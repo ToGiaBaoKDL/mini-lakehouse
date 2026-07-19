@@ -1,12 +1,14 @@
 import subprocess
-from prefect import task
+from prefect import task, get_run_logger
 
 @task
 def run_dbt_build(project_dir: str, profiles_dir: str) -> str:
     """
     Thực thi dbt build để chạy và kiểm thử các model staging, curated và analytics.
+    Sử dụng Prefect logger để ghi nhận toàn bộ log đồng bộ.
     """
-    print(f"Bắt đầu chạy dbt build (project: {project_dir}, profiles: {profiles_dir})...")
+    logger = get_run_logger()
+    logger.info("Bắt đầu chạy dbt build (project: %s, profiles: %s)...", project_dir, profiles_dir)
     
     cmd = [
         "uv", "run", "dbt", "build",
@@ -17,15 +19,14 @@ def run_dbt_build(project_dir: str, profiles_dir: str) -> str:
     # Chạy dbt subprocess
     result = subprocess.run(cmd, capture_output=True, text=True)
     
-    print("----- DBT STDOUT -----")
-    print(result.stdout)
-    print("----------------------")
+    # Ghi nhận log output từ dbt stdout
+    if result.stdout:
+        logger.info("----- DBT STDOUT -----\n%s", result.stdout)
     
     if result.returncode != 0:
-        print("----- DBT STDERR -----")
-        print(result.stderr)
-        print("----------------------")
+        if result.stderr:
+            logger.error("----- DBT STDERR -----\n%s", result.stderr)
         raise RuntimeError(f"dbt build thất bại với exit code {result.returncode}")
         
-    print("dbt build đã chạy thành công!")
+    logger.info("dbt build đã chạy thành công!")
     return "dbt build completed"

@@ -1,0 +1,23 @@
+# prefect.yaml
+# Cấu hình Deployments khai báo (Declarative Deployments) cho Prefect
+# Giúp tự động hóa việc đăng ký tất cả các Flow tương tự như cách quét DAG của Airflow
+
+# Tên dự án
+name: mini-lakehouse
+prefect-version: 3.1.0
+
+# Khai báo danh sách các deployments
+deployments:
+  - name: hourly-ingestion
+    entrypoint: pipelines/flows/ingest_github_archive.py:ingest_github_archive_hour
+    schedule:
+      cron: "0 * * * *"  # Chạy vào đúng phút 0 hàng giờ
+      timezone: "UTC"
+    description: "Flow tải dữ liệu GitHub Archive và nạp đè vào Iceberg Landing Table theo giờ."
+
+  - name: daily-transformation
+    entrypoint: pipelines/flows/transform_github_archive_daily.py:transform_github_archive_daily
+    schedule:
+      cron: "0 8 * * *"  # Chạy vào đúng 8:00 AM hàng ngày
+      timezone: "Asia/Ho_Chi_Minh"
+    description: "Flow thực thi dbt build để biến đổi dữ liệu ClickHouse và chạy các bài data test chất lượng."
