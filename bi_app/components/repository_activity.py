@@ -38,7 +38,7 @@ def render_repository_activity(repo_daily: pd.DataFrame):
         ),
         coloraxis_colorbar=dict(title="Contributors")
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
     
     st.write(" ")
     st.markdown("### 📊 Chi tiết hoạt động tích hợp của các Repository")
@@ -58,6 +58,6 @@ def render_repository_activity(repo_daily: pd.DataFrame):
     
     st.dataframe(
         formatted_df,
-        use_container_width=True,
+        width="stretch",
         hide_index=True
     )

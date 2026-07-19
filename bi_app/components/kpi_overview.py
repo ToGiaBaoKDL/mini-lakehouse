@@ -70,7 +70,7 @@ def render_kpi_overview(events: pd.DataFrame, repos: pd.DataFrame, actors: pd.Da
             font=dict(family="Outfit, sans-serif", size=13, color="#e2e8f0"),
             legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
         )
-        st.plotly_chart(fig1, use_container_width=True)
+        st.plotly_chart(fig1, width="stretch")
         
     with col_chart2:
         st.markdown("### 📈 Hoạt động đóng góp theo ngày (Events)")
@@ -100,4 +100,4 @@ def render_kpi_overview(events: pd.DataFrame, repos: pd.DataFrame, actors: pd.Da
                 linecolor='rgba(255,255,255,0.1)'
             )
         )
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(fig2, width="stretch")

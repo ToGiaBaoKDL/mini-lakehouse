@@ -95,24 +95,25 @@ def render_metadata_inspector(catalog: Optional[Catalog]):
             </style>
             """, unsafe_allow_html=True)
             
-            # Khởi tạo chuỗi HTML
+            # Khởi tạo chuỗi HTML dạng một dòng liên tục không xuống dòng (tránh markdown parser tự ý escape html)
             timeline_html = '<div class="timeline">'
             for snap in sorted_snapshots:
                 commit_time = pd.to_datetime(snap.timestamp_ms, unit="ms").strftime('%Y-%m-%d %H:%M:%S UTC')
                 parent_id = str(snap.parent_snapshot_id) if snap.parent_snapshot_id else "None (Khởi tạo bảng)"
-                timeline_html += f"""
-                <div class="timeline-item">
-                    <div class="timeline-marker"></div>
-                    <div class="timeline-content">
-                        <div class="timeline-time">⏱️ Commit Time: {commit_time}</div>
-                        <div class="timeline-title">Snapshot ID: {snap.snapshot_id}</div>
-                        <div class="timeline-detail">
-                            <strong>Parent ID:</strong> {parent_id}<br/>
-                            <strong>Manifest List:</strong> <code style='font-size: 0.75rem; color: #4facfe;'>{snap.manifest_list}</code>
-                        </div>
-                    </div>
-                </div>
-                """
+                item_html = (
+                    f"<div class='timeline-item'>"
+                    f"<div class='timeline-marker'></div>"
+                    f"<div class='timeline-content'>"
+                    f"<div class='timeline-time'>⏱️ Commit Time: {commit_time}</div>"
+                    f"<div class='timeline-title'>Snapshot ID: {snap.snapshot_id}</div>"
+                    f"<div class='timeline-detail'>"
+                    f"<strong>Parent ID:</strong> {parent_id}<br/>"
+                    f"<strong>Manifest List:</strong> <code style='font-size: 0.75rem; color: #4facfe;'>{snap.manifest_list}</code>"
+                    f"</div>"
+                    f"</div>"
+                    f"</div>"
+                )
+                timeline_html += item_html
             timeline_html += '</div>'
             st.markdown(timeline_html, unsafe_allow_html=True)
         else:
@@ -128,13 +129,13 @@ def render_metadata_inspector(catalog: Optional[Catalog]):
             meta_records = []
             for entry in metadata_log:
                 meta_records.append({
-                    "File Metadata JSON": entry.metadata_file_location,  # type: ignore
+                    "File Metadata JSON": entry.metadata_file,
                     "Thời gian tạo": pd.to_datetime(entry.timestamp_ms, unit="ms")
                 })
             meta_df = pd.DataFrame(meta_records)
             st.dataframe(
                 meta_df.sort_values(by="Thời gian tạo", ascending=False),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True
             )
         else:
