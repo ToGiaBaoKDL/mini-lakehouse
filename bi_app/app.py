@@ -1,3 +1,9 @@
+import os
+import sys
+
+# Tự động thêm thư mục gốc của dự án vào sys.path để tránh lỗi ModuleNotFoundError
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import streamlit as st
 import pandas as pd
 from bi_app.data_loader import get_clickhouse_client, get_iceberg_catalog, load_overview_data, load_analytics_data
