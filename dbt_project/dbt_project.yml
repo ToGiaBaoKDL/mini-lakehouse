@@ -1,9 +1,16 @@
+# dbt_project.yml
+# Cấu hình dbt project cho Mini Lakehouse (ClickHouse Engine)
+
 name: 'github_lakehouse'
 version: '1.0.0'
 config-version: 2
 
 # Profile liên kết với profiles.yml
 profile: 'github_lakehouse'
+
+# Di chuyển cấu hình config từ profiles.yml sang flags của dbt_project.yml để tránh cảnh báo deprecation
+flags:
+  send_anonymous_usage_stats: False
 
 model-paths: ["models"]
 analysis-paths: ["analyses"]

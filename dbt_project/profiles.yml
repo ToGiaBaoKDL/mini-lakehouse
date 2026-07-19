@@ -1,6 +1,3 @@
-config:
-  send_anonymous_usage_stats: False
-
 github_lakehouse:
   target: dev
   outputs:
