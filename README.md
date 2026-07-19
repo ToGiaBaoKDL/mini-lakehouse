@@ -36,10 +36,13 @@ cd catalog
 docker compose up -d
 cd ..
 
-# 2. Chạy toàn bộ Ingestion & dbt clickhouse Pipeline
+# 2. Chạy Ingestion Pipeline theo giờ (Hourly Ingest)
 PYTHONPATH=. uv run --env-file .env python pipelines/flows/ingest_github_archive.py
 
-# 3. Khởi chạy giao diện Streamlit BI
+# 3. Chạy dbt Transformation Pipeline hàng ngày (Daily Transform & Test)
+PYTHONPATH=. uv run --env-file .env python pipelines/flows/transform_github_archive_daily.py
+
+# 4. Khởi chạy giao diện Streamlit BI
 PYTHONPATH=. uv run --env-file .env streamlit run bi_app/app.py
 ```
 Giao diện Streamlit BI sẽ khả dụng tại địa chỉ: `http://localhost:8501`.

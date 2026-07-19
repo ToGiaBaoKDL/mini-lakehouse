@@ -1,21 +1,28 @@
 # Giai đoạn 4: Vận hành Pipeline & Truy vấn kết quả (ClickHouse)
 
-Tài liệu này hướng dẫn cách thực thi toàn bộ pipeline tự động và cách kết nối truy vấn dữ liệu từ các bảng ClickHouse kết quả.
+Tài liệu này hướng dẫn cách thực thi các pipeline tự động và cách kết nối truy vấn dữ liệu từ các bảng ClickHouse kết quả.
 
 ---
 
-## 1. Hướng dẫn chạy thử nghiệm Pipeline End-to-End
+## 1. Hướng dẫn chạy các Pipeline điều phối (Prefect Flows)
 
-Pipeline kết hợp tuần tự các bước: tải dữ liệu, ingest vào landing Iceberg, và chạy dbt build biến đổi dữ liệu trực tiếp trong ClickHouse.
+Để tối ưu hóa tài nguyên và đảm bảo tính chuẩn xác cho production, luồng dữ liệu được tách biệt thành hai flow độc lập:
 
-### Câu lệnh chạy:
-Chạy lệnh sau tại thư mục gốc của dự án (cần đảm bảo Docker container đang hoạt động):
+### A. Pipeline nạp dữ liệu theo giờ (Hourly Ingestion)
+Flow này chỉ thực hiện tải tệp raw `.json.gz` từ GitHub Archive và nạp đè dữ liệu thô vào phân vùng Landing Iceberg tương ứng.
 
 ```bash
 PYTHONPATH=. uv run --env-file .env python pipelines/flows/ingest_github_archive.py
 ```
 
-*Lưu ý*: Lệnh sử dụng `--env-file .env` để `uv` tự động nạp các biến cấu hình từ file `.env` vào shell trước khi chạy, giúp code Python hoàn toàn độc lập và sạch sẽ.
+### B. Pipeline biến đổi dữ liệu hàng ngày (Daily dbt Transformation)
+Flow này chạy một lần mỗi ngày để thực thi `dbt build` (gồm cả biến đổi dữ liệu thành các bảng ClickHouse MergeTree và chạy toàn bộ 16 bài kiểm định chất lượng dữ liệu).
+
+```bash
+PYTHONPATH=. uv run --env-file .env python pipelines/flows/transform_github_archive_daily.py
+```
+
+*Lưu ý*: Cả hai lệnh đều sử dụng `--env-file .env` để `uv` tự động nạp các biến cấu hình từ file `.env` vào shell trước khi chạy, giúp code Python hoàn toàn độc lập và sạch sẽ.
 
 ---
 
