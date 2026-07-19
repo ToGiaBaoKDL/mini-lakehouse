@@ -4,25 +4,38 @@ Tài liệu này hướng dẫn cách thực thi các pipeline tự động và 
 
 ---
 
-## 1. Hướng dẫn chạy các Pipeline điều phối (Prefect Flows)
+## 1. Khởi chạy Thủ công theo yêu cầu (On-Demand Runs)
 
-Để tối ưu hóa tài nguyên và đảm bảo tính chuẩn xác cho production, luồng dữ liệu được tách biệt thành hai flow độc lập:
+Bạn có thể chạy thử trực tiếp các script Python để chạy flow ngay lập tức:
 
-### A. Pipeline nạp dữ liệu theo giờ (Hourly Ingestion)
-Flow này chỉ thực hiện tải tệp raw `.json.gz` từ GitHub Archive và nạp đè dữ liệu thô vào phân vùng Landing Iceberg tương ứng.
-
+### A. Chạy Ingestion theo giờ:
 ```bash
 PYTHONPATH=. uv run --env-file .env python pipelines/flows/ingest_github_archive.py
 ```
 
-### B. Pipeline biến đổi dữ liệu hàng ngày (Daily dbt Transformation)
-Flow này chạy một lần mỗi ngày để thực thi `dbt build` (gồm cả biến đổi dữ liệu thành các bảng ClickHouse MergeTree và chạy toàn bộ 16 bài kiểm định chất lượng dữ liệu).
-
+### B. Chạy dbt Transformation hàng ngày:
 ```bash
 PYTHONPATH=. uv run --env-file .env python pipelines/flows/transform_github_archive_daily.py
 ```
 
-*Lưu ý*: Cả hai lệnh đều sử dụng `--env-file .env` để `uv` tự động nạp các biến cấu hình từ file `.env` vào shell trước khi chạy, giúp code Python hoàn toàn độc lập và sạch sẽ.
+---
+
+## 2. Khởi chạy tự động theo Lịch trình (Scheduled Deployments)
+
+Để tự động lập lịch chạy cho các flow (Hourly Ingestion và Daily dbt Transform) tương tự như mô hình Airflow DAGs, ta sử dụng tệp cấu hình khai báo [prefect.yaml](file:///home/hcm-mki-l6009/projects/mini-lakehouse/prefect.yaml):
+
+### Bước A: Đăng ký toàn bộ Flow lên Prefect Server
+```bash
+# Đăng ký toàn bộ các deployments được khai báo trong prefect.yaml
+uv run prefect deploy --all
+```
+
+### Bước B: Chạy Worker lắng nghe lịch biểu
+```bash
+# Chạy worker lắng nghe work-pool tương ứng để thực thi task khi đến giờ hẹn
+uv run prefect worker start --pool 'local-pool'
+```
+*Lưu ý*: Luồng nạp dữ liệu chạy đúng **phút 0 hàng giờ** (`0 * * * *`), còn luồng biến đổi dbt chạy vào đúng **8:00 AM hàng ngày** (`0 8 * * *`).
 
 ---
 
