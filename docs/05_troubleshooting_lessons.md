@@ -82,3 +82,11 @@ Tài liệu này ghi lại các lỗi kỹ thuật phát sinh trong quá trình 
       'id Nullable(String), type Nullable(String), actor_id Nullable(Int64), ...'
   )
   ```
+
+---
+
+## 9. Lỗi kiểm thử Not Null do dữ liệu thô bị thiếu/Null (Data Quality Test Failure)
+* **Thông báo lỗi**: `Failure in test not_null_repository_activity_daily_repo_id (models/schema.yml). Got 1 result, configured to fail if != 0`
+* **Nguyên nhân**: Dữ liệu thô từ GitHub API thỉnh thoảng chứa một số sự kiện hệ thống hoặc bản ghi lỗi mà không có thông tin repository (`repo.id` là null). Khi dbt tổng hợp mà không lọc, nó sẽ tạo ra bản ghi có `repo_id` bằng null, vi phạm ràng buộc kiểm thử `not_null`.
+* **Giải pháp**: Bổ sung điều kiện lọc dữ liệu sạch `WHERE repo_id IS NOT NULL` trong model SQL phân tích `repository_activity_daily.sql`.
+
