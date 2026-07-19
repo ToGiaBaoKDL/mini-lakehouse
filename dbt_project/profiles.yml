@@ -1,0 +1,14 @@
+config:
+  send_anonymous_usage_stats: False
+
+github_lakehouse:
+  target: dev
+  outputs:
+    dev:
+      type: clickhouse
+      host: localhost
+      port: 8123
+      user: dev_user
+      password: dev_password
+      schema: default
+      threads: 4

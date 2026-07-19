@@ -1,0 +1,39 @@
+services:
+  catalog:
+    image: tabulario/iceberg-rest:0.6.0
+    container_name: iceberg-rest-catalog
+    user: "1000:1000"
+    ports:
+      - "8181:8181"
+    environment:
+      # Sử dụng JDBC SQLite làm catalog database backend với chế độ WAL và busy_timeout
+      CATALOG_CATALOG_IMPL: org.apache.iceberg.jdbc.JdbcCatalog
+      CATALOG_URI: jdbc:sqlite:/home/iceberg/data/iceberg_catalog.db?journal_mode=WAL&busy_timeout=10000
+      CATALOG_JDBC_USER: user
+      CATALOG_JDBC_PASSWORD: password
+      # Định nghĩa warehouse lưu trực tiếp trên ổ đĩa local với scheme file://
+      CATALOG_WAREHOUSE: file:///home/hcm-mki-l6009/projects/mini-lakehouse/warehouse
+      # Sử dụng FileIO mặc định cho local filesystem
+      CATALOG_IO_IMPL: org.apache.iceberg.io.ResolvingFileIO
+    volumes:
+      # Mount thư mục lưu catalog SQLite db file
+      - ./catalog-data:/home/iceberg/data
+      # Mount thư mục warehouse trùng khớp đường dẫn giữa Host và Container
+      - /home/hcm-mki-l6009/projects/mini-lakehouse/warehouse:/home/hcm-mki-l6009/projects/mini-lakehouse/warehouse
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    container_name: clickhouse-server
+    user: "1000:1000"
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      CLICKHOUSE_DB: github_lakehouse
+      CLICKHOUSE_USER: dev_user
+      CLICKHOUSE_PASSWORD: dev_password
+    volumes:
+      # Lưu trữ ClickHouse DB files
+      - ./clickhouse-data:/var/lib/clickhouse
+      # Mount warehouse vào user_files để ClickHouse được phép đọc dữ liệu Parquet trực tiếp
+      - /home/hcm-mki-l6009/projects/mini-lakehouse/warehouse:/var/lib/clickhouse/user_files/warehouse

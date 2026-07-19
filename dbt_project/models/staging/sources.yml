@@ -1,0 +1,9 @@
+version: 2
+
+sources:
+  - name: landing_api_github
+    database: prod
+    schema: landing_api_github
+    tables:
+      - name: events_raw
+        description: "Bảng dữ liệu raw lưu trữ các sự kiện từ GitHub Archive dạng JSON."

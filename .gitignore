@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+node_modules/
+
+# Environment Variables
+.env
+
+# Prefect
+.prefect/
+
+# DuckDB Databases
+*.duckdb
+*.duckdb.wal
+
+# dbt
+dbt_project/target/
+dbt_project/dbt_packages/
+dbt_project/dbt_modules/
+dbt_project/logs/
+
+# Docker infra local data
+catalog/catalog-data/
+
+# Warehouse Storage (Dữ liệu Parquet & Metadata của Lakehouse không commit vào Git)
+warehouse/
+
+# ClickHouse Local Data
+catalog/clickhouse-data/

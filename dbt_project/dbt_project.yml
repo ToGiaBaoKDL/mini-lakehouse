@@ -1,0 +1,39 @@
+# dbt_project.yml
+# Cấu hình dbt project cho Mini Lakehouse (ClickHouse Engine)
+
+name: 'github_lakehouse'
+version: '1.0.0'
+config-version: 2
+
+# Profile liên kết với profiles.yml
+profile: 'github_lakehouse'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  github_lakehouse:
+    # 1. Staging layer: Tạo view trong ClickHouse
+    staging:
+      +materialized: view
+      +schema: staging
+
+    # 2. Curated layer: Vật chất hóa thành bảng MergeTree trong ClickHouse
+    curated:
+      +materialized: table
+      +schema: curated_engineering
+      # Bạn có thể ghi đè engine nếu muốn (ClickHouse mặc định dùng MergeTree)
+      # +engine: "MergeTree()"
+
+    # 3. Analytics layer: Vật chất hóa thành bảng MergeTree
+    analytics:
+      +materialized: table
+      +schema: analytics_engineering
