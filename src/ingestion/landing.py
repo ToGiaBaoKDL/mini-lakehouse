@@ -132,21 +132,19 @@ def append_json_archive_to_landing(local_file_path: str, source_hour_str: str) -
                 name="source_hour"
             )
         )
-        # Cấu hình vị trí (location) lưu trữ table phân rã theo bucket chuẩn Production
+        # Cấu hình vị trí (location) lưu trữ table phân rã theo bucket chuẩn Production và format-version=2
         custom_location = f"{settings.warehouse_path}/landing/api/github/events_raw"
         table = catalog.create_table(
             identifier=table_identifier,
             schema=iceberg_schema,
             partition_spec=partition_spec,
-            location=custom_location
+            location=custom_location,
+            properties={"format-version": "2"}
         )
-        logger.info("Khởi tạo bảng %s thành công tại location: %s", table_identifier, custom_location)
+        logger.info("Khởi tạo bảng %s (Format V2) thành công tại location: %s", table_identifier, custom_location)
         
-    logger.info("Ghi đè (overwrite) dữ liệu vào partition source_hour='%s'...", source_hour_str)
-    table.overwrite(
-        df=arrow_table,
-        overwrite_filter=f"source_hour == '{source_hour_str}'"
-    )
+    logger.info("Ghi đè (dynamic partition overwrite) dữ liệu bằng PyIceberg 0.11...")
+    table.dynamic_partition_overwrite(df=arrow_table)
     logger.info("Ghi dữ liệu vào Iceberg hoàn tất!")
     
     return f"Ingested {len(records)} records successfully into {table_identifier}"
