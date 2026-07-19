@@ -1,7 +1,7 @@
 import gzip
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 import pyarrow as pa
 from pyiceberg.catalog import load_catalog
 from pyiceberg.exceptions import NoSuchTableError
@@ -15,6 +15,7 @@ from pyiceberg.types import (
 from pyiceberg.partitioning import PartitionSpec, PartitionField
 from pyiceberg.transforms import IdentityTransform
 from src.utils.logging import get_logger
+from src.utils.config import settings
 
 logger = get_logger("lakehouse.ingestion.landing")
 
@@ -57,7 +58,8 @@ def append_json_archive_to_landing(local_file_path: str, source_hour_str: str) -
     """
     logger.info("Bắt đầu xử lý file raw: %s", local_file_path)
     source_file_name = os.path.basename(local_file_path)
-    ingested_at_str = datetime.utcnow().isoformat()
+    # Thay thế utcnow bằng now(timezone.utc) để tránh cảnh báo Deprecation
+    ingested_at_str = datetime.now(timezone.utc).isoformat()
     
     records = []
     error_count = 0
@@ -70,33 +72,38 @@ def append_json_archive_to_landing(local_file_path: str, source_hour_str: str) -
             total_lines += 1
             try:
                 event = json.loads(line)
+                
+                # Trích xuất dữ liệu phẳng hóa cơ bản theo cấu trúc Schema
                 actor = event.get("actor", {})
                 repo = event.get("repo", {})
-                payload_dict = event.get("payload", {})
-                payload_str = json.dumps(payload_dict) if payload_dict else "{}"
                 
-                records.append({
+                # Payload được giữ nguyên định dạng JSON string để parsing linh hoạt ở tầng sau
+                payload_str = json.dumps(event.get("payload", {}))
+                
+                record = {
                     "id": str(event.get("id")),
                     "type": event.get("type"),
-                    "actor_id": int(actor.get("id")) if actor and actor.get("id") is not None else None,
+                    "actor_id": actor.get("id") if actor else None,
                     "actor_login": actor.get("login") if actor else None,
-                    "repo_id": int(repo.get("id")) if repo and repo.get("id") is not None else None,
+                    "repo_id": repo.get("id") if repo else None,
                     "repo_name": repo.get("name") if repo else None,
                     "payload": payload_str,
-                    "public": bool(event.get("public")),
+                    "public": event.get("public"),
                     "created_at": event.get("created_at"),
                     "source_file": source_file_name,
                     "source_hour": source_hour_str,
-                    "ingested_at": ingested_at_str,
-                })
+                    "ingested_at": ingested_at_str
+                }
+                records.append(record)
             except Exception as e:
                 error_count += 1
-                logger.warning("Lỗi phân tích dòng JSON số %d: %s", total_lines, e)
-                continue
+                if error_count <= 5:
+                    logger.warning("Bỏ qua dòng lỗi trong tệp JSON: %s. Chi tiết: %s", line[:100], e)
 
-    if error_count > 0:
-        error_ratio = error_count / total_lines if total_lines > 0 else 0
-        logger.warning("Đã xảy ra %d dòng lỗi trên tổng số %d dòng (Tỷ lệ: %.2f%%)", error_count, total_lines, error_ratio * 100)
+    # Đánh giá chất lượng dữ liệu: Đảm bảo tỷ lệ hỏng cấu trúc không quá cao
+    if total_lines > 0:
+        error_ratio = error_count / total_lines
+        logger.info("Hoàn thành phân tích: Tổng số dòng=%d, Dòng lỗi=%d (Tỷ lệ: %.2f%%)", total_lines, error_count, error_ratio * 100)
         # Nếu tỷ lệ lỗi quá cao (> 5%), dừng tiến trình để kiểm tra cấu trúc API
         if error_ratio > 0.05:
             raise ValueError(f"Tỷ lệ dòng hỏng vượt quá giới hạn an toàn (>5%): {error_ratio*100:.2f}%")
@@ -125,12 +132,15 @@ def append_json_archive_to_landing(local_file_path: str, source_hour_str: str) -
                 name="source_hour"
             )
         )
+        # Cấu hình vị trí (location) lưu trữ table phân rã theo bucket chuẩn Production
+        custom_location = f"{settings.warehouse_path}/landing/api/github/events_raw"
         table = catalog.create_table(
             identifier=table_identifier,
             schema=iceberg_schema,
-            partition_spec=partition_spec
+            partition_spec=partition_spec,
+            location=custom_location
         )
-        logger.info("Khởi tạo bảng %s thành công.", table_identifier)
+        logger.info("Khởi tạo bảng %s thành công tại location: %s", table_identifier, custom_location)
         
     logger.info("Ghi đè (overwrite) dữ liệu vào partition source_hour='%s'...", source_hour_str)
     table.overwrite(

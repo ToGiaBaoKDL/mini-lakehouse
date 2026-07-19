@@ -3,7 +3,7 @@
 
 WITH source_data AS (
     SELECT * FROM file(
-        'warehouse/landing_api_github/events_raw/data/**/*.parquet', 
+        'warehouse/landing/api/github/events_raw/data/**/*.parquet', 
         'Parquet', 
         'id Nullable(String), type Nullable(String), actor_id Nullable(Int64), actor_login Nullable(String), repo_id Nullable(Int64), repo_name Nullable(String), payload Nullable(String), public Nullable(Bool), created_at Nullable(String), source_file Nullable(String), source_hour Nullable(String), ingested_at Nullable(String)'
     )

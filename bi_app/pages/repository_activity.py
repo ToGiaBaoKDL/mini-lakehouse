@@ -1,13 +1,22 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from bi_app.data_loader import load_analytics_data
 
-def render_repository_activity(repo_daily: pd.DataFrame):
-    """
-    Render giao diện phân tích chi tiết hoạt động của các Repository với biểu đồ ngang và bảng số liệu.
-    """
-    st.subheader("🔥 Top 15 Repositories hoạt động sôi nổi nhất")
-    
+# Header
+st.subheader("🔥 Top 15 Repositories hoạt động sôi nổi nhất")
+
+repo_daily = pd.DataFrame()
+data_loaded = False
+
+try:
+    repo_daily, _ = load_analytics_data()
+    data_loaded = True
+except Exception as e:
+    data_loaded = False
+    st.warning(f"Chưa có dữ liệu phân tích hoặc pipeline chưa hoàn thành chạy thử. Chi tiết: {e}")
+
+if data_loaded:
     # Lấy 15 repo hoạt động nhiều nhất
     top_repos = repo_daily.sort_values(by="total_events", ascending=False).head(15)  # type: ignore
     
@@ -30,7 +39,6 @@ def render_repository_activity(repo_daily: pd.DataFrame):
         yaxis={'categoryorder':'total ascending'},
         paper_bgcolor='rgba(0,0,0,0)',
         plot_bgcolor='rgba(0,0,0,0)',
-        font=dict(family="Outfit, sans-serif", size=13, color="#e2e8f0"),
         xaxis=dict(
             showgrid=True, 
             gridcolor='rgba(255,255,255,0.05)',

@@ -1,13 +1,28 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+from bi_app.data_loader import load_overview_data, load_analytics_data
 
-def render_kpi_overview(events: pd.DataFrame, repos: pd.DataFrame, actors: pd.DataFrame, contrib_daily: pd.DataFrame):
-    """
-    Render giao diện Dashboard Tổng quan KPIs dạng Glassmorphism và Đồ thị Plotly cao cấp.
-    """
-    st.subheader("📌 Tổng quan Hồ chứa dữ liệu (Lakehouse KPIs)")
-    
+# Header
+st.subheader("📌 Tổng quan Hồ chứa dữ liệu (Lakehouse KPIs)")
+
+# Load data
+events = pd.DataFrame()
+repos = pd.DataFrame()
+actors = pd.DataFrame()
+repo_daily = pd.DataFrame()
+contrib_daily = pd.DataFrame()
+data_loaded = False
+
+try:
+    events, repos, actors = load_overview_data()
+    _, contrib_daily = load_analytics_data()
+    data_loaded = True
+except Exception as e:
+    data_loaded = False
+    st.warning(f"Chưa có dữ liệu phân tích hoặc pipeline chưa hoàn thành chạy thử. Chi tiết: {e}")
+
+if data_loaded:
     # Tính toán thời gian ingest gần nhất
     last_ingest = pd.to_datetime(events["ingested_at"]).max().strftime('%Y-%m-%d %H:%M') if len(events) > 0 else "N/A"
     
@@ -48,7 +63,7 @@ def render_kpi_overview(events: pd.DataFrame, repos: pd.DataFrame, actors: pd.Da
     st.write(" ")
     st.write(" ")
     
-    # Render các Biểu đồ chất lượng cao
+    # Render các Biểu đồ
     col_chart1, col_chart2 = st.columns(2)
     
     with col_chart1:
@@ -67,7 +82,6 @@ def render_kpi_overview(events: pd.DataFrame, repos: pd.DataFrame, actors: pd.Da
         fig1.update_layout(
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
-            font=dict(family="Outfit, sans-serif", size=13, color="#e2e8f0"),
             legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5)
         )
         st.plotly_chart(fig1, width="stretch")
@@ -76,7 +90,7 @@ def render_kpi_overview(events: pd.DataFrame, repos: pd.DataFrame, actors: pd.Da
         st.markdown("### 📈 Hoạt động đóng góp theo ngày (Events)")
         daily_contrib = contrib_daily.groupby("activity_date")["total_events"].sum().reset_index()  # type: ignore
         
-        # Line chart mượt mà sử dụng gradient màu cam ấm
+        # Line chart mượt mà sử dụng màu cam ấm
         fig2 = px.line(
             daily_contrib, 
             x="activity_date", 
@@ -88,7 +102,6 @@ def render_kpi_overview(events: pd.DataFrame, repos: pd.DataFrame, actors: pd.Da
         fig2.update_layout(
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
-            font=dict(family="Outfit, sans-serif", size=13, color="#e2e8f0"),
             xaxis=dict(
                 showgrid=True, 
                 gridcolor='rgba(255,255,255,0.05)',

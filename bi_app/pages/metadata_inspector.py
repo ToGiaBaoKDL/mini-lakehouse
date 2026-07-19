@@ -2,19 +2,19 @@ import streamlit as st
 import pandas as pd
 from typing import Optional
 from pyiceberg.catalog import Catalog
+from bi_app.data_loader import get_iceberg_catalog
 
-def render_metadata_inspector(catalog: Optional[Catalog]):
-    """
-    Render giao diện Trình kiểm tra Siêu dữ liệu (Iceberg Metadata Inspector) thông qua REST Catalog.
-    Sử dụng Timeline thiết kế Glassmorphism tuyệt đẹp để biểu diễn Snapshots.
-    """
-    st.subheader("🕵️ Trình kiểm tra Siêu dữ liệu Apache Iceberg qua REST Catalog")
-    st.write("Dữ liệu thô nạp vào Landing layer được quản lý và theo dõi phiên bản bởi **Apache Iceberg**. Bạn có thể xem lịch sử các Snapshots dạng timeline trực tiếp từ REST Catalog:")
-    
-    if catalog is None:
-        st.warning("Không thể tải Catalog của Iceberg.")
-        return
+# Header
+st.subheader("🕵️ Trình kiểm tra Siêu dữ liệu Apache Iceberg qua REST Catalog")
+st.write("Dữ liệu thô nạp vào Landing layer được quản lý và theo dõi phiên bản bởi **Apache Iceberg**. Bạn có thể xem lịch sử các Snapshots dạng timeline trực tiếp từ REST Catalog:")
 
+catalog: Optional[Catalog] = None
+try:
+    catalog = get_iceberg_catalog()
+except Exception as e:
+    st.warning(f"Không thể kết nối Iceberg Catalog: {e}")
+
+if catalog is not None:
     try:
         table_identifier = "landing_api_github.events_raw"
         st.info(f"Đang đọc bảng Iceberg: **{table_identifier}**")
@@ -30,7 +30,7 @@ def render_metadata_inspector(catalog: Optional[Catalog]):
             # Sắp xếp từ snapshot mới nhất đến cũ nhất
             sorted_snapshots = sorted(snapshots, key=lambda x: x.timestamp_ms, reverse=True)
             
-            # Thêm CSS cho Timeline
+            # Thêm CSS cho Timeline (Không sử dụng custom font Outfit)
             st.markdown("""
             <style>
                 .timeline {
@@ -85,7 +85,6 @@ def render_metadata_inspector(catalog: Optional[Catalog]):
                     font-weight: 700;
                     color: #e2e8f0;
                     margin-bottom: 6px;
-                    font-family: 'JetBrains Mono', monospace;
                 }
                 .timeline-detail {
                     font-size: 0.8rem;
