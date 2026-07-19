@@ -11,15 +11,15 @@ services:
       CATALOG_URI: jdbc:sqlite:/home/iceberg/data/iceberg_catalog.db?journal_mode=WAL&busy_timeout=10000
       CATALOG_JDBC_USER: user
       CATALOG_JDBC_PASSWORD: password
-      # Định nghĩa warehouse lưu trực tiếp trên ổ đĩa local với scheme file://
-      CATALOG_WAREHOUSE: file:///home/hcm-mki-l6009/projects/mini-lakehouse/warehouse
+      # Định nghĩa warehouse động trỏ vào thư mục Home của người dùng hiện tại
+      CATALOG_WAREHOUSE: file://${HOME}/projects/mini-lakehouse/warehouse
       # Sử dụng FileIO mặc định cho local filesystem
       CATALOG_IO_IMPL: org.apache.iceberg.io.ResolvingFileIO
     volumes:
       # Mount thư mục lưu catalog SQLite db file
       - ./catalog-data:/home/iceberg/data
-      # Mount thư mục warehouse trùng khớp đường dẫn giữa Host và Container
-      - /home/hcm-mki-l6009/projects/mini-lakehouse/warehouse:/home/hcm-mki-l6009/projects/mini-lakehouse/warehouse
+      # Mount thư mục warehouse trùng khớp đường dẫn giữa Host và Container bằng biến HOME
+      - ${HOME}/projects/mini-lakehouse/warehouse:${HOME}/projects/mini-lakehouse/warehouse
 
   clickhouse:
     image: clickhouse/clickhouse-server:24.3
@@ -35,5 +35,5 @@ services:
     volumes:
       # Lưu trữ ClickHouse DB files
       - ./clickhouse-data:/var/lib/clickhouse
-      # Mount warehouse vào user_files để ClickHouse được phép đọc dữ liệu Parquet trực tiếp
-      - /home/hcm-mki-l6009/projects/mini-lakehouse/warehouse:/var/lib/clickhouse/user_files/warehouse
+      # Mount warehouse vào user_files dùng biến HOME
+      - ${HOME}/projects/mini-lakehouse/warehouse:/var/lib/clickhouse/user_files/warehouse

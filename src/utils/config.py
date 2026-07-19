@@ -1,10 +1,11 @@
-from pydantic import Field
+import os
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     """
     Quản lý cấu hình và biến môi trường tập trung sử dụng Pydantic Settings v2.
-    Tự động nạp dữ liệu từ file .env nếu có.
+    Tự động nạp dữ liệu từ file .env nếu có và giải quyết ký tự ngã (~).
     """
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -14,9 +15,15 @@ class Settings(BaseSettings):
 
     # Cấu hình Iceberg Warehouse Path
     warehouse_path: str = Field(
-        default="/home/hcm-mki-l6009/projects/mini-lakehouse/warehouse",
+        default="~/projects/mini-lakehouse/warehouse",
         validation_alias="PYICEBERG_CATALOG__PROD__WAREHOUSE"
     )
+    
+    @field_validator("warehouse_path", mode="after")
+    @classmethod
+    def expand_tilde_path(cls, v: str) -> str:
+        """Tự động mở rộng ký tự ~ thành đường dẫn tuyệt đối đầy đủ."""
+        return os.path.abspath(os.path.expanduser(v))
     
     # Cấu hình ClickHouse
     clickhouse_host: str = Field(default="localhost", validation_alias="CLICKHOUSE_HOST")

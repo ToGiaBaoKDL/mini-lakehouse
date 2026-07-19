@@ -1,0 +1,34 @@
+version: 2
+
+models:
+  - name: repository_activity_daily
+    description: "Bảng tổng hợp hoạt động hàng ngày của từng repository phục vụ BI."
+    columns:
+      - name: activity_date
+        description: "Ngày hoạt động."
+        tests:
+          - not_null
+      - name: repo_id
+        description: "ID của repository."
+        tests:
+          - not_null
+      - name: total_events
+        description: "Tổng số lượng event được ghi nhận."
+        tests:
+          - not_null
+
+  - name: contributor_activity_daily
+    description: "Bảng tổng hợp hoạt động hàng ngày của các contributors."
+    columns:
+      - name: activity_date
+        description: "Ngày hoạt động đóng góp."
+        tests:
+          - not_null
+      - name: actor_id
+        description: "ID của actor."
+        tests:
+          - not_null
+      - name: total_events
+        description: "Tổng số lượng đóng góp."
+        tests:
+          - not_null
