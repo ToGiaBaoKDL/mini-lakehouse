@@ -1,0 +1,79 @@
+version: 2
+
+models:
+  # --- CURATED LAYER ---
+  - name: github_events
+    description: "Bảng sự kiện GitHub chính đã qua lọc trùng và phân tích payload."
+    columns:
+      - name: id
+        description: "Mã định danh duy nhất của sự kiện."
+        tests:
+          - unique
+          - not_null
+      - name: type
+        description: "Loại sự kiện GitHub (ví dụ: PushEvent, PullRequestEvent)."
+        tests:
+          - not_null
+      - name: created_at
+        description: "Thời gian sự kiện được tạo."
+        tests:
+          - not_null
+
+  - name: repositories
+    description: "Bảng chiều quản lý danh sách các repository hoạt động."
+    columns:
+      - name: repo_id
+        description: "ID duy nhất của repository."
+        tests:
+          - unique
+          - not_null
+      - name: repo_name
+        description: "Tên repository cập nhật mới nhất."
+        tests:
+          - not_null
+
+  - name: actors
+    description: "Bảng chiều quản lý danh sách các nhà phát triển (users)."
+    columns:
+      - name: actor_id
+        description: "ID duy nhất của actor."
+        tests:
+          - unique
+          - not_null
+      - name: actor_login
+        description: "Username đăng nhập GitHub mới nhất."
+        tests:
+          - not_null
+
+  # --- ANALYTICS LAYER ---
+  - name: repository_activity_daily
+    description: "Bảng tổng hợp hoạt động hàng ngày của từng repository phục vụ BI."
+    columns:
+      - name: activity_date
+        description: "Ngày hoạt động."
+        tests:
+          - not_null
+      - name: repo_id
+        description: "ID của repository."
+        tests:
+          - not_null
+      - name: total_events
+        description: "Tổng số lượng event được ghi nhận."
+        tests:
+          - not_null
+
+  - name: contributor_activity_daily
+    description: "Bảng tổng hợp hoạt động hàng ngày của các contributors."
+    columns:
+      - name: activity_date
+        description: "Ngày hoạt động đóng góp."
+        tests:
+          - not_null
+      - name: actor_id
+        description: "ID của actor."
+        tests:
+          - not_null
+      - name: total_events
+        description: "Tổng số lượng đóng góp."
+        tests:
+          - not_null

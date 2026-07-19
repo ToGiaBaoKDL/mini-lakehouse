@@ -1,6 +1,3 @@
-# dbt_project.yml
-# Cấu hình dbt project cho Mini Lakehouse (ClickHouse Engine)
-
 name: 'github_lakehouse'
 version: '1.0.0'
 config-version: 2
@@ -30,8 +27,6 @@ models:
     curated:
       +materialized: table
       +schema: curated_engineering
-      # Bạn có thể ghi đè engine nếu muốn (ClickHouse mặc định dùng MergeTree)
-      # +engine: "MergeTree()"
 
     # 3. Analytics layer: Vật chất hóa thành bảng MergeTree
     analytics:

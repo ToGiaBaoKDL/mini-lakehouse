@@ -12,4 +12,5 @@ SELECT
     COUNT(CASE WHEN type = 'IssueCommentEvent' THEN 1 END) AS issue_comment_count,
     COUNT(DISTINCT actor_id) AS active_contributors
 FROM {{ ref('github_events') }}
+WHERE repo_id IS NOT NULL
 GROUP BY toDate(created_at), repo_id, repo_name

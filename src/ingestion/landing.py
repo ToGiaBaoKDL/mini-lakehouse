@@ -14,8 +14,11 @@ from pyiceberg.types import (
 )
 from pyiceberg.partitioning import PartitionSpec, PartitionField
 from pyiceberg.transforms import IdentityTransform
+from src.utils.logging import get_logger
 
-# Định nghĩa Iceberg Schema (được lưu trữ tại REST Catalog)
+logger = get_logger("lakehouse.ingestion.landing")
+
+# Định nghĩa Iceberg Schema (REST Catalog)
 iceberg_schema = Schema(
     NestedField(field_id=1, name="id", field_type=StringType(), required=True),
     NestedField(field_id=2, name="type", field_type=StringType(), required=False),
@@ -31,7 +34,7 @@ iceberg_schema = Schema(
     NestedField(field_id=12, name="ingested_at", field_type=StringType(), required=False),
 )
 
-# Định nghĩa PyArrow Schema tương ứng để mapping dữ liệu (khớp tính nullable với Iceberg)
+# Định nghĩa PyArrow Schema tương ứng để mapping dữ liệu
 arrow_schema = pa.schema([
     pa.field("id", pa.string(), nullable=False),
     pa.field("type", pa.string(), nullable=True),
@@ -50,27 +53,25 @@ arrow_schema = pa.schema([
 def append_json_archive_to_landing(local_file_path: str, source_hour_str: str) -> str:
     """
     Đọc dữ liệu từ file raw .json.gz, chuyển sang PyArrow Table 
-    và append vào bảng Iceberg 'landing_api_github.events_raw'.
+    và append/overwrite vào bảng Iceberg 'landing_api_github.events_raw'.
     """
-    print(f"Bắt đầu xử lý file raw: {local_file_path}")
+    logger.info("Bắt đầu xử lý file raw: %s", local_file_path)
     source_file_name = os.path.basename(local_file_path)
     ingested_at_str = datetime.utcnow().isoformat()
     
     records = []
+    error_count = 0
+    total_lines = 0
     
-    # Đọc file gzip line-by-line
     with gzip.open(local_file_path, 'rt', encoding='utf-8') as f:
         for line in f:
             if not line.strip():
                 continue
+            total_lines += 1
             try:
                 event = json.loads(line)
-                
-                # Trích xuất & làm phẳng cấu trúc cơ bản
                 actor = event.get("actor", {})
                 repo = event.get("repo", {})
-                
-                # Serialized JSON payload để đảm bảo tính mềm dẻo của landing
                 payload_dict = event.get("payload", {})
                 payload_str = json.dumps(payload_dict) if payload_dict else "{}"
                 
@@ -89,53 +90,53 @@ def append_json_archive_to_landing(local_file_path: str, source_hour_str: str) -
                     "ingested_at": ingested_at_str,
                 })
             except Exception as e:
-                # Log lỗi dòng hỏng và tiếp tục
-                print(f"Lỗi phân tích dòng JSON: {e}")
+                error_count += 1
+                logger.warning("Lỗi phân tích dòng JSON số %d: %s", total_lines, e)
                 continue
 
+    if error_count > 0:
+        error_ratio = error_count / total_lines if total_lines > 0 else 0
+        logger.warning("Đã xảy ra %d dòng lỗi trên tổng số %d dòng (Tỷ lệ: %.2f%%)", error_count, total_lines, error_ratio * 100)
+        # Nếu tỷ lệ lỗi quá cao (> 5%), dừng tiến trình để kiểm tra cấu trúc API
+        if error_ratio > 0.05:
+            raise ValueError(f"Tỷ lệ dòng hỏng vượt quá giới hạn an toàn (>5%): {error_ratio*100:.2f}%")
+
     if not records:
-        print("Không có record nào được phân tích thành công.")
+        logger.warning("Không có record nào được phân tích thành công từ file %s.", local_file_path)
         return "No records ingested"
 
-    print(f"Đã phân tích thành công {len(records)} events.")
+    logger.info("Đã phân tích thành công %d/%d events.", len(records), total_lines)
     
-    # Chuyển đổi list records sang PyArrow Table
     arrow_table = pa.Table.from_pylist(records, schema=arrow_schema)
     
-    # Kết nối Iceberg Catalog
     catalog = load_catalog("prod")
     table_identifier = "landing_api_github.events_raw"
     
-    # Kiểm tra bảng đã tồn tại chưa, nếu chưa thì khởi tạo bảng phân vùng
     try:
         table = catalog.load_table(table_identifier)
-        print(f"Bảng {table_identifier} đã tồn tại.")
+        logger.info("Bảng %s đã tồn tại.", table_identifier)
     except NoSuchTableError:
-        print(f"Bảng {table_identifier} chưa tồn tại. Tiến hành khởi tạo...")
-        
-        # Khởi tạo partition spec theo cột 'source_hour'
+        logger.info("Bảng %s chưa tồn tại. Tiến hành khởi tạo...", table_identifier)
         partition_spec = PartitionSpec(
             PartitionField(
-                source_id=11,  # field_id của source_hour
+                source_id=11,
                 field_id=1000,
                 transform=IdentityTransform(),
                 name="source_hour"
             )
         )
-        
         table = catalog.create_table(
             identifier=table_identifier,
             schema=iceberg_schema,
             partition_spec=partition_spec
         )
-        print(f"Khởi tạo bảng {table_identifier} thành công.")
+        logger.info("Khởi tạo bảng %s thành công.", table_identifier)
         
-    # Ghi đè (hoặc Append) dữ liệu vào bảng để đảm bảo tính idempotent
-    print(f"Ghi dữ liệu (overwrite) vào partition source_hour='{source_hour_str}'...")
+    logger.info("Ghi đè (overwrite) dữ liệu vào partition source_hour='%s'...", source_hour_str)
     table.overwrite(
         df=arrow_table,
         overwrite_filter=f"source_hour == '{source_hour_str}'"
     )
-    print("Ghi dữ liệu vào Iceberg hoàn tất!")
+    logger.info("Ghi dữ liệu vào Iceberg hoàn tất!")
     
     return f"Ingested {len(records)} records successfully into {table_identifier}"
