@@ -105,6 +105,7 @@ class IngestionResult(BaseModel):
     row_count: int = Field(ge=0)
     rejected_row_count: int = Field(ge=0)
     snapshot_id: int | None = None
+    was_appended: bool
 
     @model_validator(mode="after")
     def validate_counts(self) -> Self:

@@ -64,7 +64,7 @@ quote-style = "double"
 [tool.pyright]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
-include = ["src", "tests"]
+include = ["src", "orchestration", "tests"]
 exclude = ["dbt_project", ".venv"]
 venvPath = "."
 venv = ".venv"

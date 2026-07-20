@@ -13,6 +13,7 @@ COPY --from=uv /uv /uvx /bin/
 COPY pyproject.toml uv.lock README.md .python-version ./
 COPY src ./src
 COPY dbt_project ./dbt_project
+COPY orchestration ./orchestration
 COPY prefect.yaml ./prefect.yaml
 
 FROM base AS runtime

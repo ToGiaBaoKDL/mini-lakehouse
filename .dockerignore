@@ -6,7 +6,6 @@
 .ruff_cache
 .venv
 **/__pycache__
-catalog/minio-data
 dbt_project/dbt_packages
 dbt_project/logs
 dbt_project/target

@@ -8,6 +8,7 @@ def test_namespace_contract_encodes_transport_and_domain_ownership() -> None:
     assert contract[("landing",)]["location"] == "s3://landing"
     assert contract[("landing", "api")]["transport"] == "api"
     assert contract[("curated", "github")]["owner"] == "data-platform"
+    assert contract[("curated", "github", "internal")]["visibility"] == "private"
     assert contract[("analytics", "engineering")]["owner"] == "engineering-analytics"
 
 

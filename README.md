@@ -12,11 +12,15 @@ GitHub Archive API
         ▼
 s3://landing/api/github_archive/
   ├── raw/year=.../month=.../day=.../hour=.../*.json.gz
-  └── events_raw                  prod."landing.api.github_archive"
+  └── events_raw                         prod."landing.api.github_archive"
         │
-        ▼ dbt: staging → intermediate → core
-s3://curated/                     prod."curated.github"
+        ▼ dbt: staging → intermediate
+s3://curated/                     prod."curated.github.internal" (private)
   ├── stg_github_archive__events (view)
+  └── int_github__events_enriched (table)
+        │
+        ▼ dbt: conformed core
+                                  prod."curated.github" (public)
   ├── fct_github_events
   ├── dim_github_actors
   └── dim_github_repositories
@@ -32,7 +36,7 @@ same thing as dbt's modeling layers.
 
 | Contract | Owner | Rules |
 |---|---|---|
-| Landing | Data Platform | Immutable source fidelity, partitioned by ingestion/source hour |
+| Landing | Data Platform | Immutable archive plus append-only event rows partitioned by source hour |
 | Curated GitHub | Data Platform | Stable IDs, deduplication, conformed facts and dimensions |
 | Engineering marts | Engineering Analytics | Public business metrics at documented grains |
 

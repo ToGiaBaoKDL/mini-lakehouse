@@ -6,9 +6,9 @@ push: null
 pull: null
 
 deployments:
-  - name: github-archive-hourly
+  - name: etl_github_archive_hourly
     description: Ingest the previous complete UTC hour, then build tested dbt marts.
-    entrypoint: src/mini_lakehouse/orchestration/flows/github_archive.py:ingest_and_transform_github_archive
+    entrypoint: orchestration/etl_github_archive_hourly.py:etl_github_archive_hourly
     parameters: {}
     schedules:
       - cron: "15 * * * *"
@@ -21,9 +21,9 @@ deployments:
       name: lakehouse-process
       work_queue_name: default
 
-  - name: github-archive-backfill
+  - name: etl_github_archive_backfill
     description: Manually backfill an inclusive range of UTC archive hours.
-    entrypoint: src/mini_lakehouse/orchestration/flows/github_archive.py:backfill_github_archive
+    entrypoint: orchestration/etl_github_archive_backfill.py:etl_github_archive_backfill
     parameters:
       start: "2025-01-01T00:00:00Z"
       end: "2025-01-01T00:00:00Z"
@@ -35,9 +35,9 @@ deployments:
       name: lakehouse-process
       work_queue_name: default
 
-  - name: iceberg-maintenance-weekly
-    description: Compact data files and expire safe Iceberg metadata for owned tables.
-    entrypoint: src/mini_lakehouse/orchestration/flows/maintenance.py:maintain_iceberg_tables
+  - name: gov_iceberg_maintenance
+    description: Apply inherited Polaris maintenance policies to discovered Iceberg tables.
+    entrypoint: orchestration/gov_iceberg_maintenance.py:gov_iceberg_maintenance
     parameters: {}
     schedules:
       - cron: "0 3 * * 0"

@@ -1,3 +1,15 @@
+{{
+    config(
+        materialized='table',
+        schema='curated.github.internal',
+        properties={
+            'format': "'PARQUET'",
+            'format_version': '2',
+            'partitioning': "ARRAY['month(event_date_utc)']"
+        }
+    )
+}}
+
 select
     event_id,
     event_type,

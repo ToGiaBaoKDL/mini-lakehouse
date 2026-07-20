@@ -6,49 +6,18 @@ from typing import Any
 import requests
 from pyiceberg.catalog import Catalog
 from pyiceberg.exceptions import NamespaceAlreadyExistsError
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 from mini_lakehouse.config import Settings, get_settings
 from mini_lakehouse.logging import configure_logging
+from mini_lakehouse.platform.polaris import (
+    PolarisPolicyClient,
+    create_retry_session,
+    request_oauth_token,
+)
+from mini_lakehouse.platform.policies import maintenance_policy_contract
 from mini_lakehouse.storage.iceberg import load_prod_catalog
 
 logger = logging.getLogger(__name__)
-
-
-def _session() -> requests.Session:
-    retry = Retry(
-        total=12,
-        backoff_factor=1,
-        status_forcelist=(429, 500, 502, 503, 504),
-        allowed_methods=frozenset({"GET", "POST"}),
-        respect_retry_after_header=True,
-    )
-    session = requests.Session()
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
-    return session
-
-
-def _oauth_token(session: requests.Session, settings: Settings) -> str:
-    client_id, client_secret = settings.polaris.credential.get_secret_value().split(":", 1)
-    response = session.post(
-        f"{settings.polaris.uri.rstrip('/')}/v1/oauth/tokens",
-        data={
-            "grant_type": "client_credentials",
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "scope": settings.polaris.scope,
-        },
-        headers={"Polaris-Realm": settings.polaris.realm},
-        timeout=10,
-    )
-    response.raise_for_status()
-    token = response.json().get("access_token")
-    if not isinstance(token, str) or not token:
-        raise RuntimeError("Polaris did not return an OAuth access token")
-    return token
 
 
 def catalog_contract(settings: Settings) -> dict[str, Any]:
@@ -120,6 +89,10 @@ def namespace_contract(settings: Settings) -> Mapping[tuple[str, ...], dict[str,
             "owner": "data-platform",
             "data_product": "github",
         },
+        ("curated", "github", "internal"): {
+            "owner": "data-platform",
+            "visibility": "private",
+        },
         ("analytics",): {
             "location": settings.storage.analytics_uri,
             "owner": "analytics-platform",
@@ -157,10 +130,14 @@ def _load_catalog_with_retry(settings: Settings) -> Catalog:
 def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
-    session = _session()
-    token = _oauth_token(session, settings)
+    session = create_retry_session()
+    token = request_oauth_token(session, settings)
     ensure_catalog(session, settings, token)
     ensure_namespaces(_load_catalog_with_retry(settings), settings)
+    policy_client = PolarisPolicyClient(session, settings, token)
+    for policy in maintenance_policy_contract():
+        policy_client.ensure_policy(policy)
+        logger.info("Polaris policy %s is ready", policy.name)
     logger.info("Lakehouse catalog contract is ready")
 
 

@@ -14,6 +14,5 @@ mini_lakehouse:
       threads: "{{ env_var('DBT_THREADS', '4') | int }}"
       timezone: UTC
       retries: 2
-      prepared_statements_enabled: true
       session_properties:
         query_max_run_time: 30m

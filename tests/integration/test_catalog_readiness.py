@@ -16,4 +16,5 @@ def test_expected_namespaces_are_readable() -> None:
 
     assert ("landing", "api", "github_archive") in catalog.list_namespaces(("landing", "api"))
     assert ("curated", "github") in catalog.list_namespaces(("curated",))
+    assert ("curated", "github", "internal") in catalog.list_namespaces(("curated", "github"))
     assert ("analytics", "engineering") in catalog.list_namespaces(("analytics",))

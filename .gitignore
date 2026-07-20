@@ -23,13 +23,6 @@ dbt_project/dbt_packages/
 dbt_project/dbt_modules/
 dbt_project/logs/
 
-# Docker infra local data
-catalog/catalog-data/
-catalog/minio-data/
-
-# ClickHouse Local Data
-catalog/clickhouse-data/
-
 # License files
 *.license
 minio.license

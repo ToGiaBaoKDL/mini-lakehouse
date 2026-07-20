@@ -31,9 +31,28 @@ class GithubArchiveIngestionService:
             f"{self._settings.storage.landing_uri}/api/github_archive/raw/"
             f"{archive_hour.partition_path}/{archive_hour.filename}"
         )
+        raw_exists = self._object_store.exists(raw_uri)
+        loaded_hour = self._repository.hour_state(archive_hour.value)
+        if loaded_hour is not None:
+            if not raw_exists:
+                raise RuntimeError(
+                    f"Landing table contains {archive_hour.filename}, but raw archive is missing"
+                )
+            result = IngestionResult(
+                archive_hour=archive_hour.value,
+                source_file=archive_hour.filename,
+                raw_uri=raw_uri,
+                row_count=loaded_hour.row_count,
+                rejected_row_count=0,
+                snapshot_id=loaded_hour.snapshot_id,
+                was_appended=False,
+            )
+            logger.info("Archive hour is already loaded: %s", result.model_dump(mode="json"))
+            return result
+
         with TemporaryDirectory(prefix="github-archive-") as temporary_directory:
             local_path = Path(temporary_directory) / archive_hour.filename
-            if self._object_store.exists(raw_uri):
+            if raw_exists:
                 logger.info("Reusing immutable raw archive %s", raw_uri)
                 self._object_store.download(raw_uri, local_path)
             else:
@@ -46,15 +65,16 @@ class GithubArchiveIngestionService:
                 archive_hour,
                 max_error_ratio=self._settings.github_archive.max_parse_error_ratio,
             )
-            snapshot_id = self._repository.replace_hour(parsed.table)
+            write = self._repository.append_hour(parsed.table, archive_hour.value)
 
         result = IngestionResult(
             archive_hour=archive_hour.value,
             source_file=archive_hour.filename,
             raw_uri=raw_uri,
-            row_count=parsed.table.num_rows,
+            row_count=write.row_count,
             rejected_row_count=parsed.rejected_row_count,
-            snapshot_id=snapshot_id,
+            snapshot_id=write.snapshot_id,
+            was_appended=write.was_appended,
         )
         logger.info("Ingested GitHub Archive hour: %s", result.model_dump(mode="json"))
         return result

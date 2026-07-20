@@ -7,6 +7,7 @@ import trino
 from pyiceberg.catalog import Catalog
 
 from mini_lakehouse.config import get_settings
+from mini_lakehouse.contracts import CONTRIBUTOR_ACTIVITY_DAILY, REPOSITORY_ACTIVITY_DAILY
 from mini_lakehouse.storage.iceberg import load_prod_catalog
 
 
@@ -36,8 +37,9 @@ def _frame(query: str, parameters: Sequence[Any] | None = None) -> pd.DataFrame:
 
 @st.cache_data(ttl=60)
 def load_overview() -> pd.DataFrame:
+    relation = REPOSITORY_ACTIVITY_DAILY.trino(get_settings().trino.catalog)
     return _frame(
-        """
+        f"""
         select
             sum(event_count) as event_count,
             sum(push_event_count) as push_event_count,
@@ -45,15 +47,16 @@ def load_overview() -> pd.DataFrame:
             sum(pull_request_event_count) as pull_request_event_count,
             sum(issue_event_count) as issue_event_count,
             max(activity_date) as latest_activity_date
-        from prod."analytics.engineering".fct_repository_activity_daily
+        from {relation}
         """
     )
 
 
 @st.cache_data(ttl=60)
 def load_repository_activity(limit: int = 25) -> pd.DataFrame:
+    relation = REPOSITORY_ACTIVITY_DAILY.trino(get_settings().trino.catalog)
     return _frame(
-        """
+        f"""
         select
             repository_id,
             max_by(repository_name, activity_date) as repository_name,
@@ -62,7 +65,7 @@ def load_repository_activity(limit: int = 25) -> pd.DataFrame:
             sum(pushed_commit_count) as pushed_commit_count,
             sum(pull_request_event_count) as pull_request_event_count,
             sum(active_actor_count) as active_actor_days
-        from prod."analytics.engineering".fct_repository_activity_daily
+        from {relation}
         group by repository_id
         order by event_count desc
         limit ?
@@ -73,10 +76,11 @@ def load_repository_activity(limit: int = 25) -> pd.DataFrame:
 
 @st.cache_data(ttl=60)
 def load_contributor_trend() -> pd.DataFrame:
+    relation = CONTRIBUTOR_ACTIVITY_DAILY.trino(get_settings().trino.catalog)
     return _frame(
-        """
+        f"""
         select activity_date, sum(event_count) as event_count
-        from prod."analytics.engineering".fct_contributor_activity_daily
+        from {relation}
         group by activity_date
         order by activity_date
         """

@@ -3,13 +3,14 @@ from datetime import UTC, datetime
 import pandas as pd
 import streamlit as st
 
+from mini_lakehouse.contracts import GITHUB_EVENTS_RAW
 from mini_lakehouse.presentation.data_loader import get_iceberg_catalog
 
 st.title("Iceberg metadata")
 st.caption("Operational view of the immutable GitHub Archive landing table")
 
 try:
-    table = get_iceberg_catalog().load_table(("landing", "api", "github_archive", "events_raw"))
+    table = get_iceberg_catalog().load_table(GITHUB_EVENTS_RAW.iceberg)
 except Exception as error:
     st.warning(f"Landing table is not ready: {error}")
     st.stop()

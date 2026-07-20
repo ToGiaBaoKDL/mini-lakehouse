@@ -1,8 +1,12 @@
 from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 import pyarrow as pa
 from pyiceberg.catalog import Catalog, load_catalog
+from pyiceberg.expressions import EqualTo, Reference
+from pyiceberg.expressions.literals import literal
 from pyiceberg.partitioning import PartitionField, PartitionSpec
 from pyiceberg.schema import Schema
 from pyiceberg.table import Table
@@ -16,8 +20,15 @@ from pyiceberg.types import (
 )
 
 from mini_lakehouse.config.settings import Settings
+from mini_lakehouse.contracts import GITHUB_EVENTS_RAW
 
-EVENTS_IDENTIFIER = ("landing", "api", "github_archive", "events_raw")
+
+@dataclass(frozen=True, slots=True)
+class LandingHourWrite:
+    row_count: int
+    snapshot_id: int | None
+    was_appended: bool
+
 
 LANDING_ICEBERG_SCHEMA = Schema(
     NestedField(field_id=1, name="event_id", field_type=StringType(), required=True),
@@ -78,10 +89,10 @@ class LandingEventsRepository:
         self._catalog = catalog or load_prod_catalog(settings)
 
     def ensure_table(self) -> Table:
-        if self._catalog.table_exists(EVENTS_IDENTIFIER):
-            return self._catalog.load_table(EVENTS_IDENTIFIER)
+        if self._catalog.table_exists(GITHUB_EVENTS_RAW.iceberg):
+            return self._catalog.load_table(GITHUB_EVENTS_RAW.iceberg)
         return self._catalog.create_table(
-            identifier=EVENTS_IDENTIFIER,
+            identifier=GITHUB_EVENTS_RAW.iceberg,
             schema=LANDING_ICEBERG_SCHEMA,
             location=f"{self._settings.storage.landing_uri}/api/github_archive/events_raw",
             partition_spec=LANDING_PARTITION_SPEC,
@@ -92,11 +103,62 @@ class LandingEventsRepository:
             },
         )
 
-    def replace_hour(self, events: pa.Table) -> int | None:
+    def hour_state(self, source_hour: datetime) -> LandingHourWrite | None:
+        if not self._catalog.table_exists(GITHUB_EVENTS_RAW.iceberg):
+            return None
+        table = self._catalog.load_table(GITHUB_EVENTS_RAW.iceberg)
+        row_count = table.scan(
+            row_filter=EqualTo(
+                term=Reference(name="source_hour"),
+                value=literal(source_hour),
+            )
+        ).count()
+        if row_count == 0:
+            return None
+        source_hour_value = source_hour.isoformat()
+        snapshot_id = next(
+            (
+                snapshot.snapshot_id
+                for snapshot in reversed(table.snapshots())
+                if snapshot.summary is not None
+                and snapshot.summary.get("source-hour") == source_hour_value
+            ),
+            None,
+        )
+        return LandingHourWrite(
+            row_count=row_count,
+            snapshot_id=snapshot_id,
+            was_appended=False,
+        )
+
+    def append_hour(self, events: pa.Table, source_hour: datetime) -> LandingHourWrite:
+        if events.num_rows == 0:
+            raise ValueError("Cannot append an empty GitHub Archive hour")
+        source_hours = events.column("source_hour").unique().to_pylist()
+        if source_hours != [source_hour]:
+            raise ValueError(
+                "Every landing row must match the requested source hour; "
+                f"expected {source_hour.isoformat()}, found {source_hours!r}"
+            )
+
         table = self.ensure_table()
-        table.dynamic_partition_overwrite(events)
+        existing = self.hour_state(source_hour)
+        if existing is not None:
+            return existing
+        table.append(
+            events,
+            snapshot_properties={
+                "data-tier": "landing",
+                "source-hour": source_hour.isoformat(),
+                "source-system": "github_archive",
+            },
+        )
         snapshot = table.refresh().current_snapshot()
-        return snapshot.snapshot_id if snapshot is not None else None
+        return LandingHourWrite(
+            row_count=events.num_rows,
+            snapshot_id=snapshot.snapshot_id if snapshot is not None else None,
+            was_appended=True,
+        )
 
     def properties(self) -> Mapping[str, Any]:
         return self.ensure_table().properties

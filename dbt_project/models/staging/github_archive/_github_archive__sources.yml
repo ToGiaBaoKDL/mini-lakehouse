@@ -2,14 +2,15 @@ version: 2
 
 sources:
   - name: github_archive
-    description: Immutable GitHub Archive events ingested hourly by the Data Platform team.
+    description: Append-only GitHub Archive events ingested hourly by the Data Platform team.
     database: "{{ env_var('DBT_CATALOG', 'prod') }}"
     schema: landing.api.github_archive
     config:
-      loaded_at_field: ingested_at
+      loaded_at_field: source_hour
       freshness:
         warn_after: {count: 2, period: hour}
         error_after: {count: 6, period: hour}
+        filter: source_hour >= current_timestamp - interval '1' day
     meta:
       owner: data-platform
       transport: api

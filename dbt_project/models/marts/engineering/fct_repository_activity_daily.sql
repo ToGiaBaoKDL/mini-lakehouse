@@ -1,5 +1,7 @@
 {{
     config(
+        incremental_strategy='merge',
+        on_schema_change='sync_all_columns',
         unique_key=['activity_date', 'repository_id'],
         properties={
             'format': "'PARQUET'",

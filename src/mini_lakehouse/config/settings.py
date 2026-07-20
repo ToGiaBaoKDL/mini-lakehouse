@@ -36,7 +36,7 @@ class StorageSettings(BaseModel):
 
 
 class PolarisSettings(BaseModel):
-    catalog_name: str = "prod"
+    catalog_name: str = Field(default="prod", pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
     uri: str = "http://localhost:8181/api/catalog"
     management_uri: str = "http://localhost:8181/api/management/v1"
     oauth2_server_uri: str = "http://localhost:8181/api/catalog/v1/oauth/tokens"
@@ -49,14 +49,13 @@ class TrinoSettings(BaseModel):
     host: str = "localhost"
     port: int = Field(default=8080, ge=1, le=65535)
     user: str = "lakehouse"
-    catalog: str = "prod"
+    catalog: str = Field(default="prod", pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
     http_scheme: Literal["http", "https"] = "http"
 
 
 class DbtSettings(BaseModel):
     project_dir: Path = Path("dbt_project")
     profiles_dir: Path = Path("dbt_project")
-    target: str = "local"
 
 
 class GithubArchiveSettings(BaseModel):
@@ -64,11 +63,6 @@ class GithubArchiveSettings(BaseModel):
     request_timeout_seconds: float = Field(default=120.0, gt=0)
     max_parse_error_ratio: float = Field(default=0.001, ge=0, le=1)
     user_agent: str = "mini-lakehouse/0.2"
-
-
-class PrefectSettings(BaseModel):
-    work_pool: str = "lakehouse-process"
-    dbt_concurrency_limit: int = Field(default=1, ge=1)
 
 
 class Settings(BaseSettings):
@@ -89,7 +83,6 @@ class Settings(BaseSettings):
     trino: TrinoSettings = Field(default_factory=TrinoSettings)
     dbt: DbtSettings = Field(default_factory=DbtSettings)
     github_archive: GithubArchiveSettings = Field(default_factory=GithubArchiveSettings)
-    prefect: PrefectSettings = Field(default_factory=PrefectSettings)
 
 
 @lru_cache(maxsize=1)
