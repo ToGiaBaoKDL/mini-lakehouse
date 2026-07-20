@@ -1,0 +1,50 @@
+version: 2
+
+models:
+  - name: fct_repository_activity_daily
+    description: Daily engineering activity at the stable activity_date + repository_id grain.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [activity_date, repository_id]
+    columns:
+      - name: activity_date
+        data_tests: [not_null]
+      - name: repository_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_github_repositories')
+                field: repository_id
+
+  - name: fct_contributor_activity_daily
+    description: Daily engineering activity at the stable activity_date + actor_id grain.
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [activity_date, actor_id]
+    columns:
+      - name: activity_date
+        data_tests: [not_null]
+      - name: actor_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_github_actors')
+                field: actor_id
+
+exposures:
+  - name: engineering_activity_dashboard
+    label: Engineering Activity Dashboard
+    type: dashboard
+    maturity: medium
+    url: http://localhost:8501
+    description: Streamlit dashboard backed only by public engineering marts.
+    depends_on:
+      - ref('fct_repository_activity_daily')
+      - ref('fct_contributor_activity_daily')
+    owner:
+      name: Engineering Analytics
+      email: engineering-analytics@example.com

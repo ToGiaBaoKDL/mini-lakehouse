@@ -1,0 +1,34 @@
+version: 2
+
+groups:
+  - name: data_platform
+    owner:
+      name: Data Platform
+      email: data-platform@example.com
+  - name: engineering_analytics
+    owner:
+      name: Engineering Analytics
+      email: engineering-analytics@example.com
+
+models:
+  - name: fct_github_events
+    description: Deduplicated GitHub event fact at one row per stable event ID.
+    columns:
+      - name: event_id
+        data_tests: [not_null, unique]
+      - name: event_date_utc
+        data_tests: [not_null]
+      - name: push_commit_count
+        description: Number of commits in a PushEvent payload; null for non-push events.
+
+  - name: dim_github_actors
+    description: Latest observed mutable actor attributes at one row per actor ID.
+    columns:
+      - name: actor_id
+        data_tests: [not_null, unique]
+
+  - name: dim_github_repositories
+    description: Latest observed mutable repository attributes at one row per repository ID.
+    columns:
+      - name: repository_id
+        data_tests: [not_null, unique]

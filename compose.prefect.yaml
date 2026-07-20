@@ -1,0 +1,125 @@
+# Optional orchestration control plane. Always combine with compose.core.yaml.
+x-lakehouse-environment: &lakehouse-environment
+  LAKEHOUSE_ENVIRONMENT: local
+  LAKEHOUSE_STORAGE__BACKEND: s3
+  LAKEHOUSE_STORAGE__ENDPOINT_URL: http://object-store:9000
+  LAKEHOUSE_STORAGE__ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+  LAKEHOUSE_STORAGE__SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+  LAKEHOUSE_STORAGE__REGION: us-east-1
+  LAKEHOUSE_STORAGE__LANDING_URI: s3://landing
+  LAKEHOUSE_STORAGE__CURATED_URI: s3://curated
+  LAKEHOUSE_STORAGE__ANALYTICS_URI: s3://analytics
+  LAKEHOUSE_POLARIS__CATALOG_NAME: prod
+  LAKEHOUSE_POLARIS__URI: http://polaris:8181/api/catalog
+  LAKEHOUSE_POLARIS__MANAGEMENT_URI: http://polaris:8181/api/management/v1
+  LAKEHOUSE_POLARIS__OAUTH2_SERVER_URI: http://polaris:8181/api/catalog/v1/oauth/tokens
+  LAKEHOUSE_POLARIS__REALM: ${POLARIS_REALM:-POLARIS}
+  LAKEHOUSE_POLARIS__CREDENTIAL: ${POLARIS_ROOT_CLIENT_ID:-root}:${POLARIS_ROOT_CLIENT_SECRET:-secretpassword}
+  LAKEHOUSE_TRINO__HOST: trino
+  LAKEHOUSE_TRINO__PORT: 8080
+  LAKEHOUSE_TRINO__USER: lakehouse
+  DBT_CATALOG: prod
+  DBT_TARGET: local
+  DBT_PROFILES_DIR: /app/dbt_project
+  DBT_PROJECT_DIR: /app/dbt_project
+  TRINO_HOST: trino
+  TRINO_PORT: 8080
+  TRINO_USER: lakehouse
+  PREFECT_API_URL: http://prefect-server:4200/api
+
+x-orchestration-image: &orchestration-image
+  image: mini-lakehouse-orchestration:local
+  build:
+    context: .
+    target: orchestration
+
+x-prefect-server-environment: &prefect-server-environment
+  PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://${POSTGRES_USER:-lakehouse}:${POSTGRES_PASSWORD:-lakehouse}@postgres:5432/prefect
+  PREFECT_MESSAGING_BROKER: prefect_redis.messaging
+  PREFECT_MESSAGING_CACHE: prefect_redis.messaging
+  PREFECT_REDIS_MESSAGING_HOST: redis
+  PREFECT_REDIS_MESSAGING_PORT: 6379
+  PREFECT_REDIS_MESSAGING_DB: 0
+
+services:
+  redis:
+    image: redis:latest
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  prefect-server:
+    image: prefecthq/prefect:3-latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *prefect-server-environment
+      PREFECT_SERVER_API_HOST: 0.0.0.0
+      PREFECT_SERVER_UI_API_URL: http://localhost:4200/api
+    command: prefect server start --no-services
+    ports:
+      - "127.0.0.1:4200:4200"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:4200/api/health', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+
+  prefect-services:
+    image: prefecthq/prefect:3-latest
+    depends_on:
+      prefect-server:
+        condition: service_healthy
+    environment:
+      <<: *prefect-server-environment
+    command: prefect server services start
+    restart: unless-stopped
+
+  prefect-bootstrap:
+    <<: *orchestration-image
+    depends_on:
+      prefect-server:
+        condition: service_healthy
+    environment:
+      <<: *lakehouse-environment
+    command: >-
+      prefect work-pool create lakehouse-process
+      --type process --overwrite --no-prompt
+    restart: "no"
+
+  prefect-worker:
+    <<: *orchestration-image
+    depends_on:
+      prefect-bootstrap:
+        condition: service_completed_successfully
+      trino:
+        condition: service_healthy
+    environment:
+      <<: *lakehouse-environment
+    command: >-
+      prefect worker start --pool lakehouse-process --type process --limit 1
+      --no-create-pool-if-not-found
+    restart: unless-stopped
+
+  prefect-deploy:
+    <<: *orchestration-image
+    depends_on:
+      prefect-bootstrap:
+        condition: service_completed_successfully
+      prefect-worker:
+        condition: service_started
+    environment:
+      <<: *lakehouse-environment
+    command: prefect deploy --all
+    restart: "no"
+
+volumes:
+  redis-data:

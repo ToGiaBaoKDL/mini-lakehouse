@@ -1,41 +1,42 @@
-# Hướng dẫn Dự án Mini Data Lakehouse (Tổng quan)
+# Architecture and ownership
 
-Dự án này xây dựng một **Data Lakehouse** cục bộ mô phỏng môi trường production thực tế, sử dụng dữ liệu sự kiện từ GitHub Archive làm nguồn cấp đầu vào.
+## Bounded contexts
 
----
-
-## 1. Kiến trúc luồng dữ liệu (Data Pipeline Flow)
+The Python package is split by responsibility rather than by technical script type:
 
 ```text
-GitHub Archive API (Compressed JSON)
-       │
-       ▼ [Ingestion Layer - Prefect, PyArrow & PyIceberg]
-Raw Files Archive (.json.gz) & Landing Table (Apache Iceberg REST Catalog)
-       │
-       ▼ [Transformation Layer - dbt & ClickHouse]
-dbt staging (Views via ClickHouse file function) -> dbt curated & analytics (ClickHouse MergeTree)
-       │
-       ▼ [Presentation Layer]
-BI & Reporting Dashboard (Streamlit & clickhouse-connect / PyIceberg metadata query)
+src/mini_lakehouse/
+├── config/                 validated runtime configuration
+├── github_archive/         source client, boundary models, parser, ingestion service
+├── storage/                object-store and Iceberg adapters
+├── orchestration/          thin Prefect tasks and deployable flows
+├── platform/               idempotent Polaris namespace bootstrap
+└── presentation/           read-only Streamlit application
 ```
 
----
+`dbt_project/` remains a top-level analytics project because its graph, tests, docs, artifacts,
+and release lifecycle differ from the Python application.
 
-## 2. Danh mục tài liệu hướng dẫn chi tiết (Phases)
+## Catalog and storage contract
 
-Vui lòng theo dõi tài liệu dự án theo thứ tự các bước dưới đây để thiết lập và chạy thành công Lakehouse:
+There is one Polaris catalog named `prod`. Environments should use separate catalogs or separate
+Polaris deployments; dbt must not invent environment prefixes inside production namespaces.
 
-1. **[01_setup.md](file:///home/hcm-mki-l6009/projects/mini-lakehouse/docs/01_environment_setup.md)**: Hướng dẫn cài đặt Python dependencies bằng `uv`, các công cụ clean code (`ruff`, `pyright`), cấu hình tệp `.env`, khởi tạo Docker container cho Iceberg REST Catalog và ClickHouse Server.
-2. **[02_ingestion.md](file:///home/hcm-mki-l6009/projects/mini-lakehouse/docs/02_data_ingestion.md)**: Hướng dẫn cơ chế hoạt động của pipeline nạp dữ liệu từ GH Archive API bằng Prefect, PyArrow và PyIceberg, đồng thời giải thích cấu trúc tệp metadata độc đáo của Iceberg.
-3. **[03_transformation.md](file:///home/hcm-mki-l6009/projects/mini-lakehouse/docs/03_dbt_transformation.md)**: Giải thích vai trò của ClickHouse Server làm công cụ tính toán phân tích (OLAP), cấu hình `dbt-clickhouse` profiles, và cách ClickHouse đọc dữ liệu trực tiếp từ Landing layer qua file function.
-4. **[04_execution.md](file:///home/hcm-mki-l6009/projects/mini-lakehouse/docs/04_pipeline_execution.md)**: Hướng dẫn vận hành chạy thử toàn bộ pipeline tự động và cách viết script Python sử dụng `clickhouse-connect` để truy vấn các bảng phân tích phục vụ báo cáo.
-5. **[05_troubleshooting_lessons.md](file:///home/hcm-mki-l6009/projects/mini-lakehouse/docs/05_troubleshooting_lessons.md)**: Nhật ký ghi lại các lỗi kỹ thuật phát sinh và bài học kinh nghiệm rút ra trong quá trình thiết lập và build dự án.
+- `landing` bucket: source-owned data. Prefixes express transport (`api`, `rdbms`, `stream`).
+- `curated` bucket: conformed data without transport details in its namespace.
+- `analytics` bucket: consumer-facing data organized by business domain and owner.
 
----
+For future RDBMS ingestion, use `prod."landing.rdbms.<database>_raw".<table>`. For streams, use
+`prod."landing.stream.<platform>".<topic>`. These are naming contracts, not code paths coupled to
+GitHub Archive.
 
-## 3. Các thành phần chính của Lakehouse sau khi chạy thành công
+## Ownership
 
-Sau khi pipeline hoàn tất, cấu trúc thư mục dữ liệu tại `warehouse/` sẽ như sau:
-* `raw-files/`: Thư mục lưu trữ tệp tin gốc `.json.gz` để audit hoặc backfill.
-* `landing_api_github/events_raw/`: Bảng Iceberg Landing thô chứa tất cả các events được ghi bởi PyIceberg.
-* ClickHouse Server lưu dữ liệu phân tích cục bộ tại thư mục host mount `catalog/clickhouse-data/`.
+- Data Platform owns ingestion, landing, Polaris contracts, `staging`, `intermediate`, and core
+  GitHub facts/dimensions.
+- Engineering Analytics owns the public engineering marts and their metric semantics.
+- Platform operators own Iceberg maintenance and infrastructure lifecycle.
+- Streamlit is a consumer. It cannot redefine metrics or query private intermediate models.
+
+dbt `group`, `access`, source metadata, tests, and exposure declarations make those boundaries
+machine-readable.

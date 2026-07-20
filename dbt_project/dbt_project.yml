@@ -1,41 +1,52 @@
-# dbt_project.yml
-# Cấu hình dbt project cho Mini Lakehouse (ClickHouse Engine)
-
-name: 'github_lakehouse'
-version: '1.0.0'
+name: "mini_lakehouse"
+version: "0.2.0"
 config-version: 2
-
-# Profile liên kết với profiles.yml
-profile: 'github_lakehouse'
-
-# Di chuyển cấu hình config từ profiles.yml sang flags của dbt_project.yml để tránh cảnh báo deprecation
-flags:
-  send_anonymous_usage_stats: False
+profile: "mini_lakehouse"
 
 model-paths: ["models"]
-analysis-paths: ["analyses"]
 test-paths: ["tests"]
-seed-paths: ["seeds"]
 macro-paths: ["macros"]
-snapshot-paths: ["snapshots"]
 
 clean-targets:
   - "target"
   - "dbt_packages"
 
+flags:
+  send_anonymous_usage_stats: false
+  require_certificate_validation: true
+
 models:
-  github_lakehouse:
-    # 1. Staging layer: Tạo view trong Trino
+  mini_lakehouse:
+    +persist_docs:
+      relation: true
+      columns: true
+
     staging:
       +materialized: view
-      +schema: landing.staging
+      +schema: curated.github
+      +group: data_platform
+      +access: private
+      +tags: ["staging", "github_archive"]
 
-    # 2. Curated layer: Vật chất hóa thành bảng Iceberg
-    curated:
-      +materialized: table
-      +schema: curated.engineering
+    intermediate:
+      +materialized: ephemeral
+      +group: data_platform
+      +access: private
+      +tags: ["intermediate", "github"]
 
-    # 3. Analytics layer: Vật chất hóa thành bảng Iceberg
-    analytics:
-      +materialized: table
-      +schema: analytics.engineering
+    marts:
+      core:
+        +materialized: table
+        +on_table_exists: replace
+        +schema: curated.github
+        +group: data_platform
+        +access: public
+        +tags: ["curated", "github"]
+      engineering:
+        +materialized: incremental
+        +incremental_strategy: merge
+        +on_schema_change: sync_all_columns
+        +schema: analytics.engineering
+        +group: engineering_analytics
+        +access: public
+        +tags: ["mart", "engineering"]

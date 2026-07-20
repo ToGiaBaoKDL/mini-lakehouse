@@ -1,0 +1,2 @@
+CREATE DATABASE polaris;
+CREATE DATABASE prefect;

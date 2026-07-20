@@ -1,48 +1,99 @@
-# Mini Data Lakehouse Project ⚡
+# Mini Lakehouse
 
-Dự án này xây dựng một hệ thống **Data Lakehouse** cục bộ (Local-first) chuẩn doanh nghiệp phục vụ mục đích học tập và nghiên cứu. Hệ thống được thiết kế để dễ dàng chuyển đổi cấu hình lưu trữ từ hệ thống tệp cục bộ (Local Filesystem) lên **Google Cloud Storage (GCS)** mà không cần thay đổi mã nguồn.
+A local-first, production-shaped lakehouse for GitHub Archive data. The stack uses Apache
+Polaris as the single `prod` catalog, Apache Iceberg for all persisted tables, Trino for SQL,
+dbt for transformation, Prefect for orchestration, and uv for Python packaging.
 
----
+## Architecture
 
-## 🛠️ Công nghệ sử dụng
-* **Prefect** (Orchestration): Điều phối toàn bộ dữ liệu từ API tải về đến lúc nạp đè và biến đổi.
-* **Apache Iceberg + REST Catalog**: Sử dụng định dạng bảng Iceberg để lưu trữ lớp Landing thô, đảm bảo tính nhất quán (ACID transaction) và hỗ trợ Time Travel.
-* **dbt (data build tool) & ClickHouse**: Thực hiện các truy vấn biến đổi dữ liệu siêu tốc và lưu trữ dữ liệu lớp Curated và Analytics trực tiếp trong **ClickHouse Server** (dùng `MergeTree` engine).
-* **Ruff & Pyright**: Đảm bảo chất lượng mã nguồn Python sạch sẽ, nhất quán và an toàn về kiểu.
-* **Streamlit**: Giao diện BI phân tích dữ liệu trực quan kết hợp tính năng kiểm tra Iceberg Metadata thông qua PyIceberg.
+```text
+GitHub Archive API
+        │
+        ▼
+s3://landing/api/github_archive/
+  ├── raw/year=.../month=.../day=.../hour=.../*.json.gz
+  └── events_raw                  prod."landing.api.github_archive"
+        │
+        ▼ dbt: staging → intermediate → core
+s3://curated/                     prod."curated.github"
+  ├── stg_github_archive__events (view)
+  ├── fct_github_events
+  ├── dim_github_actors
+  └── dim_github_repositories
+        │
+        ▼ dbt: domain marts
+s3://analytics/                   prod."analytics.engineering"
+  ├── fct_repository_activity_daily
+  └── fct_contributor_activity_daily
+```
 
----
+The three physical buckets are lifecycle/security boundaries. They are intentionally not the
+same thing as dbt's modeling layers.
 
-## 📂 Hướng dẫn Dự án Chi tiết (Phases)
+| Contract | Owner | Rules |
+|---|---|---|
+| Landing | Data Platform | Immutable source fidelity, partitioned by ingestion/source hour |
+| Curated GitHub | Data Platform | Stable IDs, deduplication, conformed facts and dimensions |
+| Engineering marts | Engineering Analytics | Public business metrics at documented grains |
 
-Dự án được tài liệu hóa thành các phần ngắn gọn, súc tích trong thư mục `docs/`. Vui lòng đọc theo thứ tự để cấu hình và chạy:
+## Quick start
 
-1. **[00_overview.md](file:///home/hcm-mki-l6009/projects/mini-lakehouse/docs/00_overview.md)**: Sơ đồ dòng chảy dữ liệu (Architecture) và cấu trúc thư mục Lakehouse sau khi chạy thành công.
-2. **[01_setup.md](file:///home/hcm-mki-l6009/projects/mini-lakehouse/docs/01_environment_setup.md)**: Hướng dẫn chuẩn bị môi trường ảo bằng `uv`, cấu hình `.env`, các lệnh kiểm tra ruff/pyright và Docker Compose chạy Iceberg Catalog & ClickHouse.
-3. **[02_ingestion.md](file:///home/hcm-mki-l6009/projects/mini-lakehouse/docs/02_data_ingestion.md)**: Giải thích pipeline nạp dữ liệu thô (Landing events) và quy luật đặt tên file metadata của Iceberg.
-4. **[03_transformation.md](file:///home/hcm-mki-l6009/projects/mini-lakehouse/docs/03_dbt_transformation.md)**: Cơ chế hoạt động của ClickHouse, dbt models, và cách ClickHouse đọc dữ liệu Parquet từ Landing layer thông qua file function.
-5. **[04_execution.md](file:///home/hcm-mki-l6009/projects/mini-lakehouse/docs/04_pipeline_execution.md)**: Hướng dẫn vận hành chạy thử toàn bộ pipeline tự động và cách viết script Python sử dụng `clickhouse-connect` để truy vấn dữ liệu ClickHouse kết quả.
-6. **[05_troubleshooting_lessons.md](file:///home/hcm-mki-l6009/projects/mini-lakehouse/docs/05_troubleshooting_lessons.md)**: Nhật ký ghi lại các lỗi kỹ thuật phát sinh (phân quyền docker, s3 empty host, schema view của clickhouse) và bài học kinh nghiệm rút ra.
-
----
-
-## 🚀 Khởi động nhanh (Quick Start)
-
-Dành cho những người đã thiết lập xong môi trường và file `.env`:
+Requirements: Docker with Compose v2 and [uv](https://docs.astral.sh/uv/).
+Compose modules consistently follow `compose.<module>.yaml`: `core` is the required data plane,
+while `prefect` and `dashboard` are optional overlays.
 
 ```bash
-# 1. Khởi chạy Iceberg REST Catalog và ClickHouse Server
-cd catalog
-docker compose up -d
-cd ..
-
-# 2. Chạy Ingestion Pipeline theo giờ (Hourly Ingest)
-PYTHONPATH=. uv run --env-file .env python pipelines/flows/ingest_github_archive.py
-
-# 3. Chạy dbt Transformation Pipeline hàng ngày (Daily Transform & Test)
-PYTHONPATH=. uv run --env-file .env python pipelines/flows/transform_github_archive_daily.py
-
-# 4. Khởi chạy giao diện Streamlit BI
-PYTHONPATH=. uv run --env-file .env streamlit run bi_app/app.py
+cp .env.example .env
+uv sync --locked --all-extras --all-groups
+docker compose -f compose.core.yaml up -d --build
 ```
-Giao diện Streamlit BI sẽ khả dụng tại địa chỉ: `http://localhost:8501`.
+
+The core data plane exposes only loopback ports:
+
+- MinIO API/console: `localhost:9000` / `localhost:9001`
+- Polaris API/management health: `localhost:8181` / `localhost:8182`
+- Trino: `localhost:8080`
+
+Ingest the previous complete UTC hour and build the dbt project:
+
+```bash
+uv run lakehouse ingest
+uv run dbt build --project-dir dbt_project --profiles-dir dbt_project
+```
+
+Add the orchestration control plane when you need scheduled deployments:
+
+```bash
+docker compose -f compose.core.yaml -f compose.prefect.yaml up -d --build
+```
+
+Prefect is then available at `localhost:4200`. Add the presentation plane independently:
+
+```bash
+docker compose -f compose.core.yaml -f compose.dashboard.yaml up -d --build
+```
+
+Streamlit is then available at `localhost:8501` and queries only public analytics marts.
+
+## Development checks
+
+```bash
+uv lock --check
+uv run ruff format --check .
+uv run ruff check .
+uv run pyright
+uv run pytest -m "not integration"
+uv run dbt parse --project-dir dbt_project --profiles-dir dbt_project
+docker compose -f compose.core.yaml config --quiet
+docker compose -f compose.core.yaml -f compose.prefect.yaml config --quiet
+docker compose -f compose.core.yaml -f compose.dashboard.yaml config --quiet
+```
+
+Run read-only integration tests after the stack is healthy:
+
+```bash
+RUN_LAKEHOUSE_INTEGRATION=1 uv run pytest -m integration
+```
+
+See [docs/00_overview.md](docs/00_overview.md) for boundaries and
+[docs/04_pipeline_execution.md](docs/04_pipeline_execution.md) for operations.

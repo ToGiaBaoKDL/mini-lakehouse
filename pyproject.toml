@@ -1,35 +1,75 @@
+[build-system]
+requires = ["uv_build>=0.11.0,<0.12.0"]
+build-backend = "uv_build"
+
 [project]
 name = "mini-lakehouse"
-version = "0.1.0"
-description = "A mini data lakehouse project using GitHub Archive, Prefect, Apache Iceberg, dbt-duckdb, and Streamlit."
+version = "0.2.0"
+description = "A small production-shaped lakehouse built with Polaris, Iceberg, Trino, dbt, and Prefect."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.13,<3.14"
 dependencies = [
-    "prefect>=2.19.0",
-    "pyiceberg[pyarrow,s3fs]>=0.11.0",
-    "pyarrow>=14.0.0",
-    "duckdb>=1.0.0",
-    "dbt-core>=1.8.0",
-    "dbt-trino>=1.8.0",
-    "streamlit>=1.35.0",
-    "requests>=2.31.0",
-    "pytest>=8.0.0",
-    "ruff>=0.4.0",
-    "pyright>=1.1.0",
-    "plotly>=5.18.0",
-    "trino>=0.328.0",
-    "pydantic-settings>=2.0.0",
+    "fsspec>=2025.12",
+    "pyarrow>=23,<26",
+    "pydantic>=2.12,<3",
+    "pydantic-settings>=2.12,<3",
+    "pyiceberg[pyarrow,s3fs]>=0.10,<0.12",
+    "requests>=2.32,<3",
+    "urllib3>=2.5,<3",
 ]
 
-[tool.uv]
-package = false
+[project.optional-dependencies]
+dashboard = [
+    "pandas>=2.3,<3",
+    "plotly>=6.5,<7",
+    "streamlit>=1.53,<2",
+    "trino>=0.336,<1",
+]
+orchestration = [
+    "dbt-trino>=1.10,<1.11",
+    "prefect>=3.7,<4",
+    "prefect-dbt>=0.7,<0.8",
+    "trino>=0.336,<1",
+]
 
-[tool.pyright]
-venvPath = "."
-venv = ".venv"
-typeCheckingMode = "basic"
+[dependency-groups]
+dev = [
+    "pyright>=1.1.408,<2",
+    "pytest>=9,<10",
+    "pytest-cov>=7,<8",
+    "ruff>=0.14,<0.16",
+    "types-requests>=2.32,<3",
+]
+
+[project.scripts]
+lakehouse = "mini_lakehouse.cli:main"
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+testpaths = ["tests"]
+markers = [
+    "integration: requires the local Compose stack",
+]
 
 [tool.ruff]
-lint.ignore = ["E402"]
+line-length = 100
+target-version = "py313"
 
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pyright]
+pythonVersion = "3.13"
+typeCheckingMode = "strict"
+include = ["src", "tests"]
+exclude = ["dbt_project", ".venv"]
+venvPath = "."
+venv = ".venv"
+reportMissingTypeStubs = false
+reportUnknownArgumentType = false
+reportUnknownMemberType = false
+reportUnknownParameterType = false
+reportUnknownVariableType = false

@@ -1,23 +1,51 @@
-# prefect.yaml
-# Cấu hình Deployments khai báo (Declarative Deployments) cho Prefect
-# Giúp tự động hóa việc đăng ký tất cả các Flow tương tự như cách quét DAG của Airflow
-
-# Tên dự án
 name: mini-lakehouse
-prefect-version: 3.1.0
+prefect-version: 3.7.8
 
-# Khai báo danh sách các deployments
+build: null
+push: null
+pull: null
+
 deployments:
-  - name: hourly-ingestion
-    entrypoint: pipelines/flows/ingest_github_archive.py:ingest_github_archive_hour
-    schedule:
-      cron: "0 * * * *"  # Chạy vào đúng phút 0 hàng giờ
-      timezone: "UTC"
-    description: "Flow tải dữ liệu GitHub Archive và nạp đè vào Iceberg Landing Table theo giờ."
+  - name: github-archive-hourly
+    description: Ingest the previous complete UTC hour, then build tested dbt marts.
+    entrypoint: src/mini_lakehouse/orchestration/flows/github_archive.py:ingest_and_transform_github_archive
+    parameters: {}
+    schedules:
+      - cron: "15 * * * *"
+        timezone: UTC
+        active: true
+    concurrency_limit:
+      limit: 1
+      collision_strategy: ENQUEUE
+    work_pool:
+      name: lakehouse-process
+      work_queue_name: default
 
-  - name: daily-transformation
-    entrypoint: pipelines/flows/transform_github_archive_daily.py:transform_github_archive_daily
-    schedule:
-      cron: "0 8 * * *"  # Chạy vào đúng 8:00 AM hàng ngày
-      timezone: "Asia/Ho_Chi_Minh"
-    description: "Flow thực thi dbt build để biến đổi dữ liệu ClickHouse và chạy các bài data test chất lượng."
+  - name: github-archive-backfill
+    description: Manually backfill an inclusive range of UTC archive hours.
+    entrypoint: src/mini_lakehouse/orchestration/flows/github_archive.py:backfill_github_archive
+    parameters:
+      start: "2025-01-01T00:00:00Z"
+      end: "2025-01-01T00:00:00Z"
+    schedules: []
+    concurrency_limit:
+      limit: 1
+      collision_strategy: ENQUEUE
+    work_pool:
+      name: lakehouse-process
+      work_queue_name: default
+
+  - name: iceberg-maintenance-weekly
+    description: Compact data files and expire safe Iceberg metadata for owned tables.
+    entrypoint: src/mini_lakehouse/orchestration/flows/maintenance.py:maintain_iceberg_tables
+    parameters: {}
+    schedules:
+      - cron: "0 3 * * 0"
+        timezone: UTC
+        active: true
+    concurrency_limit:
+      limit: 1
+      collision_strategy: ENQUEUE
+    work_pool:
+      name: lakehouse-process
+      work_queue_name: maintenance

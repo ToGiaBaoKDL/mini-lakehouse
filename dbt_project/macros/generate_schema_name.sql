@@ -1,6 +1,5 @@
--- dbt_project/macros/generate_schema_name.sql
--- Ghi đè macro mặc định để dbt không tự ghép target.schema (ví dụ 'default_') vào trước custom schema name
 {% macro generate_schema_name(custom_schema_name, node) -%}
+    {# Environment isolation belongs at the Polaris catalog level, not in namespace names. #}
     {%- if custom_schema_name is none -%}
         {{ target.schema }}
     {%- else -%}
