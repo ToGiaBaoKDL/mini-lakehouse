@@ -16,7 +16,7 @@ except Exception as e:
 
 if catalog is not None:
     try:
-        table_identifier = "landing_api_github.events_raw"
+        table_identifier = "landing.api.github.events_raw"
         st.info(f"Đang đọc bảng Iceberg: **{table_identifier}**")
         
         # Tải thông tin bảng qua PyIceberg
@@ -31,7 +31,7 @@ if catalog is not None:
             sorted_snapshots = sorted(snapshots, key=lambda x: x.timestamp_ms, reverse=True)
             
             # Thêm CSS cho Timeline (Không sử dụng custom font Outfit)
-            st.markdown("""
+            style_html = """
             <style>
                 .timeline {
                     position: relative;
@@ -92,10 +92,10 @@ if catalog is not None:
                     word-break: break-all;
                 }
             </style>
-            """, unsafe_allow_html=True)
+            """
             
             # Khởi tạo chuỗi HTML dạng một dòng liên tục không xuống dòng (tránh markdown parser tự ý escape html)
-            timeline_html = '<div class="timeline">'
+            timeline_html = style_html + '<div class="timeline">'
             for snap in sorted_snapshots:
                 commit_time = pd.to_datetime(snap.timestamp_ms, unit="ms").strftime('%Y-%m-%d %H:%M:%S UTC')
                 parent_id = str(snap.parent_snapshot_id) if snap.parent_snapshot_id else "None (Khởi tạo bảng)"
@@ -114,7 +114,7 @@ if catalog is not None:
                 )
                 timeline_html += item_html
             timeline_html += '</div>'
-            st.markdown(timeline_html, unsafe_allow_html=True)
+            st.html(timeline_html)
         else:
             st.info("Bảng Iceberg Landing chưa có snapshot nào.")
             

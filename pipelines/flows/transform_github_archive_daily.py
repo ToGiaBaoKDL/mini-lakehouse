@@ -23,5 +23,7 @@ def transform_github_archive_daily():
     return "Transformation successful"
 
 if __name__ == "__main__":
-    print("Bắt đầu chạy thử nghiệm biến đổi dữ liệu hàng ngày...")
+    from src.utils.logging import get_logger
+    logger = get_logger("lakehouse.pipelines.transform")
+    logger.info("Bắt đầu chạy thử nghiệm biến đổi dữ liệu hàng ngày...")
     transform_github_archive_daily()

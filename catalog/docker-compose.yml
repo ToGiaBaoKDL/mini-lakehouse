@@ -1,33 +1,86 @@
 services:
+  minio:
+    image: quay.io/minio/aistor/minio:latest
+    container_name: aistor
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: "server /data --console-address :9001 --license /etc/minio/minio.license"
+    environment:
+      - MINIO_ROOT_USER=any_key
+      - MINIO_ROOT_PASSWORD=any_secret
+      # Cấu hình domain ảo để MinIO AIStor phân giải chính xác các virtual-hosted bucket S3 subdomains
+      - MINIO_DOMAIN=aistor
+    volumes:
+      - ./minio-data:/data
+      # Mount file bản quyền thương mại AIStor từ root workspace
+      - ../minio.license:/etc/minio/minio.license:ro
+    networks:
+      default:
+        aliases:
+          - lakehouse.aistor
+          - landing.aistor
+          - curated.aistor
+          - analytics.aistor
+
   catalog:
-    image: tabulario/iceberg-rest:0.6.0
-    container_name: iceberg-rest-catalog
-    user: "1000:1000"
+    image: apache/polaris:latest
+    container_name: polaris-catalog
     ports:
       - "8181:8181"
-    environment:
-      # Sử dụng JDBC SQLite làm catalog database backend với chế độ WAL và busy_timeout
-      CATALOG_CATALOG_IMPL: org.apache.iceberg.jdbc.JdbcCatalog
-      CATALOG_URI: jdbc:sqlite:/home/iceberg/data/iceberg_catalog.db?journal_mode=WAL&busy_timeout=10000
-      CATALOG_JDBC_USER: user
-      CATALOG_JDBC_PASSWORD: password
-      CATALOG_WAREHOUSE: file://${HOME}/projects/mini-lakehouse/warehouse
-      CATALOG_IO_IMPL: org.apache.iceberg.io.ResolvingFileIO
-    volumes:
-      - ./catalog-data:/home/iceberg/data
-      - ${HOME}/projects/mini-lakehouse/warehouse:${HOME}/projects/mini-lakehouse/warehouse
-
-  clickhouse:
-    image: clickhouse/clickhouse-server:24.3
-    container_name: clickhouse-server
     user: "1000:1000"
-    ports:
-      - "8123:8123"
-      - "9000:9000"
+    depends_on:
+      - minio
     environment:
-      CLICKHOUSE_DB: github_lakehouse
-      CLICKHOUSE_USER: dev_user
-      CLICKHOUSE_PASSWORD: dev_password
+      - POLARIS_BOOTSTRAP_CREDENTIALS=POLARIS,root,secretpassword
+      - POLARIS_READINESS_IGNORE_SEVERE_ISSUES=true
+      - QUARKUS_CONFIG_VALIDATE_UNKNOWN=false
+      - JAVA_OPTS=-Dpolaris.features."SUPPORTED_CATALOG_STORAGE_TYPES"=["FILE","S3","GCS","AZURE"] -Dpolaris.features."ALLOW_INSECURE_STORAGE_TYPES"=true -Dpolaris.features."ALLOW_NAMESPACE_CUSTOM_LOCATION"=true
+      
+      - POLARIS_FEATURES_ALLOW_NAMESPACE_CUSTOM_LOCATION=true
+      - POLARIS_CATALOG_ALLOW_NAMESPACE_CUSTOM_LOCATION=true
+      - POLARIS_ALLOW_NAMESPACE_CUSTOM_LOCATION=true
+      
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=any_key
+      - AWS_SECRET_ACCESS_KEY=any_secret
+      
+      # Kết nối các dịch vụ AWS SDK v2 của Polaris sang MinIO AIStor
+      - AWS_ENDPOINT_URL=http://aistor:9000
+      - AWS_ENDPOINT_URL_S3=http://aistor:9000
+      - AWS_ENDPOINT_URL_STS=http://aistor:9000
     volumes:
-      - ./clickhouse-data:/var/lib/clickhouse
-      - ${HOME}/projects/mini-lakehouse/warehouse:/var/lib/clickhouse/user_files/warehouse
+      - /etc/passwd:/etc/passwd:ro
+      - /etc/group:/etc/group:ro
+
+  polaris-bootstrap:
+    image: python:3.11-slim
+    container_name: polaris-bootstrap
+    depends_on:
+      - catalog
+      - minio
+    restart: on-failure
+    volumes:
+      - .:/app
+    working_dir: /app
+    entrypoint:
+      - "sh"
+      - "-c"
+      - |
+        echo "Installing Python dependencies (boto3, requests)..."
+        pip install --no-cache-dir boto3 requests
+        echo "Running bootstrap_lakehouse.py..."
+        python bootstrap_lakehouse.py
+        echo "Bootstrap complete!"
+
+  trino:
+    image: trinodb/trino:latest
+    container_name: trino-server
+    ports:
+      - "8080:8080"
+    depends_on:
+      - catalog
+      - minio
+    volumes:
+      # Mount cấu hình Trino Node/Catalog từ thư mục trino/etc của máy host
+      - ./trino/etc:/etc/trino:ro

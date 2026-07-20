@@ -2,10 +2,11 @@ github_lakehouse:
   target: dev
   outputs:
     dev:
-      type: clickhouse
+      type: trino
       host: localhost
-      port: 8123
-      user: dev_user
-      password: dev_password
+      port: 8080
+      user: admin
+      catalog: iceberg
       schema: default
+      method: none
       threads: 4

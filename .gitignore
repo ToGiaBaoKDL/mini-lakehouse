@@ -17,10 +17,6 @@ node_modules/
 # Prefect
 .prefect/
 
-# DuckDB Databases
-*.duckdb
-*.duckdb.wal
-
 # dbt
 dbt_project/target/
 dbt_project/dbt_packages/
@@ -29,9 +25,12 @@ dbt_project/logs/
 
 # Docker infra local data
 catalog/catalog-data/
-
-# Warehouse Storage (Dữ liệu Parquet & Metadata của Lakehouse không commit vào Git)
-warehouse/
+catalog/minio-data/
 
 # ClickHouse Local Data
 catalog/clickhouse-data/
+
+# License files
+*.license
+minio.license
+catalog/minio.license

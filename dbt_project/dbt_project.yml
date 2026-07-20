@@ -25,17 +25,17 @@ clean-targets:
 
 models:
   github_lakehouse:
-    # 1. Staging layer: Tạo view trong ClickHouse
+    # 1. Staging layer: Tạo view trong Trino
     staging:
       +materialized: view
-      +schema: staging
+      +schema: landing.staging
 
-    # 2. Curated layer: Vật chất hóa thành bảng MergeTree trong ClickHouse
+    # 2. Curated layer: Vật chất hóa thành bảng Iceberg
     curated:
       +materialized: table
-      +schema: curated_engineering
+      +schema: curated.engineering
 
-    # 3. Analytics layer: Vật chất hóa thành bảng MergeTree
+    # 3. Analytics layer: Vật chất hóa thành bảng Iceberg
     analytics:
       +materialized: table
-      +schema: analytics_engineering
+      +schema: analytics.engineering

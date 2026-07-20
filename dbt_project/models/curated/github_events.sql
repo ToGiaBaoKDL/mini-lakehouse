@@ -1,5 +1,5 @@
 -- github_events.sql
--- Bảng sự kiện curated sạch sẽ, loại bỏ trùng lặp và trích xuất các thuộc tính payload phổ biến (ClickHouse)
+-- Bảng sự kiện curated sạch sẽ, loại bỏ trùng lặp và trích xuất các thuộc tính payload phổ biến (Trino)
 
 WITH deduplicated AS (
     SELECT
@@ -17,12 +17,12 @@ SELECT
     repo_name,
     public,
     created_at,
-    -- Trích xuất trường từ payload JSON sử dụng hàm JSONExtract của ClickHouse
-    JSONExtractString(payload, 'action') AS action,
-    JSONExtractString(payload, 'ref_type') AS ref_type,
-    JSONExtractInt(payload, 'issue', 'number') AS issue_number,
-    JSONExtractInt(payload, 'pull_request', 'number') AS pull_request_number,
-    JSONExtract(payload, 'comment', 'id', 'Int64') AS comment_id,
+    -- Trích xuất trường từ payload JSON sử dụng hàm json_extract_scalar của Trino
+    json_extract_scalar(payload, '$.action') AS action,
+    json_extract_scalar(payload, '$.ref_type') AS ref_type,
+    cast(json_extract_scalar(payload, '$.issue.number') as bigint) AS issue_number,
+    cast(json_extract_scalar(payload, '$.pull_request.number') as bigint) AS pull_request_number,
+    cast(json_extract_scalar(payload, '$.comment.id') as bigint) AS comment_id,
     source_file,
     source_hour,
     ingested_at

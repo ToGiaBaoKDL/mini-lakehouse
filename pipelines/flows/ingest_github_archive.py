@@ -31,26 +31,22 @@ def ingest_github_archive_hour(
         hour = target_time.hour
         logger.info("Chạy tự động theo lịch. Tự động tính toán target_time: %s H%d", target_time.strftime('%Y-%m-%d'), hour)
     
-    # Sử dụng cấu hình nạp từ Pydantic Settings
-    base_warehouse = settings.warehouse_path
-    raw_archive_dir = os.path.join(base_warehouse, "raw-files", "api", "github")
-    
     source_hour_str = f"{year}-{month:02d}-{day:02d}-{hour}"
     
     logger.info("Bắt đầu chạy Ingestion cho source_hour=%s", source_hour_str)
     
-    # 1. Tải file raw
-    local_file = download_archive_file(
+    # 1. Tải file raw (lưu thẳng vào SeaweedFS S3, trả về đường dẫn s3://)
+    s3_file_path = download_archive_file(
         year=year,
         month=month,
         day=day,
         hour=hour,
-        target_dir=raw_archive_dir
+        target_dir=""
     )
     
-    # 2. Nạp dữ liệu vào Landing table
+    # 2. Nạp dữ liệu vào Landing table từ S3
     ingest_result = append_to_landing_table(
-        local_file_path=local_file,
+        file_path=s3_file_path,
         source_hour_str=source_hour_str
     )
     logger.info("Kết quả Landing Ingestion: %s", ingest_result)
@@ -59,13 +55,8 @@ def ingest_github_archive_hour(
     return "Ingestion successful"
 
 if __name__ == "__main__":
-    # Lùi lại 1 ngày để chạy thử nghiệm thủ công
-    yesterday = datetime.now(timezone.utc) - timedelta(days=1)
+    from src.utils.logging import get_logger
+    logger = get_logger("lakehouse.pipelines.ingest")
     
-    print(f"Bắt đầu chạy thử nghiệm Ingestion cho thời điểm: {yesterday.strftime('%Y-%m-%d %H:00:00')}")
-    ingest_github_archive_hour(
-        year=yesterday.year,
-        month=yesterday.month,
-        day=yesterday.day,
-        hour=yesterday.hour
-    )
+    logger.info("Kích hoạt chạy Ingestion thủ công...")
+    ingest_github_archive_hour()

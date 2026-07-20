@@ -1,8 +1,8 @@
 -- repository_activity_daily.sql
--- Bảng tổng hợp hoạt động hàng ngày của từng repository, tối ưu cho dashboard BI (ClickHouse)
+-- Bảng tổng hợp hoạt động hàng ngày của từng repository, tối ưu cho dashboard BI (Trino)
 
 SELECT
-    toDate(created_at) AS activity_date,
+    cast(created_at as date) AS activity_date,
     repo_id,
     repo_name,
     COUNT(*) AS total_events,
@@ -13,4 +13,4 @@ SELECT
     COUNT(DISTINCT actor_id) AS active_contributors
 FROM {{ ref('github_events') }}
 WHERE repo_id IS NOT NULL
-GROUP BY toDate(created_at), repo_id, repo_name
+GROUP BY cast(created_at as date), repo_id, repo_name
