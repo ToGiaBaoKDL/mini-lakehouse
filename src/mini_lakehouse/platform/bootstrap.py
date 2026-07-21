@@ -40,12 +40,21 @@ def main() -> None:
             logger.info("Pruned %d stale managed Polaris policies", len(prune_plan))
         for policy in contracts.policies:
             result = policy_client.reconcile_policy(policy)
-            logger.info(
-                "Polaris policy %s: %s; ensured %d mappings",
-                result.policy,
-                result.action,
-                result.ensured_mappings,
-            )
+            if result.pending_mappings:
+                logger.info(
+                    "Polaris policy %s: %s; ensured %d mappings, %d pending (table not yet created)",
+                    result.policy,
+                    result.action,
+                    result.ensured_mappings,
+                    result.pending_mappings,
+                )
+            else:
+                logger.info(
+                    "Polaris policy %s: %s; ensured %d mappings",
+                    result.policy,
+                    result.action,
+                    result.ensured_mappings,
+                )
     logger.info("Lakehouse catalog contract is ready")
 
 

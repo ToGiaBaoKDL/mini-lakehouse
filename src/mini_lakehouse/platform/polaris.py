@@ -130,6 +130,7 @@ class PolicyReconcileResult:
     policy: str
     action: Literal["created", "updated", "unchanged"]
     ensured_mappings: int
+    pending_mappings: int = 0
 
 
 class PolarisPolicyClient:
@@ -257,23 +258,25 @@ class PolarisPolicyClient:
                 response.raise_for_status()
                 current = self._read_policy(response)
 
+        ensured = 0
+        pending = 0
         for target in spec.targets:
             response = self._session.put(
                 f"{policy_url}/mappings",
-                json={
-                    "target": {
-                        "type": target.type,
-                        "path": list(target.path),
-                    }
-                },
+                json={"target": {"type": target.type, "path": list(target.path)}},
                 headers=self._headers,
                 timeout=15,
             )
+            if response.status_code == 404 and target.type == "table-like":
+                pending += 1
+                continue
             response.raise_for_status()
+            ensured += 1
         return PolicyReconcileResult(
             policy=spec.name,
             action=action,
-            ensured_mappings=len(spec.targets),
+            ensured_mappings=ensured,
+            pending_mappings=pending,
         )
 
     def applicable_policies(self, table: TableIdentifier) -> list[PolarisPolicy]:
