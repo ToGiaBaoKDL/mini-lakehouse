@@ -11,18 +11,36 @@ WORKDIR /app
 
 COPY --from=uv /uv /uvx /bin/
 COPY pyproject.toml uv.lock README.md .python-version ./
-COPY src ./src
-COPY dbt_project ./dbt_project
-COPY orchestration ./orchestration
-COPY prefect.yaml ./prefect.yaml
 
-FROM base AS runtime
-RUN uv sync --frozen --no-dev
+FROM base AS runtime-dependencies
+RUN uv sync --frozen --no-dev --no-install-project
+
+FROM runtime-dependencies AS runtime
+COPY src ./src
+COPY contracts ./contracts
+RUN uv sync --frozen --no-dev --no-editable
 
 CMD ["lakehouse", "--help"]
 
-FROM runtime AS orchestration
-RUN uv sync --frozen --no-dev --extra orchestration
+FROM base AS orchestration-dependencies
+RUN uv sync --frozen --no-dev --extra orchestration --no-install-project
 
-FROM runtime AS dashboard
-RUN uv sync --frozen --no-dev --extra dashboard
+FROM orchestration-dependencies AS orchestration
+COPY src ./src
+COPY contracts ./contracts
+COPY dbt_project ./dbt_project
+COPY orchestration ./orchestration
+COPY prefect.yaml ./prefect.yaml
+RUN uv sync --frozen --no-dev --extra orchestration --no-editable
+
+CMD ["prefect", "--help"]
+
+FROM base AS dashboard-dependencies
+RUN uv sync --frozen --no-dev --extra dashboard --no-install-project
+
+FROM dashboard-dependencies AS dashboard
+COPY src ./src
+COPY contracts ./contracts
+RUN uv sync --frozen --no-dev --extra dashboard --no-editable
+
+CMD ["streamlit", "--help"]

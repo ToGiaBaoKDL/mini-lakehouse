@@ -1,0 +1,18 @@
+version: 1
+name: engineering
+owner: engineering-analytics
+business_owner: engineering
+dbt_group: engineering_analytics
+description: Consumer-facing engineering activity metrics.
+analytics_namespace: [analytics, engineering]
+
+tables:
+  - key: repository_activity_daily
+    name: fct_repository_activity_daily
+    access: public
+    description: Daily repository activity at activity date and repository grain.
+
+  - key: contributor_activity_daily
+    name: fct_contributor_activity_daily
+    access: public
+    description: Daily contributor activity at activity date and actor grain.

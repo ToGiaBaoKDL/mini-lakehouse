@@ -19,7 +19,7 @@ s3://curated/                     prod."curated.github.internal" (private)
   ├── stg_github_archive__events (view)
   └── int_github__events_enriched (table)
         │
-        ▼ dbt: conformed core
+        ▼ dbt: GitHub domain marts
                                   prod."curated.github" (public)
   ├── fct_github_events
   ├── dim_github_actors
@@ -36,7 +36,7 @@ same thing as dbt's modeling layers.
 
 | Contract | Owner | Rules |
 |---|---|---|
-| Landing | Data Platform | Immutable archive plus append-only event rows partitioned by source hour |
+| Landing | Data Platform | Immutable archive plus one atomic Iceberg partition per source hour |
 | Curated GitHub | Data Platform | Stable IDs, deduplication, conformed facts and dimensions |
 | Engineering marts | Engineering Analytics | Public business metrics at documented grains |
 
@@ -48,7 +48,8 @@ while `prefect` and `dashboard` are optional overlays.
 
 ```bash
 cp .env.example .env
-uv sync --locked --all-extras --all-groups
+uv sync --frozen --all-extras --all-groups
+uv run lakehouse validate
 docker compose -f compose.core.yaml up -d --build
 ```
 
@@ -61,7 +62,7 @@ The core data plane exposes only loopback ports:
 Ingest the previous complete UTC hour and build the dbt project:
 
 ```bash
-uv run lakehouse ingest
+uv run lakehouse ingest github-archive
 uv run dbt build --project-dir dbt_project --profiles-dir dbt_project
 ```
 
@@ -77,7 +78,13 @@ Prefect is then available at `localhost:4200`. Add the presentation plane indepe
 docker compose -f compose.core.yaml -f compose.dashboard.yaml up -d --build
 ```
 
-Streamlit is then available at `localhost:8501` and queries only public analytics marts.
+Streamlit is then available at `localhost:8501`. Business charts query only public analytics
+marts; its separate operational metadata page reads Iceberg catalog metadata without redefining
+domain metrics.
+
+Prefect task/flow failures and flow success can be sent to Slack and Gmail using the
+`LAKEHOUSE_NOTIFICATIONS__*` settings documented in
+[pipeline operations](docs/04_pipeline_execution.md). Channels are disabled unless configured.
 
 ## Development checks
 
@@ -100,4 +107,7 @@ RUN_LAKEHOUSE_INTEGRATION=1 uv run pytest -m integration
 ```
 
 See [docs/00_overview.md](docs/00_overview.md) for boundaries and
-[docs/04_pipeline_execution.md](docs/04_pipeline_execution.md) for operations.
+[docs/04_pipeline_execution.md](docs/04_pipeline_execution.md) for operations. Source and policy
+onboarding rules live beside the desired state in [contracts/README.md](contracts/README.md).
+The ownership matrix and safe policy migration procedure are documented in
+[docs/06_contracts_operations.md](docs/06_contracts_operations.md).

@@ -3,12 +3,12 @@ from typing import cast
 import pytest
 from pyiceberg.catalog import Catalog
 
-from mini_lakehouse.contracts import TableIdentifier
+from mini_lakehouse.contracts import TableIdentifier, load_contracts
+from mini_lakehouse.contracts.policies import policy_content_json
 from mini_lakehouse.platform.maintenance import build_maintenance_plan
 from mini_lakehouse.platform.polaris import PolarisPolicyClient
 from mini_lakehouse.platform.policies import (
     PolarisPolicy,
-    maintenance_policy_contract,
     maintenance_statements,
 )
 
@@ -20,17 +20,17 @@ def _policies() -> list[PolarisPolicy]:
                 "name": spec.name,
                 "type": spec.policy_type,
                 "description": spec.description,
-                "content": spec.content_json,
+                "content": policy_content_json(spec),
                 "version": 1,
                 "inheritable": True,
             }
         )
-        for spec in maintenance_policy_contract()
+        for spec in load_contracts().policies
     ]
 
 
 def test_maintenance_contract_is_inherited_from_data_tier_namespaces() -> None:
-    specs = maintenance_policy_contract()
+    specs = load_contracts().policies
 
     assert {spec.policy_type for spec in specs} == {
         "system.data-compaction",
@@ -40,7 +40,9 @@ def test_maintenance_contract_is_inherited_from_data_tier_namespaces() -> None:
     }
     assert all(spec.namespace == ("curated",) for spec in specs)
     assert all(
-        spec.target_namespaces == (("landing",), ("curated",), ("analytics",)) for spec in specs
+        tuple(target.path for target in spec.targets)
+        == (("landing",), ("curated",), ("analytics",))
+        for spec in specs
     )
 
 

@@ -1,12 +1,15 @@
+"""GitHub Archive ingestion use case."""
+
 import logging
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from mini_lakehouse.config.settings import Settings
-from mini_lakehouse.github_archive.client import GithubArchiveClient
-from mini_lakehouse.github_archive.models import ArchiveHour, IngestionResult
-from mini_lakehouse.github_archive.parser import parse_archive
-from mini_lakehouse.storage.iceberg import LandingEventsRepository
+from mini_lakehouse.contracts import PlatformContracts, load_contracts
+from mini_lakehouse.sources.github_archive.client import GithubArchiveClient
+from mini_lakehouse.sources.github_archive.models import ArchiveHour, IngestionResult
+from mini_lakehouse.sources.github_archive.parser import parse_archive
+from mini_lakehouse.sources.github_archive.repository import GithubArchiveRepository
 from mini_lakehouse.storage.object_store import ObjectStore, create_object_store
 
 logger = logging.getLogger(__name__)
@@ -19,16 +22,23 @@ class GithubArchiveIngestionService:
         *,
         client: GithubArchiveClient | None = None,
         object_store: ObjectStore | None = None,
-        repository: LandingEventsRepository | None = None,
+        repository: GithubArchiveRepository | None = None,
+        contracts: PlatformContracts | None = None,
     ) -> None:
         self._settings = settings
+        self._contracts = contracts or load_contracts(settings.contracts_dir)
+        self._source_contract = self._contracts.source("github_archive")
         self._client = client or GithubArchiveClient(settings.github_archive)
         self._object_store = object_store or create_object_store(settings.storage)
-        self._repository = repository or LandingEventsRepository(settings)
+        self._repository = repository or GithubArchiveRepository(
+            settings,
+            contracts=self._contracts,
+        )
 
     def ingest(self, archive_hour: ArchiveHour) -> IngestionResult:
         raw_uri = (
-            f"{self._settings.storage.landing_uri}/api/github_archive/raw/"
+            f"{self._settings.storage.landing_uri.rstrip('/')}"
+            f"/{self._source_contract.raw_object_prefix}/"
             f"{archive_hour.partition_path}/{archive_hour.filename}"
         )
         raw_exists = self._object_store.exists(raw_uri)
@@ -45,7 +55,7 @@ class GithubArchiveIngestionService:
                 row_count=loaded_hour.row_count,
                 rejected_row_count=0,
                 snapshot_id=loaded_hour.snapshot_id,
-                was_appended=False,
+                was_written=False,
             )
             logger.info("Archive hour is already loaded: %s", result.model_dump(mode="json"))
             return result
@@ -58,14 +68,17 @@ class GithubArchiveIngestionService:
             else:
                 logger.info("Downloading %s", archive_hour.filename)
                 self._client.download(archive_hour, local_path)
-                self._object_store.upload(local_path, raw_uri)
+                created = self._object_store.upload_if_absent(local_path, raw_uri)
+                if not created:
+                    logger.info("Raw archive was committed concurrently; using %s", raw_uri)
+                    self._object_store.download(raw_uri, local_path)
 
             parsed = parse_archive(
                 local_path,
                 archive_hour,
                 max_error_ratio=self._settings.github_archive.max_parse_error_ratio,
             )
-            write = self._repository.append_hour(parsed.table, archive_hour.value)
+            write = self._repository.write_hour(parsed.table, archive_hour.value)
 
         result = IngestionResult(
             archive_hour=archive_hour.value,
@@ -74,7 +87,7 @@ class GithubArchiveIngestionService:
             row_count=write.row_count,
             rejected_row_count=parsed.rejected_row_count,
             snapshot_id=write.snapshot_id,
-            was_appended=write.was_appended,
+            was_written=write.was_written,
         )
         logger.info("Ingested GitHub Archive hour: %s", result.model_dump(mode="json"))
         return result

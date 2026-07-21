@@ -1,0 +1,76 @@
+version: 2
+
+models:
+  - name: fct_github_events
+    description: Deduplicated GitHub event fact at one row per stable event ID.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: event_id
+        data_type: varchar
+        data_tests: [not_null, unique]
+      - name: event_type
+        data_type: varchar
+      - name: actor_id
+        data_type: bigint
+      - name: repository_id
+        data_type: bigint
+      - name: is_public
+        data_type: boolean
+      - name: occurred_at
+        data_type: timestamp(6) with time zone
+      - name: event_date_utc
+        data_type: date
+        data_tests: [not_null]
+      - name: push_commit_count
+        data_type: bigint
+        description: Number of commits in a PushEvent payload; null for non-push events.
+      - name: event_action
+        data_type: varchar
+      - name: ref_type
+        data_type: varchar
+      - name: issue_number
+        data_type: bigint
+      - name: pull_request_number
+        data_type: bigint
+      - name: comment_id
+        data_type: bigint
+      - name: source_file
+        data_type: varchar
+      - name: source_hour
+        data_type: timestamp(6) with time zone
+      - name: ingested_at
+        data_type: timestamp(6) with time zone
+
+  - name: dim_github_actors
+    description: Latest observed mutable actor attributes at one row per actor ID.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: actor_id
+        data_type: bigint
+        data_tests: [not_null, unique]
+      - name: actor_login
+        data_type: varchar
+      - name: is_bot
+        data_type: boolean
+      - name: last_observed_at
+        data_type: timestamp(6) with time zone
+
+  - name: dim_github_repositories
+    description: Latest observed mutable repository attributes at one row per repository ID.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: repository_id
+        data_type: bigint
+        data_tests: [not_null, unique]
+      - name: repository_name
+        data_type: varchar
+      - name: repository_owner
+        data_type: varchar
+      - name: last_observed_at
+        data_type: timestamp(6) with time zone

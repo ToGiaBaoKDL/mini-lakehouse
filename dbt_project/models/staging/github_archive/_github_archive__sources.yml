@@ -3,10 +3,10 @@ version: 2
 sources:
   - name: github_archive
     description: Append-only GitHub Archive events ingested hourly by the Data Platform team.
-    database: "{{ env_var('DBT_CATALOG', 'prod') }}"
+    database: "{{ env_var('LAKEHOUSE_TRINO__CATALOG', 'prod') }}"
     schema: landing.api.github_archive
     config:
-      loaded_at_field: source_hour
+      loaded_at_field: ingested_at
       freshness:
         warn_after: {count: 2, period: hour}
         error_after: {count: 6, period: hour}

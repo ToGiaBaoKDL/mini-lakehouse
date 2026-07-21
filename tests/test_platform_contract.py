@@ -1,5 +1,6 @@
 from mini_lakehouse.config.settings import Settings
-from mini_lakehouse.platform.bootstrap import catalog_contract, namespace_contract
+from mini_lakehouse.platform.catalog import catalog_contract
+from mini_lakehouse.platform.namespaces import namespace_contract
 
 
 def test_namespace_contract_encodes_transport_and_domain_ownership() -> None:
@@ -17,7 +18,17 @@ def test_catalog_contract_enables_bucket_root_namespaces() -> None:
 
     assert payload["properties"]["polaris.config.namespace-custom-location.enabled"] == "true"
     assert payload["storageConfigInfo"]["allowedLocations"] == [
+        "s3://landing/_catalog",
         "s3://landing",
         "s3://curated",
         "s3://analytics",
     ]
+
+
+def test_catalog_contract_uses_the_configured_data_plane_endpoint() -> None:
+    settings = Settings.model_validate({"storage": {"endpoint_url": "http://object-store:9000"}})
+
+    payload = catalog_contract(settings)
+
+    assert payload["storageConfigInfo"]["endpoint"] == "http://object-store:9000"
+    assert payload["storageConfigInfo"]["endpointInternal"] == ("http://object-store:9000")

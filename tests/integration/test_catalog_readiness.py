@@ -3,7 +3,8 @@ import os
 import pytest
 
 from mini_lakehouse.config import get_settings
-from mini_lakehouse.storage.iceberg import load_prod_catalog
+from mini_lakehouse.contracts import load_contracts
+from mini_lakehouse.storage.iceberg import load_iceberg_catalog
 
 
 @pytest.mark.integration
@@ -12,9 +13,9 @@ from mini_lakehouse.storage.iceberg import load_prod_catalog
     reason="set RUN_LAKEHOUSE_INTEGRATION=1 with the Compose stack running",
 )
 def test_expected_namespaces_are_readable() -> None:
-    catalog = load_prod_catalog(get_settings())
+    settings = get_settings()
+    catalog = load_iceberg_catalog(settings)
+    contracts = load_contracts(settings.contracts_dir)
 
-    assert ("landing", "api", "github_archive") in catalog.list_namespaces(("landing", "api"))
-    assert ("curated", "github") in catalog.list_namespaces(("curated",))
-    assert ("curated", "github", "internal") in catalog.list_namespaces(("curated", "github"))
-    assert ("analytics", "engineering") in catalog.list_namespaces(("analytics",))
+    for namespace in contracts.catalog.namespaces:
+        assert catalog.namespace_exists(namespace.path), ".".join(namespace.path)

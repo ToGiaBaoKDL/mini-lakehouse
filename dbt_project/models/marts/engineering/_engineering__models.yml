@@ -3,37 +3,85 @@ version: 2
 models:
   - name: fct_repository_activity_daily
     description: Daily engineering activity at the stable activity_date + repository_id grain.
+    config:
+      contract:
+        enforced: true
     data_tests:
       - unique_combination_of_columns:
           arguments:
             combination_of_columns: [activity_date, repository_id]
     columns:
       - name: activity_date
+        data_type: date
         data_tests: [not_null]
       - name: repository_id
+        data_type: bigint
         data_tests:
           - not_null
           - relationships:
               arguments:
                 to: ref('dim_github_repositories')
                 field: repository_id
+      - name: event_count
+        data_type: bigint
+      - name: push_event_count
+        data_type: bigint
+      - name: pushed_commit_count
+        data_type: bigint
+      - name: pull_request_event_count
+        data_type: bigint
+      - name: unique_pull_request_count
+        data_type: bigint
+      - name: issue_event_count
+        data_type: bigint
+      - name: issue_comment_event_count
+        data_type: bigint
+      - name: active_actor_count
+        data_type: bigint
+      - name: repository_name
+        data_type: varchar
+      - name: repository_owner
+        data_type: varchar
 
   - name: fct_contributor_activity_daily
     description: Daily engineering activity at the stable activity_date + actor_id grain.
+    config:
+      contract:
+        enforced: true
     data_tests:
       - unique_combination_of_columns:
           arguments:
             combination_of_columns: [activity_date, actor_id]
     columns:
       - name: activity_date
+        data_type: date
         data_tests: [not_null]
       - name: actor_id
+        data_type: bigint
         data_tests:
           - not_null
           - relationships:
               arguments:
                 to: ref('dim_github_actors')
                 field: actor_id
+      - name: event_count
+        data_type: bigint
+      - name: active_repository_count
+        data_type: bigint
+      - name: push_event_count
+        data_type: bigint
+      - name: pushed_commit_count
+        data_type: bigint
+      - name: pull_request_event_count
+        data_type: bigint
+      - name: issue_event_count
+        data_type: bigint
+      - name: issue_comment_event_count
+        data_type: bigint
+      - name: actor_login
+        data_type: varchar
+      - name: is_bot
+        data_type: boolean
 
 exposures:
   - name: engineering_activity_dashboard

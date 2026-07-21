@@ -1,0 +1,66 @@
+version: 1
+
+catalog:
+  name: prod
+  type: INTERNAL
+  owner: data-platform
+  default_storage_root: landing
+  namespace_custom_locations: true
+  properties:
+    polaris.config.drop-with-purge.enabled: "true"
+
+catalog_role_grants:
+  - catalog_role: catalog_admin
+    privileges: [CATALOG_MANAGE_CONTENT]
+
+namespaces:
+  - path: [landing]
+    storage_root: landing
+    owner: data-platform
+    description: Immutable source-owned data and replayable landing tables.
+    properties:
+      data_tier: landing
+
+  - path: [landing, api]
+    owner: data-platform
+    description: Sources acquired through HTTP APIs or published HTTP archives.
+    properties:
+      transport: api
+
+  - path: [landing, api, github_archive]
+    owner: data-platform
+    description: GitHub Archive source boundary.
+    properties:
+      source_system: github_archive
+
+  - path: [curated]
+    storage_root: curated
+    owner: data-platform
+    description: Conformed reusable data without transport-specific ownership.
+    properties:
+      data_tier: curated
+
+  - path: [curated, github]
+    owner: data-platform
+    description: Conformed GitHub entities and events.
+    properties:
+      data_product: github
+
+  - path: [curated, github, internal]
+    owner: data-platform
+    description: Private dbt staging and reusable intermediate relations.
+    properties:
+      visibility: private
+
+  - path: [analytics]
+    storage_root: analytics
+    owner: analytics-platform
+    description: Consumer-facing data products organized by business domain.
+    properties:
+      data_tier: analytics
+
+  - path: [analytics, engineering]
+    owner: engineering-analytics
+    description: Engineering activity metrics and reporting data products.
+    properties:
+      business_domain: engineering

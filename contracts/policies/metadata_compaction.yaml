@@ -1,0 +1,18 @@
+version: 1
+name: compact-metadata
+namespace: [curated]
+owner: data-platform
+policy_type: system.metadata-compaction
+description: Rewrite Iceberg manifests for efficient planning.
+
+content:
+  version: "2025-02-03"
+  enable: true
+
+targets:
+  - type: namespace
+    path: [landing]
+  - type: namespace
+    path: [curated]
+  - type: namespace
+    path: [analytics]

@@ -6,7 +6,7 @@ The dbt project follows a standard directional graph:
 source()
   └── staging/github_archive        one-to-one typed source views
         └── intermediate/github     ephemeral dedupe/latest-state logic plus one enriched table
-              └── marts/core/github conformed fact and dimensions in curated
+              └── marts/github      conformed GitHub fact and dimensions in curated
                     └── marts/engineering public domain aggregates in analytics
 ```
 
@@ -23,19 +23,21 @@ Important rules:
 - Dates are explicitly UTC.
 - JSON numeric fields use `try_cast` so an upstream payload change does not silently corrupt the
   entire transformation run.
-- Core and analytics outputs currently materialize as full Iceberg tables. Their stable keys,
-  `MERGE` settings, schema-change settings, and bounded lookback predicates remain dormant inside
-  the models, so switching selected models back to `incremental` later does not require rewriting
-  business SQL.
-- Source freshness uses `source_hour`, not ingestion time. This catches a stalled hourly feed even
-  when an old archive is backfilled today; warning/error thresholds are two/six hours. A one-day
-  partition filter bounds the freshness query without weakening either threshold.
+- GitHub and Engineering marts materialize as full Iceberg tables. Only the bounded
+  `is_incremental()` predicates remain dormant, so a future incremental decision does not require
+  rewriting business SQL; no inactive `MERGE` or schema-change config is carried today.
+- Public marts enforce dbt model contracts in addition to data tests, groups, and access rules.
+- Source freshness measures `ingested_at`, because freshness is an ingestion SLA rather than an
+  event-time SLA. A one-day `source_hour` filter bounds the query, while warning/error thresholds
+  remain two/six hours.
+- Prefect invokes named selectors from `selectors.yml`; deployment code does not repeat graph
+  expressions.
 
 Run and document the graph:
 
 ```bash
-uv run dbt source freshness --project-dir dbt_project --profiles-dir dbt_project
-uv run dbt build --project-dir dbt_project --profiles-dir dbt_project
+uv run dbt source freshness --selector github_archive_freshness --project-dir dbt_project --profiles-dir dbt_project
+uv run dbt build --selector engineering_pipeline --project-dir dbt_project --profiles-dir dbt_project
 uv run dbt docs generate --project-dir dbt_project --profiles-dir dbt_project
 ```
 

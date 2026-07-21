@@ -35,12 +35,12 @@ models:
       +tags: ["intermediate", "github"]
 
     marts:
-      core:
+      github:
         +materialized: table
         +schema: curated.github
         +group: data_platform
         +access: public
-        +tags: ["curated", "github"]
+        +tags: ["mart", "curated", "github"]
       engineering:
         +materialized: table
         +schema: analytics.engineering

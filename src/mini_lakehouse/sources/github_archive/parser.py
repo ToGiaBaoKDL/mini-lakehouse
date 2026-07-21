@@ -1,3 +1,5 @@
+"""Streaming gzip reader and strict event parser."""
+
 import gzip
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -6,25 +8,8 @@ from pathlib import Path
 import pyarrow as pa
 from pydantic import ValidationError
 
-from mini_lakehouse.github_archive.models import ArchiveHour, GithubArchiveEvent
-
-LANDING_ARROW_SCHEMA = pa.schema(
-    [
-        pa.field("event_id", pa.string(), nullable=False),
-        pa.field("event_type", pa.string(), nullable=False),
-        pa.field("actor_id", pa.int64()),
-        pa.field("actor_login", pa.string()),
-        pa.field("repository_id", pa.int64()),
-        pa.field("repository_name", pa.string()),
-        pa.field("payload_json", pa.string(), nullable=False),
-        pa.field("is_public", pa.bool_(), nullable=False),
-        pa.field("occurred_at", pa.timestamp("us", tz="UTC"), nullable=False),
-        pa.field("source_file", pa.string(), nullable=False),
-        pa.field("source_hour", pa.timestamp("us", tz="UTC"), nullable=False),
-        pa.field("ingested_at", pa.timestamp("us", tz="UTC"), nullable=False),
-        pa.field("raw_event_json", pa.string(), nullable=False),
-    ]
-)
+from mini_lakehouse.sources.github_archive.models import ArchiveHour, GithubArchiveEvent
+from mini_lakehouse.sources.github_archive.schema import EVENTS_ARROW_SCHEMA
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +57,6 @@ def parse_archive(
         raise ValueError(f"Archive contains no valid rows: {path}")
 
     return ParsedArchive(
-        table=pa.Table.from_pylist(records, schema=LANDING_ARROW_SCHEMA),
+        table=pa.Table.from_pylist(records, schema=EVENTS_ARROW_SCHEMA),
         rejected_row_count=rejected,
     )

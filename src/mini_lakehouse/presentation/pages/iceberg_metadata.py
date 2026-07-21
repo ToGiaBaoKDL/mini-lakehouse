@@ -3,16 +3,33 @@ from datetime import UTC, datetime
 import pandas as pd
 import streamlit as st
 
-from mini_lakehouse.contracts import GITHUB_EVENTS_RAW
 from mini_lakehouse.presentation.data_loader import get_iceberg_catalog
+from mini_lakehouse.storage.iceberg import discover_tables
 
 st.title("Iceberg metadata")
-st.caption("Operational view of the immutable GitHub Archive landing table")
+st.caption("Operational snapshot history for a discovered Iceberg table")
 
 try:
-    table = get_iceberg_catalog().load_table(GITHUB_EVENTS_RAW.iceberg)
+    catalog = get_iceberg_catalog()
+    identifiers = {
+        ".".join(identifier.iceberg): identifier
+        for identifier in sorted(discover_tables(catalog), key=lambda item: item.iceberg)
+    }
 except Exception as error:
-    st.warning(f"Landing table is not ready: {error}")
+    st.warning(f"Iceberg catalog is not ready: {error}")
+    st.stop()
+
+if not identifiers:
+    st.info("No Iceberg tables are available yet.")
+    st.stop()
+
+selected = st.selectbox("Table", tuple(identifiers))
+identifier = identifiers[selected]
+
+try:
+    table = catalog.load_table(identifier.iceberg)
+except Exception as error:
+    st.warning(f"Table metadata is not readable: {error}")
     st.stop()
 
 snapshots = [

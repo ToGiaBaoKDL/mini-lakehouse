@@ -1,0 +1,12 @@
+version: 2
+
+groups:
+  - name: data_platform
+    owner:
+      name: Data Platform
+      email: data-platform@gmail.com
+
+  - name: engineering_analytics
+    owner:
+      name: Engineering Analytics
+      email: engineering-analytics@gmail.com

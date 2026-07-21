@@ -1,8 +1,5 @@
 {{
     config(
-        incremental_strategy='merge',
-        on_schema_change='sync_all_columns',
-        unique_key=['activity_date', 'repository_id'],
         properties={
             'format': "'PARQUET'",
             'format_version': '2',
@@ -40,8 +37,18 @@ aggregated as (
 )
 
 select
-    aggregated.*,
+    aggregated.activity_date,
+    aggregated.repository_id,
+    aggregated.event_count,
+    aggregated.push_event_count,
+    aggregated.pushed_commit_count,
+    aggregated.pull_request_event_count,
+    aggregated.unique_pull_request_count,
+    aggregated.issue_event_count,
+    aggregated.issue_comment_event_count,
+    aggregated.active_actor_count,
     repositories.repository_name,
     repositories.repository_owner
 from aggregated
-left join {{ ref('dim_github_repositories') }} as repositories using (repository_id)
+left join {{ ref('dim_github_repositories') }} as repositories
+    on aggregated.repository_id = repositories.repository_id

@@ -5,12 +5,21 @@ Python 3.13 is pinned in `.python-version`. The project is an installable uv pac
 
 ```bash
 cp .env.example .env
-uv sync --locked --all-extras --all-groups
+uv sync --frozen --all-extras --all-groups
 ```
 
 Configuration uses nested Pydantic settings with the `LAKEHOUSE_` prefix and `__` delimiter. For
 example, `LAKEHOUSE_STORAGE__LANDING_URI` maps to `settings.storage.landing_uri`. Secrets may be
 mounted under `/run/secrets` in a managed deployment. The local `.env` is ignored by Git.
+dbt's profile reads the same `LAKEHOUSE_TRINO__*` keys as Python, so catalog and Trino endpoints
+do not have a second `DBT_CATALOG`/`TRINO_HOST` source of truth.
+
+Stable desired state is separate from runtime settings and lives under `contracts/`. Validate both
+layers before starting services:
+
+```bash
+uv run lakehouse validate
+```
 
 Start the core data plane:
 
@@ -28,14 +37,14 @@ docker compose -f compose.core.yaml -f compose.prefect.yaml up -d --build
 docker compose -f compose.core.yaml -f compose.dashboard.yaml up -d --build
 ```
 
-Compose uses floating latest service images by project policy. Prefect is the one explicit
+Compose uses floating latest service images by current project policy. Prefect is the one explicit
 major-family exception: its official current image is `prefecthq/prefect:3-latest`, while the bare
-`latest` tag still resolves to legacy Prefect 1. This is convenient for this learning environment
-but means CI is also a compatibility signal. A production deployment should promote tested
-digests through environments even if local development follows latest tags.
+`latest` tag resolves to the legacy major line. CI and the local integration stack are therefore
+compatibility gates. A managed production rollout should still promote tested digests between
+environments even while this repository deliberately tracks latest tags.
 
-Only S3 dependencies are installed. The object-store port remains behind an adapter boundary so a
-future GCS implementation can be added deliberately without carrying `gcsfs` today.
+Only S3 dependencies are installed. There is no GCS compatibility package or inactive runtime
+branch in this project.
 
 The local Polaris metastore is PostgreSQL-backed. `polaris-admin` bootstraps its realm idempotently,
 then the application bootstrap creates catalog `prod` and the governed namespace locations. No

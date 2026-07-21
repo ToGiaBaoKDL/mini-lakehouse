@@ -1,1 +1,0 @@
-"""GitHub Archive ingestion domain."""

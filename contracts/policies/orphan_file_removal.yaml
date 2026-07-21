@@ -1,0 +1,19 @@
+version: 1
+name: remove-orphan-files
+namespace: [curated]
+owner: data-platform
+policy_type: system.orphan-file-removal
+description: Remove Iceberg orphan files only after a thirty-day safety window.
+
+content:
+  version: "2025-02-03"
+  enable: true
+  max_orphan_file_age_in_days: 30
+
+targets:
+  - type: namespace
+    path: [landing]
+  - type: namespace
+    path: [curated]
+  - type: namespace
+    path: [analytics]

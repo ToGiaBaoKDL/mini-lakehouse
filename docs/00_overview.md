@@ -8,21 +8,34 @@ modules:
 
 ```text
 orchestration/
-├── etl_github_archive_hourly.py
-├── etl_github_archive_backfill.py
-└── gov_iceberg_maintenance.py
+├── flows/                   deployable Prefect DAGs with co-located tasks
+│   ├── etl_github_archive.py
+│   └── gov_iceberg_maintenance.py
+├── utils/                   dbt invocation and retry policy
+└── plugins/                 threaded Slack/Gmail Prefect lifecycle hooks
+
+contracts/                  reviewed non-secret platform desired state
 
 src/mini_lakehouse/
-├── config/                 validated runtime configuration
-├── contracts/              canonical catalog/table identifiers shared by all consumers
-├── github_archive/         source client, boundary models, parser, ingestion service
-├── storage/                object-store and Iceberg adapters
-├── platform/               Polaris bootstrap, policies, and Iceberg maintenance planning
+├── config/                 endpoints, credentials, and runtime environment settings
+├── contracts/              strict, ownership-scoped contract modules
+│   ├── catalog.py          catalog, namespaces, and RBAC desired state
+│   ├── sources.py          source/checkpoint/table declarations
+│   ├── domains.py          analytics ownership and published tables
+│   ├── policies.py         typed Polaris policy contents and targets
+│   └── registry.py         cross-file reference and boundary validation
+├── sources/                one package per source boundary
+│   └── github_archive/     client, schema, parser, repository, ingestion service
+├── storage/                provider and Iceberg catalog adapters only
+├── platform/               Polaris adapter plus isolated catalog/RBAC/namespace reconcilers
 └── presentation/           read-only Streamlit application
 ```
 
-Each DAG file follows `[job_type]_[description].py` and owns its Prefect tasks and flow. Shared
-business logic remains in `mini_lakehouse`; DAG files only adapt that logic to Prefect.
+Every deployable DAG lives under `flows/` and follows `[job_type]_[description].py`, analogous to
+Airflow's `dags/` discovery boundary. Its flow and source-owned tasks stay in the same file.
+Cross-DAG mechanics live under `utils/` and Prefect integrations under `plugins/`; there is no
+private task sidecar or catch-all `tasks.py`. None of these directories needs `__init__.py`.
+Source and platform behavior remains in `mini_lakehouse`; orchestration only composes it.
 
 `dbt_project/` remains a top-level analytics project because its graph, tests, docs, artifacts,
 and release lifecycle differ from the Python application.
@@ -48,11 +61,14 @@ GitHub Archive.
 
 ## Ownership
 
-- Data Platform owns ingestion, landing, Polaris contracts, `staging`, `intermediate`, and core
-  GitHub facts/dimensions.
+- Data Platform owns ingestion, landing, Polaris contracts, `staging`, `intermediate`, and GitHub
+  facts/dimensions.
 - Engineering Analytics owns the public engineering marts and their metric semantics.
 - Platform operators own Iceberg maintenance and infrastructure lifecycle.
 - Streamlit is a consumer. It cannot redefine metrics or query private intermediate models.
 
 dbt `group`, `access`, source metadata, tests, and exposure declarations make those boundaries
 machine-readable.
+
+The root `contracts/` registry makes platform desired state machine-readable as well. It contains
+no executable SQL and no secret. `uv run lakehouse validate` must pass before bootstrap or ingest.

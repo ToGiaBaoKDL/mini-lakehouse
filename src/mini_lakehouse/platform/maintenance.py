@@ -1,11 +1,11 @@
-from collections.abc import Iterator
+from collections.abc import Callable, Sequence
 
 from pydantic import BaseModel, ConfigDict
 from pyiceberg.catalog import Catalog
 
-from mini_lakehouse.contracts import TableIdentifier
 from mini_lakehouse.platform.polaris import PolarisPolicyClient
 from mini_lakehouse.platform.policies import maintenance_statements
+from mini_lakehouse.storage.iceberg import discover_tables
 
 
 class MaintenancePlanItem(BaseModel):
@@ -15,22 +15,20 @@ class MaintenancePlanItem(BaseModel):
     statements: tuple[str, ...]
 
 
-def walk_namespaces(catalog: Catalog) -> Iterator[tuple[str, ...]]:
-    pending = list(catalog.list_namespaces())
-    seen: set[tuple[str, ...]] = set()
-    while pending:
-        namespace = pending.pop()
-        if namespace in seen:
-            continue
-        seen.add(namespace)
-        yield namespace
-        pending.extend(catalog.list_namespaces(namespace))
-
-
-def discover_tables(catalog: Catalog) -> Iterator[TableIdentifier]:
-    for namespace in walk_namespaces(catalog):
-        for identifier in catalog.list_tables(namespace):
-            yield TableIdentifier.from_iceberg(identifier)
+def collect_maintenance_results(
+    pending: Sequence[tuple[MaintenancePlanItem, Callable[..., int]]],
+) -> tuple[int, int, list[str]]:
+    """Resolve a submitted batch without abandoning successful sibling tables."""
+    completed = 0
+    statements = 0
+    failures: list[str] = []
+    for plan, result in pending:
+        try:
+            statements += result()
+            completed += 1
+        except Exception as error:
+            failures.append(f"{plan.table}: {error}")
+    return completed, statements, failures
 
 
 def build_maintenance_plan(

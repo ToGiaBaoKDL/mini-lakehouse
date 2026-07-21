@@ -1,3 +1,5 @@
+"""HTTP client for immutable GitHub Archive source files."""
+
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -6,7 +8,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from mini_lakehouse.config.settings import GithubArchiveSettings
-from mini_lakehouse.github_archive.models import ArchiveHour
+from mini_lakehouse.sources.github_archive.models import ArchiveHour
 
 
 class ArchiveNotPublishedError(RuntimeError):

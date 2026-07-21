@@ -3,7 +3,7 @@
 The command below targets the previous complete UTC hour unless `--hour` is supplied:
 
 ```bash
-uv run lakehouse ingest --hour 2025-01-01T00:00:00Z
+uv run lakehouse ingest github-archive --hour 2025-01-01T00:00:00Z
 ```
 
 The application performs four explicit operations:

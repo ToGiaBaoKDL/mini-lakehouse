@@ -1,8 +1,5 @@
 {{
     config(
-        incremental_strategy='merge',
-        on_schema_change='sync_all_columns',
-        unique_key=['activity_date', 'actor_id'],
         properties={
             'format': "'PARQUET'",
             'format_version': '2',
@@ -39,8 +36,17 @@ aggregated as (
 )
 
 select
-    aggregated.*,
+    aggregated.activity_date,
+    aggregated.actor_id,
+    aggregated.event_count,
+    aggregated.active_repository_count,
+    aggregated.push_event_count,
+    aggregated.pushed_commit_count,
+    aggregated.pull_request_event_count,
+    aggregated.issue_event_count,
+    aggregated.issue_comment_event_count,
     actors.actor_login,
     actors.is_bot
 from aggregated
-left join {{ ref('dim_github_actors') }} as actors using (actor_id)
+left join {{ ref('dim_github_actors') }} as actors
+    on aggregated.actor_id = actors.actor_id

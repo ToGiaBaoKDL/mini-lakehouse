@@ -7,8 +7,8 @@ import trino
 from pyiceberg.catalog import Catalog
 
 from mini_lakehouse.config import get_settings
-from mini_lakehouse.contracts import CONTRIBUTOR_ACTIVITY_DAILY, REPOSITORY_ACTIVITY_DAILY
-from mini_lakehouse.storage.iceberg import load_prod_catalog
+from mini_lakehouse.contracts import PlatformContracts, load_contracts
+from mini_lakehouse.storage.iceberg import load_iceberg_catalog
 
 
 @st.cache_resource
@@ -24,7 +24,13 @@ def get_trino_connection() -> trino.dbapi.Connection:
 
 @st.cache_resource
 def get_iceberg_catalog() -> Catalog:
-    return load_prod_catalog(get_settings())
+    return load_iceberg_catalog(get_settings())
+
+
+@st.cache_resource
+def get_contract_registry() -> PlatformContracts:
+    settings = get_settings()
+    return load_contracts(settings.contracts_dir)
 
 
 def _frame(query: str, parameters: Sequence[Any] | None = None) -> pd.DataFrame:
@@ -35,9 +41,18 @@ def _frame(query: str, parameters: Sequence[Any] | None = None) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=pd.Index(columns))
 
 
+def _domain_relation(domain: str, table: str) -> str:
+    return (
+        get_contract_registry()
+        .domain(domain)
+        .table_identifier(table)
+        .trino(get_settings().trino.catalog)
+    )
+
+
 @st.cache_data(ttl=60)
 def load_overview() -> pd.DataFrame:
-    relation = REPOSITORY_ACTIVITY_DAILY.trino(get_settings().trino.catalog)
+    relation = _domain_relation("engineering", "repository_activity_daily")
     return _frame(
         f"""
         select
@@ -54,7 +69,7 @@ def load_overview() -> pd.DataFrame:
 
 @st.cache_data(ttl=60)
 def load_repository_activity(limit: int = 25) -> pd.DataFrame:
-    relation = REPOSITORY_ACTIVITY_DAILY.trino(get_settings().trino.catalog)
+    relation = _domain_relation("engineering", "repository_activity_daily")
     return _frame(
         f"""
         select
@@ -76,7 +91,7 @@ def load_repository_activity(limit: int = 25) -> pd.DataFrame:
 
 @st.cache_data(ttl=60)
 def load_contributor_trend() -> pd.DataFrame:
-    relation = CONTRIBUTOR_ACTIVITY_DAILY.trino(get_settings().trino.catalog)
+    relation = _domain_relation("engineering", "contributor_activity_daily")
     return _frame(
         f"""
         select activity_date, sum(event_count) as event_count

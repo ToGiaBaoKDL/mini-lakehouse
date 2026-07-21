@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version-file: .python-version
-      - run: uv sync --locked --all-extras --all-groups
+      - run: uv sync --frozen --all-extras --all-groups
       - run: uv lock --check
       - run: uv run ruff format --check .
       - run: uv run ruff check .
@@ -40,7 +40,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version-file: .python-version
-      - run: uv sync --locked --all-groups
+      - run: uv sync --frozen --all-groups
       - name: Start Polaris and Trino dependency chain
         run: docker compose -f compose.core.yaml up -d --build trino
       - name: Wait for Trino

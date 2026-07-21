@@ -1,8 +1,5 @@
 {{
     config(
-        incremental_strategy='merge',
-        unique_key='event_id',
-        on_schema_change='sync_all_columns',
         properties={
             'format': "'PARQUET'",
             'format_version': '2',

@@ -26,6 +26,8 @@ class StorageSettings(BaseModel):
             parsed = urlparse(uri)
             if parsed.scheme != expected_scheme or not parsed.netloc:
                 raise ValueError(f"Expected a {expected_scheme} bucket URI, got {uri!r}")
+            if parsed.path not in ("", "/"):
+                raise ValueError(f"Storage lifecycle URI must be a bucket root, got {uri!r}")
             buckets.append(parsed.netloc)
         if len(set(buckets)) != len(buckets):
             raise ValueError("landing, curated, and analytics must use distinct buckets")
@@ -43,6 +45,13 @@ class PolarisSettings(BaseModel):
     realm: str = "POLARIS"
     credential: SecretStr = SecretStr("root:secretpassword")
     scope: str = "PRINCIPAL_ROLE:ALL"
+
+    @model_validator(mode="after")
+    def validate_credential(self) -> Self:
+        client_id, separator, client_secret = self.credential.get_secret_value().partition(":")
+        if not separator or not client_id or not client_secret:
+            raise ValueError("Polaris credential must use a non-empty client_id:client_secret pair")
+        return self
 
 
 class TrinoSettings(BaseModel):
@@ -62,7 +71,35 @@ class GithubArchiveSettings(BaseModel):
     base_url: str = "https://data.gharchive.org"
     request_timeout_seconds: float = Field(default=120.0, gt=0)
     max_parse_error_ratio: float = Field(default=0.001, ge=0, le=1)
-    user_agent: str = "mini-lakehouse/0.2"
+    user_agent: str = "mini-lakehouse"
+
+
+class NotificationSettings(BaseModel):
+    prefect_ui_url: str = "http://localhost:4200"
+    slack_bot_token: SecretStr | None = None
+    slack_channel_id: str | None = None
+    gmail_sender: str | None = None
+    gmail_app_password: SecretStr | None = None
+    gmail_recipients: tuple[str, ...] = ()
+    timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+
+    @model_validator(mode="after")
+    def validate_channels(self) -> Self:
+        slack_values = (self.slack_bot_token, self.slack_channel_id)
+        if any(value is not None for value in slack_values) and any(
+            value is None for value in slack_values
+        ):
+            raise ValueError("Slack notifications require bot_token and channel_id")
+        gmail_values = (
+            self.gmail_sender,
+            self.gmail_app_password,
+            self.gmail_recipients or None,
+        )
+        if any(value is not None for value in gmail_values) and any(
+            value is None for value in gmail_values
+        ):
+            raise ValueError("Gmail notifications require sender, app_password, and recipients")
+        return self
 
 
 class Settings(BaseSettings):
@@ -78,11 +115,25 @@ class Settings(BaseSettings):
 
     environment: Literal["local", "ci", "production"] = "local"
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    contracts_dir: Path = Path("contracts")
     storage: StorageSettings = Field(default_factory=StorageSettings)
     polaris: PolarisSettings = Field(default_factory=PolarisSettings)
     trino: TrinoSettings = Field(default_factory=TrinoSettings)
     dbt: DbtSettings = Field(default_factory=DbtSettings)
     github_archive: GithubArchiveSettings = Field(default_factory=GithubArchiveSettings)
+    notifications: NotificationSettings = Field(default_factory=NotificationSettings)
+
+    @model_validator(mode="after")
+    def reject_local_credentials_in_production(self) -> Self:
+        if self.environment != "production":
+            return self
+        storage_access_key = self.storage.secret_value(self.storage.access_key)
+        storage_secret_key = self.storage.secret_value(self.storage.secret_key)
+        if storage_access_key == "minioadmin" or storage_secret_key == "minioadmin":
+            raise ValueError("Production cannot use the local MinIO root credentials")
+        if self.polaris.credential.get_secret_value() == "root:secretpassword":
+            raise ValueError("Production cannot use the local Polaris root credential")
+        return self
 
 
 @lru_cache(maxsize=1)

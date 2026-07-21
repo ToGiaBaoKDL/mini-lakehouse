@@ -38,17 +38,3 @@ class TableIdentifier:
     def trino(self, catalog: str) -> str:
         schema = ".".join(self.namespace)
         return ".".join((_quoted(catalog), f'"{schema}"', _quoted(self.name)))
-
-
-GITHUB_EVENTS_RAW = TableIdentifier(
-    namespace=("landing", "api", "github_archive"),
-    name="events_raw",
-)
-REPOSITORY_ACTIVITY_DAILY = TableIdentifier(
-    namespace=("analytics", "engineering"),
-    name="fct_repository_activity_daily",
-)
-CONTRIBUTOR_ACTIVITY_DAILY = TableIdentifier(
-    namespace=("analytics", "engineering"),
-    name="fct_contributor_activity_daily",
-)

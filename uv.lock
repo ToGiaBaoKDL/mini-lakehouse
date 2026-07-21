@@ -1219,6 +1219,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyiceberg", extra = ["pyarrow", "s3fs"] },
+    { name = "pyyaml" },
     { name = "requests" },
     { name = "urllib3" },
 ]
@@ -1231,6 +1232,7 @@ dashboard = [
     { name = "trino" },
 ]
 orchestration = [
+    { name = "dbt-core" },
     { name = "dbt-trino" },
     { name = "prefect" },
     { name = "prefect-dbt" },
@@ -1248,6 +1250,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "dbt-core", marker = "extra == 'orchestration'", specifier = ">=1.10,<1.12" },
     { name = "dbt-trino", marker = "extra == 'orchestration'", specifier = ">=1.10,<1.11" },
     { name = "fsspec", specifier = ">=2025.12" },
     { name = "pandas", marker = "extra == 'dashboard'", specifier = ">=2.3,<3" },
@@ -1258,6 +1261,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "pydantic-settings", specifier = ">=2.12,<3" },
     { name = "pyiceberg", extras = ["pyarrow", "s3fs"], specifier = ">=0.10,<0.12" },
+    { name = "pyyaml", specifier = ">=6.0.3,<7" },
     { name = "requests", specifier = ">=2.32,<3" },
     { name = "streamlit", marker = "extra == 'dashboard'", specifier = ">=1.53,<2" },
     { name = "trino", marker = "extra == 'dashboard'", specifier = ">=0.336,<1" },

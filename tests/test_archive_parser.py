@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from mini_lakehouse.github_archive.models import ArchiveHour
-from mini_lakehouse.github_archive.parser import parse_archive
+from mini_lakehouse.sources.github_archive.models import ArchiveHour
+from mini_lakehouse.sources.github_archive.parser import parse_archive
 
 
 def _event(event_id: str = "123") -> dict[str, object]:
