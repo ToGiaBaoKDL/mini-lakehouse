@@ -14,8 +14,8 @@ from mini_lakehouse.storage.iceberg import load_iceberg_catalog
 )
 def test_expected_namespaces_are_readable() -> None:
     settings = get_settings()
-    catalog = load_iceberg_catalog(settings)
     contracts = load_contracts(settings.contracts_dir)
 
-    for namespace in contracts.catalog.namespaces:
-        assert catalog.namespace_exists(namespace.path), ".".join(namespace.path)
+    with load_iceberg_catalog(settings) as catalog:
+        for namespace in contracts.catalog.namespaces:
+            assert catalog.namespace_exists(namespace.path), ".".join(namespace.path)

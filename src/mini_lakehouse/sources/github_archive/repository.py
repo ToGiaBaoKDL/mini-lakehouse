@@ -3,6 +3,7 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from types import TracebackType
 from typing import Any
 
 import pyarrow as pa
@@ -12,11 +13,11 @@ from pyiceberg.expressions.literals import literal
 from pyiceberg.table import Table
 
 from mini_lakehouse.config.settings import Settings
-from mini_lakehouse.contracts import PlatformContracts, load_contracts
-from mini_lakehouse.sources.github_archive.schema import (
-    EVENTS_ICEBERG_SCHEMA,
-    EVENTS_PARTITION_SPEC,
-    EVENTS_SCHEMA_CONTRACT,
+from mini_lakehouse.contracts import (
+    PlatformContracts,
+    iceberg_schema,
+    load_contracts,
+    partition_spec,
 )
 from mini_lakehouse.storage.iceberg import load_iceberg_catalog
 
@@ -36,15 +37,16 @@ class GithubArchiveRepository:
         contracts: PlatformContracts | None = None,
     ) -> None:
         self._settings = settings
+        self._owned_catalog = catalog is None
         self._catalog = catalog or load_iceberg_catalog(settings)
         source = (contracts or load_contracts(settings.contracts_dir)).source("github_archive")
         self._table_contract = source.table("events_raw")
         self._identifier = source.table_identifier("events_raw")
-        if self._table_contract.schema_contract != EVENTS_SCHEMA_CONTRACT:
-            raise ValueError(
-                "GitHub Archive table references unsupported schema contract "
-                f"{self._table_contract.schema_contract!r}"
-            )
+        self._schema = iceberg_schema(self._table_contract.columns)
+        self._partition_spec = partition_spec(
+            self._table_contract.columns,
+            self._table_contract.partitioning,
+        )
         if self._table_contract.write_mode != "checkpoint_overwrite":
             raise ValueError("GitHub Archive requires checkpoint_overwrite for idempotent commits")
         contract_partitioning = tuple(
@@ -53,6 +55,20 @@ class GithubArchiveRepository:
         )
         if contract_partitioning != (("source_hour", "hour"),):
             raise ValueError("GitHub Archive requires hour(source_hour) partitioning")
+        if self._table_contract.partitioning[0].name != "archive_hour":
+            raise ValueError("GitHub Archive partition must be named archive_hour")
+
+    def __enter__(self) -> "GithubArchiveRepository":
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        if self._owned_catalog:
+            self._catalog.__exit__(exc_type, exc_val, exc_tb)
 
     def ensure_table(self) -> Table:
         if self._catalog.table_exists(self._identifier.iceberg):
@@ -61,12 +77,12 @@ class GithubArchiveRepository:
             return table
         table = self._catalog.create_table(
             identifier=self._identifier.iceberg,
-            schema=EVENTS_ICEBERG_SCHEMA,
+            schema=self._schema,
             location=(
                 f"{self._settings.storage.landing_uri.rstrip('/')}"
                 f"/{self._table_contract.location_prefix}"
             ),
-            partition_spec=EVENTS_PARTITION_SPEC,
+            partition_spec=self._partition_spec,
             properties={
                 "format-version": "2",
                 "write.format.default": "parquet",
@@ -76,13 +92,12 @@ class GithubArchiveRepository:
         self._validate_partition_spec(table)
         return table
 
-    @staticmethod
-    def _validate_partition_spec(table: Table) -> None:
+    def _validate_partition_spec(self, table: Table) -> None:
         current = table.spec()
-        if current != EVENTS_PARTITION_SPEC:
+        if current != self._partition_spec:
             raise RuntimeError(
                 "GitHub Archive partition spec drifted from its source contract; "
-                f"expected {EVENTS_PARTITION_SPEC}, found {current}"
+                f"expected {self._partition_spec}, found {current}"
             )
 
     def hour_state(self, source_hour: datetime) -> GithubArchiveWrite | None:

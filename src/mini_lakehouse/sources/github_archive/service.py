@@ -1,6 +1,7 @@
 """GitHub Archive ingestion use case."""
 
 import logging
+from contextlib import nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -30,19 +31,30 @@ class GithubArchiveIngestionService:
         self._source_contract = self._contracts.source("github_archive")
         self._client = client or GithubArchiveClient(settings.github_archive)
         self._object_store = object_store or create_object_store(settings.storage)
-        self._repository = repository or GithubArchiveRepository(
-            settings,
-            contracts=self._contracts,
-        )
+        self._repository = repository
 
     def ingest(self, archive_hour: ArchiveHour) -> IngestionResult:
+        owned = (
+            GithubArchiveRepository(self._settings, contracts=self._contracts)
+            if self._repository is None
+            else None
+        )
+        context = owned if owned is not None else nullcontext(self._repository)
+        with context as repository:
+            return self._ingest(repository, archive_hour)  # type: ignore[arg-type]
+
+    def _ingest(
+        self,
+        repository: GithubArchiveRepository,
+        archive_hour: ArchiveHour,
+    ) -> IngestionResult:
         raw_uri = (
             f"{self._settings.storage.landing_uri.rstrip('/')}"
             f"/{self._source_contract.raw_object_prefix}/"
             f"{archive_hour.partition_path}/{archive_hour.filename}"
         )
         raw_exists = self._object_store.exists(raw_uri)
-        loaded_hour = self._repository.hour_state(archive_hour.value)
+        loaded_hour = repository.hour_state(archive_hour.value)
         if loaded_hour is not None:
             if not raw_exists:
                 raise RuntimeError(
@@ -78,7 +90,7 @@ class GithubArchiveIngestionService:
                 archive_hour,
                 max_error_ratio=self._settings.github_archive.max_parse_error_ratio,
             )
-            write = self._repository.write_hour(parsed.table, archive_hour.value)
+            write = repository.write_hour(parsed.table, archive_hour.value)
 
         result = IngestionResult(
             archive_hour=archive_hour.value,

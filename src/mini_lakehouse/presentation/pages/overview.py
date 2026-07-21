@@ -1,14 +1,14 @@
 import plotly.express as px
 import streamlit as st
 
-from mini_lakehouse.presentation.data_loader import load_contributor_trend, load_overview
+from mini_lakehouse.presentation.data_loader import load_daily_event_trend, load_overview
 
 st.title("Engineering activity")
 st.caption("Public dbt marts owned by Engineering Analytics")
 
 try:
     overview = load_overview().iloc[0]
-    trend = load_contributor_trend()
+    trend = load_daily_event_trend()
 except Exception as error:
     st.warning(f"Analytics marts are not ready: {error}")
     st.stop()
