@@ -1,0 +1,16 @@
+version: 2
+
+models:
+  - name: stg_github__events
+    description: Analytics-facing projection of the canonical curated GitHub event stream.
+    columns:
+      - name: event_id
+        description: Stable GitHub event identifier.
+      - name: event_date_utc
+        description: UTC calendar date derived during curation.
+
+  - name: stg_github__actors_current
+    description: Analytics-facing projection of current GitHub actor attributes.
+
+  - name: stg_github__repositories_current
+    description: Analytics-facing projection of current GitHub repository attributes.

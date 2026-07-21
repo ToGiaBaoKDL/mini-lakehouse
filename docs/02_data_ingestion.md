@@ -15,7 +15,8 @@ The application performs four explicit operations:
    timestamp columns.
 4. Replace the Iceberg `source_hour` partition dynamically, making a retry idempotent.
 
-The raw table is `prod."landing.api.github_archive".events_raw`. It is partitioned by source hour,
+The raw table is `prod.landing.github_archive_events_raw`. It uses the hidden Iceberg transform
+`hour(source_hour)`,
 not business event time, because source-hour replacement is the ingestion transaction boundary.
 
 Malformed rows are counted and the batch fails if their ratio exceeds the configured contract.

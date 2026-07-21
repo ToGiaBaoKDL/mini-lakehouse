@@ -1,74 +1,73 @@
 # Architecture and ownership
 
-## Bounded contexts
+## Data lifecycle
 
-The Python package is split by responsibility rather than by technical script type. Deployable
-Prefect DAGs stay outside the package because they are runtime entrypoints, not reusable domain
-modules:
+The lifecycle buckets are physical security and retention boundaries. Modeling layers are logical
+and do not create extra namespaces:
 
 ```text
-orchestration/
-├── flows/                   deployable Prefect DAGs with co-located tasks
-│   ├── etl_github_archive.py
-│   └── gov_iceberg_maintenance.py
-├── utils/                   dbt invocation and retry policy
-└── plugins/                 threaded Slack/Gmail Prefect lifecycle hooks
-
-contracts/                  reviewed non-secret platform desired state
-
-src/mini_lakehouse/
-├── config/                 endpoints, credentials, and runtime environment settings
-├── contracts/              strict, ownership-scoped contract modules
-│   ├── catalog.py          catalog, namespaces, and RBAC desired state
-│   ├── sources.py          source/checkpoint/table declarations
-│   ├── domains.py          analytics ownership and published tables
-│   ├── policies.py         typed Polaris policy contents and targets
-│   └── registry.py         cross-file reference and boundary validation
-├── sources/                one package per source boundary
-│   └── github_archive/     client, schema, parser, repository, ingestion service
-├── storage/                provider and Iceberg catalog adapters only
-├── platform/               Polaris adapter plus isolated catalog/RBAC/namespace reconcilers
-└── presentation/           read-only Streamlit application
+GitHub Archive
+  └─ EL ─▶ prod.landing.github_archive_events_raw
+             immutable raw object + replayable source-hour partition
+              └─ TL/Trino ─▶ prod."curated.github".{events,actors_current,repositories_current}
+                                canonical source-conformed GitHub product
+                                  └─ TL/dbt ─▶ prod."analytics.engineering".fct_*_daily
+                                                consumer-facing domain metrics
 ```
 
-Every deployable DAG lives under `flows/` and follows `[job_type]_[description].py`, analogous to
-Airflow's `dags/` discovery boundary. Its flow and source-owned tasks stay in the same file.
-Cross-DAG mechanics live under `utils/` and Prefect integrations under `plugins/`; there is no
-private task sidecar or catch-all `tasks.py`. None of these directories needs `__init__.py`.
-Source and platform behavior remains in `mini_lakehouse`; orchestration only composes it.
+- `landing` is one logical namespace. Transport and source identity remain in physical object
+  prefixes such as `api/github_archive/`; source-prefixed table names prevent collisions.
+- `curated` drops transport identity and publishes reusable, validated source-conformed products.
+- `analytics` is organized by business domain and owns consumer semantics.
 
-`dbt_project/` remains a top-level analytics project because its graph, tests, docs, artifacts,
-and release lifecycle differ from the Python application.
+For a future RDBMS source, use a unique landing table such as
+`prod.landing.warehouse_raw_orders` at `s3://landing/rdbms/warehouse_raw/orders`. Its curation
+package publishes to a transport-free curated product. A future domain can consume one or more
+curated products without depending on their ingestion implementation.
 
-## Catalog and storage contract
+## Code boundaries
 
-There is one Polaris catalog named `prod`. Environments should use separate catalogs or separate
-Polaris deployments; dbt must not invent environment prefixes inside production namespaces.
+```text
+contracts/
+├── catalog.yaml            catalog, namespaces, locations, grants
+├── sources/                landing ownership and checkpoints
+├── products/               canonical curated products
+├── domains/                analytics ownership and published marts
+└── policies/               typed Polaris maintenance policy desired state
 
-- `landing` bucket: source-owned data. Prefixes express transport (`api`, `rdbms`, `stream`).
-- `curated` bucket: conformed data without transport details in its namespace.
-- `analytics` bucket: consumer-facing data organized by business domain and owner.
+src/mini_lakehouse/
+├── config/                 secret/runtime settings
+├── contracts/              strict Pydantic contract models and cross-file validation
+├── sources/                source-owned acquisition, parsing, and landing writes
+├── products/               curated product schemas and curation services
+├── platform/               Polaris, Trino, namespace, RBAC, and maintenance adapters
+├── storage/                S3-compatible object store and Iceberg catalog adapters
+└── presentation/           read-only domain consumers
 
-GitHub Archive lands at `prod."landing.api.github_archive".events_raw`. Private dbt staging and
-shared enriched data live in `prod."curated.github.internal"`; conformed public facts and
-dimensions live in `prod."curated.github"`; Engineering-owned marts live in
-`prod."analytics.engineering"`. Nested Polaris namespaces intentionally become one quoted Trino
-schema, so all application code renders identifiers through the shared table contract.
+dbt/analytics/
+├── models/staging/         ephemeral curated-source projections
+├── models/intermediate/    ephemeral reusable business logic
+└── models/marts/           physical analytics-domain tables only
 
-For future RDBMS ingestion, use `prod."landing.rdbms.<database>_raw".<table>`. For streams, use
-`prod."landing.stream.<platform>".<topic>`. These are naming contracts, not code paths coupled to
-GitHub Archive.
+orchestration/
+├── flows/                  deployable DAGs with co-located tasks
+├── utils/                  shared dbt and retry mechanics
+└── plugins/                Slack/Gmail Prefect lifecycle integrations
+```
+
+Deployable flow files follow `[job_type]_[description].py`. Orchestration composes application
+services but does not contain source or product business behavior. It is intentionally not a
+Python package and has no `__init__.py` or catch-all task module.
 
 ## Ownership
 
-- Data Platform owns ingestion, landing, Polaris contracts, `staging`, `intermediate`, and GitHub
-  facts/dimensions.
-- Engineering Analytics owns the public engineering marts and their metric semantics.
-- Platform operators own Iceberg maintenance and infrastructure lifecycle.
-- Streamlit is a consumer. It cannot redefine metrics or query private intermediate models.
+| Boundary | Technical owner | Responsibility |
+|---|---|---|
+| `landing` / `github_archive_*` | Data Platform | Immutable raw archive, parsing fidelity, source-hour idempotency |
+| `curated.github` | Data Platform | Canonical event/entity schema, deduplication, normalization, reusable source semantics |
+| `analytics.engineering` | Engineering Analytics | Metric definitions, grains, dbt tests/contracts, dashboard-facing tables |
+| Catalog and maintenance | Data Platform | Polaris desired state, access grants, policy reconciliation, Iceberg maintenance |
 
-dbt `group`, `access`, source metadata, tests, and exposure declarations make those boundaries
-machine-readable.
-
-The root `contracts/` registry makes platform desired state machine-readable as well. It contains
-no executable SQL and no secret. `uv run lakehouse validate` must pass before bootstrap or ingest.
+The registry validates source → curated product → analytics domain references. dbt `group`,
+`access`, source metadata, contracts, tests, and exposures repeat those boundaries in dbt-native
+metadata where dbt needs them; runtime secrets remain environment-only.

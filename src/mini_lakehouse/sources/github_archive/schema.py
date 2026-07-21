@@ -3,7 +3,7 @@
 import pyarrow as pa
 from pyiceberg.partitioning import PartitionField, PartitionSpec
 from pyiceberg.schema import Schema
-from pyiceberg.transforms import IdentityTransform
+from pyiceberg.transforms import HourTransform
 from pyiceberg.types import (
     BooleanType,
     LongType,
@@ -52,7 +52,7 @@ EVENTS_PARTITION_SPEC = PartitionSpec(
     PartitionField(
         source_id=11,
         field_id=1000,
-        transform=IdentityTransform(),
-        name="source_hour",
+        transform=HourTransform(),
+        name="source_hour_hour",
     )
 )

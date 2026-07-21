@@ -26,12 +26,15 @@ class DomainContract(ContractModel):
     dbt_group: Identifier
     description: str = Field(min_length=1)
     analytics_namespace: NamespacePath = Field(min_length=2)
+    upstream_products: tuple[ContractName, ...] = Field(min_length=1)
     tables: tuple[DomainTableContract, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
     def validate_domain(self) -> "DomainContract":
         if self.analytics_namespace[0] != "analytics":
             raise ValueError(f"Domain {self.name!r} must publish below analytics")
+        if len(self.upstream_products) != len(set(self.upstream_products)):
+            raise ValueError(f"Domain {self.name!r} upstream products must be unique")
         keys = [table.key for table in self.tables]
         names = [table.name for table in self.tables]
         if len(keys) != len(set(keys)) or len(names) != len(set(names)):

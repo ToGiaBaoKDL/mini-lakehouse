@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "mini-lakehouse"
-version = "0.2.0"
+version = "0.3.0"
 description = "A small production-shaped lakehouse built with Polaris, Iceberg, Trino, dbt, and Prefect."
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
@@ -16,6 +16,7 @@ dependencies = [
     "pyiceberg[pyarrow,s3fs]>=0.10,<0.12",
     "pyyaml>=6.0.3,<7",
     "requests>=2.32,<3",
+    "trino>=0.336,<1",
     "urllib3>=2.5,<3",
 ]
 
@@ -24,14 +25,12 @@ dashboard = [
     "pandas>=2.3,<3",
     "plotly>=6.5,<7",
     "streamlit>=1.53,<2",
-    "trino>=0.336,<1",
 ]
 orchestration = [
     "dbt-core>=1.10,<1.12",
     "dbt-trino>=1.10,<1.11",
     "prefect>=3.7,<4",
     "prefect-dbt>=0.7,<0.8",
-    "trino>=0.336,<1",
 ]
 
 [dependency-groups]
@@ -67,7 +66,7 @@ quote-style = "double"
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
 include = ["src", "orchestration", "tests"]
-exclude = ["dbt_project", ".venv"]
+exclude = ["dbt", ".venv"]
 venvPath = "."
 venv = ".venv"
 reportMissingTypeStubs = false

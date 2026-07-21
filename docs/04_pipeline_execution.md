@@ -1,63 +1,63 @@
 # Pipeline execution and operations
 
-Prefect has two deployments:
+## Deployments
 
-- `etl_github_archive`: scheduled without parameters to ingest the previous complete UTC hour;
-  custom runs accept `start_hour` and optional `end_hour` for an inclusive backfill. Historical
-  custom runs intentionally do not run the real-time freshness gate.
-- `gov_iceberg_maintenance`: policy-driven compaction, manifest rewrite, snapshot expiry, and
-  orphan-file cleanup for discovered Iceberg tables.
+Prefect has three independently retryable deployments:
 
-Deployable files live in `orchestration/flows/` and follow `[job_type]_[description].py`, making
-that directory the Prefect equivalent of Airflow's `dags/`. Each flow and its source-owned tasks
-stay together. Only cross-DAG dbt/retry mechanics live in `orchestration/utils`, and Prefect
-integrations in `orchestration/plugins`. There is no private task sidecar, catch-all `tasks.py`, or
-`__init__.py` in orchestration.
+| Deployment | Boundary | Trigger |
+|---|---|---|
+| `el_github_archive` | GitHub Archive → landing | `15 * * * *` UTC |
+| `tl_github_analytics` | landing → curated GitHub → full dbt analytics | `30 * * * *` UTC |
+| `gov_iceberg_maintenance` | Policy-driven Iceberg maintenance | Weekly schedule |
 
-The ingestion deployment has concurrency one with `ENQUEUE`, avoiding overlap between its schedule
-and custom backfill runs. The local process worker is packaged in the same image as the flow code;
-there are no host-only imports or runtime pip installs.
+The two hourly deployments are deliberately schedule-driven. There are no Prefect event sensors,
+automation triggers, or cross-deployment payloads. Landing starts at minute 15; transformation
+starts at minute 30 and executes curation, source freshness, and a full `dbt build` sequentially.
+The fifteen-minute offset is operational buffer, while landing completeness validation makes a
+missing or delayed archive fail explicitly instead of silently building stale analytics. Both
+flows derive the archive checkpoint from the Prefect run's scheduled start time, so a queued run
+that starts after the next hour still processes the intended hour. Separate work queues isolate
+ingestion, transformation, and maintenance, while singleton `ENQUEUE` limits prevent overlapping
+writes.
 
-Landing is idempotent by UTC source hour. Raw object creation uses the S3 conditional-create
-primitive and can never overwrite an existing archive. The Iceberg repository checks only
-partition/file metadata, then commits a new hour with dynamic partition overwrite. A normal rerun
-is a no-op; retries or concurrent writers cannot accumulate duplicate rows through append. A
-missing archive for an already-loaded hour is an integrity error. Backfill is bounded by its
-requested start/end hours and rebuilds dbt tables once after ingestion completes.
+Flow files live under `orchestration/flows/`, follow `[job_type]_[description].py`, and co-locate
+their Prefect tasks. Reusable dbt/retry mechanics live in `utils`; notification integrations live
+in `plugins`. Source and product business logic remains under `src/mini_lakehouse`.
 
-A normal scheduled/manual trigger uses no parameters. A one-hour replay supplies only
-`start_hour`; an inclusive backfill supplies both parameters:
+## Normal runs and retries
+
+A scheduled run processes the previous complete UTC archive hour. A manual Prefect run may supply
+one `archive_hour`; multi-hour windows and dedicated backfill DAGs are intentionally absent:
 
 ```bash
-prefect deployment run etl_github_archive/etl_github_archive
-prefect deployment run etl_github_archive/etl_github_archive \
-  --param start_hour=2026-07-21T04:00:00Z
-prefect deployment run etl_github_archive/etl_github_archive \
-  --param start_hour=2026-07-21T04:00:00Z \
-  --param end_hour=2026-07-21T05:00:00Z
+prefect deployment run el_github_archive/el_github_archive
+prefect deployment run el_github_archive/el_github_archive \
+  --param archive_hour=2026-07-21T04:00:00Z
+prefect deployment run tl_github_analytics/tl_github_analytics \
+  --param archive_hour=2026-07-21T04:00:00Z
 ```
 
-The same fields are exposed by Prefect's custom-run form. Ingestion task retries use delays of
-30/120/300 seconds and retry only transient transport/server failures. If a terminal flow run is
-retried, Prefect preserves its parameters; already committed hours resolve as metadata-only no-op,
-so the retry cannot append duplicates.
+The same single field is available in Prefect's custom-run form. Every TL run executes curated
+source freshness and the complete dbt project; there is no alternate historical-run branch.
 
-Maintenance policy definitions are stored as typed YAML contracts and reconciled as metadata at
-the Data Platform-owned Polaris
-`curated` root and attached to the `landing`, `curated`, and `analytics` roots so child namespaces
-inherit them. No fourth bucket or location-less pseudo-domain is introduced. Polaris stores and
-resolves policy metadata; the Prefect governance flow discovers every table, fetches its applicable
-policies, validates their typed content, and executes the matching Trino procedures. Tables are
-processed in bounded concurrent batches and failures are summarized only after the remaining
-tables have run. This removes table-name allowlists while retaining explicit scope and safe
-retention thresholds.
+Idempotency is enforced at the write that owns each boundary:
 
-The Compose overlay creates or reconciles the process work pool in a one-shot bootstrap service
-before starting the worker and registering deployments. Re-running the overlay is therefore
-non-interactive and idempotent.
+- Raw objects use S3 conditional create and are immutable.
+- Landing atomically overwrites one source-hour checkpoint using an equality predicate projected
+  onto the hidden hourly partition; completed retries resolve from metadata without downloading or
+  parsing again.
+- Curated validates the selected landing hour, deduplicates by `event_id`, and `MERGE`s only that
+  hour into canonical tables.
+- Analytics tables use atomic full-table replacement. The current project deliberately does not
+  claim incremental analytics semantics.
 
-Every task has a failure hook; every flow has running, success, failure, cancellation, and crash
-hooks. Configure Slack Bot API and Gmail App Password delivery in `.env`:
+Retrying a failed Prefect task preserves its resolved `archive_hour`. If the independent TL
+schedule starts before landing is available, it fails clearly and can be retried after EL succeeds.
+
+## Notifications
+
+Every task has a failure hook. Every flow reports running, success, failure, cancellation, and
+crash states. Configure both Slack Bot API and Gmail App Password delivery in `.env`:
 
 ```dotenv
 LAKEHOUSE_NOTIFICATIONS__SLACK_BOT_TOKEN=xoxb-...
@@ -67,43 +67,35 @@ LAKEHOUSE_NOTIFICATIONS__GMAIL_APP_PASSWORD=google-app-password
 LAKEHOUSE_NOTIFICATIONS__GMAIL_RECIPIENTS=["data-platform@example.com"]
 ```
 
-The Slack bot needs `chat:write` and must be a member of the configured channel. A flow-running
-hook creates one colored parent message and stores its `thread_ts` as a Prefect Variable keyed by
-flow-run ID. Task failures reply inside that thread; terminal flow state updates the parent to
-green or red and removes the variable. Gmail sends styled HTML for flow success/failure and each
-task failure. It intentionally skips start and task-success mail to prevent alert fatigue.
+Slack creates one parent message per flow run. Task failures reply in its thread; the terminal
+flow state updates the parent. Gmail sends styled flow success/failure and task-failure messages.
+Delivery channels are independent and best-effort so notification outages cannot mask pipeline
+state. With incomplete configuration, the channel is disabled.
 
-Both channels include environment, Prefect state, run ID, detail, and a Prefect deep link. Gmail
-requires a Google App Password rather than the account password. Channel delivery is independent
-and best-effort: Slack/Gmail outages are logged but never mask the pipeline's original state. With
-no complete channel set, notifications are disabled for local development.
+## Maintenance
 
-Start the orchestration overlay with the data plane:
+Typed YAML policies attach at lifecycle namespaces and are inherited by child namespaces. The
+governance flow discovers tables from the catalog, resolves applicable Polaris policies, validates
+their full content, and invokes bounded Trino maintenance procedures. It has no table allowlist or
+dashboard-owned table registry.
 
-```bash
-docker compose -f compose.core.yaml -f compose.prefect.yaml up -d --build
-```
-
-Register deployments manually after editing `prefect.yaml`:
+## Local operations
 
 ```bash
+docker compose -f compose.core.yaml -f compose.prefect.yaml up -d
 PREFECT_API_URL=http://localhost:4200/api uv run prefect deploy --all
-```
 
-Useful health commands:
-
-```bash
-docker compose -f compose.core.yaml -f compose.prefect.yaml ps
 curl --fail http://localhost:8182/q/health/ready
 curl --fail http://localhost:8080/v1/info
 curl --fail http://localhost:4200/api/health
-uv run dbt debug --project-dir dbt_project --profiles-dir dbt_project
+uv run dbt debug --project-dir dbt/analytics --profiles-dir dbt/analytics
 ```
 
-To remove the local platform and all local named-volume data:
+The Compose overlay idempotently reconciles the local process work pool and deployments. Removing
+the local stack and named volumes is destructive:
 
 ```bash
 docker compose -f compose.core.yaml -f compose.prefect.yaml down --volumes
 ```
 
-This is destructive and should never be used against shared or cloud buckets.
+Never use that cleanup command against shared or cloud storage.

@@ -1,0 +1,42 @@
+name: "mini_lakehouse_analytics"
+version: "0.3.0"
+config-version: 2
+profile: "mini_lakehouse"
+
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+flags:
+  send_anonymous_usage_stats: false
+  require_certificate_validation: true
+
+models:
+  mini_lakehouse_analytics:
+    +persist_docs:
+      relation: true
+      columns: true
+
+    staging:
+      +materialized: ephemeral
+      +group: engineering_analytics
+      +access: private
+      +tags: ["staging", "github"]
+
+    intermediate:
+      +materialized: ephemeral
+      +group: engineering_analytics
+      +access: private
+      +tags: ["intermediate", "engineering"]
+
+    marts:
+      engineering:
+        +materialized: table
+        +schema: analytics.engineering
+        +group: engineering_analytics
+        +access: public
+        +tags: ["mart", "engineering"]

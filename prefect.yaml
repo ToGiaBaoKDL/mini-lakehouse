@@ -12,28 +12,40 @@ definitions:
       collision_strategy: ENQUEUE
 
   work_pools:
-    default: &default_work_pool
+    ingestion: &ingestion_work_pool
       name: lakehouse-process
-      work_queue_name: default
+      work_queue_name: ingestion
+    transformation: &transformation_work_pool
+      name: lakehouse-process
+      work_queue_name: transformation
     maintenance: &maintenance_work_pool
       name: lakehouse-process
       work_queue_name: maintenance
 
 deployments:
-  - name: etl_github_archive
-    description: >-
-      Ingest the previous complete UTC hour by default. Set start_hour for a one-hour custom run,
-      or start_hour and end_hour for an inclusive backfill, then build tested dbt marts.
-    entrypoint: orchestration/flows/etl_github_archive.py:etl_github_archive
+  - name: el_github_archive
+    description: Land one complete UTC GitHub Archive hour at minute 15 each hour.
+    entrypoint: orchestration/flows/el_github_archive.py:el_github_archive
     parameters:
-      start_hour: null
-      end_hour: null
+      archive_hour: null
     schedules:
       - cron: "15 * * * *"
         timezone: UTC
         active: true
     concurrency_limit: *singleton
-    work_pool: *default_work_pool
+    work_pool: *ingestion_work_pool
+
+  - name: tl_github_analytics
+    description: Curate the latest landed GitHub hour, then freshness-check and build all dbt resources.
+    entrypoint: orchestration/flows/tl_github_analytics.py:tl_github_analytics
+    parameters:
+      archive_hour: null
+    schedules:
+      - cron: "30 * * * *"
+        timezone: UTC
+        active: true
+    concurrency_limit: *singleton
+    work_pool: *transformation_work_pool
 
   - name: gov_iceberg_maintenance
     description: Apply inherited Polaris maintenance policies to discovered Iceberg tables.

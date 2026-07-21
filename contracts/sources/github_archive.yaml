@@ -2,9 +2,8 @@ version: 1
 name: github_archive
 source_type: api
 owner: data-platform
-dbt_group: data_platform
 description: Public GitHub events published as immutable hourly archives.
-landing_namespace: [landing, api, github_archive]
+landing_namespace: [landing]
 raw_object_prefix: api/github_archive/raw
 
 checkpoint:
@@ -13,8 +12,10 @@ checkpoint:
 
 tables:
   - key: events_raw
-    name: events_raw
+    name: github_archive_events_raw
     location_prefix: api/github_archive/events_raw
     schema_contract: github_archive.events_raw.v1
-    partition_fields: [source_hour]
-    write_mode: partition_overwrite
+    partitioning:
+      - field: source_hour
+        transform: hour
+    write_mode: checkpoint_overwrite

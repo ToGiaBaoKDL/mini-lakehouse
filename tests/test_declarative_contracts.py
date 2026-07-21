@@ -23,9 +23,12 @@ def test_repository_contracts_form_a_valid_registry() -> None:
     } == {"landing", "curated", "analytics"}
     assert contracts.source("github_archive").table_identifier("events_raw").iceberg == (
         "landing",
-        "api",
-        "github_archive",
-        "events_raw",
+        "github_archive_events_raw",
+    )
+    assert contracts.product("github").table_identifier("events").iceberg == (
+        "curated",
+        "github",
+        "events",
     )
     assert (
         contracts.domain("engineering").table_identifier("repository_activity_daily").trino("prod")
@@ -98,23 +101,6 @@ def test_github_archive_iceberg_field_ids_are_stable() -> None:
 
 def test_registry_accepts_a_second_source_family_without_core_code_changes() -> None:
     payload = load_contracts().model_dump(mode="python")
-    payload["catalog"]["namespaces"] = (
-        *payload["catalog"]["namespaces"],
-        *(
-            {
-                "path": ["landing", "rdbms"],
-                "owner": "data-platform",
-                "description": "Relational database sources.",
-                "properties": {"transport": "rdbms"},
-            },
-            {
-                "path": ["landing", "rdbms", "warehouse_raw"],
-                "owner": "warehouse-source-team",
-                "description": "Raw warehouse database boundary.",
-                "properties": {"source_system": "warehouse"},
-            },
-        ),
-    )
     payload["sources"] = (
         *payload["sources"],
         {
@@ -122,19 +108,18 @@ def test_registry_accepts_a_second_source_family_without_core_code_changes() -> 
             "name": "warehouse_raw",
             "source_type": "rdbms",
             "owner": "warehouse-source-team",
-            "dbt_group": "data_platform",
             "description": "Fixture proving source-family extensibility.",
-            "landing_namespace": ["landing", "rdbms", "warehouse_raw"],
+            "landing_namespace": ["landing"],
             "raw_object_prefix": "rdbms/warehouse_raw/raw",
             "checkpoint": {"kind": "timestamp", "field": "updated_at"},
             "tables": [
                 {
                     "key": "orders",
-                    "name": "orders",
+                    "name": "warehouse_raw_orders",
                     "location_prefix": "rdbms/warehouse_raw/orders",
                     "schema_contract": "warehouse.orders.v1",
-                    "partition_fields": ["updated_at"],
-                    "write_mode": "partition_overwrite",
+                    "partitioning": [{"field": "updated_at", "transform": "day"}],
+                    "write_mode": "checkpoint_overwrite",
                 }
             ],
         },
@@ -144,9 +129,7 @@ def test_registry_accepts_a_second_source_family_without_core_code_changes() -> 
 
     assert expanded.source("warehouse_raw").table_identifier("orders").iceberg == (
         "landing",
-        "rdbms",
-        "warehouse_raw",
-        "orders",
+        "warehouse_raw_orders",
     )
 
 
@@ -162,7 +145,7 @@ def test_contract_models_reject_unknown_fields() -> None:
         CatalogContract.model_validate(payload)
 
 
-@pytest.mark.parametrize("collection", ["sources", "domains", "policies"])
+@pytest.mark.parametrize("collection", ["sources", "products", "domains", "policies"])
 def test_registry_rejects_duplicate_owned_contracts(collection: str) -> None:
     payload = _registry_payload()
     payload[collection] = (*payload[collection], payload[collection][0])
@@ -179,11 +162,11 @@ def test_source_contract_rejects_duplicate_table_identifiers() -> None:
         SourceContract.model_validate(payload)
 
 
-def test_registry_rejects_a_source_with_an_unknown_namespace() -> None:
+def test_source_contract_rejects_a_non_landing_namespace() -> None:
     payload = _registry_payload()
-    payload["sources"][0]["landing_namespace"] = ("landing", "api", "missing")
+    payload["sources"][0]["landing_namespace"] = ("unknown",)
 
-    with pytest.raises(ValidationError, match="unknown landing namespace"):
+    with pytest.raises(ValidationError, match="shared landing namespace"):
         PlatformContracts.model_validate(payload)
 
 

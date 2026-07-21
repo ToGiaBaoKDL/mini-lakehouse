@@ -3,13 +3,13 @@ from mini_lakehouse.platform.catalog import catalog_contract
 from mini_lakehouse.platform.namespaces import namespace_contract
 
 
-def test_namespace_contract_encodes_transport_and_domain_ownership() -> None:
+def test_namespace_contract_separates_lifecycle_and_domain_ownership() -> None:
     contract = namespace_contract(Settings())
 
     assert contract[("landing",)]["location"] == "s3://landing"
-    assert contract[("landing", "api")]["transport"] == "api"
+    assert not any(path[:2] == ("landing", "api") for path in contract)
     assert contract[("curated", "github")]["owner"] == "data-platform"
-    assert contract[("curated", "github", "internal")]["visibility"] == "private"
+    assert ("curated", "github", "internal") not in contract
     assert contract[("analytics", "engineering")]["owner"] == "engineering-analytics"
 
 

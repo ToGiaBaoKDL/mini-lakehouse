@@ -45,8 +45,14 @@ class GithubArchiveRepository:
                 "GitHub Archive table references unsupported schema contract "
                 f"{self._table_contract.schema_contract!r}"
             )
-        if self._table_contract.write_mode != "partition_overwrite":
-            raise ValueError("GitHub Archive requires partition_overwrite for idempotent commits")
+        if self._table_contract.write_mode != "checkpoint_overwrite":
+            raise ValueError("GitHub Archive requires checkpoint_overwrite for idempotent commits")
+        contract_partitioning = tuple(
+            (partition.field, partition.transform)
+            for partition in self._table_contract.partitioning
+        )
+        if contract_partitioning != (("source_hour", "hour"),):
+            raise ValueError("GitHub Archive requires hour(source_hour) partitioning")
 
     def ensure_table(self) -> Table:
         if self._catalog.table_exists(self._identifier.iceberg):
@@ -114,8 +120,12 @@ class GithubArchiveRepository:
         existing = self.hour_state(source_hour)
         if existing is not None:
             return existing
-        table.dynamic_partition_overwrite(
+        table.overwrite(
             events,
+            overwrite_filter=EqualTo(
+                term=Reference(name="source_hour"),
+                value=literal(source_hour),
+            ),
             snapshot_properties={
                 "data-tier": "landing",
                 "source-hour": source_hour.isoformat(),

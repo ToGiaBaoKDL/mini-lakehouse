@@ -34,25 +34,6 @@ class ArchiveHour(BaseModel):
         normalized = value.replace("Z", "+00:00")
         return cls(value=datetime.fromisoformat(normalized))
 
-    @classmethod
-    def resolve_window(
-        cls,
-        start: str | datetime | None,
-        end: str | datetime | None,
-        *,
-        now: datetime | None = None,
-    ) -> tuple[Self, Self]:
-        if start is None:
-            if end is not None:
-                raise ValueError("end requires start")
-            current = cls.previous_complete_hour(now)
-            return current, current
-        window_start = cls.parse(start)
-        window_end = cls.parse(end) if end is not None else window_start
-        if window_start.value > window_end.value:
-            raise ValueError("start must be less than or equal to end")
-        return window_start, window_end
-
     @property
     def filename(self) -> str:
         return self.value.strftime("%Y-%m-%d-%-H.json.gz")

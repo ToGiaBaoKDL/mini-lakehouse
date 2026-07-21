@@ -48,11 +48,13 @@ def test_prefect_deployments_reuse_declared_work_pool_and_concurrency_contracts(
     deployments = cast(list[dict[str, object]], config["deployments"])
 
     assert {deployment["name"] for deployment in deployments} == {
-        "etl_github_archive",
+        "el_github_archive",
+        "tl_github_analytics",
         "gov_iceberg_maintenance",
     }
     assert set(cast(dict[str, object], definitions["work_pools"])) == {
-        "default",
+        "ingestion",
+        "transformation",
         "maintenance",
     }
     assert all(
@@ -60,15 +62,33 @@ def test_prefect_deployments_reuse_declared_work_pool_and_concurrency_contracts(
         for deployment in deployments
     )
     ingestion = next(
-        deployment for deployment in deployments if deployment["name"] == "etl_github_archive"
+        deployment for deployment in deployments if deployment["name"] == "el_github_archive"
     )
-    assert ingestion["parameters"] == {"start_hour": None, "end_hour": None}
+    transformation = next(
+        deployment for deployment in deployments if deployment["name"] == "tl_github_analytics"
+    )
+    assert ingestion["parameters"] == {"archive_hour": None}
+    assert transformation["parameters"] == {"archive_hour": None}
+    assert all("triggers" not in deployment for deployment in deployments)
+    assert ingestion["schedules"] == [{"cron": "15 * * * *", "timezone": "UTC", "active": True}]
+    assert transformation["schedules"] == [
+        {"cron": "30 * * * *", "timezone": "UTC", "active": True}
+    ]
 
 
-def test_dbt_flows_use_named_selectors_instead_of_inline_graph_expressions() -> None:
+def test_scheduled_dbt_pipeline_runs_freshness_then_the_full_project() -> None:
     source = (ORCHESTRATION_DIR / "utils" / "dbt.py").read_text(encoding="utf-8")
-    assert '"--selector"' in source
+    assert 'runner.invoke(["source", "freshness"])' in source
+    assert 'runner.invoke(["build"])' in source
+    assert '"--selector"' not in source
     assert '"--select"' not in source
+
+
+def test_scheduled_archive_hour_uses_prefect_scheduled_start_time() -> None:
+    source = (ORCHESTRATION_DIR / "utils" / "scheduling.py").read_text(encoding="utf-8")
+
+    assert "flow_run.scheduled_start_time" in source
+    assert "datetime.now" not in source
 
 
 def test_all_reusable_prefect_tasks_and_flows_have_failure_hooks() -> None:

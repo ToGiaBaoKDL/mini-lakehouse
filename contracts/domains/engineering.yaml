@@ -5,6 +5,7 @@ business_owner: engineering
 dbt_group: engineering_analytics
 description: Consumer-facing engineering activity metrics.
 analytics_namespace: [analytics, engineering]
+upstream_products: [github]
 
 tables:
   - key: repository_activity_daily

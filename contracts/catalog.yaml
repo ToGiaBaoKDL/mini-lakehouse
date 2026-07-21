@@ -21,18 +21,6 @@ namespaces:
     properties:
       data_tier: landing
 
-  - path: [landing, api]
-    owner: data-platform
-    description: Sources acquired through HTTP APIs or published HTTP archives.
-    properties:
-      transport: api
-
-  - path: [landing, api, github_archive]
-    owner: data-platform
-    description: GitHub Archive source boundary.
-    properties:
-      source_system: github_archive
-
   - path: [curated]
     storage_root: curated
     owner: data-platform
@@ -45,12 +33,6 @@ namespaces:
     description: Conformed GitHub entities and events.
     properties:
       data_product: github
-
-  - path: [curated, github, internal]
-    owner: data-platform
-    description: Private dbt staging and reusable intermediate relations.
-    properties:
-      visibility: private
 
   - path: [analytics]
     storage_root: analytics

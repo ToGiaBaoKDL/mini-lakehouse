@@ -1211,7 +1211,7 @@ wheels = [
 
 [[package]]
 name = "mini-lakehouse"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "fsspec" },
@@ -1221,6 +1221,7 @@ dependencies = [
     { name = "pyiceberg", extra = ["pyarrow", "s3fs"] },
     { name = "pyyaml" },
     { name = "requests" },
+    { name = "trino" },
     { name = "urllib3" },
 ]
 
@@ -1229,14 +1230,12 @@ dashboard = [
     { name = "pandas" },
     { name = "plotly" },
     { name = "streamlit" },
-    { name = "trino" },
 ]
 orchestration = [
     { name = "dbt-core" },
     { name = "dbt-trino" },
     { name = "prefect" },
     { name = "prefect-dbt" },
-    { name = "trino" },
 ]
 
 [package.dev-dependencies]
@@ -1264,8 +1263,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.3,<7" },
     { name = "requests", specifier = ">=2.32,<3" },
     { name = "streamlit", marker = "extra == 'dashboard'", specifier = ">=1.53,<2" },
-    { name = "trino", marker = "extra == 'dashboard'", specifier = ">=0.336,<1" },
-    { name = "trino", marker = "extra == 'orchestration'", specifier = ">=0.336,<1" },
+    { name = "trino", specifier = ">=0.336,<1" },
     { name = "urllib3", specifier = ">=2.5,<3" },
 ]
 provides-extras = ["dashboard", "orchestration"]

@@ -6,6 +6,7 @@ from mini_lakehouse.config import get_settings
 from mini_lakehouse.contracts import load_contracts
 from mini_lakehouse.logging import configure_logging
 from mini_lakehouse.platform.runtime import validate_runtime_contract
+from mini_lakehouse.products.github.service import GithubCurationService
 from mini_lakehouse.sources.github_archive.models import ArchiveHour
 from mini_lakehouse.sources.github_archive.service import GithubArchiveIngestionService
 
@@ -23,6 +24,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--hour",
         help="ISO-8601 UTC hour, for example 2025-01-01T00:00:00Z; defaults to the last hour",
     )
+    curate = subparsers.add_parser("curate", help="Publish a canonical curated data product")
+    product_parsers = curate.add_subparsers(dest="product", required=True)
+    github = product_parsers.add_parser(
+        "github",
+        help="Curate one GitHub Archive landing hour",
+    )
+    github.add_argument(
+        "--hour",
+        help="UTC source hour; defaults to the previous complete hour",
+    )
     subparsers.add_parser(
         "validate",
         help="Validate declarative contracts and runtime settings without side effects",
@@ -37,6 +48,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     if args.command == "ingest" and args.source == "github-archive":
         result = GithubArchiveIngestionService(settings).ingest(ArchiveHour.parse(args.hour))
         print(json.dumps(result.model_dump(mode="json"), indent=2))
+    elif args.command == "curate" and args.product == "github":
+        result = GithubCurationService(settings).curate(ArchiveHour.parse(args.hour))
+        print(json.dumps(result.model_dump(mode="json"), indent=2))
     elif args.command == "validate":
         contracts = load_contracts(settings.contracts_dir)
         validate_runtime_contract(settings, contracts)
@@ -47,6 +61,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                     "catalog_role_grants": len(contracts.catalog.catalog_role_grants),
                     "namespaces": len(contracts.catalog.namespaces),
                     "sources": len(contracts.sources),
+                    "products": len(contracts.products),
                     "domains": len(contracts.domains),
                     "policies": len(contracts.policies),
                 },

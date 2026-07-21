@@ -6,7 +6,7 @@
 |---|---|---|---|
 | Catalog, lifecycle namespaces, and RBAC | `contracts/catalog.yaml` | Data Platform | Isolated Polaris reconcilers |
 | Source landing data | `contracts/sources/*.yaml` + source package | Declared source owner | Source service and repository |
-| Curated GitHub models | dbt `marts/github` | Data Platform | dbt/Trino |
+| Curated GitHub product | `contracts/products/github.yaml` + product package | Data Platform | Trino curation service |
 | Analytics domain models | `contracts/domains/*.yaml` + dbt group | Declared domain owner | dbt/Trino |
 | Maintenance policy | `contracts/policies/*.yaml` | Declared policy owner | Polaris metadata + governance flow |
 | Dashboard business queries | Domain relation registry | Engineering Analytics | Read-only Streamlit service |
@@ -42,9 +42,9 @@ docker compose -f compose.core.yaml run --rm lakehouse-bootstrap
 ```
 
 The local `catalog_admin` role is explicitly granted `CATALOG_MANAGE_CONTENT`, and the catalog
-feature flag `polaris.config.drop-with-purge.enabled` is explicit because dbt full-table rebuilds
-drop and recreate Iceberg relations. These settings belong to the catalog contract rather than a
-container startup script.
+feature flag `polaris.config.drop-with-purge.enabled` is explicit for reviewed table retirement
+and local rebuild migrations. Normal dbt models use atomic table replacement. These settings
+belong to the catalog contract rather than a container startup script.
 
 Running bootstrap again with unchanged contracts must produce no catalog, role-grant, namespace,
 or policy-content mutation. Mapping `PUT` requests remain safe and idempotent by Polaris API

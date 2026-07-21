@@ -10,12 +10,13 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 COPY --from=uv /uv /uvx /bin/
-COPY pyproject.toml uv.lock README.md .python-version ./
+COPY pyproject.toml uv.lock .python-version ./
 
 FROM base AS runtime-dependencies
 RUN uv sync --frozen --no-dev --no-install-project
 
 FROM runtime-dependencies AS runtime
+COPY README.md ./
 COPY src ./src
 COPY contracts ./contracts
 RUN uv sync --frozen --no-dev --no-editable
@@ -26,9 +27,10 @@ FROM base AS orchestration-dependencies
 RUN uv sync --frozen --no-dev --extra orchestration --no-install-project
 
 FROM orchestration-dependencies AS orchestration
+COPY README.md ./
 COPY src ./src
 COPY contracts ./contracts
-COPY dbt_project ./dbt_project
+COPY dbt ./dbt
 COPY orchestration ./orchestration
 COPY prefect.yaml ./prefect.yaml
 RUN uv sync --frozen --no-dev --extra orchestration --no-editable
@@ -39,6 +41,7 @@ FROM base AS dashboard-dependencies
 RUN uv sync --frozen --no-dev --extra dashboard --no-install-project
 
 FROM dashboard-dependencies AS dashboard
+COPY README.md ./
 COPY src ./src
 COPY contracts ./contracts
 RUN uv sync --frozen --no-dev --extra dashboard --no-editable

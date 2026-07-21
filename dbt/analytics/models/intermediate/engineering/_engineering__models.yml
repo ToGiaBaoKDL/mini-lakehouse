@@ -1,0 +1,5 @@
+version: 2
+
+models:
+  - name: int_engineering__events_classified
+    description: GitHub events with reusable Engineering activity classifications.

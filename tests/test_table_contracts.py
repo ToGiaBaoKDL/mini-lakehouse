@@ -5,6 +5,7 @@ from unittest.mock import create_autospec
 import pyarrow as pa
 import pytest
 from pyiceberg.catalog import Catalog
+from pyiceberg.expressions import EqualTo
 from pyiceberg.partitioning import PartitionField, PartitionSpec
 from pyiceberg.table import Table
 from pyiceberg.transforms import HourTransform, IdentityTransform
@@ -29,13 +30,13 @@ def test_nested_namespace_renders_as_one_trino_schema() -> None:
     assert table.trino("prod") == ('"prod"."analytics.engineering"."fct_repository_activity_daily"')
 
 
-def test_github_archive_partition_spec_uses_checkpoint_identity() -> None:
+def test_github_archive_partition_spec_uses_hour_transform() -> None:
     field = EVENTS_PARTITION_SPEC.fields[0]
 
     assert field.source_id == 11
     assert field.field_id == 1000
-    assert field.name == "source_hour"
-    assert isinstance(field.transform, IdentityTransform)
+    assert field.name == "source_hour_hour"
+    assert isinstance(field.transform, HourTransform)
 
 
 def test_landing_table_rejects_partition_spec_drift() -> None:
@@ -47,8 +48,8 @@ def test_landing_table_rejects_partition_spec_drift() -> None:
         PartitionField(
             source_id=11,
             field_id=1000,
-            transform=HourTransform(),
-            name="source_hour_hour",
+            transform=IdentityTransform(),
+            name="source_hour",
         )
     )
     repository = GithubArchiveRepository(Settings(), catalog=catalog)
@@ -100,7 +101,7 @@ def test_existing_hour_is_resolved_from_partition_metadata_without_reading_rows(
     table.scan.return_value.to_arrow.assert_not_called()
 
 
-def test_new_hour_uses_partition_overwrite_as_the_idempotent_commit() -> None:
+def test_new_hour_uses_checkpoint_predicate_overwrite_as_the_idempotent_commit() -> None:
     source_hour = datetime(2025, 1, 2, 3, tzinfo=UTC)
     catalog = create_autospec(Catalog, instance=True)
     table = create_autospec(Table, instance=True)
@@ -116,5 +117,6 @@ def test_new_hour_uses_partition_overwrite_as_the_idempotent_commit() -> None:
 
     assert result.was_written is True
     assert result.snapshot_id == 9
-    table.dynamic_partition_overwrite.assert_called_once()
+    table.overwrite.assert_called_once()
+    assert isinstance(table.overwrite.call_args.kwargs["overwrite_filter"], EqualTo)
     table.append.assert_not_called()

@@ -1,4 +1,4 @@
-"""Shared retry policy for source ingestion tasks."""
+"""Shared retry policies for external I/O and compute tasks."""
 
 from typing import Any
 
@@ -9,6 +9,7 @@ from mini_lakehouse.sources.github_archive.client import ArchiveNotPublishedErro
 
 INGESTION_RETRY_DELAYS_SECONDS = [30.0, 120.0, 300.0]
 DBT_RETRY_DELAY_SECONDS = 30
+CURATION_RETRY_DELAY_SECONDS = 30
 MAINTENANCE_RETRY_DELAY_SECONDS = 60
 
 

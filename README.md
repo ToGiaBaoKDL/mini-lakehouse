@@ -12,21 +12,16 @@ GitHub Archive API
         ▼
 s3://landing/api/github_archive/
   ├── raw/year=.../month=.../day=.../hour=.../*.json.gz
-  └── events_raw                         prod."landing.api.github_archive"
+  └── events_raw                         prod.landing.github_archive_events_raw
         │
-        ▼ dbt: staging → intermediate
-s3://curated/                     prod."curated.github.internal" (private)
-  ├── stg_github_archive__events (view)
-  └── int_github__events_enriched (table)
+        ▼ Trino curation: validate → normalize → idempotent MERGE
+s3://curated/github/                     prod."curated.github"
+  ├── events
+  ├── actors_current
+  └── repositories_current
         │
-        ▼ dbt: GitHub domain marts
-                                  prod."curated.github" (public)
-  ├── fct_github_events
-  ├── dim_github_actors
-  └── dim_github_repositories
-        │
-        ▼ dbt: domain marts
-s3://analytics/                   prod."analytics.engineering"
+        ▼ dbt/analytics: ephemeral staging → intermediate → marts
+s3://analytics/engineering/              prod."analytics.engineering"
   ├── fct_repository_activity_daily
   └── fct_contributor_activity_daily
 ```
@@ -59,11 +54,14 @@ The core data plane exposes only loopback ports:
 - Polaris API/management health: `localhost:8181` / `localhost:8182`
 - Trino: `localhost:8080`
 
-Ingest the previous complete UTC hour and build the dbt project:
+Ingest and curate the previous complete UTC hour, then build the analytics project:
 
 ```bash
 uv run lakehouse ingest github-archive
-uv run dbt build --project-dir dbt_project --profiles-dir dbt_project
+uv run lakehouse curate github
+uv run dbt source freshness --project-dir dbt/analytics --profiles-dir dbt/analytics
+uv run dbt build \
+  --project-dir dbt/analytics --profiles-dir dbt/analytics
 ```
 
 Add the orchestration control plane when you need scheduled deployments:
@@ -82,7 +80,10 @@ Streamlit is then available at `localhost:8501`. Business charts query only publ
 marts; its separate operational metadata page reads Iceberg catalog metadata without redefining
 domain metrics.
 
-Prefect task/flow failures and flow success can be sent to Slack and Gmail using the
+The ingestion deployment runs hourly at minute 15 UTC. A single transformation deployment runs at
+minute 30, curates the corresponding archive hour, validates source freshness, and builds the full
+dbt project without Prefect event sensors. Prefect task/flow failures and flow success can be sent
+to Slack and Gmail using the
 `LAKEHOUSE_NOTIFICATIONS__*` settings documented in
 [pipeline operations](docs/04_pipeline_execution.md). Channels are disabled unless configured.
 
@@ -94,7 +95,7 @@ uv run ruff format --check .
 uv run ruff check .
 uv run pyright
 uv run pytest -m "not integration"
-uv run dbt parse --project-dir dbt_project --profiles-dir dbt_project
+uv run dbt parse --project-dir dbt/analytics --profiles-dir dbt/analytics
 docker compose -f compose.core.yaml config --quiet
 docker compose -f compose.core.yaml -f compose.prefect.yaml config --quiet
 docker compose -f compose.core.yaml -f compose.dashboard.yaml config --quiet

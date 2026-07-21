@@ -23,7 +23,7 @@ jobs:
       - run: uv run ruff check .
       - run: uv run pyright
       - run: uv run pytest -m "not integration"
-      - run: uv run dbt parse --project-dir dbt_project --profiles-dir dbt_project
+      - run: uv run dbt parse --project-dir dbt/analytics --profiles-dir dbt/analytics
       - run: docker compose -f compose.core.yaml config --quiet
       - run: docker compose -f compose.core.yaml -f compose.prefect.yaml config --quiet
       - run: docker compose -f compose.core.yaml -f compose.dashboard.yaml config --quiet

@@ -18,10 +18,10 @@ node_modules/
 .prefect/
 
 # dbt
-dbt_project/target/
-dbt_project/dbt_packages/
-dbt_project/dbt_modules/
-dbt_project/logs/
+dbt/**/target/
+dbt/**/dbt_packages/
+dbt/**/dbt_modules/
+dbt/**/logs/
 
 # License files
 *.license

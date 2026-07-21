@@ -21,6 +21,11 @@ class ContractModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+class PartitionTransformContract(ContractModel):
+    field: Identifier
+    transform: Literal["identity", "day", "hour", "month", "year"]
+
+
 def validate_relative_prefix(value: str) -> str:
     if value.startswith("/") or value.endswith("/") or ".." in value.split("/"):
         raise ValueError("Object prefixes must be normalized relative paths")

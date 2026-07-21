@@ -4,12 +4,14 @@ from mini_lakehouse.contracts.base import ContractModel
 from mini_lakehouse.contracts.catalog import CatalogContract
 from mini_lakehouse.contracts.domains import DomainContract
 from mini_lakehouse.contracts.policies import PolicyContract
+from mini_lakehouse.contracts.products import CuratedProductContract
 from mini_lakehouse.contracts.sources import SourceContract
 
 
 class PlatformContracts(ContractModel):
     catalog: CatalogContract
     sources: tuple[SourceContract, ...]
+    products: tuple[CuratedProductContract, ...]
     domains: tuple[DomainContract, ...]
     policies: tuple[PolicyContract, ...]
 
@@ -17,34 +19,62 @@ class PlatformContracts(ContractModel):
     def validate_references(self) -> "PlatformContracts":
         namespace_paths = {namespace.path for namespace in self.catalog.namespaces}
         source_names = [source.name for source in self.sources]
+        product_names = [product.name for product in self.products]
         domain_names = [domain.name for domain in self.domains]
         policy_keys = [(policy.namespace, policy.name) for policy in self.policies]
         if len(source_names) != len(set(source_names)):
             raise ValueError("Source names must be unique")
+        if len(product_names) != len(set(product_names)):
+            raise ValueError("Curated product names must be unique")
         if len(domain_names) != len(set(domain_names)):
             raise ValueError("Domain names must be unique")
         if len(policy_keys) != len(set(policy_keys)):
             raise ValueError("Policy namespace/name pairs must be unique")
 
+        source_table_identifiers = [
+            source.table_identifier(table.key) for source in self.sources for table in source.tables
+        ]
+        if len(source_table_identifiers) != len(set(source_table_identifiers)):
+            raise ValueError("Landing source table identifiers must be globally unique")
+
         for source in self.sources:
             if source.landing_namespace not in namespace_paths:
                 raise ValueError(f"Source {source.name!r} references an unknown landing namespace")
+        known_sources = set(source_names)
+        for product in self.products:
+            if product.curated_namespace not in namespace_paths:
+                raise ValueError(
+                    f"Curated product {product.name!r} references an unknown curated namespace"
+                )
+            unknown_sources = set(product.upstream_sources) - known_sources
+            if unknown_sources:
+                raise ValueError(
+                    f"Curated product {product.name!r} references unknown sources "
+                    f"{sorted(unknown_sources)!r}"
+                )
+        known_products = set(product_names)
         for domain in self.domains:
             if domain.analytics_namespace not in namespace_paths:
                 raise ValueError(
                     f"Domain {domain.name!r} references an unknown analytics namespace"
                 )
+            unknown_products = set(domain.upstream_products) - known_products
+            if unknown_products:
+                raise ValueError(
+                    f"Domain {domain.name!r} references unknown curated products "
+                    f"{sorted(unknown_products)!r}"
+                )
 
-        source_namespaces = {source.landing_namespace for source in self.sources}
-        landing_leaves = {
+        product_namespaces = {product.curated_namespace for product in self.products}
+        curated_leaves = {
             path
             for path in namespace_paths
-            if path[0] == "landing"
-            and len(path) >= 3
+            if path[0] == "curated"
+            and len(path) >= 2
             and not any(other[:-1] == path for other in namespace_paths)
         }
-        if landing_leaves != source_namespaces:
-            raise ValueError("Every landing source leaf must have exactly one source contract")
+        if curated_leaves != product_namespaces:
+            raise ValueError("Every curated leaf must have exactly one curated product contract")
 
         domain_namespaces = {domain.analytics_namespace for domain in self.domains}
         analytics_domains = {
@@ -85,3 +115,9 @@ class PlatformContracts(ContractModel):
             return next(domain for domain in self.domains if domain.name == name)
         except StopIteration as error:
             raise KeyError(f"Unknown domain: {name}") from error
+
+    def product(self, name: str) -> CuratedProductContract:
+        try:
+            return next(product for product in self.products if product.name == name)
+        except StopIteration as error:
+            raise KeyError(f"Unknown curated product: {name}") from error

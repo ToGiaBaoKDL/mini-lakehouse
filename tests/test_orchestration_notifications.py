@@ -17,7 +17,7 @@ def _notification(
     return RunNotification(
         kind=kind,
         status=status,
-        definition_name="etl_ingest_github_archive_hour",
+        definition_name="el_ingest_github_archive_hour",
         run_name="helpful-otter",
         run_id="task-run-id",
         flow_run_id="flow-run-id",
@@ -58,7 +58,7 @@ def test_slack_task_failure_is_posted_inside_its_flow_thread(
     assert payload["thread_ts"] == "1700000000.456"
     assert payload["reply_broadcast"] is False
     rendered = str(payload["attachments"])
-    assert "etl_ingest_github_archive_hour" in rendered
+    assert "el_ingest_github_archive_hour" in rendered
     assert "archive endpoint returned 503" in rendered
     assert "https://prefect.example.com/runs/flow-run/flow-run-id" in rendered
 

@@ -7,6 +7,7 @@ from mini_lakehouse.contracts.base import (
     ContractName,
     Identifier,
     NamespacePath,
+    PartitionTransformContract,
     validate_relative_prefix,
 )
 from mini_lakehouse.contracts.identifiers import TableIdentifier
@@ -43,12 +44,15 @@ class SourceTableContract(ContractModel):
     name: Identifier
     location_prefix: str
     schema_contract: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
-    partition_fields: tuple[Identifier, ...] = Field(min_length=1)
-    write_mode: Literal["append", "partition_overwrite"]
+    partitioning: tuple[PartitionTransformContract, ...] = Field(min_length=1)
+    write_mode: Literal["append", "checkpoint_overwrite"]
 
     @model_validator(mode="after")
     def validate_location_prefix(self) -> "SourceTableContract":
         validate_relative_prefix(self.location_prefix)
+        partition_fields = [partition.field for partition in self.partitioning]
+        if len(partition_fields) != len(set(partition_fields)):
+            raise ValueError(f"Table {self.name!r} partition fields must be unique")
         return self
 
 
@@ -57,9 +61,8 @@ class SourceContract(ContractModel):
     name: ContractName
     source_type: Literal["api", "rdbms", "stream"]
     owner: ContractName
-    dbt_group: Identifier
     description: str = Field(min_length=1)
-    landing_namespace: NamespacePath = Field(min_length=3)
+    landing_namespace: NamespacePath = Field(min_length=1)
     raw_object_prefix: str
     checkpoint: CheckpointContract
     tables: tuple[SourceTableContract, ...] = Field(min_length=1)
@@ -67,9 +70,8 @@ class SourceContract(ContractModel):
     @model_validator(mode="after")
     def validate_source_boundary(self) -> "SourceContract":
         validate_relative_prefix(self.raw_object_prefix)
-        expected_prefix = ("landing", self.source_type)
-        if self.landing_namespace[:2] != expected_prefix:
-            raise ValueError(f"Source {self.name!r} must live below {'.'.join(expected_prefix)!r}")
+        if self.landing_namespace != ("landing",):
+            raise ValueError(f"Source {self.name!r} must publish in the shared landing namespace")
         source_object_prefix = f"{self.source_type}/{self.name}/"
         if not self.raw_object_prefix.startswith(source_object_prefix):
             raise ValueError(
@@ -82,15 +84,19 @@ class SourceContract(ContractModel):
             raise ValueError(f"Source {self.name!r} table keys and names must be unique")
         if len(locations) != len(set(locations)):
             raise ValueError(f"Source {self.name!r} table locations must be unique")
+        table_name_prefix = f"{self.name.replace('-', '_')}_"
         for table in self.tables:
+            if not table.name.startswith(table_name_prefix):
+                raise ValueError(
+                    f"Source table {table.name!r} must start with {table_name_prefix!r}"
+                )
             if not table.location_prefix.startswith(source_object_prefix):
                 raise ValueError(
                     f"Source {self.name!r} tables must live below {source_object_prefix!r}"
                 )
-            if (
-                table.write_mode == "partition_overwrite"
-                and self.checkpoint.field not in table.partition_fields
-            ):
+            if table.write_mode == "checkpoint_overwrite" and self.checkpoint.field not in {
+                partition.field for partition in table.partitioning
+            }:
                 raise ValueError(
                     f"Table {table.name!r} must partition by checkpoint field "
                     f"{self.checkpoint.field!r} for idempotent overwrite"

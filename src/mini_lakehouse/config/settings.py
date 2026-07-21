@@ -63,8 +63,8 @@ class TrinoSettings(BaseModel):
 
 
 class DbtSettings(BaseModel):
-    project_dir: Path = Path("dbt_project")
-    profiles_dir: Path = Path("dbt_project")
+    project_dir: Path = Path("dbt/analytics")
+    profiles_dir: Path = Path("dbt/analytics")
 
 
 class GithubArchiveSettings(BaseModel):
