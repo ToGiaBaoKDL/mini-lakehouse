@@ -39,10 +39,10 @@ def catalog_contract(
             "storageType": "S3",
             "endpoint": external_endpoint,
             "endpointInternal": internal_endpoint,
-            "pathStyleAccess": settings.environment == "local",
+            "pathStyleAccess": storage.path_style_access,
             "region": storage.region,
-            "stsUnavailable": settings.environment == "local",
-            "kmsUnavailable": settings.environment == "local",
+            "stsUnavailable": storage.sts_unavailable,
+            "kmsUnavailable": storage.kms_unavailable,
             "allowedLocations": [
                 default_base_location,
                 *(storage_uri(settings, tier) for tier in ("landing", "curated", "analytics")),

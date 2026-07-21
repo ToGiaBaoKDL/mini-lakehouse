@@ -1,6 +1,9 @@
 version: 1
 name: engineering
 owner: engineering-analytics
+contact:
+  name: Engineering Analytics
+  email: engineering-analytics@example.com
 business_owner: engineering
 dbt_group: engineering_analytics
 description: Consumer-facing engineering activity metrics.

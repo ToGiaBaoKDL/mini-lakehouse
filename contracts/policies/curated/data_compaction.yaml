@@ -1,0 +1,18 @@
+version: 1
+name: mlh-curated-compact-data-files
+namespace: [curated]
+owner: data-platform
+policy_type: system.data-compaction
+description: Compact only recent partitions of the canonical GitHub event fact.
+content:
+  version: "2025-02-03"
+  enable: true
+  config:
+    target_file_size_bytes: 134217728
+execution:
+  partition_field: event_date_utc
+  partition_type: date
+  lookback_days: 7
+targets:
+  - type: table-like
+    path: [curated, github, events]

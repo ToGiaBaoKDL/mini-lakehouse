@@ -1,12 +1,19 @@
 {{
     config(
-        on_table_exists='replace',
-        properties=analytics_iceberg_properties('month(activity_date)')
+        properties=analytics_iceberg_properties('engineering', 'month(activity_date)')
     )
 }}
 
 with events as (
-    select *
+    select
+        event_date_utc,
+        actor_id,
+        repository_id,
+        push_commit_count,
+        is_push_event,
+        is_pull_request_event,
+        is_issue_event,
+        is_issue_comment_event
     from {{ ref('int_engineering__events_classified') }}
     where actor_id is not null
     {% if is_incremental() %}

@@ -79,7 +79,7 @@ def _load_collection[ContractT: BaseModel](
     adapter: TypeAdapter[ContractT],
 ) -> tuple[ContractT, ...]:
     directory = root / folder
-    paths = sorted(directory.glob("*.yaml"))
+    paths = sorted(directory.rglob("*.yaml"))
     if not paths:
         raise ValueError(f"Contract directory contains no YAML files: {directory}")
     contracts: list[ContractT] = []

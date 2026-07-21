@@ -22,6 +22,7 @@ from orchestration.utils.scheduling import resolve_archive_hour
 
 @task(
     name="tl_curate_github_hour",
+    task_run_name="curate-github-{source_hour}",
     retries=1,
     retry_delay_seconds=CURATION_RETRY_DELAY_SECONDS,
     on_failure=[notify_task_failure],
@@ -33,6 +34,7 @@ def curate_github_hour(source_hour: datetime) -> dict[str, Any]:
 
 @task(
     name="tl_build_github_analytics",
+    task_run_name="build-github-analytics",
     retries=1,
     retry_delay_seconds=DBT_RETRY_DELAY_SECONDS,
     on_failure=[notify_task_failure],

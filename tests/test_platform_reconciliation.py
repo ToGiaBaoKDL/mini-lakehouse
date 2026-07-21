@@ -1,6 +1,6 @@
 import copy
 import json
-from unittest.mock import create_autospec
+from unittest.mock import call, create_autospec
 
 import requests
 from pyiceberg.catalog import Catalog
@@ -13,6 +13,11 @@ from mini_lakehouse.platform.access import ensure_catalog_role_grants
 from mini_lakehouse.platform.catalog import catalog_contract, ensure_catalog
 from mini_lakehouse.platform.namespaces import ensure_namespaces, namespace_contract
 from mini_lakehouse.platform.polaris import PolarisManagementClient, PolarisPolicyClient
+from mini_lakehouse.platform.policies import PolicyIdentifier
+from mini_lakehouse.platform.policy_reconciliation import (
+    apply_policy_prune_plan,
+    build_policy_prune_plan,
+)
 
 
 def _response(status_code: int, payload: object | None = None) -> requests.Response:
@@ -197,9 +202,9 @@ def test_policy_reconcile_does_not_update_unchanged_content() -> None:
     result = client.reconcile_policy(spec)
 
     assert result.action == "unchanged"
-    assert result.ensured_mappings == 3
+    assert result.ensured_mappings == len(spec.targets)
     session.post.assert_not_called()
-    assert session.put.call_count == 3
+    assert session.put.call_count == len(spec.targets)
 
 
 def test_policy_reconcile_updates_drift_with_the_current_server_version() -> None:
@@ -254,4 +259,27 @@ def test_policy_reconcile_handles_a_concurrent_create_idempotently() -> None:
     result = PolarisPolicyClient(session, settings, "token").reconcile_policy(spec)
 
     assert result.action == "unchanged"
-    assert session.put.call_count == 3
+    assert session.put.call_count == len(spec.targets)
+
+
+def test_policy_prune_plan_removes_only_reserved_stale_policies() -> None:
+    contracts = load_contracts()
+    desired = contracts.policies[0]
+    client = create_autospec(PolarisPolicyClient, instance=True)
+    client.list_policies.return_value = [
+        PolicyIdentifier(namespace=desired.namespace, name=desired.name),
+        PolicyIdentifier(namespace=("analytics",), name="mlh-stale-policy"),
+        PolicyIdentifier(namespace=("curated",), name="compact-data-files"),
+        PolicyIdentifier(namespace=("analytics",), name="compact-data-files"),
+        PolicyIdentifier(namespace=("curated",), name="team-owned-policy"),
+    ]
+
+    plan = build_policy_prune_plan(client, contracts)
+
+    assert [(item.namespace, item.name) for item in plan] == [
+        (("analytics",), "mlh-stale-policy"),
+    ]
+    apply_policy_prune_plan(client, plan)
+    assert client.delete_policy.call_args_list == [
+        call(("analytics",), "mlh-stale-policy"),
+    ]

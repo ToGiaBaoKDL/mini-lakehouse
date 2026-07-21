@@ -16,17 +16,17 @@ def iceberg_catalog_properties(settings: Settings) -> dict[str, str]:
         "scope": settings.polaris.scope,
         "oauth2-server-uri": settings.polaris.oauth2_server_uri,
         "s3.region": storage.region,
-        "s3.path-style-access": str(settings.environment == "local").lower(),
+        "s3.path-style-access": str(storage.path_style_access).lower(),
     }
     if storage.endpoint_url:
         properties["s3.endpoint"] = storage.endpoint_url
     access_key = storage.secret_value(storage.access_key)
     secret_key = storage.secret_value(storage.secret_key)
-    if access_key:
+    if storage.iceberg_access_delegation == "vended-credentials":
+        properties["header.X-Iceberg-Access-Delegation"] = "vended-credentials"
+    elif access_key and secret_key:
         properties["s3.access-key-id"] = access_key
-    if secret_key:
         properties["s3.secret-access-key"] = secret_key
-    if access_key and secret_key:
         # PyIceberg otherwise requests vended credentials by default. Static
         # storage credentials and delegation are mutually exclusive modes; an
         # empty explicit header prevents that default for MinIO/local and other

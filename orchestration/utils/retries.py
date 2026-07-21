@@ -17,7 +17,10 @@ def retry_transient_ingestion_error(_task: Any, _task_run: Any, state: Any) -> b
     try:
         state.result()
     except ArchiveNotPublishedError:
-        return False
+        # GitHub Archive occasionally publishes after the minute-15 deployment starts.
+        # A 404 is therefore transient at the task boundary; the bounded Prefect retry
+        # schedule handles it without teaching the HTTP client to retry every missing URL.
+        return True
     except (RequestsConnectionError, Timeout):
         return True
     except HTTPError as error:

@@ -13,6 +13,10 @@ class StorageSettings(BaseModel):
     access_key: SecretStr | None = SecretStr("minioadmin")
     secret_key: SecretStr | None = SecretStr("minioadmin")
     region: str = "us-east-1"
+    path_style_access: bool = True
+    iceberg_access_delegation: Literal["none", "vended-credentials"] = "none"
+    sts_unavailable: bool = True
+    kms_unavailable: bool = True
     landing_uri: str = "s3://landing"
     curated_uri: str = "s3://curated"
     analytics_uri: str = "s3://analytics"
@@ -31,6 +35,17 @@ class StorageSettings(BaseModel):
             buckets.append(parsed.netloc)
         if len(set(buckets)) != len(buckets):
             raise ValueError("landing, curated, and analytics must use distinct buckets")
+        credentials = (self.access_key, self.secret_key)
+        if any(value is None for value in credentials) and any(
+            value is not None for value in credentials
+        ):
+            raise ValueError("Storage access_key and secret_key must be configured together")
+        if self.iceberg_access_delegation == "vended-credentials" and all(
+            value is not None for value in credentials
+        ):
+            raise ValueError(
+                "Static storage credentials and Iceberg credential vending are mutually exclusive"
+            )
         return self
 
     def secret_value(self, value: SecretStr | None) -> str | None:
@@ -131,6 +146,11 @@ class Settings(BaseSettings):
         storage_secret_key = self.storage.secret_value(self.storage.secret_key)
         if storage_access_key == "minioadmin" or storage_secret_key == "minioadmin":
             raise ValueError("Production cannot use the local MinIO root credentials")
+        if self.storage.endpoint_url in {
+            "http://localhost:9000",
+            "http://object-store:9000",
+        }:
+            raise ValueError("Production cannot use the local object-store endpoint")
         if self.polaris.credential.get_secret_value() == "root:secretpassword":
             raise ValueError("Production cannot use the local Polaris root credential")
         return self

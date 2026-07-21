@@ -107,7 +107,7 @@ services:
       polaris:
         condition: service_healthy
     env_file:
-      - ./infra/env/lakehouse.container.env
+      - ./infra/config/lakehouse.container.env
     environment:
       LAKEHOUSE_STORAGE__ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
       LAKEHOUSE_STORAGE__SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
@@ -124,6 +124,10 @@ services:
     environment:
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      S3_ENDPOINT: http://object-store:9000
+      S3_REGION: ${LAKEHOUSE_STORAGE__REGION:-us-east-1}
+      S3_PATH_STYLE_ACCESS: ${LAKEHOUSE_STORAGE__PATH_STYLE_ACCESS:-true}
+      ICEBERG_VENDED_CREDENTIALS_ENABLED: "false"
       POLARIS_CREDENTIAL: ${POLARIS_ROOT_CLIENT_ID:-root}:${POLARIS_ROOT_CLIENT_SECRET:-secretpassword}
     ports:
       - "127.0.0.1:8080:8080"

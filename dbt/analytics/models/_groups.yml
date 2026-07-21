@@ -4,9 +4,9 @@ groups:
   - name: data_platform
     owner:
       name: Data Platform
-      email: data-platform@gmail.com
+      email: data-platform@example.com
 
   - name: engineering_analytics
     owner:
       name: Engineering Analytics
-      email: engineering-analytics@gmail.com
+      email: engineering-analytics@example.com

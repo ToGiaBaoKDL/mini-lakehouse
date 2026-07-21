@@ -3,6 +3,7 @@ from collections.abc import Callable, Sequence
 from pydantic import BaseModel, ConfigDict
 from pyiceberg.catalog import Catalog
 
+from mini_lakehouse.contracts import PlatformContracts
 from mini_lakehouse.platform.polaris import PolarisPolicyClient
 from mini_lakehouse.platform.policies import maintenance_statements
 from mini_lakehouse.storage.iceberg import discover_tables
@@ -35,13 +36,16 @@ def build_maintenance_plan(
     catalog: Catalog,
     policy_client: PolarisPolicyClient,
     trino_catalog: str,
+    contracts: PlatformContracts,
 ) -> list[MaintenancePlanItem]:
+    policy_contracts = {(policy.namespace, policy.name): policy for policy in contracts.policies}
     plan: list[MaintenancePlanItem] = []
     for table in sorted(discover_tables(catalog), key=lambda item: item.iceberg):
         statements = maintenance_statements(
             table,
             trino_catalog,
             policy_client.applicable_policies(table),
+            policy_contracts,
         )
         if statements:
             plan.append(

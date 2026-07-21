@@ -3,6 +3,8 @@ from typing import Annotated, Literal
 from pydantic import Field, model_validator
 
 from mini_lakehouse.contracts.base import (
+    ColumnContract,
+    ContactContract,
     ContractModel,
     ContractName,
     Identifier,
@@ -44,15 +46,31 @@ class SourceTableContract(ContractModel):
     name: Identifier
     location_prefix: str
     schema_contract: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
+    columns: tuple[ColumnContract, ...] = Field(min_length=1)
     partitioning: tuple[PartitionTransformContract, ...] = Field(min_length=1)
     write_mode: Literal["append", "checkpoint_overwrite"]
 
     @model_validator(mode="after")
     def validate_location_prefix(self) -> "SourceTableContract":
         validate_relative_prefix(self.location_prefix)
+        column_names = [column.name for column in self.columns]
+        field_ids = [column.field_id for column in self.columns]
+        if len(column_names) != len(set(column_names)):
+            raise ValueError(f"Table {self.name!r} column names must be unique")
+        if len(field_ids) != len(set(field_ids)) or any(field_id < 1 for field_id in field_ids):
+            raise ValueError(f"Table {self.name!r} field IDs must be unique positive integers")
         partition_fields = [partition.field for partition in self.partitioning]
         if len(partition_fields) != len(set(partition_fields)):
             raise ValueError(f"Table {self.name!r} partition fields must be unique")
+        unknown_partition_fields = set(partition_fields) - set(column_names)
+        if unknown_partition_fields:
+            raise ValueError(
+                f"Table {self.name!r} partitions by unknown columns "
+                f"{sorted(unknown_partition_fields)!r}"
+            )
+        partition_names = [partition.name for partition in self.partitioning if partition.name]
+        if len(partition_names) != len(set(partition_names)):
+            raise ValueError(f"Table {self.name!r} partition names must be unique")
         return self
 
 
@@ -61,6 +79,7 @@ class SourceContract(ContractModel):
     name: ContractName
     source_type: Literal["api", "rdbms", "stream"]
     owner: ContractName
+    contact: ContactContract
     description: str = Field(min_length=1)
     landing_namespace: NamespacePath = Field(min_length=1)
     raw_object_prefix: str

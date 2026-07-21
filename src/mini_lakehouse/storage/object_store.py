@@ -24,14 +24,17 @@ class FsspecObjectStore:
     ) -> None:
         self._settings = settings
         options: dict[str, Any] = {
-            "key": settings.secret_value(settings.access_key),
-            "secret": settings.secret_value(settings.secret_key),
-            "client_kwargs": {
-                "endpoint_url": settings.endpoint_url,
-                "region_name": settings.region,
+            "client_kwargs": {"region_name": settings.region},
+            "config_kwargs": {
+                "s3": {"addressing_style": "path" if settings.path_style_access else "virtual"}
             },
-            "config_kwargs": {"s3": {"addressing_style": "path"}},
         }
+        if settings.endpoint_url is not None:
+            options["client_kwargs"]["endpoint_url"] = settings.endpoint_url
+        access_key = settings.secret_value(settings.access_key)
+        secret_key = settings.secret_value(settings.secret_key)
+        if access_key is not None and secret_key is not None:
+            options.update({"key": access_key, "secret": secret_key})
         self._filesystem = filesystem or fsspec.filesystem(settings.backend, **options)
 
     def _path(self, uri: str) -> str:

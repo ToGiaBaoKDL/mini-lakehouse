@@ -2,6 +2,9 @@ version: 1
 name: github_archive
 source_type: api
 owner: data-platform
+contact:
+  name: Data Platform
+  email: data-platform@example.com
 description: Public GitHub events published as immutable hourly archives.
 landing_namespace: [landing]
 raw_object_prefix: api/github_archive/raw
@@ -15,7 +18,22 @@ tables:
     name: github_archive_events_raw
     location_prefix: api/github_archive/events_raw
     schema_contract: github_archive.events_raw.v1
+    columns:
+      - {field_id: 1, name: event_id, data_type: string, required: true, description: Stable GitHub event identifier.}
+      - {field_id: 2, name: event_type, data_type: string, required: true, description: GitHub event type.}
+      - {field_id: 3, name: actor_id, data_type: long, required: false, description: GitHub actor identifier when present.}
+      - {field_id: 4, name: actor_login, data_type: string, required: false, description: Actor login observed in the archive.}
+      - {field_id: 5, name: repository_id, data_type: long, required: false, description: GitHub repository identifier when present.}
+      - {field_id: 6, name: repository_name, data_type: string, required: false, description: Repository full name observed in the archive.}
+      - {field_id: 7, name: payload_json, data_type: string, required: true, description: Canonical JSON serialization of the event payload.}
+      - {field_id: 8, name: is_public, data_type: boolean, required: true, description: Whether GitHub marked the event public.}
+      - {field_id: 9, name: occurred_at, data_type: timestamptz, required: true, description: Event occurrence timestamp.}
+      - {field_id: 10, name: source_file, data_type: string, required: true, description: Immutable GitHub Archive filename.}
+      - {field_id: 11, name: source_hour, data_type: timestamptz, required: true, description: UTC archive checkpoint hour.}
+      - {field_id: 12, name: ingested_at, data_type: timestamptz, required: true, description: Landing ingestion timestamp.}
+      - {field_id: 13, name: raw_event_json, data_type: string, required: true, description: Original immutable event JSON.}
     partitioning:
       - field: source_hour
         transform: hour
+        name: archive_hour
     write_mode: checkpoint_overwrite

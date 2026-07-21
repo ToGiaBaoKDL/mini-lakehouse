@@ -1,4 +1,5 @@
 import json
+from collections.abc import Mapping
 from typing import Any
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
@@ -6,6 +7,7 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 from mini_lakehouse.contracts import TableIdentifier
 from mini_lakehouse.contracts.policies import (
     DataCompactionContent,
+    DataCompactionPolicyContract,
     MetadataCompactionContent,
     OrphanFileRemovalContent,
     SnapshotExpiryContent,
@@ -28,6 +30,8 @@ class PolarisPolicy(BaseModel):
     content: str | dict[str, Any]
     version: int = Field(default=0, ge=0)
     inheritable: bool = False
+    inherited: bool = False
+    namespace: tuple[str, ...] = ()
 
     @field_validator("content", mode="before")
     @classmethod
@@ -59,6 +63,23 @@ class ApplicablePoliciesResponse(BaseModel):
     )
 
 
+class PolicyIdentifier(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    namespace: tuple[str, ...]
+    name: str
+
+
+class ListPoliciesResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    identifiers: list[PolicyIdentifier] = Field(default_factory=list)
+    next_page_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("next-page-token", "nextPageToken", "next_page_token"),
+    )
+
+
 def _data_size(value: int) -> str:
     mebibyte = 1024 * 1024
     if value % mebibyte == 0:
@@ -70,6 +91,7 @@ def maintenance_statements(
     table: TableIdentifier,
     catalog: str,
     policies: list[PolarisPolicy],
+    policy_contracts: Mapping[tuple[tuple[str, ...], str], object] | None = None,
 ) -> tuple[str, ...]:
     applicable = {
         policy.policy_type: policy
@@ -92,8 +114,19 @@ def maintenance_statements(
             parsed = DataCompactionContent.model_validate(content)
             if parsed.enable:
                 threshold = _data_size(parsed.config.target_file_size_bytes)
+                contract = (policy_contracts or {}).get((policy.namespace, policy.name))
+                if not isinstance(contract, DataCompactionPolicyContract):
+                    raise ValueError(
+                        f"Data compaction policy {policy.name!r} has no typed execution contract"
+                    )
+                execution = contract.execution
+                boundary = (
+                    "current_date" if execution.partition_type == "date" else "current_timestamp"
+                )
                 statements.append(
-                    f"ALTER TABLE {relation} EXECUTE optimize(file_size_threshold => '{threshold}')"
+                    f"ALTER TABLE {relation} EXECUTE optimize(file_size_threshold => "
+                    f"'{threshold}') WHERE \"{execution.partition_field}\" >= {boundary} "
+                    f"- INTERVAL '{execution.lookback_days}' DAY"
                 )
         elif policy_type == "system.metadata-compaction":
             parsed = MetadataCompactionContent.model_validate(content)

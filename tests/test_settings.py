@@ -38,6 +38,11 @@ def test_storage_rejects_an_uninstalled_backend() -> None:
         StorageSettings.model_validate({"backend": "gcs"})
 
 
+def test_storage_rejects_static_and_vended_iceberg_credentials_together() -> None:
+    with pytest.raises(ValidationError, match="mutually exclusive"):
+        StorageSettings(iceberg_access_delegation="vended-credentials")
+
+
 def test_polaris_credential_requires_a_complete_pair() -> None:
     with pytest.raises(ValidationError, match="client_id:client_secret"):
         PolarisSettings.model_validate({"credential": "missing-secret"})

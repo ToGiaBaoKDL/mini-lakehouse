@@ -1,0 +1,18 @@
+version: 1
+name: mlh-landing-compact-data-files
+namespace: [landing]
+owner: data-platform
+policy_type: system.data-compaction
+description: Compact only recent GitHub Archive landing partitions.
+content:
+  version: "2025-02-03"
+  enable: true
+  config:
+    target_file_size_bytes: 134217728
+execution:
+  partition_field: source_hour
+  partition_type: timestamptz
+  lookback_days: 2
+targets:
+  - type: table-like
+    path: [landing, github_archive_events_raw]

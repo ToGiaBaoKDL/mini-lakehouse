@@ -29,10 +29,11 @@ reconcilers. It performs only these normal operations:
   concurrency; reject immutable catalog name/type drift.
 - Update drifted namespace properties or policy content.
 - Idempotently attach every desired policy mapping.
+- Delete stale repository-managed `mlh-` policies with `detach-all` after producing a prune plan.
 - Refuse catalog drift that cannot be updated safely in place.
 
-It never drops a catalog, namespace, table, policy, object, or mapping. Catalog creation handles a
-concurrent creator by reading and validating the winning state. Catalog and policy updates use
+It never drops a catalog, namespace, table, object, or team-owned policy. Catalog creation handles
+a concurrent creator by reading and validating the winning state. Catalog and policy updates use
 Polaris version checks and retry one concurrent update after re-reading server state.
 
 Run the bootstrap through the core Compose module:
@@ -50,24 +51,22 @@ Running bootstrap again with unchanged contracts must produce no catalog, role-g
 or policy-content mutation. Mapping `PUT` requests remain safe and idempotent by Polaris API
 contract.
 
-## Removing a policy attachment
+## Changing policy targets
 
-Polaris currently exposes attach/detach operations but no endpoint that lists all direct mappings
-for one policy. Therefore removing `targets` from YAML is not treated as proof that an existing
-mapping should be deleted.
+Polaris exposes attach/detach operations but not a complete direct-mapping inventory for one
+policy. Its current server may also report a missing mapping as HTTP 500. Bootstrap therefore does
+not issue speculative detach calls across every table.
 
-Use a reviewed migration in this order:
+Use replacement semantics instead:
 
-1. Record the policy namespace/name and exact target from the current contract.
-2. Send the Polaris detach request (`POST` to the policy `/mappings` endpoint) with that exact
-   target and verify a `204` response.
-3. Query `applicable-policies` on the affected resource and confirm the effective policy is the
-   intended inherited/overridden policy.
-4. Remove the target from YAML and run `lakehouse validate`.
-5. Apply bootstrap twice and verify the second run is unchanged.
+1. Give the changed target set a new descriptive `mlh-<tier>-...` policy name.
+2. Keep only the new policy contract and run `lakehouse validate`.
+3. Review the prune plan: only absent policies with the reserved `mlh-` prefix are eligible.
+4. Apply bootstrap. It deletes stale managed policies with `detach-all`, then creates/attaches the
+   replacement; plan a brief policy transition window for this reviewed operation.
+5. Query `applicable-policies` on affected tables and apply bootstrap again to verify a no-op.
 
-Do not make normal bootstrap infer destructive detach operations by scanning inherited policy
-results; inheritance does not provide a complete direct-mapping inventory.
+Never use the `mlh-` prefix for manually/team-managed policies.
 
 ## Rollback
 

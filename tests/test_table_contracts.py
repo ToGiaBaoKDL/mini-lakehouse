@@ -35,7 +35,7 @@ def test_github_archive_partition_spec_uses_hour_transform() -> None:
 
     assert field.source_id == 11
     assert field.field_id == 1000
-    assert field.name == "source_hour_hour"
+    assert field.name == "archive_hour"
     assert isinstance(field.transform, HourTransform)
 
 

@@ -1,0 +1,14 @@
+version: 1
+name: mlh-analytics-expire-snapshots
+namespace: [analytics]
+owner: analytics-platform
+policy_type: system.snapshot-expiry
+description: Retain analytics snapshots for fourteen days.
+content:
+  version: "2025-02-03"
+  enable: true
+  config:
+    max_snapshot_age_days: 14
+targets:
+  - type: namespace
+    path: [analytics]

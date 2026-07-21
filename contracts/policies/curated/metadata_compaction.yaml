@@ -1,18 +1,12 @@
 version: 1
-name: compact-metadata
+name: mlh-curated-compact-metadata
 namespace: [curated]
 owner: data-platform
 policy_type: system.metadata-compaction
-description: Rewrite Iceberg manifests for efficient planning.
-
+description: Rewrite curated manifests to keep planning efficient.
 content:
   version: "2025-02-03"
   enable: true
-
 targets:
   - type: namespace
-    path: [landing]
-  - type: namespace
     path: [curated]
-  - type: namespace
-    path: [analytics]

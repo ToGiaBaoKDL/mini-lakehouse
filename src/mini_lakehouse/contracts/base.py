@@ -13,6 +13,7 @@ type ContractName = Annotated[
 ]
 type StorageTier = Literal["landing", "curated", "analytics"]
 type NamespacePath = tuple[Identifier, ...]
+type LogicalType = Literal["string", "long", "boolean", "timestamptz", "date"]
 
 _SAFE_PREFIX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_./=-]*$")
 
@@ -21,9 +22,26 @@ class ContractModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+class ContactContract(ContractModel):
+    name: str
+    email: Annotated[
+        str,
+        StringConstraints(pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$"),
+    ]
+
+
+class ColumnContract(ContractModel):
+    field_id: int
+    name: Identifier
+    data_type: LogicalType
+    required: bool
+    description: str
+
+
 class PartitionTransformContract(ContractModel):
     field: Identifier
     transform: Literal["identity", "day", "hour", "month", "year"]
+    name: Identifier | None = None
 
 
 def validate_relative_prefix(value: str) -> str:

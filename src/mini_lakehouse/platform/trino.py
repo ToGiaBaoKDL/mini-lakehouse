@@ -45,10 +45,13 @@ class TrinoExecutor:
         parameters: Sequence[Any] | None = None,
     ) -> QueryResult:
         cursor = self._connection.cursor()
-        if parameters is None:
-            cursor.execute(statement)
-        else:
-            cursor.execute(statement, params=parameters)
-        rows = tuple(tuple(row) for row in cursor.fetchall())
-        columns = tuple(description[0] for description in cursor.description or ())
+        try:
+            if parameters is None:
+                cursor.execute(statement)
+            else:
+                cursor.execute(statement, params=parameters)
+            rows = tuple(tuple(row) for row in cursor.fetchall())
+            columns = tuple(description[0] for description in cursor.description or ())
+        finally:
+            cursor.close()
         return QueryResult(columns=columns, rows=rows)

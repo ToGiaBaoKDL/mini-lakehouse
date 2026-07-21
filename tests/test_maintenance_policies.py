@@ -13,7 +13,13 @@ from mini_lakehouse.platform.policies import (
 )
 
 
-def _policies() -> list[PolarisPolicy]:
+def _target_applies(table: TableIdentifier, target_type: str, path: tuple[str, ...]) -> bool:
+    if target_type == "table-like":
+        return path == table.iceberg
+    return table.namespace[: len(path)] == path
+
+
+def _policies(table: TableIdentifier) -> list[PolarisPolicy]:
     return [
         PolarisPolicy.model_validate(
             {
@@ -23,13 +29,19 @@ def _policies() -> list[PolarisPolicy]:
                 "content": policy_content_json(spec),
                 "version": 1,
                 "inheritable": True,
+                "namespace": spec.namespace,
             }
         )
         for spec in load_contracts().policies
+        if any(_target_applies(table, target.type, target.path) for target in spec.targets)
     ]
 
 
-def test_maintenance_contract_is_inherited_from_data_tier_namespaces() -> None:
+def _policy_contracts() -> dict[tuple[tuple[str, ...], str], object]:
+    return {(policy.namespace, policy.name): policy for policy in load_contracts().policies}
+
+
+def test_maintenance_contract_is_isolated_by_lifecycle_tier() -> None:
     specs = load_contracts().policies
 
     assert {spec.policy_type for spec in specs} == {
@@ -38,36 +50,49 @@ def test_maintenance_contract_is_inherited_from_data_tier_namespaces() -> None:
         "system.snapshot-expiry",
         "system.orphan-file-removal",
     }
-    assert all(spec.namespace == ("curated",) for spec in specs)
+    assert len(specs) == 12
+    assert {spec.namespace for spec in specs} == {
+        ("landing",),
+        ("curated",),
+        ("analytics",),
+    }
     assert all(
-        tuple(target.path for target in spec.targets)
-        == (("landing",), ("curated",), ("analytics",))
+        all(not target.path or target.path[0] == spec.namespace[0] for target in spec.targets)
         for spec in specs
     )
 
 
 def test_polaris_policies_compile_to_safe_trino_maintenance() -> None:
-    table = TableIdentifier(("analytics", "engineering"), "events_daily")
+    table = TableIdentifier(("analytics", "engineering"), "fct_repository_activity_daily")
 
-    assert maintenance_statements(table, "prod", _policies()) == (
-        'ALTER TABLE "prod"."analytics.engineering"."events_daily" '
-        "EXECUTE optimize(file_size_threshold => '128MB')",
-        'ALTER TABLE "prod"."analytics.engineering"."events_daily" EXECUTE optimize_manifests',
-        'ALTER TABLE "prod"."analytics.engineering"."events_daily" '
-        "EXECUTE expire_snapshots(retention_threshold => '7d')",
-        'ALTER TABLE "prod"."analytics.engineering"."events_daily" '
+    assert maintenance_statements(
+        table,
+        "prod",
+        _policies(table),
+        _policy_contracts(),
+    ) == (
+        'ALTER TABLE "prod"."analytics.engineering"."fct_repository_activity_daily" '
+        "EXECUTE optimize(file_size_threshold => '128MB') WHERE \"activity_date\" "
+        ">= current_date - INTERVAL '30' DAY",
+        'ALTER TABLE "prod"."analytics.engineering"."fct_repository_activity_daily" '
+        "EXECUTE optimize_manifests",
+        'ALTER TABLE "prod"."analytics.engineering"."fct_repository_activity_daily" '
+        "EXECUTE expire_snapshots(retention_threshold => '14d')",
+        'ALTER TABLE "prod"."analytics.engineering"."fct_repository_activity_daily" '
         "EXECUTE remove_orphan_files(retention_threshold => '30d')",
     )
 
 
 def test_duplicate_policy_type_is_rejected() -> None:
-    policies = _policies()
+    table = TableIdentifier(("curated", "github"), "events")
+    policies = _policies(table)
 
     with pytest.raises(ValueError, match="Multiple maintenance policies"):
         maintenance_statements(
-            TableIdentifier(("curated", "github"), "events"),
+            table,
             "prod",
             [*policies, policies[0]],
+            _policy_contracts(),
         )
 
 
@@ -82,15 +107,17 @@ class _Catalog:
 
     def list_tables(self, namespace: tuple[str, ...]) -> list[tuple[str, ...]]:
         tables: dict[tuple[str, ...], list[tuple[str, ...]]] = {
-            ("curated", "github"): [("curated", "github", "github_events")],
-            ("analytics", "engineering"): [("analytics", "engineering", "events_daily")],
+            ("curated", "github"): [("curated", "github", "events")],
+            ("analytics", "engineering"): [
+                ("analytics", "engineering", "fct_repository_activity_daily")
+            ],
         }
         return tables.get(namespace, [])
 
 
 class _PolicyClient:
-    def applicable_policies(self, _table: TableIdentifier) -> list[PolarisPolicy]:
-        return _policies()
+    def applicable_policies(self, table: TableIdentifier) -> list[PolarisPolicy]:
+        return _policies(table)
 
 
 def test_maintenance_plan_discovers_nested_tables_without_an_allowlist() -> None:
@@ -98,10 +125,11 @@ def test_maintenance_plan_discovers_nested_tables_without_an_allowlist() -> None
         cast(Catalog, _Catalog()),
         cast(PolarisPolicyClient, _PolicyClient()),
         "prod",
+        load_contracts(),
     )
 
     assert [item.table for item in plan] == [
-        '"prod"."analytics.engineering"."events_daily"',
-        '"prod"."curated.github"."github_events"',
+        '"prod"."analytics.engineering"."fct_repository_activity_daily"',
+        '"prod"."curated.github"."events"',
     ]
     assert all(len(item.statements) == 4 for item in plan)

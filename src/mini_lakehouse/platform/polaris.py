@@ -11,7 +11,9 @@ from mini_lakehouse.contracts import TableIdentifier
 from mini_lakehouse.contracts.policies import PolicyContract, policy_content_json
 from mini_lakehouse.platform.policies import (
     ApplicablePoliciesResponse,
+    ListPoliciesResponse,
     PolarisPolicy,
+    PolicyIdentifier,
 )
 
 
@@ -19,7 +21,9 @@ def create_retry_session() -> requests.Session:
     retry = Retry(
         total=12,
         backoff_factor=1,
-        status_forcelist=(429, 500, 502, 503, 504),
+        # Do not blanket-retry 500: Polaris may use it for deterministic policy
+        # errors such as POLICY_MAPPING_NOT_FOUND. Those must fail fast.
+        status_forcelist=(429, 502, 503, 504),
         allowed_methods=frozenset({"GET", "POST", "PUT"}),
         respect_retry_after_header=True,
     )
@@ -158,6 +162,38 @@ class PolarisPolicyClient:
         if not isinstance(policy, dict):
             raise RuntimeError("Polaris did not return a policy object")
         return PolarisPolicy.model_validate(policy)
+
+    def list_policies(self, namespace: tuple[str, ...]) -> list[PolicyIdentifier]:
+        identifiers: list[PolicyIdentifier] = []
+        page_token: str | None = None
+        seen_tokens: set[str] = set()
+        while True:
+            params = {"page-token": page_token} if page_token is not None else None
+            response = self._session.get(
+                self._policies_url(namespace),
+                params=params,
+                headers=self._headers,
+                timeout=15,
+            )
+            response.raise_for_status()
+            page = ListPoliciesResponse.model_validate(response.json())
+            identifiers.extend(page.identifiers)
+            page_token = page.next_page_token
+            if page_token is None:
+                return identifiers
+            if page_token in seen_tokens:
+                raise RuntimeError("Polaris returned a repeated policy page token")
+            seen_tokens.add(page_token)
+
+    def delete_policy(self, namespace: tuple[str, ...], name: str) -> None:
+        response = self._session.delete(
+            f"{self._policies_url(namespace)}/{quote(name, safe='')}",
+            params={"detach-all": "true"},
+            headers=self._headers,
+            timeout=15,
+        )
+        if response.status_code != 404:
+            response.raise_for_status()
 
     def reconcile_policy(self, spec: PolicyContract) -> PolicyReconcileResult:
         collection_url = self._policies_url(spec.namespace)

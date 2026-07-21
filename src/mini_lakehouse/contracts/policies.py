@@ -21,6 +21,12 @@ class DataCompactionContent(ContractModel):
     config: DataCompactionConfig
 
 
+class BoundedOptimizeExecution(ContractModel):
+    partition_field: Identifier
+    partition_type: Literal["date", "timestamptz"]
+    lookback_days: int = Field(ge=1, le=365)
+
+
 class MetadataCompactionContent(ContractModel):
     version: Literal["2025-02-03"]
     enable: bool
@@ -75,6 +81,7 @@ class PolicyContractBase(ContractModel):
 class DataCompactionPolicyContract(PolicyContractBase):
     policy_type: Literal["system.data-compaction"]
     content: DataCompactionContent
+    execution: BoundedOptimizeExecution
 
 
 class MetadataCompactionPolicyContract(PolicyContractBase):

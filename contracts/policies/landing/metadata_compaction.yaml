@@ -1,0 +1,12 @@
+version: 1
+name: mlh-landing-compact-metadata
+namespace: [landing]
+owner: data-platform
+policy_type: system.metadata-compaction
+description: Rewrite landing manifests to keep planning bounded.
+content:
+  version: "2025-02-03"
+  enable: true
+targets:
+  - type: namespace
+    path: [landing]

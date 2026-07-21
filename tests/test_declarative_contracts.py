@@ -108,6 +108,10 @@ def test_registry_accepts_a_second_source_family_without_core_code_changes() -> 
             "name": "warehouse_raw",
             "source_type": "rdbms",
             "owner": "warehouse-source-team",
+            "contact": {
+                "name": "Warehouse Source Team",
+                "email": "warehouse-source-team@example.com",
+            },
             "description": "Fixture proving source-family extensibility.",
             "landing_namespace": ["landing"],
             "raw_object_prefix": "rdbms/warehouse_raw/raw",
@@ -118,6 +122,15 @@ def test_registry_accepts_a_second_source_family_without_core_code_changes() -> 
                     "name": "warehouse_raw_orders",
                     "location_prefix": "rdbms/warehouse_raw/orders",
                     "schema_contract": "warehouse.orders.v1",
+                    "columns": [
+                        {
+                            "field_id": 1,
+                            "name": "updated_at",
+                            "data_type": "timestamptz",
+                            "required": True,
+                            "description": "Source update checkpoint.",
+                        }
+                    ],
                     "partitioning": [{"field": "updated_at", "transform": "day"}],
                     "write_mode": "checkpoint_overwrite",
                 }

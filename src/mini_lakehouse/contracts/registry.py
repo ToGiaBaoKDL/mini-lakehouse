@@ -86,10 +86,28 @@ class PlatformContracts(ContractModel):
             )
 
         attachments: set[tuple[str, tuple[str, ...], str]] = set()
+        table_partition_fields = {
+            source.table_identifier(table.key).iceberg: {
+                partition.field for partition in table.partitioning
+            }
+            for source in self.sources
+            for table in source.tables
+        }
+        table_partition_fields.update(
+            {
+                product.table_identifier(table.key).iceberg: {
+                    partition.field for partition in table.partitioning
+                }
+                for product in self.products
+                for table in product.tables
+            }
+        )
         for policy in self.policies:
             if policy.namespace not in namespace_paths:
                 raise ValueError(f"Policy {policy.name!r} is stored in an unknown namespace")
             for target in policy.targets:
+                if target.path and target.path[0] != policy.namespace[0]:
+                    raise ValueError(f"Policy {policy.name!r} cannot cross lifecycle tiers")
                 if target.type == "namespace" and target.path not in namespace_paths:
                     raise ValueError(f"Policy {policy.name!r} targets an unknown namespace")
                 if target.type == "table-like" and target.path[:-1] not in namespace_paths:
@@ -102,6 +120,17 @@ class PlatformContracts(ContractModel):
                         "Only one inheritable policy of a type may target the same resource"
                     )
                 attachments.add(key)
+                if policy.policy_type == "system.data-compaction" and target.type == "table-like":
+                    known_fields = table_partition_fields.get(target.path)
+                    if (
+                        known_fields is not None
+                        and policy.execution.partition_field not in known_fields
+                    ):
+                        raise ValueError(
+                            f"Policy {policy.name!r} bounds optimize by "
+                            f"{policy.execution.partition_field!r}, but {target.path!r} "
+                            f"partitions by {sorted(known_fields)!r}"
+                        )
         return self
 
     def source(self, name: str) -> SourceContract:

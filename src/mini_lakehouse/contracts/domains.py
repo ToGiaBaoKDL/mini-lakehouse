@@ -3,6 +3,7 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from mini_lakehouse.contracts.base import (
+    ContactContract,
     ContractModel,
     ContractName,
     Identifier,
@@ -22,6 +23,7 @@ class DomainContract(ContractModel):
     version: Literal[1]
     name: ContractName
     owner: ContractName
+    contact: ContactContract
     business_owner: ContractName
     dbt_group: Identifier
     description: str = Field(min_length=1)

@@ -2,7 +2,7 @@
 
 x-lakehouse-runtime: &lakehouse-runtime
   env_file:
-    - ./infra/env/lakehouse.container.env
+    - ./infra/config/lakehouse.container.env
   environment:
     LAKEHOUSE_STORAGE__ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
     LAKEHOUSE_STORAGE__SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}

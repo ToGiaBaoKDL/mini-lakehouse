@@ -31,10 +31,10 @@ Polaris allows engine-specific keys in policy `config`, but this project intenti
 only fields that its Trino maintenance runner can enforce. Unsupported fields fail validation
 instead of being silently ignored.
 
-Bootstrap safely creates/updates policy bodies and desired mappings. Removing a mapping is treated
-as a destructive migration: the Polaris API does not expose a direct mapping-list endpoint, so a
-reviewed detach operation must accompany the contract change instead of guessing and deleting
-attachments during normal bootstrap.
+Bootstrap safely creates/updates policy bodies and desired mappings. The `mlh-` prefix is reserved
+for this repository. A target-set change must use a new policy name: bootstrap prunes the old
+`mlh-` policy with Polaris `detach-all`, then creates and attaches the replacement. It never probes
+unknown mappings with blind detach requests.
 
 ## Adding a source and product
 
@@ -48,5 +48,5 @@ attachments during normal bootstrap.
    schedules over cross-deployment event sensors when a fixed source SLA exists.
 7. Declare the curated product as a dbt source; keep dbt staging/intermediate models ephemeral.
 8. Reference the product from each consuming analytics domain contract.
-9. Attach existing tier policies; do not copy policy bodies.
+9. Attach the tier policy; change its name when changing targets so stale mappings are prunable.
 10. Add cross-layer, idempotent rerun, and failure-recovery tests before enabling a schedule.

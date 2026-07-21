@@ -78,8 +78,8 @@ def test_prefect_deployments_reuse_declared_work_pool_and_concurrency_contracts(
 
 def test_scheduled_dbt_pipeline_runs_freshness_then_the_full_project() -> None:
     source = (ORCHESTRATION_DIR / "utils" / "dbt.py").read_text(encoding="utf-8")
-    assert 'runner.invoke(["source", "freshness"])' in source
-    assert 'runner.invoke(["build"])' in source
+    assert '_invoke(dbt_runner, ["source", "freshness"])' in source
+    assert '_invoke(dbt_runner, ["build"])' in source
     assert '"--selector"' not in source
     assert '"--select"' not in source
 

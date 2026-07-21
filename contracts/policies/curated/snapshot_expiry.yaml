@@ -1,0 +1,14 @@
+version: 1
+name: mlh-curated-expire-snapshots
+namespace: [curated]
+owner: data-platform
+policy_type: system.snapshot-expiry
+description: Retain curated snapshots for fourteen days.
+content:
+  version: "2025-02-03"
+  enable: true
+  config:
+    max_snapshot_age_days: 14
+targets:
+  - type: namespace
+    path: [curated]

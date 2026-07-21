@@ -21,6 +21,7 @@ from orchestration.utils.scheduling import resolve_archive_hour
 
 @task(
     name="el_ingest_github_archive_hour",
+    task_run_name="ingest-github-archive-{source_hour}",
     retries=len(INGESTION_RETRY_DELAYS_SECONDS),
     retry_delay_seconds=INGESTION_RETRY_DELAYS_SECONDS,
     retry_condition_fn=retry_transient_ingestion_error,

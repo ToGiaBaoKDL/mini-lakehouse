@@ -2,6 +2,7 @@ import trino
 from prefect import flow, task
 
 from mini_lakehouse.config import get_settings
+from mini_lakehouse.contracts import load_contracts
 from mini_lakehouse.platform.maintenance import (
     MaintenancePlanItem,
     build_maintenance_plan,
@@ -22,20 +23,26 @@ from orchestration.plugins.notifications import (
 from orchestration.utils.retries import MAINTENANCE_RETRY_DELAY_SECONDS
 
 
-@task(name="gov_discover_iceberg_maintenance", on_failure=[notify_task_failure])
+@task(
+    name="gov_discover_iceberg_maintenance",
+    task_run_name="discover-iceberg-maintenance-plan",
+    on_failure=[notify_task_failure],
+)
 def discover_maintenance_plan() -> list[MaintenancePlanItem]:
     settings = get_settings()
-    session = create_retry_session()
-    token = request_oauth_token(session, settings)
-    return build_maintenance_plan(
-        load_iceberg_catalog(settings),
-        PolarisPolicyClient(session, settings, token),
-        settings.trino.catalog,
-    )
+    with create_retry_session() as session, load_iceberg_catalog(settings) as catalog:
+        token = request_oauth_token(session, settings)
+        return build_maintenance_plan(
+            catalog,
+            PolarisPolicyClient(session, settings, token),
+            settings.trino.catalog,
+            load_contracts(settings.contracts_dir),
+        )
 
 
 @task(
     name="gov_maintain_iceberg_table",
+    task_run_name="maintain-{plan.table}",
     retries=1,
     retry_delay_seconds=MAINTENANCE_RETRY_DELAY_SECONDS,
     on_failure=[notify_task_failure],
@@ -50,10 +57,13 @@ def maintain_table(plan: MaintenancePlanItem) -> int:
     )
     try:
         cursor = connection.cursor()
-        for statement in plan.statements:
-            cursor.execute(statement)
-            cursor.fetchall()
-        return len(plan.statements)
+        try:
+            for statement in plan.statements:
+                cursor.execute(statement)
+                cursor.fetchall()
+            return len(plan.statements)
+        finally:
+            cursor.close()
     finally:
         connection.close()
 
