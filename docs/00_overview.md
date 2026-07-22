@@ -31,7 +31,7 @@ curated products without depending on their ingestion implementation.
 contracts/
 ├── catalog.yaml            catalog, namespaces, locations, grants
 ├── sources/                landing ownership and checkpoints
-├── products/               canonical curated products
+├── curated_products/       canonical curated products
 ├── domains/                analytics ownership and published marts
 └── policies/               typed Polaris maintenance policy desired state
 
@@ -39,10 +39,9 @@ src/mini_lakehouse/
 ├── config/                 secret/runtime settings
 ├── contracts/              strict Pydantic contract models and cross-file validation
 ├── sources/                source-owned acquisition, parsing, and landing writes
-├── products/               curated product schemas and curation services
+├── curated_products/       curated product schemas and curation services
 ├── platform/               Polaris, Trino, namespace, RBAC, and maintenance adapters
-├── storage/                S3-compatible object store and Iceberg catalog adapters
-└── presentation/           read-only domain consumers
+└── storage/                S3-compatible object store and Iceberg catalog adapters
 
 dbt/analytics/
 ├── models/staging/         ephemeral curated-source projections
@@ -50,14 +49,15 @@ dbt/analytics/
 └── models/marts/           physical analytics-domain tables only
 
 orchestration/
-├── flows/                  deployable DAGs with co-located tasks
+├── flows/<domain>/         deployable DAGs with co-located tasks
 ├── utils/                  shared dbt and retry mechanics
 └── plugins/                Slack/Gmail Prefect lifecycle integrations
 ```
 
-Deployable flow files follow `[job_type]_[description].py`. Orchestration composes application
-services but does not contain source or product business behavior. It is intentionally not a
-Python package and has no `__init__.py` or catch-all task module.
+Deployable flow files live below a domain or platform folder and follow
+`[job_type]_[description].py`. Orchestration composes application services but does not contain
+source or product business behavior. It is intentionally not a Python package and has no
+`__init__.py` or catch-all task module.
 
 ## Ownership
 
@@ -65,9 +65,9 @@ Python package and has no `__init__.py` or catch-all task module.
 |---|---|---|
 | `landing` / `github_archive_*` | Data Platform | Immutable raw archive, parsing fidelity, source-hour idempotency |
 | `curated.github` | Data Platform | Canonical event/entity schema, deduplication, normalization, reusable source semantics |
-| `analytics.engineering` | Engineering Analytics | Metric definitions, grains, dbt tests/contracts, dashboard-facing tables |
+| `analytics.engineering` | Engineering Analytics | Metric definitions, grains, dbt tests/contracts, BI-facing tables |
 | Catalog and maintenance | Data Platform | Polaris desired state, access grants, policy reconciliation, Iceberg maintenance |
 
-The registry validates source → curated product → analytics domain references. dbt `group`,
-`access`, source metadata, contracts, tests, and exposures repeat those boundaries in dbt-native
-metadata where dbt needs them; runtime secrets remain environment-only.
+The registry validates source → curated product → analytics domain references. dbt source metadata,
+contracts, tests, and future BI metadata repeat only the pieces dbt-native tooling needs; runtime
+secrets remain environment-only.

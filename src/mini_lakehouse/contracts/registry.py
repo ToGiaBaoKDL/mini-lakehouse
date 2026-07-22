@@ -2,16 +2,16 @@ from pydantic import model_validator
 
 from mini_lakehouse.contracts.base import ContractModel
 from mini_lakehouse.contracts.catalog import CatalogContract
+from mini_lakehouse.contracts.curated_products import CuratedProductContract
 from mini_lakehouse.contracts.domains import DomainContract
 from mini_lakehouse.contracts.policies import PolicyContract
-from mini_lakehouse.contracts.products import CuratedProductContract
 from mini_lakehouse.contracts.sources import SourceContract
 
 
 class PlatformContracts(ContractModel):
     catalog: CatalogContract
     sources: tuple[SourceContract, ...]
-    products: tuple[CuratedProductContract, ...]
+    curated_products: tuple[CuratedProductContract, ...]
     domains: tuple[DomainContract, ...]
     policies: tuple[PolicyContract, ...]
 
@@ -19,7 +19,7 @@ class PlatformContracts(ContractModel):
     def validate_references(self) -> "PlatformContracts":
         namespace_paths = {namespace.path for namespace in self.catalog.namespaces}
         source_names = [source.name for source in self.sources]
-        product_names = [product.name for product in self.products]
+        product_names = [product.name for product in self.curated_products]
         domain_names = [domain.name for domain in self.domains]
         policy_keys = [(policy.namespace, policy.name) for policy in self.policies]
         if len(source_names) != len(set(source_names)):
@@ -41,7 +41,7 @@ class PlatformContracts(ContractModel):
             if source.landing_namespace not in namespace_paths:
                 raise ValueError(f"Source {source.name!r} references an unknown landing namespace")
         known_sources = set(source_names)
-        for product in self.products:
+        for product in self.curated_products:
             if product.curated_namespace not in namespace_paths:
                 raise ValueError(
                     f"Curated product {product.name!r} references an unknown curated namespace"
@@ -58,14 +58,14 @@ class PlatformContracts(ContractModel):
                 raise ValueError(
                     f"Domain {domain.name!r} references an unknown analytics namespace"
                 )
-            unknown_products = set(domain.upstream_products) - known_products
+            unknown_products = set(domain.upstream_curated_products) - known_products
             if unknown_products:
                 raise ValueError(
                     f"Domain {domain.name!r} references unknown curated products "
                     f"{sorted(unknown_products)!r}"
                 )
 
-        product_namespaces = {product.curated_namespace for product in self.products}
+        product_namespaces = {product.curated_namespace for product in self.curated_products}
         curated_leaves = {
             path
             for path in namespace_paths
@@ -98,8 +98,17 @@ class PlatformContracts(ContractModel):
                 product.table_identifier(table.key).iceberg: {
                     partition.field for partition in table.partitioning
                 }
-                for product in self.products
+                for product in self.curated_products
                 for table in product.tables
+            }
+        )
+        table_partition_fields.update(
+            {
+                domain.table_identifier(table.key).iceberg: {
+                    partition.field for partition in table.partitioning
+                }
+                for domain in self.domains
+                for table in domain.tables
             }
         )
         for policy in self.policies:
@@ -120,16 +129,33 @@ class PlatformContracts(ContractModel):
                         "Only one inheritable policy of a type may target the same resource"
                     )
                 attachments.add(key)
-                if policy.policy_type == "system.data-compaction" and target.type == "table-like":
-                    known_fields = table_partition_fields.get(target.path)
-                    if (
-                        known_fields is not None
-                        and policy.execution.partition_field not in known_fields
-                    ):
+                if policy.policy_type == "system.data-compaction":
+                    if target.type == "table-like":
+                        known_fields = table_partition_fields.get(target.path)
+                        matching_tables = (
+                            {target.path: known_fields} if known_fields is not None else {}
+                        )
+                    elif target.type == "namespace":
+                        matching_tables = {
+                            path: fields
+                            for path, fields in table_partition_fields.items()
+                            if path[:-1][: len(target.path)] == target.path
+                        }
+                    else:
+                        matching_tables = table_partition_fields
+                    incompatible_tables = {
+                        path: fields
+                        for path, fields in matching_tables.items()
+                        if policy.execution.partition_field not in fields
+                    }
+                    if incompatible_tables:
+                        details = "; ".join(
+                            f"{path!r} partitions by {sorted(fields)!r}"
+                            for path, fields in sorted(incompatible_tables.items())
+                        )
                         raise ValueError(
                             f"Policy {policy.name!r} bounds optimize by "
-                            f"{policy.execution.partition_field!r}, but {target.path!r} "
-                            f"partitions by {sorted(known_fields)!r}"
+                            f"{policy.execution.partition_field!r}, but {details}"
                         )
         return self
 
@@ -145,8 +171,8 @@ class PlatformContracts(ContractModel):
         except StopIteration as error:
             raise KeyError(f"Unknown domain: {name}") from error
 
-    def product(self, name: str) -> CuratedProductContract:
+    def curated_product(self, name: str) -> CuratedProductContract:
         try:
-            return next(product for product in self.products if product.name == name)
+            return next(product for product in self.curated_products if product.name == name)
         except StopIteration as error:
             raise KeyError(f"Unknown curated product: {name}") from error

@@ -3,7 +3,10 @@
 from dataclasses import dataclass
 
 from mini_lakehouse.contracts import PlatformContracts
-from mini_lakehouse.platform.polaris import PolarisPolicyClient
+from mini_lakehouse.platform.polaris import (
+    PolarisPolicyClient,
+    PolicyReconcileResult,
+)
 
 MANAGED_POLICY_PREFIX = "mlh-"
 
@@ -12,6 +15,28 @@ MANAGED_POLICY_PREFIX = "mlh-"
 class PolicyPruneItem:
     namespace: tuple[str, ...]
     name: str
+
+
+@dataclass(frozen=True, slots=True)
+class PolicyReconcileSummary:
+    results: tuple[PolicyReconcileResult, ...]
+
+    @property
+    def ensured_mappings(self) -> int:
+        return sum(result.ensured_mappings for result in self.results)
+
+    @property
+    def pending_mappings(self) -> int:
+        return sum(result.pending_mappings for result in self.results)
+
+
+def reconcile_policies(
+    client: PolarisPolicyClient,
+    contracts: PlatformContracts,
+) -> PolicyReconcileSummary:
+    return PolicyReconcileSummary(
+        tuple(client.reconcile_policy(policy) for policy in contracts.policies)
+    )
 
 
 def build_policy_prune_plan(

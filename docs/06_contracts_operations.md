@@ -6,11 +6,9 @@
 |---|---|---|---|
 | Catalog, lifecycle namespaces, and RBAC | `contracts/catalog.yaml` | Data Platform | Isolated Polaris reconcilers |
 | Source landing data | `contracts/sources/*.yaml` + source package | Declared source owner | Source service and repository |
-| Curated GitHub product | `contracts/products/github.yaml` + product package | Data Platform | Trino curation service |
-| Analytics domain models | `contracts/domains/*.yaml` + dbt group | Declared domain owner | dbt/Trino |
+| Curated GitHub product | `contracts/curated_products/github.yaml` + curated product package | Data Platform | Trino curation service |
+| Analytics domain models | `contracts/domains/*.yaml` + dbt contracts | Declared domain owner | dbt/Trino |
 | Maintenance policy | `contracts/policies/*.yaml` | Declared policy owner | Polaris metadata + governance flow |
-| Dashboard business queries | Domain relation registry | Engineering Analytics | Read-only Streamlit service |
-| Dashboard operational metadata | Iceberg catalog discovery | Data Platform | Read-only Streamlit service |
 | Deployment lifecycle | Compose and `prefect.yaml` | Platform operators | Docker Compose and Prefect |
 
 Validate the complete non-secret registry and its runtime catalog settings before every apply:

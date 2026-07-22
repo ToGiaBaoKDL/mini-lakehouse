@@ -82,17 +82,3 @@ models:
         data_type: varchar
       - name: is_bot
         data_type: boolean
-
-exposures:
-  - name: engineering_activity_dashboard
-    label: Engineering Activity Dashboard
-    type: dashboard
-    maturity: medium
-    url: http://localhost:3000
-    description: Lightdash dashboard backed only by public Engineering marts.
-    depends_on:
-      - ref('fct_repository_activity_daily')
-      - ref('fct_contributor_activity_daily')
-    owner:
-      name: To Gia Bao
-      email: bao.to@timo.vn

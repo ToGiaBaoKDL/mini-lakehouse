@@ -8,12 +8,11 @@ import pyarrow as pa
 import pytest
 
 from mini_lakehouse.config import get_settings
-from mini_lakehouse.contracts import load_contracts
+from mini_lakehouse.contracts import arrow_schema, load_contracts
+from mini_lakehouse.curated_products.github.service import GithubCurationService
 from mini_lakehouse.platform.trino import TrinoExecutor
-from mini_lakehouse.products.github.service import GithubCurationService
 from mini_lakehouse.sources.github_archive.models import ArchiveHour
 from mini_lakehouse.sources.github_archive.repository import GithubArchiveRepository
-from mini_lakehouse.sources.github_archive.schema import EVENTS_ARROW_SCHEMA
 from mini_lakehouse.storage.iceberg import load_iceberg_catalog
 
 pytestmark = [
@@ -38,6 +37,7 @@ def _event(
     repository_name: str,
     push_commit_count: int,
 ) -> pa.Table:
+    events_contract = load_contracts().source("github_archive").table("events_raw")
     payload = {"size": push_commit_count}
     raw_event = {
         "id": _EVENT_ID,
@@ -66,7 +66,7 @@ def _event(
                 "raw_event_json": json.dumps(raw_event, separators=(",", ":")),
             }
         ],
-        schema=EVENTS_ARROW_SCHEMA,
+        schema=arrow_schema(events_contract.columns),
     )
 
 
@@ -128,7 +128,7 @@ def test_landing_curation_merge_and_analytics_build_end_to_end() -> None:
         )
 
     contracts = load_contracts(settings.contracts_dir)
-    product = contracts.product("github")
+    product = contracts.curated_product("github")
     domain = contracts.domain("engineering")
     with TrinoExecutor(settings.trino) as executor:
         curation = GithubCurationService(settings, executor=executor, contracts=contracts)

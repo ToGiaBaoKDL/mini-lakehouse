@@ -4,7 +4,7 @@ from typing import cast
 
 import yaml
 
-from mini_lakehouse.contracts import load_contracts
+from mini_lakehouse.contracts import load_contracts, partition_expression
 
 
 def _yaml(path: str) -> dict[str, object]:
@@ -14,16 +14,14 @@ def _yaml(path: str) -> dict[str, object]:
 
 
 def test_dbt_curated_source_matches_the_product_contract() -> None:
-    product = load_contracts().product("github")
+    product = load_contracts().curated_product("github")
     dbt_source_file = _yaml("dbt/analytics/models/staging/github/_github__sources.yml")
     dbt_sources = cast(list[dict[str, object]], dbt_source_file["sources"])
     dbt_source = dbt_sources[0]
     tables = cast(list[dict[str, object]], dbt_source["tables"])
-    source_config = cast(dict[str, object], dbt_source["config"])
 
     assert dbt_source["name"] == product.name
     assert dbt_source["schema"] == ".".join(product.curated_namespace)
-    assert source_config["group"] == product.dbt_group
     source_meta = cast(dict[str, object], dbt_source["meta"])
     assert source_meta["owner"] == product.owner
     assert source_meta["contact"] == product.contact.email
@@ -36,6 +34,18 @@ def test_dbt_engineering_marts_match_the_domain_contract() -> None:
     models = cast(list[dict[str, object]], dbt_model_file["models"])
 
     assert {model["name"] for model in models} == {table.name for table in domain.tables}
+    model_by_name = {str(model["name"]): model for model in models}
+    for table in domain.tables:
+        model = model_by_name[table.name]
+        data_tests = cast(list[dict[str, object]], model["data_tests"])
+        unique_test = cast(dict[str, object], data_tests[0]["unique_combination_of_columns"])
+        arguments = cast(dict[str, object], unique_test["arguments"])
+        assert arguments["combination_of_columns"] == list(table.grain)
+        sql = Path(f"dbt/analytics/models/marts/engineering/{table.name}.sql").read_text(
+            encoding="utf-8"
+        )
+        for partition in table.partitioning:
+            assert partition_expression(partition) in sql
 
     project_file = _yaml("dbt/analytics/dbt_project.yml")
     project_models = cast(dict[str, object], project_file["models"])
@@ -46,32 +56,24 @@ def test_dbt_engineering_marts_match_the_domain_contract() -> None:
     engineering = cast(dict[str, object], marts["engineering"])
 
     assert staging["+materialized"] == "ephemeral"
-    assert staging["+access"] == "protected"
     assert intermediate["+materialized"] == "ephemeral"
     assert engineering["+materialized"] == "table"
     assert engineering["+schema"] == ".".join(domain.analytics_namespace)
-    assert engineering["+group"] == domain.dbt_group
 
 
-def test_dbt_groups_match_product_and_domain_ownership() -> None:
-    contracts = load_contracts()
-    group_file = _yaml("dbt/analytics/models/_groups.yml")
-    groups = cast(list[dict[str, object]], group_file["groups"])
-    group_by_name = {str(group["name"]): group for group in groups}
-
-    product = contracts.product("github")
-    domain = contracts.domain("engineering")
-    product_owner = cast(dict[str, object], group_by_name[product.dbt_group]["owner"])
-    domain_owner = cast(dict[str, object], group_by_name[domain.dbt_group]["owner"])
-
-    assert product_owner == {
-        "name": product.contact.name,
-        "email": product.contact.email,
-    }
-    assert domain_owner == {
-        "name": domain.contact.name,
-        "email": domain.contact.email,
-    }
+def test_dbt_does_not_use_groups_for_current_scope() -> None:
+    assert not Path("dbt/analytics/models/_groups.yml").exists()
+    assert not Path("dbt/analytics/selectors.yml").exists()
+    dbt_files = [
+        Path("dbt/analytics/dbt_project.yml"),
+        Path("dbt/analytics/profiles.yml"),
+        *sorted(Path("dbt/analytics/models").rglob("*.yml")),
+    ]
+    assert dbt_files
+    for path in dbt_files:
+        payload = path.read_text(encoding="utf-8")
+        assert "group:" not in payload
+        assert "+group:" not in payload
 
 
 def test_dbt_sql_uses_explicit_projection_and_explicit_domain_locations() -> None:

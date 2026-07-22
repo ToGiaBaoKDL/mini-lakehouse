@@ -1,3 +1,5 @@
+import logging
+
 import trino
 from prefect import flow, task
 
@@ -13,6 +15,7 @@ from mini_lakehouse.platform.polaris import (
     create_retry_session,
     request_oauth_token,
 )
+from mini_lakehouse.platform.policy_reconciliation import reconcile_policies
 from mini_lakehouse.storage.iceberg import load_iceberg_catalog
 from orchestration.plugins.notifications import (
     notify_flow_failure,
@@ -21,6 +24,8 @@ from orchestration.plugins.notifications import (
     notify_task_failure,
 )
 from orchestration.utils.retries import MAINTENANCE_RETRY_DELAY_SECONDS
+
+logger = logging.getLogger(__name__)
 
 
 @task(
@@ -32,11 +37,19 @@ def discover_maintenance_plan() -> list[MaintenancePlanItem]:
     settings = get_settings()
     with create_retry_session() as session, load_iceberg_catalog(settings) as catalog:
         token = request_oauth_token(session, settings)
+        policy_client = PolarisPolicyClient(session, settings, token)
+        contracts = load_contracts(settings.contracts_dir)
+        summary = reconcile_policies(policy_client, contracts)
+        if summary.pending_mappings:
+            logger.info(
+                "Policy reconciliation left %d table-like mappings pending",
+                summary.pending_mappings,
+            )
         return build_maintenance_plan(
             catalog,
-            PolarisPolicyClient(session, settings, token),
+            policy_client,
             settings.trino.catalog,
-            load_contracts(settings.contracts_dir),
+            contracts,
         )
 
 

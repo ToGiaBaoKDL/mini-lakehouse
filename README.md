@@ -39,7 +39,8 @@ same thing as dbt's modeling layers.
 
 Requirements: Docker with Compose v2 and [uv](https://docs.astral.sh/uv/).
 Compose modules consistently follow `compose.<module>.yaml`: `core` is the required data plane,
-while `prefect` and `dashboard` are optional overlays.
+while `prefect` is the optional orchestration overlay. The BI plane is intentionally absent until
+Lightdash is added as a real service.
 
 ```bash
 cp .env.example .env
@@ -70,15 +71,9 @@ Add the orchestration control plane when you need scheduled deployments:
 docker compose -f compose.core.yaml -f compose.prefect.yaml up -d --build
 ```
 
-Prefect is then available at `localhost:4200`. Add the presentation plane independently:
-
-```bash
-docker compose -f compose.core.yaml -f compose.dashboard.yaml up -d --build
-```
-
-Streamlit is then available at `localhost:8501`. Business charts query only public analytics
-marts; its separate operational metadata page reads Iceberg catalog metadata without redefining
-domain metrics.
+Prefect is then available at `localhost:4200`. BI services are not deployed by the current Compose
+stack. When Lightdash is added, it
+should consume only public analytics marts and dbt metadata, not landing or curated tables directly.
 
 The ingestion deployment runs hourly at minute 15 UTC. A single transformation deployment runs at
 minute 30, curates the corresponding archive hour, validates source freshness, and builds the full
@@ -98,7 +93,6 @@ uv run pytest -m "not integration"
 uv run dbt parse --project-dir dbt/analytics --profiles-dir dbt/analytics
 docker compose -f compose.core.yaml config --quiet
 docker compose -f compose.core.yaml -f compose.prefect.yaml config --quiet
-docker compose -f compose.core.yaml -f compose.dashboard.yaml config --quiet
 ```
 
 Run read-only integration tests after the stack is healthy:

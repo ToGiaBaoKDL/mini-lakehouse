@@ -15,6 +15,7 @@ from mini_lakehouse.platform.polaris import (
 from mini_lakehouse.platform.policy_reconciliation import (
     apply_policy_prune_plan,
     build_policy_prune_plan,
+    reconcile_policies,
 )
 from mini_lakehouse.platform.runtime import validate_runtime_contract
 
@@ -38,11 +39,11 @@ def main() -> None:
         apply_policy_prune_plan(policy_client, prune_plan)
         if prune_plan:
             logger.info("Pruned %d stale managed Polaris policies", len(prune_plan))
-        for policy in contracts.policies:
-            result = policy_client.reconcile_policy(policy)
+        for result in reconcile_policies(policy_client, contracts).results:
             if result.pending_mappings:
                 logger.info(
-                    "Polaris policy %s: %s; ensured %d mappings, %d pending (table not yet created)",
+                    "Polaris policy %s: %s; ensured %d mappings, "
+                    "%d pending (table not yet created)",
                     result.policy,
                     result.action,
                     result.ensured_mappings,

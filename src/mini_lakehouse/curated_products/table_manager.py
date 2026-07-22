@@ -1,4 +1,4 @@
-"""Physical table lifecycle for the curated GitHub product."""
+"""Physical table lifecycle for curated product contracts."""
 
 from mini_lakehouse.config.settings import Settings
 from mini_lakehouse.contracts import (
@@ -7,18 +7,21 @@ from mini_lakehouse.contracts import (
     partition_expression,
     trino_type,
 )
-from mini_lakehouse.contracts.products import CuratedTableContract
+from mini_lakehouse.contracts.curated_products import CuratedTableContract
 from mini_lakehouse.platform.trino import SqlExecutor
 
 
-class GithubCuratedTableManager:
+class CuratedTableManager:
     def __init__(
         self,
         settings: Settings,
+        product_name: str,
         contracts: PlatformContracts | None = None,
     ) -> None:
         self._settings = settings
-        self._product = (contracts or load_contracts(settings.contracts_dir)).product("github")
+        self._product = (contracts or load_contracts(settings.contracts_dir)).curated_product(
+            product_name
+        )
 
     def _relation(self, table: CuratedTableContract) -> str:
         return self._product.table_identifier(table.key).trino(self._settings.trino.catalog)

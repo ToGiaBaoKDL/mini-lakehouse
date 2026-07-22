@@ -29,12 +29,11 @@ docker compose -f compose.core.yaml ps
 ```
 
 Compose files follow the `compose.<module>.yaml` convention. `compose.core.yaml` is the required
-data plane, `compose.prefect.yaml` adds orchestration, and `compose.dashboard.yaml` adds
-presentation:
+data plane, and `compose.prefect.yaml` adds orchestration. A BI overlay should only be added when
+Lightdash is configured as a real service:
 
 ```bash
 docker compose -f compose.core.yaml -f compose.prefect.yaml up -d --build
-docker compose -f compose.core.yaml -f compose.dashboard.yaml up -d --build
 ```
 
 Compose uses floating latest service images by current project policy. Prefect is the one explicit

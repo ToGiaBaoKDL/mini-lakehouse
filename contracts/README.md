@@ -9,13 +9,14 @@ file with strict Pydantic models before making a network or storage call.
   flags, and required catalog-role grants.
 - `sources/*.yaml`: source boundary, shared landing namespace, immutable transport/object prefix,
   checkpoint key, table location, partition transform, and schema-contract reference.
-- `products/*.yaml`: canonical curated product owner, upstream sources, keys, partitions, and
+- `curated_products/*.yaml`: canonical curated product owner, upstream sources, keys, partitions, and
   physical locations.
-- `domains/*.yaml`: analytics-domain owner, upstream curated products, and public relation registry.
+- `domains/*.yaml`: analytics-domain owner, upstream curated products, mart grain, partitioning,
+  and public relation registry.
 - `policies/*.yaml`: one Polaris policy per file, including typed content and attachments.
 
 Runtime endpoints and credentials do not belong here. They remain in environment variables or a
-secret manager. dbt SQL, model tests, groups, access, and exposures remain in native dbt files.
+secret manager. dbt SQL, model tests, and future BI metadata remain in native dbt files.
 
 ## Validation
 
@@ -43,7 +44,8 @@ unknown mappings with blind detach requests.
 2. Add a source-owned package with client, parser, schema, repository, and service as needed.
 3. Give every Iceberg field a permanent ID and lock it with a schema test.
 4. Choose a natural checkpoint/idempotency key and an atomic table commit strategy.
-5. Add `products/<product>.yaml` and a source-conformance service under `products/<product>/`.
+5. Add `curated_products/<product>.yaml` and a source-conformance service under
+   `curated_products/<product>/`.
 6. Add convention-named EL and TL DAGs that co-locate their Prefect tasks; prefer explicit
    schedules over cross-deployment event sensors when a fixed source SLA exists.
 7. Declare the curated product as a dbt source; keep dbt staging/intermediate models ephemeral.

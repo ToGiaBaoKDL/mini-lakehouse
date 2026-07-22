@@ -10,7 +10,7 @@ ALLOWED_JOB_TYPES = {"etl", "el", "tl", "rpt", "mon", "bk", "gov", "test"}
 
 
 def _dag_files() -> list[Path]:
-    return sorted(path for path in FLOWS_DIR.glob("*.py") if not path.name.startswith("_"))
+    return sorted(path for path in FLOWS_DIR.rglob("*.py") if not path.name.startswith("_"))
 
 
 def test_each_dag_lives_in_flows_and_uses_the_job_type_convention() -> None:
@@ -18,7 +18,7 @@ def test_each_dag_lives_in_flows_and_uses_the_job_type_convention() -> None:
 
     assert dag_files
     assert not list(ORCHESTRATION_DIR.glob("*.py"))
-    assert not list(FLOWS_DIR.glob("_*.py"))
+    assert not list(FLOWS_DIR.rglob("_*.py"))
     assert not (ORCHESTRATION_DIR / "__init__.py").exists()
     assert not (ORCHESTRATION_DIR / "tasks.py").exists()
 
@@ -27,7 +27,7 @@ def test_each_dag_lives_in_flows_and_uses_the_job_type_convention() -> None:
         assert separator and description
         assert job_type in ALLOWED_JOB_TYPES
 
-    assert not (FLOWS_DIR / "__init__.py").exists()
+    assert not list(FLOWS_DIR.rglob("__init__.py"))
     assert not (ORCHESTRATION_DIR / "utils" / "__init__.py").exists()
     assert not (ORCHESTRATION_DIR / "plugins" / "__init__.py").exists()
 
@@ -92,7 +92,7 @@ def test_scheduled_archive_hour_uses_prefect_scheduled_start_time() -> None:
 
 
 def test_all_reusable_prefect_tasks_and_flows_have_failure_hooks() -> None:
-    for path in FLOWS_DIR.glob("*.py"):
+    for path in _dag_files():
         source = path.read_text(encoding="utf-8")
         module = ast.parse(source)
         decorators = [

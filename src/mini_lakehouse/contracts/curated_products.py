@@ -64,7 +64,6 @@ class CuratedProductContract(ContractModel):
     name: ContractName
     owner: ContractName
     contact: ContactContract
-    dbt_group: Identifier
     description: str = Field(min_length=1)
     curated_namespace: NamespacePath = Field(min_length=2)
     upstream_sources: tuple[ContractName, ...] = Field(min_length=1)

@@ -4,12 +4,11 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from mini_lakehouse.contracts import load_contracts
+from mini_lakehouse.contracts import iceberg_schema, load_contracts
 from mini_lakehouse.contracts.catalog import CatalogContract
 from mini_lakehouse.contracts.policies import DataCompactionPolicyContract
 from mini_lakehouse.contracts.registry import PlatformContracts
 from mini_lakehouse.contracts.sources import SourceContract
-from mini_lakehouse.sources.github_archive.schema import EVENTS_ICEBERG_SCHEMA
 
 
 def test_repository_contracts_form_a_valid_registry() -> None:
@@ -25,7 +24,7 @@ def test_repository_contracts_form_a_valid_registry() -> None:
         "landing",
         "github_archive_events_raw",
     )
-    assert contracts.product("github").table_identifier("events").iceberg == (
+    assert contracts.curated_product("github").table_identifier("events").iceberg == (
         "curated",
         "github",
         "events",
@@ -33,6 +32,10 @@ def test_repository_contracts_form_a_valid_registry() -> None:
     assert (
         contracts.domain("engineering").table_identifier("repository_activity_daily").trino("prod")
         == '"prod"."analytics.engineering"."fct_repository_activity_daily"'
+    )
+    assert contracts.domain("engineering").table("repository_activity_daily").grain == (
+        "activity_date",
+        "repository_id",
     )
 
 
@@ -80,9 +83,10 @@ def test_contract_loader_rejects_secret_like_keys(tmp_path: Path) -> None:
 
 
 def test_github_archive_iceberg_field_ids_are_stable() -> None:
-    assert [
-        (field.field_id, field.name, field.required) for field in EVENTS_ICEBERG_SCHEMA.fields
-    ] == [
+    events_contract = load_contracts().source("github_archive").table("events_raw")
+    events_schema = iceberg_schema(events_contract.columns)
+
+    assert [(field.field_id, field.name, field.required) for field in events_schema.fields] == [
         (1, "event_id", True),
         (2, "event_type", True),
         (3, "actor_id", False),
@@ -158,12 +162,25 @@ def test_contract_models_reject_unknown_fields() -> None:
         CatalogContract.model_validate(payload)
 
 
-@pytest.mark.parametrize("collection", ["sources", "products", "domains", "policies"])
+@pytest.mark.parametrize("collection", ["sources", "curated_products", "domains", "policies"])
 def test_registry_rejects_duplicate_owned_contracts(collection: str) -> None:
     payload = _registry_payload()
     payload[collection] = (*payload[collection], payload[collection][0])
 
     with pytest.raises(ValidationError, match="unique"):
+        PlatformContracts.model_validate(payload)
+
+
+def test_registry_rejects_analytics_policy_partition_drift() -> None:
+    payload = _registry_payload()
+    analytics_compaction = next(
+        policy
+        for policy in payload["policies"]
+        if policy["name"] == "mlh-analytics-engineering-compact-data-files"
+    )
+    analytics_compaction["execution"]["partition_field"] = "source_hour"
+
+    with pytest.raises(ValidationError, match="bounds optimize by"):
         PlatformContracts.model_validate(payload)
 
 

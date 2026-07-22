@@ -8,9 +8,9 @@ from pydantic import BaseModel, TypeAdapter
 from yaml.nodes import MappingNode, Node, SequenceNode
 
 from mini_lakehouse.contracts.catalog import CatalogContract
+from mini_lakehouse.contracts.curated_products import CuratedProductContract
 from mini_lakehouse.contracts.domains import DomainContract
 from mini_lakehouse.contracts.policies import PolicyContract
-from mini_lakehouse.contracts.products import CuratedProductContract
 from mini_lakehouse.contracts.registry import PlatformContracts
 from mini_lakehouse.contracts.sources import SourceContract
 
@@ -100,7 +100,11 @@ def load_contracts(root: Path = Path("contracts")) -> PlatformContracts:
     return PlatformContracts(
         catalog=_load_model(catalog_path, CatalogContract),
         sources=_load_collection(resolved, "sources", TypeAdapter(SourceContract)),
-        products=_load_collection(resolved, "products", TypeAdapter(CuratedProductContract)),
+        curated_products=_load_collection(
+            resolved,
+            "curated_products",
+            TypeAdapter(CuratedProductContract),
+        ),
         domains=_load_collection(resolved, "domains", TypeAdapter(DomainContract)),
         policies=_load_collection(resolved, "policies", TypeAdapter(PolicyContract)),
     )

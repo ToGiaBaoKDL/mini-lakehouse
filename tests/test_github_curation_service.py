@@ -6,8 +6,8 @@ import pytest
 
 from mini_lakehouse.config.settings import Settings
 from mini_lakehouse.contracts import load_contracts, partition_expression, trino_type
+from mini_lakehouse.curated_products.github.service import GithubCurationService
 from mini_lakehouse.platform.trino import QueryResult
-from mini_lakehouse.products.github.service import GithubCurationService
 from mini_lakehouse.sources.github_archive.models import ArchiveHour
 
 
@@ -15,7 +15,7 @@ class FakeTrinoExecutor:
     def __init__(self, source_hours: tuple[tuple[datetime, int], ...]) -> None:
         self.source_hours = source_hours
         self.calls: list[tuple[str, tuple[Any, ...] | None]] = []
-        self.product = load_contracts().product("github")
+        self.product = load_contracts().curated_product("github")
 
     def execute(
         self,

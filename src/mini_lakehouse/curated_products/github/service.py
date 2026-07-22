@@ -7,9 +7,9 @@ from pydantic import BaseModel, ConfigDict
 
 from mini_lakehouse.config.settings import Settings
 from mini_lakehouse.contracts import PlatformContracts, load_contracts
+from mini_lakehouse.curated_products.github.repository import GithubCurationRepository
+from mini_lakehouse.curated_products.table_manager import CuratedTableManager
 from mini_lakehouse.platform.trino import SqlExecutor, TrinoExecutor
-from mini_lakehouse.products.github.repository import GithubCurationRepository
-from mini_lakehouse.products.github.table_manager import GithubCuratedTableManager
 from mini_lakehouse.sources.github_archive.models import ArchiveHour
 
 
@@ -30,17 +30,17 @@ class GithubCurationService:
         *,
         executor: SqlExecutor | None = None,
         contracts: PlatformContracts | None = None,
-        table_manager: GithubCuratedTableManager | None = None,
+        table_manager: CuratedTableManager | None = None,
         repository: GithubCurationRepository | None = None,
     ) -> None:
         self._settings = settings
         registry = contracts or load_contracts(settings.contracts_dir)
         source = registry.source("github_archive")
-        product = registry.product("github")
+        product = registry.curated_product("github")
         if product.upstream_sources != (source.name,):
             raise ValueError("GitHub curation requires github_archive as its only upstream source")
         self._executor = executor
-        self._table_manager = table_manager or GithubCuratedTableManager(settings, registry)
+        self._table_manager = table_manager or CuratedTableManager(settings, product.name, registry)
         self._repository = repository or GithubCurationRepository(settings, registry)
 
     def curate(self, source_hour: ArchiveHour) -> GithubCurationResult:

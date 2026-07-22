@@ -20,9 +20,10 @@ that starts after the next hour still processes the intended hour. Separate work
 ingestion, transformation, and maintenance, while singleton `ENQUEUE` limits prevent overlapping
 writes.
 
-Flow files live under `orchestration/flows/`, follow `[job_type]_[description].py`, and co-locate
-their Prefect tasks. Reusable dbt/retry mechanics live in `utils`; notification integrations live
-in `plugins`. Source and product business logic remains under `src/mini_lakehouse`.
+Flow files live under `orchestration/flows/<domain>/`, follow `[job_type]_[description].py`, and
+co-locate their Prefect tasks. Reusable dbt/retry mechanics live in `utils`; notification
+integrations live in `plugins`. Source and product business logic remains under
+`src/mini_lakehouse`.
 
 ## Normal runs and retries
 
@@ -77,7 +78,7 @@ state. With incomplete configuration, the channel is disabled.
 Typed YAML policies attach at lifecycle namespaces and are inherited by child namespaces. The
 governance flow discovers tables from the catalog, resolves applicable Polaris policies, validates
 their full content, and invokes bounded Trino maintenance procedures. It has no table allowlist or
-dashboard-owned table registry.
+consumer-owned table registry.
 
 ## Local operations
 

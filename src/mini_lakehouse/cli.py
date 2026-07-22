@@ -4,9 +4,9 @@ from collections.abc import Sequence
 
 from mini_lakehouse.config import get_settings
 from mini_lakehouse.contracts import load_contracts
+from mini_lakehouse.curated_products.github.service import GithubCurationService
 from mini_lakehouse.logging import configure_logging
 from mini_lakehouse.platform.runtime import validate_runtime_contract
-from mini_lakehouse.products.github.service import GithubCurationService
 from mini_lakehouse.sources.github_archive.models import ArchiveHour
 from mini_lakehouse.sources.github_archive.service import GithubArchiveIngestionService
 
@@ -61,7 +61,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                     "catalog_role_grants": len(contracts.catalog.catalog_role_grants),
                     "namespaces": len(contracts.catalog.namespaces),
                     "sources": len(contracts.sources),
-                    "products": len(contracts.products),
+                    "curated_products": len(contracts.curated_products),
                     "domains": len(contracts.domains),
                     "policies": len(contracts.policies),
                 },

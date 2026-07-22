@@ -23,29 +23,14 @@ models:
 
     staging:
       +materialized: ephemeral
-      +group: data_platform
-      +access: protected
       +tags: ["staging", "github"]
-      +meta:
-        owner: data-platform
-        contact: data-platform@example.com
 
     intermediate:
       +materialized: ephemeral
-      +group: engineering_analytics
-      +access: private
       +tags: ["intermediate", "engineering"]
-      +meta:
-        owner: engineering-analytics
-        contact: engineering-analytics@example.com
 
     marts:
       engineering:
         +materialized: table
         +schema: analytics.engineering
-        +group: engineering_analytics
-        +access: public
         +tags: ["mart", "engineering"]
-        +meta:
-          owner: engineering-analytics
-          contact: engineering-analytics@example.com

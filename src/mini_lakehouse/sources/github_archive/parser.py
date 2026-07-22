@@ -8,8 +8,11 @@ from pathlib import Path
 import pyarrow as pa
 from pydantic import ValidationError
 
+from mini_lakehouse.contracts import arrow_schema, load_contracts
 from mini_lakehouse.sources.github_archive.models import ArchiveHour, GithubArchiveEvent
-from mini_lakehouse.sources.github_archive.schema import EVENTS_ARROW_SCHEMA
+
+_EVENTS_TABLE = load_contracts().source("github_archive").table("events_raw")
+_EVENTS_ARROW_SCHEMA = arrow_schema(_EVENTS_TABLE.columns)
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +60,6 @@ def parse_archive(
         raise ValueError(f"Archive contains no valid rows: {path}")
 
     return ParsedArchive(
-        table=pa.Table.from_pylist(records, schema=EVENTS_ARROW_SCHEMA),
+        table=pa.Table.from_pylist(records, schema=_EVENTS_ARROW_SCHEMA),
         rejected_row_count=rejected,
     )

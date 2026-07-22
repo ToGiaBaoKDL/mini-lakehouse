@@ -5,8 +5,6 @@ sources:
     description: Canonical, source-conformed GitHub product owned by Data Platform.
     database: "{{ env_var('LAKEHOUSE_TRINO__CATALOG', 'prod') }}"
     schema: curated.github
-    config:
-      group: data_platform
     meta:
       owner: data-platform
       contact: bao.to@timo.vn

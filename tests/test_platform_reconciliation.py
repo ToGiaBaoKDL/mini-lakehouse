@@ -12,11 +12,16 @@ from mini_lakehouse.contracts.policies import policy_content_json
 from mini_lakehouse.platform.access import ensure_catalog_role_grants
 from mini_lakehouse.platform.catalog import catalog_contract, ensure_catalog
 from mini_lakehouse.platform.namespaces import ensure_namespaces, namespace_contract
-from mini_lakehouse.platform.polaris import PolarisManagementClient, PolarisPolicyClient
+from mini_lakehouse.platform.polaris import (
+    PolarisManagementClient,
+    PolarisPolicyClient,
+    PolicyReconcileResult,
+)
 from mini_lakehouse.platform.policies import PolicyIdentifier
 from mini_lakehouse.platform.policy_reconciliation import (
     apply_policy_prune_plan,
     build_policy_prune_plan,
+    reconcile_policies,
 )
 
 
@@ -283,3 +288,23 @@ def test_policy_prune_plan_removes_only_reserved_stale_policies() -> None:
     assert client.delete_policy.call_args_list == [
         call(("analytics",), "mlh-stale-policy"),
     ]
+
+
+def test_policy_reconcile_summary_tracks_pending_table_mappings() -> None:
+    contracts = load_contracts()
+    client = create_autospec(PolarisPolicyClient, instance=True)
+    client.reconcile_policy.side_effect = [
+        PolicyReconcileResult(
+            policy=policy.name,
+            action="unchanged",
+            ensured_mappings=1,
+            pending_mappings=1 if index == 0 else 0,
+        )
+        for index, policy in enumerate(contracts.policies)
+    ]
+
+    summary = reconcile_policies(client, contracts)
+
+    assert summary.ensured_mappings == len(contracts.policies)
+    assert summary.pending_mappings == 1
+    assert client.reconcile_policy.call_count == len(contracts.policies)

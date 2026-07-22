@@ -10,7 +10,7 @@ For a future managed-object-storage deployment:
    identity/IAM roles and enable credential vending in Trino/PyIceberg clients.
 3. Create separate service principals and catalog roles for ingestion, dbt, and read-only BI.
 4. Require a Polaris realm header and external identity provider where appropriate.
-5. Put TLS and authentication in front of Trino, Polaris, Prefect, and the dashboard.
+5. Put TLS and authentication in front of Trino, Polaris, Prefect, and future BI services.
 6. Move PostgreSQL and Redis to backed-up managed services.
 7. Promote tested immutable container digests, configure resource limits, and emit metrics/logs to
    the platform observability stack.

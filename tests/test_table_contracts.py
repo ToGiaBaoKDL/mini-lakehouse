@@ -11,9 +11,13 @@ from pyiceberg.table import Table
 from pyiceberg.transforms import HourTransform, IdentityTransform
 
 from mini_lakehouse.config.settings import Settings
-from mini_lakehouse.contracts import TableIdentifier
+from mini_lakehouse.contracts import TableIdentifier, load_contracts, partition_spec
 from mini_lakehouse.sources.github_archive.repository import GithubArchiveRepository
-from mini_lakehouse.sources.github_archive.schema import EVENTS_PARTITION_SPEC
+
+
+def _events_partition_spec() -> PartitionSpec:
+    events_contract = load_contracts().source("github_archive").table("events_raw")
+    return partition_spec(events_contract.columns, events_contract.partitioning)
 
 
 def test_nested_namespace_renders_as_one_trino_schema() -> None:
@@ -31,7 +35,7 @@ def test_nested_namespace_renders_as_one_trino_schema() -> None:
 
 
 def test_github_archive_partition_spec_uses_hour_transform() -> None:
-    field = EVENTS_PARTITION_SPEC.fields[0]
+    field = _events_partition_spec().fields[0]
 
     assert field.source_id == 11
     assert field.field_id == 1000
@@ -107,7 +111,7 @@ def test_new_hour_uses_checkpoint_predicate_overwrite_as_the_idempotent_commit()
     table = create_autospec(Table, instance=True)
     catalog.table_exists.return_value = True
     catalog.load_table.return_value = table
-    table.spec.return_value = EVENTS_PARTITION_SPEC
+    table.spec.return_value = _events_partition_spec()
     table.scan.return_value.plan_files.return_value = []
     table.refresh.return_value.current_snapshot.return_value = SimpleNamespace(snapshot_id=9)
     repository = GithubArchiveRepository(Settings(), catalog=catalog)

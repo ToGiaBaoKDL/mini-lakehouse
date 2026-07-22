@@ -18,7 +18,7 @@ class GithubCurationRepository:
         self._settings = settings
         registry = contracts or load_contracts(settings.contracts_dir)
         self._source = registry.source("github_archive")
-        self._product = registry.product("github")
+        self._product = registry.curated_product("github")
 
     def _relation(self, table_key: str) -> str:
         return self._product.table_identifier(table_key).trino(self._settings.trino.catalog)
