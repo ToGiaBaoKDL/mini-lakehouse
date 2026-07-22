@@ -27,3 +27,9 @@ dbt/**/logs/
 *.license
 minio.license
 catalog/minio.license
+
+# Artifacts
+plans/
+.agents/
+.codex/
+.claude/
