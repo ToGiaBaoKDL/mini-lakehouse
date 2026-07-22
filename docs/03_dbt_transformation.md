@@ -14,8 +14,8 @@ Rules:
 
 - `source()` is the only way models address curated relations.
 - Staging and intermediate models are ephemeral; curated never stores dbt implementation details.
-- Only domain marts are physical tables and each has an explicit canonical
-  `s3://analytics/<domain>/<table>` location.
+- Only domain marts are physical tables. Polaris namespace properties own analytics storage
+  locations; dbt does not duplicate table-level locations.
 - Marts currently use full `table` materialization. Dormant bounded `is_incremental()` predicates
   remain next to business SQL so a later reviewed materialization change does not rewrite metrics.
 - Aggregation uses stable IDs, and current names are joined after aggregation.
@@ -28,9 +28,17 @@ Commands:
 
 ```bash
 uv run dbt source freshness \
-  --project-dir dbt/analytics --profiles-dir dbt/analytics
-uv run dbt build \
-  --project-dir dbt/analytics --profiles-dir dbt/analytics
+  --project-dir dbt/analytics --profiles-dir dbt/analytics \
+  --selector github_sources
+uv run dbt test \
+  --project-dir dbt/analytics --profiles-dir dbt/analytics \
+  --selector github_sources --indirect-selection cautious
+uv run dbt run \
+  --project-dir dbt/analytics --profiles-dir dbt/analytics \
+  --selector engineering_marts --threads 1
+uv run dbt test \
+  --project-dir dbt/analytics --profiles-dir dbt/analytics \
+  --selector engineering_marts
 uv run dbt docs generate --project-dir dbt/analytics --profiles-dir dbt/analytics
 ```
 

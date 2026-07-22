@@ -76,11 +76,19 @@ def test_prefect_deployments_reuse_declared_work_pool_and_concurrency_contracts(
     ]
 
 
-def test_scheduled_dbt_pipeline_runs_freshness_then_the_full_project() -> None:
+def test_scheduled_dbt_pipeline_serializes_only_mart_writes() -> None:
     source = (ORCHESTRATION_DIR / "utils" / "dbt.py").read_text(encoding="utf-8")
-    assert '_invoke(dbt_runner, ["source", "freshness"])' in source
-    assert '_invoke(dbt_runner, ["build"])' in source
-    assert '"--selector"' not in source
+    assert '["source", "freshness", "--selector", GITHUB_SOURCE_SELECTOR]' in source
+    assert (
+        '["test", "--selector", GITHUB_SOURCE_SELECTOR, "--indirect-selection", "cautious"]'
+        in source
+    )
+    assert (
+        '["run", "--selector", ENGINEERING_MART_SELECTOR, "--threads", '
+        "SERIAL_DBT_WRITE_THREADS]" in source
+    )
+    assert '["test", "--selector", ENGINEERING_MART_SELECTOR]' in source
+    assert '["build"]' not in source
     assert '"--select"' not in source
 
 

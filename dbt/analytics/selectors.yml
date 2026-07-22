@@ -1,0 +1,12 @@
+selectors:
+  - name: github_sources
+    description: Canonical curated GitHub sources and their source-level tests.
+    definition:
+      method: source
+      value: github
+
+  - name: engineering_marts
+    description: Engineering mart tables; orchestration serializes this write phase for Iceberg.
+    definition:
+      method: fqn
+      value: mini_lakehouse_analytics.marts.engineering

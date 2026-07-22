@@ -11,6 +11,11 @@ class DbtRunner(Protocol):
     def invoke(self, args: list[str]) -> Any: ...
 
 
+GITHUB_SOURCE_SELECTOR = "github_sources"
+ENGINEERING_MART_SELECTOR = "engineering_marts"
+SERIAL_DBT_WRITE_THREADS = "1"
+
+
 def _invoke(runner: DbtRunner, command: list[str]) -> None:
     result = runner.invoke(command)
     if getattr(result, "success", False) is not True:
@@ -29,5 +34,13 @@ def run_dbt_pipeline(*, runner: DbtRunner | None = None) -> None:
         ),
         raise_on_failure=True,
     )
-    _invoke(dbt_runner, ["source", "freshness"])
-    _invoke(dbt_runner, ["build"])
+    _invoke(dbt_runner, ["source", "freshness", "--selector", GITHUB_SOURCE_SELECTOR])
+    _invoke(
+        dbt_runner,
+        ["test", "--selector", GITHUB_SOURCE_SELECTOR, "--indirect-selection", "cautious"],
+    )
+    _invoke(
+        dbt_runner,
+        ["run", "--selector", ENGINEERING_MART_SELECTOR, "--threads", SERIAL_DBT_WRITE_THREADS],
+    )
+    _invoke(dbt_runner, ["test", "--selector", ENGINEERING_MART_SELECTOR])

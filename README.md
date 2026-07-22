@@ -55,14 +55,24 @@ The core data plane exposes only loopback ports:
 - Polaris API/management health: `localhost:8181` / `localhost:8182`
 - Trino: `localhost:8080`
 
-Ingest and curate the previous complete UTC hour, then build the analytics project:
+Ingest and curate the previous complete UTC hour, then run the same phased analytics build used by
+Prefect:
 
 ```bash
 uv run lakehouse ingest github-archive
 uv run lakehouse curate github
-uv run dbt source freshness --project-dir dbt/analytics --profiles-dir dbt/analytics
-uv run dbt build \
-  --project-dir dbt/analytics --profiles-dir dbt/analytics
+uv run dbt source freshness \
+  --project-dir dbt/analytics --profiles-dir dbt/analytics \
+  --selector github_sources
+uv run dbt test \
+  --project-dir dbt/analytics --profiles-dir dbt/analytics \
+  --selector github_sources --indirect-selection cautious
+uv run dbt run \
+  --project-dir dbt/analytics --profiles-dir dbt/analytics \
+  --selector engineering_marts --threads 1
+uv run dbt test \
+  --project-dir dbt/analytics --profiles-dir dbt/analytics \
+  --selector engineering_marts
 ```
 
 Add the orchestration control plane when you need scheduled deployments:
@@ -76,9 +86,9 @@ stack. When Lightdash is added, it
 should consume only public analytics marts and dbt metadata, not landing or curated tables directly.
 
 The ingestion deployment runs hourly at minute 15 UTC. A single transformation deployment runs at
-minute 30, curates the corresponding archive hour, validates source freshness, and builds the full
-dbt project without Prefect event sensors. Prefect task/flow failures and flow success can be sent
-to Slack and Gmail using the
+minute 30, curates the corresponding archive hour, validates source freshness, tests curated
+sources, writes analytics marts serially for Iceberg transaction safety, then runs mart tests.
+Prefect task/flow failures and flow success can be sent to Slack and Gmail using the
 `LAKEHOUSE_NOTIFICATIONS__*` settings documented in
 [pipeline operations](docs/04_pipeline_execution.md). Channels are disabled unless configured.
 

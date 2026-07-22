@@ -22,12 +22,14 @@ def test_dbt_pipeline_stops_when_source_freshness_fails() -> None:
     with pytest.raises(RuntimeError, match="source freshness"):
         _load_dbt_utils().run_dbt_pipeline(runner=runner)
 
-    runner.invoke.assert_called_once_with(["source", "freshness"])
+    runner.invoke.assert_called_once_with(["source", "freshness", "--selector", "github_sources"])
 
 
-def test_dbt_pipeline_builds_only_after_successful_freshness() -> None:
+def test_dbt_pipeline_serializes_only_iceberg_write_phase() -> None:
     runner = Mock()
     runner.invoke.side_effect = [
+        SimpleNamespace(success=True),
+        SimpleNamespace(success=True),
         SimpleNamespace(success=True),
         SimpleNamespace(success=True),
     ]
@@ -35,6 +37,8 @@ def test_dbt_pipeline_builds_only_after_successful_freshness() -> None:
     _load_dbt_utils().run_dbt_pipeline(runner=runner)
 
     assert runner.invoke.call_args_list == [
-        call(["source", "freshness"]),
-        call(["build"]),
+        call(["source", "freshness", "--selector", "github_sources"]),
+        call(["test", "--selector", "github_sources", "--indirect-selection", "cautious"]),
+        call(["run", "--selector", "engineering_marts", "--threads", "1"]),
+        call(["test", "--selector", "engineering_marts"]),
     ]

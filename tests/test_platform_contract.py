@@ -9,8 +9,10 @@ def test_namespace_contract_separates_lifecycle_and_domain_ownership() -> None:
     assert contract[("landing",)]["location"] == "s3://landing"
     assert not any(path[:2] == ("landing", "api") for path in contract)
     assert contract[("curated", "github")]["owner"] == "data-platform"
+    assert contract[("curated", "github")]["location"] == "s3://curated/github/"
     assert ("curated", "github", "internal") not in contract
     assert contract[("analytics", "engineering")]["owner"] == "engineering-analytics"
+    assert contract[("analytics", "engineering")]["location"] == "s3://analytics/engineering/"
 
 
 def test_catalog_contract_enables_bucket_root_namespaces() -> None:

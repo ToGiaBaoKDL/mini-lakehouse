@@ -63,10 +63,10 @@ def test_dbt_engineering_marts_match_the_domain_contract() -> None:
 
 def test_dbt_does_not_use_groups_for_current_scope() -> None:
     assert not Path("dbt/analytics/models/_groups.yml").exists()
-    assert not Path("dbt/analytics/selectors.yml").exists()
     dbt_files = [
         Path("dbt/analytics/dbt_project.yml"),
         Path("dbt/analytics/profiles.yml"),
+        Path("dbt/analytics/selectors.yml"),
         *sorted(Path("dbt/analytics/models").rglob("*.yml")),
     ]
     assert dbt_files
@@ -76,7 +76,7 @@ def test_dbt_does_not_use_groups_for_current_scope() -> None:
         assert "+group:" not in payload
 
 
-def test_dbt_sql_uses_explicit_projection_and_explicit_domain_locations() -> None:
+def test_dbt_sql_uses_explicit_projection_and_namespace_owned_locations() -> None:
     model_paths = sorted(Path("dbt/analytics/models").rglob("*.sql"))
 
     assert model_paths
@@ -90,5 +90,22 @@ def test_dbt_sql_uses_explicit_projection_and_explicit_domain_locations() -> Non
         assert "on_table_exists" not in sql
 
     macro = Path("dbt/analytics/macros/iceberg_properties.sql").read_text(encoding="utf-8")
+    assert "location" not in macro
+    assert "LAKEHOUSE_STORAGE__ANALYTICS_URI" not in macro
     assert "split(" not in macro
     assert "expected_schema = 'analytics.' ~ domain" in macro
+
+
+def test_dbt_selectors_define_orchestration_boundaries() -> None:
+    selectors_file = _yaml("dbt/analytics/selectors.yml")
+    selectors = cast(list[dict[str, object]], selectors_file["selectors"])
+    selector_by_name = {str(selector["name"]): selector for selector in selectors}
+
+    assert set(selector_by_name) == {"github_sources", "engineering_marts"}
+    github_definition = cast(dict[str, object], selector_by_name["github_sources"]["definition"])
+    mart_definition = cast(dict[str, object], selector_by_name["engineering_marts"]["definition"])
+    assert github_definition == {"method": "source", "value": "github"}
+    assert mart_definition == {
+        "method": "fqn",
+        "value": "mini_lakehouse_analytics.marts.engineering",
+    }

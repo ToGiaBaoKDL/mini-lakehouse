@@ -7,18 +7,18 @@ Prefect has three independently retryable deployments:
 | Deployment | Boundary | Trigger |
 |---|---|---|
 | `el_github_archive` | GitHub Archive → landing | `15 * * * *` UTC |
-| `tl_github_analytics` | landing → curated GitHub → full dbt analytics | `30 * * * *` UTC |
+| `tl_github_analytics` | landing → curated GitHub → phased dbt analytics | `30 * * * *` UTC |
 | `gov_iceberg_maintenance` | Policy-driven Iceberg maintenance | Weekly schedule |
 
 The two hourly deployments are deliberately schedule-driven. There are no Prefect event sensors,
 automation triggers, or cross-deployment payloads. Landing starts at minute 15; transformation
-starts at minute 30 and executes curation, source freshness, and a full `dbt build` sequentially.
-The fifteen-minute offset is operational buffer, while landing completeness validation makes a
-missing or delayed archive fail explicitly instead of silently building stale analytics. Both
-flows derive the archive checkpoint from the Prefect run's scheduled start time, so a queued run
-that starts after the next hour still processes the intended hour. Separate work queues isolate
-ingestion, transformation, and maintenance, while singleton `ENQUEUE` limits prevent overlapping
-writes.
+starts at minute 30 and executes curation, source freshness, curated source tests, serialized mart
+table writes, and mart tests. The fifteen-minute offset is operational buffer, while landing
+completeness validation makes a missing or delayed archive fail explicitly instead of silently
+building stale analytics. Both flows derive the archive checkpoint from the Prefect run's scheduled
+start time, so a queued run that starts after the next hour still processes the intended hour.
+Separate work queues isolate ingestion, transformation, and maintenance, while singleton `ENQUEUE`
+limits prevent overlapping writes.
 
 Flow files live under `orchestration/flows/<domain>/`, follow `[job_type]_[description].py`, and
 co-locate their Prefect tasks. Reusable dbt/retry mechanics live in `utils`; notification
@@ -38,8 +38,8 @@ prefect deployment run tl_github_analytics/tl_github_analytics \
   --param archive_hour=2026-07-21T04:00:00Z
 ```
 
-The same single field is available in Prefect's custom-run form. Every TL run executes curated
-source freshness and the complete dbt project; there is no alternate historical-run branch.
+The same single field is available in Prefect's custom-run form. Every TL run executes the same
+phased dbt pipeline; there is no alternate historical-run branch.
 
 Idempotency is enforced at the write that owns each boundary:
 

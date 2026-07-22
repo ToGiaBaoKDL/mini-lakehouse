@@ -26,7 +26,6 @@ jobs:
       - run: uv run dbt parse --project-dir dbt/analytics --profiles-dir dbt/analytics
       - run: docker compose -f compose.core.yaml config --quiet
       - run: docker compose -f compose.core.yaml -f compose.prefect.yaml config --quiet
-      - run: docker compose -f compose.core.yaml -f compose.bi.yaml config --quiet
 
   lakehouse-end-to-end:
     runs-on: ubuntu-latest
