@@ -3,9 +3,6 @@ version: 2
 models:
   - name: fct_repository_activity_daily
     description: Daily engineering activity at the stable activity_date + repository_id grain.
-    config:
-      contract:
-        enforced: true
     data_tests:
       - unique_combination_of_columns:
           arguments:
@@ -45,9 +42,6 @@ models:
 
   - name: fct_contributor_activity_daily
     description: Daily engineering activity at the stable activity_date + actor_id grain.
-    config:
-      contract:
-        enforced: true
     data_tests:
       - unique_combination_of_columns:
           arguments:

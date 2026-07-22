@@ -8,15 +8,18 @@ file with strict Pydantic models before making a network or storage call.
 - `catalog.yaml`: catalog owner, lifecycle roots, namespaces, technical owners, catalog feature
   flags, and required catalog-role grants.
 - `sources/*.yaml`: source boundary, shared landing namespace, immutable transport/object prefix,
-  checkpoint key, table location, partition transform, and schema-contract reference.
-- `curated_products/*.yaml`: canonical curated product owner, upstream sources, keys, partitions, and
-  physical locations.
+  checkpoint key, partition transform, and schema-contract reference.
+- `curated_products/*.yaml`: canonical curated product owner, upstream sources, keys, partitions,
+  and schemas.
 - `domains/*.yaml`: analytics-domain owner, upstream curated products, mart grain, partitioning,
   and public relation registry.
 - `policies/*.yaml`: one Polaris policy per file, including typed content and attachments.
 
 Runtime endpoints and credentials do not belong here. They remain in environment variables or a
 secret manager. dbt SQL, model tests, and future BI metadata remain in native dbt files.
+Physical locations of managed Iceberg tables are also absent: namespace roots come from
+`catalog.yaml`, and each engine derives the canonical table directory from the registered
+namespace plus table name. Only immutable raw object prefixes are storage contracts.
 
 ## Validation
 

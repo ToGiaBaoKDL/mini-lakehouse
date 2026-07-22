@@ -152,8 +152,16 @@ def test_landing_curation_merge_and_analytics_build_end_to_end() -> None:
             ),
         )
 
-    _run_dbt("source", "freshness")
-    _run_dbt("build")
+    _run_dbt("source", "freshness", "--selector", "github_sources")
+    _run_dbt(
+        "test",
+        "--selector",
+        "github_sources",
+        "--indirect-selection",
+        "cautious",
+    )
+    _run_dbt("run", "--selector", "engineering_marts", "--threads", "1")
+    _run_dbt("test", "--selector", "engineering_marts")
 
     repository_mart_relation = domain.table_identifier("repository_activity_daily").trino(
         settings.trino.catalog

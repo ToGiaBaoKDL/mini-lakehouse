@@ -1,26 +1,16 @@
 import logging
 from collections.abc import Mapping
 from time import sleep
-from typing import cast
 
 from pyiceberg.catalog import Catalog
 from pyiceberg.exceptions import NamespaceAlreadyExistsError
 
 from mini_lakehouse.config import Settings
 from mini_lakehouse.contracts import PlatformContracts, load_contracts
-from mini_lakehouse.contracts.base import StorageTier
-from mini_lakehouse.platform.runtime import storage_uri, validate_runtime_contract
+from mini_lakehouse.platform.runtime import namespace_storage_uri, validate_runtime_contract
 from mini_lakehouse.storage.iceberg import load_iceberg_catalog
 
 logger = logging.getLogger(__name__)
-
-
-def _namespace_storage_uri(settings: Settings, namespace: tuple[str, ...]) -> str:
-    root = namespace[0]
-    base_uri = storage_uri(settings, cast(StorageTier, root)).rstrip("/")
-    if len(namespace) == 1:
-        return base_uri
-    return f"{base_uri}/{'/'.join(namespace[1:])}/"
 
 
 def namespace_contract(
@@ -31,7 +21,7 @@ def namespace_contract(
     validate_runtime_contract(settings, registry)
     return {
         namespace.path: namespace.iceberg_properties(
-            _namespace_storage_uri(settings, namespace.path)
+            namespace_storage_uri(settings, namespace.path)
         )
         for namespace in registry.catalog.namespaces
     }

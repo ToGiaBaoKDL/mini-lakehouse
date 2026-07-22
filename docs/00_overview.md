@@ -21,9 +21,12 @@ GitHub Archive
 - `analytics` is organized by business domain and owns consumer semantics.
 
 For a future RDBMS source, use a unique landing table such as
-`prod.landing.warehouse_raw_orders` at `s3://landing/rdbms/warehouse_raw/orders`. Its curation
-package publishes to a transport-free curated product. A future domain can consume one or more
-curated products without depending on their ingestion implementation.
+`prod.landing.warehouse_raw_orders`; retain a deterministic transport path such as
+`s3://landing/rdbms/warehouse_raw/raw/...` only for immutable source objects. Polaris owns the
+namespace location, so the engine derives the managed table path as
+`s3://landing/warehouse_raw_orders`. Its curation package publishes to a transport-free curated
+product. A future domain can consume one or more curated products without depending on their
+ingestion implementation.
 
 ## Code boundaries
 

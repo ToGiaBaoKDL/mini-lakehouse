@@ -44,15 +44,13 @@ type CheckpointContract = Annotated[
 class SourceTableContract(ContractModel):
     key: ContractName
     name: Identifier
-    location_prefix: str
     schema_contract: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
     columns: tuple[ColumnContract, ...] = Field(min_length=1)
     partitioning: tuple[PartitionTransformContract, ...] = Field(min_length=1)
     write_mode: Literal["append", "checkpoint_overwrite"]
 
     @model_validator(mode="after")
-    def validate_location_prefix(self) -> "SourceTableContract":
-        validate_relative_prefix(self.location_prefix)
+    def validate_table(self) -> "SourceTableContract":
         column_names = [column.name for column in self.columns]
         field_ids = [column.field_id for column in self.columns]
         if len(column_names) != len(set(column_names)):
@@ -98,20 +96,13 @@ class SourceContract(ContractModel):
             )
         keys = [table.key for table in self.tables]
         names = [table.name for table in self.tables]
-        locations = [table.location_prefix for table in self.tables]
         if len(keys) != len(set(keys)) or len(names) != len(set(names)):
             raise ValueError(f"Source {self.name!r} table keys and names must be unique")
-        if len(locations) != len(set(locations)):
-            raise ValueError(f"Source {self.name!r} table locations must be unique")
         table_name_prefix = f"{self.name.replace('-', '_')}_"
         for table in self.tables:
             if not table.name.startswith(table_name_prefix):
                 raise ValueError(
                     f"Source table {table.name!r} must start with {table_name_prefix!r}"
-                )
-            if not table.location_prefix.startswith(source_object_prefix):
-                raise ValueError(
-                    f"Source {self.name!r} tables must live below {source_object_prefix!r}"
                 )
             if table.write_mode == "checkpoint_overwrite" and self.checkpoint.field not in {
                 partition.field for partition in table.partitioning

@@ -37,6 +37,9 @@ def test_dbt_engineering_marts_match_the_domain_contract() -> None:
     model_by_name = {str(model["name"]): model for model in models}
     for table in domain.tables:
         model = model_by_name[table.name]
+        config = cast(dict[str, object], model.get("config", {}))
+        contract = cast(dict[str, object], config.get("contract", {}))
+        assert contract.get("enforced", False) is False
         data_tests = cast(list[dict[str, object]], model["data_tests"])
         unique_test = cast(dict[str, object], data_tests[0]["unique_combination_of_columns"])
         arguments = cast(dict[str, object], unique_test["arguments"])
@@ -57,7 +60,8 @@ def test_dbt_engineering_marts_match_the_domain_contract() -> None:
 
     assert staging["+materialized"] == "ephemeral"
     assert intermediate["+materialized"] == "ephemeral"
-    assert engineering["+materialized"] == "table"
+    assert marts["+materialized"] == "table"
+    assert marts["+on_table_exists"] == "replace"
     assert engineering["+schema"] == ".".join(domain.analytics_namespace)
 
 
@@ -94,6 +98,9 @@ def test_dbt_sql_uses_explicit_projection_and_namespace_owned_locations() -> Non
     assert "LAKEHOUSE_STORAGE__ANALYTICS_URI" not in macro
     assert "split(" not in macro
     assert "expected_schema = 'analytics.' ~ domain" in macro
+
+    trino_catalog = Path("infra/trino/etc/catalog/prod.properties").read_text(encoding="utf-8")
+    assert "iceberg.unique-table-location=false" in trino_catalog
 
 
 def test_dbt_selectors_define_orchestration_boundaries() -> None:

@@ -7,7 +7,7 @@
 | Catalog, lifecycle namespaces, and RBAC | `contracts/catalog.yaml` | Data Platform | Isolated Polaris reconcilers |
 | Source landing data | `contracts/sources/*.yaml` + source package | Declared source owner | Source service and repository |
 | Curated GitHub product | `contracts/curated_products/github.yaml` + curated product package | Data Platform | Trino curation service |
-| Analytics domain models | `contracts/domains/*.yaml` + dbt contracts | Declared domain owner | dbt/Trino |
+| Analytics domain models | `contracts/domains/*.yaml` + dbt metadata/tests | Declared domain owner | dbt/Trino |
 | Maintenance policy | `contracts/policies/*.yaml` | Declared policy owner | Polaris metadata + governance flow |
 | Deployment lifecycle | Compose and `prefect.yaml` | Platform operators | Docker Compose and Prefect |
 
@@ -40,10 +40,12 @@ Run the bootstrap through the core Compose module:
 docker compose -f compose.core.yaml run --rm lakehouse-bootstrap
 ```
 
-The local `catalog_admin` role is explicitly granted `CATALOG_MANAGE_CONTENT`, and the catalog
-feature flag `polaris.config.drop-with-purge.enabled` is explicit for reviewed table retirement
-and local rebuild migrations. Normal dbt models use atomic table replacement. These settings
-belong to the catalog contract rather than a container startup script.
+The local `catalog_admin` role is explicitly granted `CATALOG_MANAGE_CONTENT`. The Polaris
+`drop-with-purge` feature flag is reserved for reviewed retirement and local rebuild migrations.
+Namespace locations are the physical source of truth; table creators do not provide another path,
+and Trino is configured to derive stable table directories without UUID suffixes. Normal dbt models
+use table replacement. These settings belong to reviewed platform configuration rather than a
+container startup script.
 
 Running bootstrap again with unchanged contracts must produce no catalog, role-grant, namespace,
 or policy-content mutation. Mapping `PUT` requests remain safe and idempotent by Polaris API

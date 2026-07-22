@@ -10,7 +10,6 @@ from mini_lakehouse.contracts.base import (
     Identifier,
     NamespacePath,
     PartitionTransformContract,
-    validate_relative_prefix,
 )
 from mini_lakehouse.contracts.identifiers import TableIdentifier
 
@@ -19,7 +18,6 @@ class CuratedTableContract(ContractModel):
     key: ContractName
     name: Identifier
     description: str = Field(min_length=1)
-    location_prefix: str
     schema_contract: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
     columns: tuple[ColumnContract, ...] = Field(min_length=1)
     primary_key: tuple[Identifier, ...] = Field(min_length=1)
@@ -28,7 +26,6 @@ class CuratedTableContract(ContractModel):
 
     @model_validator(mode="after")
     def validate_table(self) -> "CuratedTableContract":
-        validate_relative_prefix(self.location_prefix)
         column_names = [column.name for column in self.columns]
         field_ids = [column.field_id for column in self.columns]
         if len(column_names) != len(set(column_names)):
@@ -77,16 +74,8 @@ class CuratedProductContract(ContractModel):
             raise ValueError(f"Curated product {self.name!r} upstream sources must be unique")
         keys = [table.key for table in self.tables]
         names = [table.name for table in self.tables]
-        locations = [table.location_prefix for table in self.tables]
         if len(keys) != len(set(keys)) or len(names) != len(set(names)):
             raise ValueError(f"Curated product {self.name!r} table keys and names must be unique")
-        if len(locations) != len(set(locations)):
-            raise ValueError(f"Curated product {self.name!r} table locations must be unique")
-        product_prefix = f"{self.name}/"
-        if any(not location.startswith(product_prefix) for location in locations):
-            raise ValueError(
-                f"Curated product {self.name!r} table locations must live below {product_prefix!r}"
-            )
         return self
 
     def table(self, key: str) -> CuratedTableContract:

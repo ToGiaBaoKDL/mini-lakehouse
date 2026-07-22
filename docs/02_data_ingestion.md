@@ -18,6 +18,8 @@ The application performs four explicit operations:
 The raw table is `prod.landing.github_archive_events_raw`. It uses the hidden Iceberg transform
 `hour(source_hour)`,
 not business event time, because source-hour replacement is the ingestion transaction boundary.
+Its physical location is derived from the `landing` namespace and table name. It is intentionally
+independent from the deterministic `api/github_archive/raw` object prefix.
 
 Malformed rows are counted and the batch fails if their ratio exceeds the configured contract.
 HTTP retries apply only to transient statuses; a not-yet-published archive hour is a distinct

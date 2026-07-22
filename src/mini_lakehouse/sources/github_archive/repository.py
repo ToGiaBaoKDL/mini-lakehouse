@@ -78,10 +78,6 @@ class GithubArchiveRepository:
         table = self._catalog.create_table(
             identifier=self._identifier.iceberg,
             schema=self._schema,
-            location=(
-                f"{self._settings.storage.landing_uri.rstrip('/')}"
-                f"/{self._table_contract.location_prefix}"
-            ),
             partition_spec=self._partition_spec,
             properties={
                 "format-version": "2",

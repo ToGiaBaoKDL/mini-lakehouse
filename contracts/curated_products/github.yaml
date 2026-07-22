@@ -12,7 +12,6 @@ tables:
   - key: events
     name: events
     description: Deduplicated and normalized GitHub events at one row per stable event ID.
-    location_prefix: github/events
     schema_contract: github.events.v1
     primary_key: [event_id]
     columns:
@@ -43,7 +42,6 @@ tables:
   - key: actors_current
     name: actors_current
     description: Latest observed GitHub actor attributes at one row per actor ID.
-    location_prefix: github/actors_current
     schema_contract: github.actors_current.v1
     primary_key: [actor_id]
     columns:
@@ -57,7 +55,6 @@ tables:
   - key: repositories_current
     name: repositories_current
     description: Latest observed GitHub repository attributes at one row per repository ID.
-    location_prefix: github/repositories_current
     schema_contract: github.repositories_current.v1
     primary_key: [repository_id]
     columns:

@@ -26,9 +26,6 @@ class CuratedTableManager:
     def _relation(self, table: CuratedTableContract) -> str:
         return self._product.table_identifier(table.key).trino(self._settings.trino.catalog)
 
-    def _location(self, table: CuratedTableContract) -> str:
-        return f"{self._settings.storage.curated_uri.rstrip('/')}/{table.location_prefix}"
-
     def ensure_tables(self, executor: SqlExecutor) -> None:
         for table in self._product.tables:
             executor.execute(self._create_table_sql(table))
@@ -42,7 +39,6 @@ class CuratedTableManager:
         properties = [
             "format = 'PARQUET'",
             "format_version = 2",
-            f"location = '{self._location(table)}'",
         ]
         if table.partitioning:
             values = ", ".join(
@@ -69,12 +65,6 @@ class CuratedTableManager:
         if len(create_statement.rows) != 1:
             raise RuntimeError(f"Trino returned no canonical DDL for {relation}")
         ddl = str(create_statement.rows[0][0])
-        expected_location = f"location = '{self._location(table)}'"
-        if expected_location not in ddl:
-            raise RuntimeError(
-                f"Curated table {relation} has a non-canonical location; "
-                f"expected {self._location(table)!r}"
-            )
         for partition in table.partitioning:
             expression = partition_expression(partition)
             if f"'{expression}'" not in ddl:

@@ -124,3 +124,16 @@ def test_new_hour_uses_checkpoint_predicate_overwrite_as_the_idempotent_commit()
     table.overwrite.assert_called_once()
     assert isinstance(table.overwrite.call_args.kwargs["overwrite_filter"], EqualTo)
     table.append.assert_not_called()
+
+
+def test_new_landing_table_derives_location_from_its_namespace() -> None:
+    catalog = create_autospec(Catalog, instance=True)
+    table = create_autospec(Table, instance=True)
+    catalog.table_exists.return_value = False
+    catalog.create_table.return_value = table
+    table.spec.return_value = _events_partition_spec()
+
+    result = GithubArchiveRepository(Settings(), catalog=catalog).ensure_table()
+
+    assert result is table
+    assert "location" not in catalog.create_table.call_args.kwargs

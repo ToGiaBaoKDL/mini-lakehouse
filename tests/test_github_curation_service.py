@@ -36,7 +36,7 @@ class FakeTrinoExecutor:
             partitioning = " ".join(
                 f"'{partition_expression(value)}'" for value in table.partitioning
             )
-            ddl = f"location = 's3://curated/github/{table_key}' {partitioning}"
+            ddl = partitioning
             return QueryResult(columns=("Create Table",), rows=((ddl,),))
         if "GROUP BY source_hour" in statement:
             return QueryResult(
@@ -78,6 +78,9 @@ def test_curation_is_bounded_to_one_source_hour() -> None:
     assert "source.ingested_at," in event_merge
     assert "source.source_hour," in event_merge
     assert "source.source_file" in event_merge
+    create_calls = [call[0] for call in executor.calls if call[0].startswith("CREATE TABLE")]
+    assert create_calls
+    assert all("location =" not in statement.lower() for statement in create_calls)
 
 
 def test_curation_rejects_a_missing_landing_hour() -> None:

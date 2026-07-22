@@ -124,7 +124,6 @@ def test_registry_accepts_a_second_source_family_without_core_code_changes() -> 
                 {
                     "key": "orders",
                     "name": "warehouse_raw_orders",
-                    "location_prefix": "rdbms/warehouse_raw/orders",
                     "schema_contract": "warehouse.orders.v1",
                     "columns": [
                         {
@@ -236,3 +235,18 @@ def test_normalized_registry_is_deterministic_across_loads() -> None:
     load_contracts.cache_clear()
 
     assert load_contracts().model_dump_json() == first
+
+
+def test_managed_table_contracts_do_not_duplicate_physical_locations() -> None:
+    contracts = load_contracts()
+
+    assert all(
+        "location_prefix" not in table.model_fields_set
+        for source in contracts.sources
+        for table in source.tables
+    )
+    assert all(
+        "location_prefix" not in table.model_fields_set
+        for product in contracts.curated_products
+        for table in product.tables
+    )

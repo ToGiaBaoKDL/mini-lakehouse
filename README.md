@@ -10,24 +10,25 @@ dbt for transformation, Prefect for orchestration, and uv for Python packaging.
 GitHub Archive API
         │
         ▼
-s3://landing/api/github_archive/
-  ├── raw/year=.../month=.../day=.../hour=.../*.json.gz
-  └── events_raw                         prod.landing.github_archive_events_raw
+s3://landing/
+  ├── api/github_archive/raw/year=.../month=.../day=.../hour=.../*.json.gz
+  └── github_archive_events_raw/         prod.landing.github_archive_events_raw
         │
         ▼ Trino curation: validate → normalize → idempotent MERGE
 s3://curated/github/                     prod."curated.github"
-  ├── events
-  ├── actors_current
-  └── repositories_current
+  ├── events/
+  ├── actors_current/
+  └── repositories_current/
         │
         ▼ dbt/analytics: ephemeral staging → intermediate → marts
 s3://analytics/engineering/              prod."analytics.engineering"
-  ├── fct_repository_activity_daily
-  └── fct_contributor_activity_daily
+  ├── fct_repository_activity_daily/
+  └── fct_contributor_activity_daily/
 ```
 
 The three physical buckets are lifecycle/security boundaries. They are intentionally not the
-same thing as dbt's modeling layers.
+same thing as dbt's modeling layers. Managed table locations are derived from the namespace
+location and logical table name; application code and dbt models do not repeat physical paths.
 
 | Contract | Owner | Rules |
 |---|---|---|

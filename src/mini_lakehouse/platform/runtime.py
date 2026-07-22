@@ -1,6 +1,8 @@
+from typing import cast
+
 from mini_lakehouse.config import Settings
 from mini_lakehouse.contracts import PlatformContracts
-from mini_lakehouse.contracts.base import StorageTier
+from mini_lakehouse.contracts.base import NamespacePath, StorageTier
 
 
 def storage_uri(settings: Settings, tier: StorageTier) -> str:
@@ -9,6 +11,13 @@ def storage_uri(settings: Settings, tier: StorageTier) -> str:
         "curated": settings.storage.curated_uri,
         "analytics": settings.storage.analytics_uri,
     }[tier]
+
+
+def namespace_storage_uri(settings: Settings, namespace: NamespacePath) -> str:
+    base_uri = storage_uri(settings, cast(StorageTier, namespace[0])).rstrip("/")
+    if len(namespace) == 1:
+        return base_uri
+    return f"{base_uri}/{'/'.join(namespace[1:])}/"
 
 
 def validate_runtime_contract(settings: Settings, contracts: PlatformContracts) -> None:

@@ -16,11 +16,15 @@ Rules:
 - Staging and intermediate models are ephemeral; curated never stores dbt implementation details.
 - Only domain marts are physical tables. Polaris namespace properties own analytics storage
   locations; dbt does not duplicate table-level locations.
-- Marts currently use full `table` materialization. Dormant bounded `is_incremental()` predicates
-  remain next to business SQL so a later reviewed materialization change does not rewrite metrics.
+- Marts currently use full `table` materialization with a single Trino Iceberg
+  `CREATE OR REPLACE TABLE AS SELECT` statement. This keeps refreshes atomic and avoids
+  rename-based `__dbt_tmp` locations. Column types remain documented in model YAML; grain,
+  nullability, and relationships are executable dbt tests. Dormant bounded `is_incremental()`
+  predicates remain next to business SQL so a later reviewed materialization change does not
+  rewrite metrics.
 - Aggregation uses stable IDs, and current names are joined after aggregation.
-- dbt contracts fix public column types; uniqueness, nullability, relationships,
-  and future BI metadata remain dbt-native.
+- Public column types, uniqueness, nullability, relationships, and future BI metadata remain
+  dbt-native. Trino infers the declared mart types from explicit model projections.
 - Curated source freshness measures `max(source_hour)`, which represents the newest fully curated
   source checkpoint. Only the event stream has a freshness SLA; current entity snapshots do not.
 
