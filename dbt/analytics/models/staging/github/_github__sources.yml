@@ -9,7 +9,7 @@ sources:
       group: data_platform
     meta:
       owner: data-platform
-      contact: data-platform@example.com
+      contact: bao.to@timo.vn
       product: github
       physical_bucket: curated
     tables:

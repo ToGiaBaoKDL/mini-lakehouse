@@ -88,11 +88,11 @@ exposures:
     label: Engineering Activity Dashboard
     type: dashboard
     maturity: medium
-    url: http://localhost:8501
-    description: Streamlit dashboard backed only by public Engineering marts.
+    url: http://localhost:3000
+    description: Lightdash dashboard backed only by public Engineering marts.
     depends_on:
       - ref('fct_repository_activity_daily')
       - ref('fct_contributor_activity_daily')
     owner:
-      name: Engineering Analytics
-      email: engineering-analytics@example.com
+      name: To Gia Bao
+      email: bao.to@timo.vn

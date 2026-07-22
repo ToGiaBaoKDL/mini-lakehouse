@@ -1,0 +1,4 @@
+# Optional BI plane. Always combine with compose.core.yaml.
+# Lightdash will be configured here.
+
+services: {}

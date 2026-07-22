@@ -26,7 +26,7 @@ jobs:
       - run: uv run dbt parse --project-dir dbt/analytics --profiles-dir dbt/analytics
       - run: docker compose -f compose.core.yaml config --quiet
       - run: docker compose -f compose.core.yaml -f compose.prefect.yaml config --quiet
-      - run: docker compose -f compose.core.yaml -f compose.dashboard.yaml config --quiet
+      - run: docker compose -f compose.core.yaml -f compose.bi.yaml config --quiet
 
   lakehouse-end-to-end:
     runs-on: ubuntu-latest
@@ -48,8 +48,6 @@ jobs:
         run: timeout 240 bash -c 'until curl --fail --silent http://localhost:8080/v1/info; do sleep 3; done'
       - name: Build orchestration image
         run: docker compose -f compose.core.yaml -f compose.prefect.yaml build prefect-worker
-      - name: Build dashboard image
-        run: docker compose -f compose.core.yaml -f compose.dashboard.yaml build dashboard
       - name: Exercise landing, curation, dbt, and catalog contracts
         run: RUN_LAKEHOUSE_INTEGRATION=1 uv run pytest -m integration
       - name: Collect service logs

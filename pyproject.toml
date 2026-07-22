@@ -21,11 +21,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dashboard = [
-    "pandas>=2.3,<3",
-    "plotly>=6.5,<7",
-    "streamlit>=1.53,<2",
-]
 orchestration = [
     "dbt-core>=1.10,<1.12",
     "dbt-trino>=1.10,<1.11",

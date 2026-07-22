@@ -20,8 +20,8 @@ def test_compose_modules_are_clean_clone_safe() -> None:
     compose_files = sorted(Path.cwd().glob("compose*.yaml"))
 
     assert [path.name for path in compose_files] == [
+        "compose.bi.yaml",
         "compose.core.yaml",
-        "compose.dashboard.yaml",
         "compose.prefect.yaml",
     ]
     for compose_file in compose_files:

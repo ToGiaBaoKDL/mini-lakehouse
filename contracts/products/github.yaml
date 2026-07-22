@@ -3,7 +3,7 @@ name: github
 owner: data-platform
 contact:
   name: Data Platform
-  email: data-platform@example.com
+  email: bao.to@timo.vn
 dbt_group: data_platform
 description: Canonical validated GitHub entities and events for downstream data products.
 curated_namespace: [curated, github]

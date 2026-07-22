@@ -40,15 +40,3 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 CMD ["prefect", "--help"]
 
-FROM base AS dashboard-dependencies
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra dashboard --no-install-project
-
-FROM dashboard-dependencies AS dashboard
-COPY README.md ./
-COPY src ./src
-COPY contracts ./contracts
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra dashboard --no-editable
-
-CMD ["streamlit", "--help"]
