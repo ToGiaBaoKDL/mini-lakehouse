@@ -19,7 +19,8 @@ from mini_lakehouse.contracts import (
     load_contracts,
     partition_spec,
 )
-from mini_lakehouse.storage.iceberg import load_iceberg_catalog
+from mini_lakehouse.platform.runtime import source_table_storage_uri
+from mini_lakehouse.storage.iceberg import load_iceberg_catalog, validate_table_location
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,9 +40,12 @@ class GithubArchiveRepository:
         self._settings = settings
         self._owned_catalog = catalog is None
         self._catalog = catalog or load_iceberg_catalog(settings)
-        source = (contracts or load_contracts(settings.contracts_dir)).source("github_archive")
-        self._table_contract = source.table("events_raw")
-        self._identifier = source.table_identifier("events_raw")
+        self._source = (contracts or load_contracts(settings.contracts_dir)).source(
+            "github_archive"
+        )
+        self._table_contract = self._source.table("events_raw")
+        self._identifier = self._source.table_identifier("events_raw")
+        self._location = source_table_storage_uri(settings, self._source, "events_raw")
         self._schema = iceberg_schema(self._table_contract.columns)
         self._partition_spec = partition_spec(
             self._table_contract.columns,
@@ -73,11 +77,12 @@ class GithubArchiveRepository:
     def ensure_table(self) -> Table:
         if self._catalog.table_exists(self._identifier.iceberg):
             table = self._catalog.load_table(self._identifier.iceberg)
-            self._validate_partition_spec(table)
+            self._validate_table(table)
             return table
         table = self._catalog.create_table(
             identifier=self._identifier.iceberg,
             schema=self._schema,
+            location=self._location,
             partition_spec=self._partition_spec,
             properties={
                 "format-version": "2",
@@ -85,10 +90,11 @@ class GithubArchiveRepository:
                 "write.parquet.compression-codec": "zstd",
             },
         )
-        self._validate_partition_spec(table)
+        self._validate_table(table)
         return table
 
-    def _validate_partition_spec(self, table: Table) -> None:
+    def _validate_table(self, table: Table) -> None:
+        validate_table_location(table, self._location, owner="GitHub Archive")
         current = table.spec()
         if current != self._partition_spec:
             raise RuntimeError(
@@ -100,6 +106,7 @@ class GithubArchiveRepository:
         if not self._catalog.table_exists(self._identifier.iceberg):
             return None
         table = self._catalog.load_table(self._identifier.iceberg)
+        self._validate_table(table)
         files = tuple(
             table.scan(
                 row_filter=EqualTo(

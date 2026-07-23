@@ -36,7 +36,7 @@ class FakeTrinoExecutor:
             partitioning = " ".join(
                 f"'{partition_expression(value)}'" for value in table.partitioning
             )
-            ddl = partitioning
+            ddl = f"location = 's3://curated/github/{table.name}' {partitioning}"
             return QueryResult(columns=("Create Table",), rows=((ddl,),))
         if "GROUP BY source_hour" in statement:
             return QueryResult(

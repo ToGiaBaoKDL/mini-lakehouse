@@ -7,19 +7,24 @@ file with strict Pydantic models before making a network or storage call.
 
 - `catalog.yaml`: catalog owner, lifecycle roots, namespaces, technical owners, catalog feature
   flags, and required catalog-role grants.
-- `sources/*.yaml`: source boundary, shared landing namespace, immutable transport/object prefix,
+- `sources/*.yaml`: source boundary, shared landing namespace, source-owned raw object prefix,
   checkpoint key, partition transform, and schema-contract reference.
 - `curated_products/*.yaml`: canonical curated product owner, upstream sources, keys, partitions,
   and schemas.
+- `processors/*.yaml`: external processing owner, pinned model revisions, output protocol,
+  resource limits, artifact prefix, runner, and retry policy.
 - `domains/*.yaml`: analytics-domain owner, upstream curated products, mart grain, partitioning,
   and public relation registry.
 - `policies/*.yaml`: one Polaris policy per file, including typed content and attachments.
 
 Runtime endpoints and credentials do not belong here. They remain in environment variables or a
 secret manager. dbt SQL, model tests, and future BI metadata remain in native dbt files.
-Physical locations of managed Iceberg tables are also absent: namespace roots come from
-`catalog.yaml`, and each engine derives the canonical table directory from the registered
-namespace plus table name. Only immutable raw object prefixes are storage contracts.
+Physical locations of managed Iceberg tables are also absent from individual table declarations.
+Namespace roots come from `catalog.yaml`. Curated/analytics locations follow their dedicated
+namespace; landing locations are derived centrally as
+`<landing>/<source-type>/<source-name>/tables/<table-key>` because all sources share one logical
+namespace. Each source contract defines its raw prefix and whether a checkpoint is append-only or
+replaced atomically.
 
 ## Validation
 
@@ -51,7 +56,9 @@ unknown mappings with blind detach requests.
    `curated_products/<product>/`.
 6. Add convention-named EL and TL DAGs that co-locate their Prefect tasks; prefer explicit
    schedules over cross-deployment event sensors when a fixed source SLA exists.
-7. Declare the curated product as a dbt source; keep dbt staging/intermediate models ephemeral.
-8. Reference the product from each consuming analytics domain contract.
-9. Attach the tier policy; change its name when changing targets so stale mappings are prunable.
-10. Add cross-layer, idempotent rerun, and failure-recovery tests before enabling a schedule.
+7. Add `processors/<processor>.yaml` only when compute leaves the lakehouse runtime; pin every
+   output-affecting model/config and keep provider credentials in the environment.
+8. Declare the curated product as a dbt source; keep dbt staging/intermediate models ephemeral.
+9. Reference the product from each consuming analytics domain contract.
+10. Attach the tier policy; change its name when changing targets so stale mappings are prunable.
+11. Add cross-layer, idempotent rerun, and failure-recovery tests before enabling a schedule.

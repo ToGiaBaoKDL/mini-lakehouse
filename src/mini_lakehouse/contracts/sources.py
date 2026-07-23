@@ -20,6 +20,11 @@ class HourlyPartitionCheckpoint(ContractModel):
     field: Identifier
 
 
+class DailyPartitionCheckpoint(ContractModel):
+    kind: Literal["daily_partition"]
+    field: Identifier
+
+
 class TimestampCheckpoint(ContractModel):
     kind: Literal["timestamp"]
     field: Identifier
@@ -36,7 +41,11 @@ class OffsetCheckpoint(ContractModel):
 
 
 type CheckpointContract = Annotated[
-    HourlyPartitionCheckpoint | TimestampCheckpoint | CursorCheckpoint | OffsetCheckpoint,
+    HourlyPartitionCheckpoint
+    | DailyPartitionCheckpoint
+    | TimestampCheckpoint
+    | CursorCheckpoint
+    | OffsetCheckpoint,
     Field(discriminator="kind"),
 ]
 
@@ -84,16 +93,25 @@ class SourceContract(ContractModel):
     checkpoint: CheckpointContract
     tables: tuple[SourceTableContract, ...] = Field(min_length=1)
 
+    @property
+    def storage_prefix(self) -> str:
+        """Canonical physical boundary for every object owned by this source."""
+        return f"{self.source_type}/{self.name}"
+
+    def table_storage_prefix(self, key: str) -> str:
+        """Return the source-relative root of one managed Iceberg table."""
+        return f"{self.storage_prefix}/tables/{self.table(key).key}"
+
     @model_validator(mode="after")
     def validate_source_boundary(self) -> "SourceContract":
         validate_relative_prefix(self.raw_object_prefix)
         if self.landing_namespace != ("landing",):
             raise ValueError(f"Source {self.name!r} must publish in the shared landing namespace")
-        source_object_prefix = f"{self.source_type}/{self.name}/"
-        if not self.raw_object_prefix.startswith(source_object_prefix):
-            raise ValueError(
-                f"Source {self.name!r} raw objects must live below {source_object_prefix!r}"
-            )
+        raw_root = f"{self.storage_prefix}/raw"
+        if self.raw_object_prefix != raw_root and not self.raw_object_prefix.startswith(
+            f"{raw_root}/"
+        ):
+            raise ValueError(f"Source {self.name!r} raw objects must live at or below {raw_root!r}")
         keys = [table.key for table in self.tables]
         names = [table.name for table in self.tables]
         if len(keys) != len(set(keys)) or len(names) != len(set(names)):

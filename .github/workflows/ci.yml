@@ -19,6 +19,7 @@ jobs:
           python-version-file: .python-version
       - run: uv sync --frozen --all-extras --all-groups
       - run: uv lock --check
+      - run: uv lock --check --directory runners/kaggle/glm_ocr
       - run: uv run ruff format --check .
       - run: uv run ruff check .
       - run: uv run pyright
@@ -45,10 +46,12 @@ jobs:
         run: docker compose -f compose.core.yaml up -d --build trino
       - name: Wait for Trino
         run: timeout 240 bash -c 'until curl --fail --silent http://localhost:8080/v1/info; do sleep 3; done'
+      - name: Route the Compose S3 endpoint from host-side integration tests
+        run: echo "127.0.0.1 object-store" | sudo tee -a /etc/hosts
       - name: Build orchestration image
         run: docker compose -f compose.core.yaml -f compose.prefect.yaml build prefect-worker
       - name: Exercise landing, curation, dbt, and catalog contracts
-        run: RUN_LAKEHOUSE_INTEGRATION=1 uv run pytest -m integration
+        run: LAKEHOUSE_ENVIRONMENT=ci RUN_LAKEHOUSE_INTEGRATION=1 uv run pytest -m integration
       - name: Collect service logs
         if: failure()
         run: docker compose -f compose.core.yaml logs --no-color

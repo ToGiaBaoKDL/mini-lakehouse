@@ -1,0 +1,62 @@
+version: 1
+name: arxiv
+source_type: api
+owner: data-platform
+contact:
+  name: Data Platform
+  email: bao.to@timo.vn
+description: ArXiv article metadata harvested through OAI-PMH.
+landing_namespace: [landing]
+raw_object_prefix: api/arxiv/raw/oai
+
+checkpoint:
+  kind: daily_partition
+  field: datestamp_date
+
+tables:
+  - key: oai_records_raw
+    name: arxiv_oai_records_raw
+    schema_contract: arxiv.oai_records_raw.v1
+    columns:
+      - {field_id: 1, name: oai_identifier, data_type: string, required: true, description: Stable OAI identifier.}
+      - {field_id: 2, name: arxiv_id, data_type: string, required: true, description: ArXiv article identifier.}
+      - {field_id: 3, name: title, data_type: string, required: false, description: Latest title exposed by OAI.}
+      - {field_id: 4, name: abstract, data_type: string, required: false, description: Latest abstract exposed by OAI.}
+      - {field_id: 5, name: authors_json, data_type: string, required: true, description: Canonical JSON array of ordered author occurrences.}
+      - {field_id: 6, name: categories, data_type: string, required: false, description: Space-delimited category codes.}
+      - {field_id: 7, name: primary_category, data_type: string, required: false, description: First category code.}
+      - {field_id: 8, name: license_uri, data_type: string, required: false, description: Article license URI.}
+      - {field_id: 9, name: doi, data_type: string, required: false, description: Published DOI when present.}
+      - {field_id: 10, name: journal_ref, data_type: string, required: false, description: Journal reference when present.}
+      - {field_id: 11, name: comments, data_type: string, required: false, description: Author comments when present.}
+      - {field_id: 12, name: created_date, data_type: date, required: false, description: Original submission date.}
+      - {field_id: 13, name: updated_date, data_type: date, required: false, description: Latest revision date.}
+      - {field_id: 14, name: datestamp_date, data_type: date, required: true, description: OAI record modification checkpoint.}
+      - {field_id: 15, name: set_specs, data_type: string, required: false, description: Space-delimited OAI set memberships.}
+      - {field_id: 16, name: pdf_url, data_type: string, required: true, description: Canonical ArXiv PDF URL derived from arxiv_id.}
+      - {field_id: 17, name: is_deleted, data_type: boolean, required: true, description: OAI deletion tombstone.}
+      - {field_id: 18, name: raw_object_key, data_type: string, required: true, description: Deterministic raw response archive key.}
+      - {field_id: 19, name: raw_object_sha256, data_type: string, required: true, description: Complete raw response archive content hash.}
+      - {field_id: 20, name: record_index, data_type: long, required: true, description: Record position within the harvested day.}
+      - {field_id: 21, name: record_sha256, data_type: string, required: true, description: Hash of the canonical serialized OAI record XML.}
+      - {field_id: 22, name: ingested_at, data_type: timestamptz, required: true, description: Landing ingestion timestamp.}
+    partitioning:
+      - field: datestamp_date
+        transform: identity
+    write_mode: checkpoint_overwrite
+
+  - key: oai_checkpoints
+    name: arxiv_oai_checkpoints
+    schema_contract: arxiv.oai_checkpoints.v1
+    columns:
+      - {field_id: 1, name: datestamp_date, data_type: date, required: true, description: Successfully published OAI datestamp day.}
+      - {field_id: 2, name: raw_object_key, data_type: string, required: true, description: Deterministic raw response archive key.}
+      - {field_id: 3, name: raw_object_sha256, data_type: string, required: true, description: Hash of the complete raw response archive.}
+      - {field_id: 4, name: page_count, data_type: long, required: true, description: Number of OAI response pages.}
+      - {field_id: 5, name: record_count, data_type: long, required: true, description: Number of records published for the day.}
+      - {field_id: 6, name: schema_version, data_type: string, required: true, description: Landing parser schema version.}
+      - {field_id: 7, name: published_at, data_type: timestamptz, required: true, description: Successful publication timestamp.}
+    partitioning:
+      - field: datestamp_date
+        transform: identity
+    write_mode: checkpoint_overwrite

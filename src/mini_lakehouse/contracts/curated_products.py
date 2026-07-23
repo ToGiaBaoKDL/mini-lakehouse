@@ -70,6 +70,11 @@ class CuratedProductContract(ContractModel):
     def validate_product(self) -> "CuratedProductContract":
         if self.curated_namespace[0] != "curated":
             raise ValueError(f"Curated product {self.name!r} must publish below curated")
+        expected_leaf = self.name.replace("-", "_")
+        if self.curated_namespace[-1] != expected_leaf:
+            raise ValueError(
+                f"Curated product {self.name!r} must own namespace leaf {expected_leaf!r}"
+            )
         if len(self.upstream_sources) != len(set(self.upstream_sources)):
             raise ValueError(f"Curated product {self.name!r} upstream sources must be unique")
         keys = [table.key for table in self.tables]

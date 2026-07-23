@@ -17,7 +17,7 @@ namespaces:
   - path: [landing]
     storage_root: landing
     owner: data-platform
-    description: Immutable source-owned data and replayable landing tables.
+    description: Replayable source-owned captures and checkpointed landing tables.
     properties:
       data_tier: landing
 
@@ -33,6 +33,12 @@ namespaces:
     description: Conformed GitHub entities and events.
     properties:
       data_product: github
+
+  - path: [curated, arxiv]
+    owner: data-platform
+    description: Canonical ArXiv papers and OCR results.
+    properties:
+      data_product: arxiv
 
   - path: [analytics]
     storage_root: analytics

@@ -1,0 +1,136 @@
+version: 1
+name: arxiv
+owner: data-platform
+contact:
+  name: Data Platform
+  email: bao.to@timo.vn
+description: Canonical current ArXiv metadata and OCR results.
+curated_namespace: [curated, arxiv]
+upstream_sources: [arxiv]
+
+tables:
+  - key: papers
+    name: papers
+    description: Latest canonical metadata at one row per ArXiv article.
+    schema_contract: arxiv.papers.v1
+    primary_key: [arxiv_id]
+    columns:
+      - {field_id: 1, name: arxiv_id, data_type: string, required: true, description: Stable ArXiv article identifier.}
+      - {field_id: 2, name: oai_identifier, data_type: string, required: true, description: Stable OAI identifier.}
+      - {field_id: 3, name: title, data_type: string, required: false, description: Current normalized title.}
+      - {field_id: 4, name: abstract, data_type: string, required: false, description: Current normalized abstract.}
+      - {field_id: 5, name: license_uri, data_type: string, required: false, description: Current license URI.}
+      - {field_id: 6, name: doi, data_type: string, required: false, description: Current DOI.}
+      - {field_id: 7, name: journal_ref, data_type: string, required: false, description: Current journal reference.}
+      - {field_id: 8, name: comments, data_type: string, required: false, description: Current author comments.}
+      - {field_id: 9, name: created_date, data_type: date, required: false, description: Original submission date.}
+      - {field_id: 10, name: updated_date, data_type: date, required: false, description: Latest revision date.}
+      - {field_id: 11, name: oai_datestamp, data_type: date, required: true, description: Latest observed OAI modification date.}
+      - {field_id: 12, name: pdf_url, data_type: string, required: true, description: Canonical PDF download URL.}
+      - {field_id: 13, name: is_deleted, data_type: boolean, required: true, description: Current OAI tombstone state.}
+      - {field_id: 14, name: source_record_sha256, data_type: string, required: true, description: Winning landing mutation hash.}
+      - {field_id: 15, name: curated_at, data_type: timestamptz, required: true, description: Latest curation timestamp.}
+    write_mode: merge
+
+  - key: paper_authors
+    name: paper_authors
+    description: Ordered author occurrences for current paper metadata.
+    schema_contract: arxiv.paper_authors.v1
+    primary_key: [arxiv_id, author_position]
+    columns:
+      - {field_id: 1, name: arxiv_id, data_type: string, required: true, description: Parent paper identifier.}
+      - {field_id: 2, name: author_position, data_type: long, required: true, description: One-based source author order.}
+      - {field_id: 3, name: keyname, data_type: string, required: true, description: Author family/key name.}
+      - {field_id: 4, name: forenames, data_type: string, required: false, description: Author forenames.}
+      - {field_id: 5, name: suffix, data_type: string, required: false, description: Author suffix.}
+      - {field_id: 6, name: affiliation, data_type: string, required: false, description: Source affiliation when present.}
+      - {field_id: 7, name: oai_datestamp, data_type: date, required: true, description: Parent metadata mutation date.}
+      - {field_id: 8, name: curated_at, data_type: timestamptz, required: true, description: Latest curation timestamp.}
+    write_mode: merge
+
+  - key: paper_categories
+    name: paper_categories
+    description: Category memberships for current paper metadata.
+    schema_contract: arxiv.paper_categories.v1
+    primary_key: [arxiv_id, category]
+    columns:
+      - {field_id: 1, name: arxiv_id, data_type: string, required: true, description: Parent paper identifier.}
+      - {field_id: 2, name: category, data_type: string, required: true, description: ArXiv category code.}
+      - {field_id: 3, name: is_primary, data_type: boolean, required: true, description: Whether this is the primary category.}
+      - {field_id: 4, name: oai_datestamp, data_type: date, required: true, description: Parent metadata mutation date.}
+      - {field_id: 5, name: curated_at, data_type: timestamptz, required: true, description: Latest curation timestamp.}
+    write_mode: merge
+
+  - key: ocr_batches
+    name: ocr_batches
+    description: Durable state for one prepared or submitted Kaggle OCR execution.
+    schema_contract: arxiv.ocr_batches.v1
+    primary_key: [batch_id]
+    columns:
+      - {field_id: 1, name: batch_id, data_type: string, required: true, description: Deterministic batch execution identifier.}
+      - {field_id: 2, name: provider_run_id, data_type: string, required: false, description: "Exact Kaggle kernel version for status, logs, and output retrieval."}
+      - {field_id: 3, name: kernel_slug, data_type: string, required: true, description: Kaggle owner and kernel name.}
+      - {field_id: 4, name: request_count, data_type: long, required: true, description: Documents submitted in the batch.}
+      - {field_id: 5, name: state, data_type: string, required: true, description: Canonical batch state.}
+      - {field_id: 6, name: manifest_sha256, data_type: string, required: false, description: Validated terminal manifest hash.}
+      - {field_id: 7, name: prepared_at, data_type: timestamptz, required: true, description: Durable outbox preparation timestamp.}
+      - {field_id: 8, name: submitted_at, data_type: timestamptz, required: false, description: First confirmed Kaggle submission timestamp.}
+      - {field_id: 9, name: completed_at, data_type: timestamptz, required: false, description: Terminal timestamp.}
+      - {field_id: 10, name: error_code, data_type: string, required: false, description: Typed batch error code.}
+      - {field_id: 11, name: error_message, data_type: string, required: false, description: Bounded diagnostic message.}
+      - {field_id: 12, name: curated_at, data_type: timestamptz, required: true, description: Latest state publication timestamp.}
+    write_mode: merge
+
+  - key: ocr_document_runs
+    name: ocr_document_runs
+    description: Stateful history with one row per document attempt and OCR batch.
+    schema_contract: arxiv.ocr_document_runs.v1
+    primary_key: [batch_id, request_id]
+    columns:
+      - {field_id: 1, name: request_id, data_type: string, required: true, description: Deterministic paper/source-mutation/processor request identifier preserved across attempts.}
+      - {field_id: 2, name: batch_id, data_type: string, required: true, description: Owning batch execution.}
+      - {field_id: 3, name: arxiv_id, data_type: string, required: true, description: Source paper identifier.}
+      - {field_id: 4, name: oai_datestamp, data_type: date, required: true, description: Selecting paper mutation date.}
+      - {field_id: 5, name: source_record_sha256, data_type: string, required: true, description: Selecting canonical metadata mutation hash.}
+      - {field_id: 6, name: pdf_url, data_type: string, required: true, description: Download URL sent to Kaggle.}
+      - {field_id: 7, name: pdf_sha256, data_type: string, required: false, description: Observed source PDF hash.}
+      - {field_id: 8, name: pdf_size_bytes, data_type: long, required: false, description: Observed source PDF size.}
+      - {field_id: 9, name: page_count, data_type: long, required: false, description: Observed PDF page count.}
+      - {field_id: 10, name: processing_id, data_type: string, required: false, description: Paper/content/model/config identity.}
+      - {field_id: 11, name: model_repository, data_type: string, required: true, description: OCR model repository.}
+      - {field_id: 12, name: model_revision, data_type: string, required: true, description: Pinned OCR model revision.}
+      - {field_id: 13, name: layout_model_repository, data_type: string, required: true, description: Layout model repository.}
+      - {field_id: 14, name: layout_model_revision, data_type: string, required: true, description: Pinned layout model revision.}
+      - {field_id: 15, name: adapter_version, data_type: string, required: true, description: Canonical adapter version.}
+      - {field_id: 16, name: config_hash, data_type: string, required: true, description: Canonical processor configuration hash.}
+      - {field_id: 17, name: artifact_uri, data_type: string, required: false, description: Published per-paper artifact root.}
+      - {field_id: 18, name: manifest_sha256, data_type: string, required: false, description: Per-document content manifest hash.}
+      - {field_id: 19, name: state, data_type: string, required: true, description: Canonical document state.}
+      - {field_id: 20, name: attempt_count, data_type: long, required: true, description: Attempt ordinal for this source mutation and processor configuration.}
+      - {field_id: 21, name: error_code, data_type: string, required: false, description: Typed document error code.}
+      - {field_id: 22, name: error_message, data_type: string, required: false, description: Bounded diagnostic message.}
+      - {field_id: 23, name: prepared_at, data_type: timestamptz, required: true, description: Durable attempt preparation timestamp.}
+      - {field_id: 24, name: submitted_at, data_type: timestamptz, required: false, description: First confirmed Kaggle submission timestamp.}
+      - {field_id: 25, name: completed_at, data_type: timestamptz, required: false, description: Terminal import timestamp.}
+      - {field_id: 26, name: curated_at, data_type: timestamptz, required: true, description: Latest state publication timestamp.}
+    write_mode: merge
+
+  - key: ocr_document_elements
+    name: ocr_document_elements
+    description: Canonical layout/content elements for successful OCR processing.
+    schema_contract: arxiv.ocr_document_elements.v1
+    primary_key: [processing_id, element_id]
+    columns:
+      - {field_id: 1, name: processing_id, data_type: string, required: true, description: Paper/content/model/config identity.}
+      - {field_id: 2, name: element_id, data_type: string, required: true, description: Deterministic element identifier.}
+      - {field_id: 3, name: arxiv_id, data_type: string, required: true, description: Source paper identifier.}
+      - {field_id: 4, name: page_number, data_type: long, required: true, description: One-based source page number.}
+      - {field_id: 5, name: reading_order, data_type: long, required: true, description: Zero-based page reading order.}
+      - {field_id: 6, name: element_type, data_type: string, required: true, description: Canonical block type.}
+      - {field_id: 7, name: bbox_json, data_type: string, required: false, description: Normalized bounding box JSON.}
+      - {field_id: 8, name: text_content, data_type: string, required: true, description: Normalized plain text.}
+      - {field_id: 9, name: markdown_content, data_type: string, required: false, description: Element Markdown when available.}
+      - {field_id: 10, name: parent_element_id, data_type: string, required: false, description: Canonical parent element.}
+      - {field_id: 11, name: raw_attributes_json, data_type: string, required: false, description: Forward-compatible model attributes.}
+      - {field_id: 12, name: curated_at, data_type: timestamptz, required: true, description: Publication timestamp.}
+    write_mode: merge

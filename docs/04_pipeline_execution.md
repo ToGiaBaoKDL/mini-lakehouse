@@ -2,12 +2,15 @@
 
 ## Deployments
 
-Prefect has three independently retryable deployments:
+Prefect has six independently retryable deployments:
 
 | Deployment | Boundary | Trigger |
 |---|---|---|
 | `el_github_archive` | GitHub Archive → landing | `15 * * * *` UTC |
 | `tl_github_analytics` | landing → curated GitHub → phased dbt analytics | `30 * * * *` UTC |
+| `etl_arxiv_metadata` | ArXiv OAI `T-1` → landing → curated ArXiv | `0 6 * * *` UTC |
+| `etl_arxiv_ocr` | Reconcile Kaggle output → curated; submit next batch | `*/20 * * * *` UTC, paused by default |
+| `gov_arxiv_ocr_resources` | Reconcile private Kaggle runner Dataset | Manual only |
 | `gov_iceberg_maintenance` | Policy-driven Iceberg maintenance | Weekly schedule |
 
 The two hourly deployments are deliberately schedule-driven. There are no Prefect event sensors,
@@ -17,8 +20,8 @@ table writes, and mart tests. The fifteen-minute offset is operational buffer, w
 completeness validation makes a missing or delayed archive fail explicitly instead of silently
 building stale analytics. Both flows derive the archive checkpoint from the Prefect run's scheduled
 start time, so a queued run that starts after the next hour still processes the intended hour.
-Separate work queues isolate ingestion, transformation, and maintenance, while singleton `ENQUEUE`
-limits prevent overlapping writes.
+Separate work queues isolate ingestion, transformation, external processing, and maintenance,
+while singleton `ENQUEUE` limits prevent overlapping writes.
 
 Flow files live under `orchestration/flows/<domain>/`, follow `[job_type]_[description].py`, and
 co-locate their Prefect tasks. Reusable dbt/retry mechanics live in `utils`; notification
@@ -51,9 +54,58 @@ Idempotency is enforced at the write that owns each boundary:
   hour into canonical tables.
 - Analytics tables use atomic full-table replacement. The current project deliberately does not
   claim incremental analytics semantics.
+- ArXiv replaces one closed OAI datestamp partition and its deterministic raw archive key; the
+  successful landing checkpoint is written last, then curated metadata converges by mutation hash.
 
 Retrying a failed Prefect task preserves its resolved `archive_hour`. If the independent TL
 schedule starts before landing is available, it fails clearly and can be retried after EL succeeds.
+
+ArXiv OCR does not hold a Prefect task open while polling a remote notebook. Each scheduled run
+performs one bounded state transition: recover only a kernel version carrying the same `batch_id`,
+reconcile that exact version, import each successful document independently, and submit at most one
+next batch of ten. It checks available Kaggle GPU quota before preparing durable batch state. The
+runner downloads PDFs into ephemeral storage, loads pinned layout/OCR models once, and emits no
+source PDF. `ocr_batches` is the durable outbox and `ocr_document_runs` preserves attempt history;
+Prefect remains the owner of orchestration task/run history.
+
+Runner code is a private Kaggle Dataset versioned by a deterministic SHA-256 manifest. Kernel
+metadata pins the exact Dataset version, and status, logs, and output downloads pin the exact kernel
+version. Run the manual resource deployment before the first OCR run and whenever runner code or
+its lockfile changes:
+
+```bash
+prefect deployment run gov_arxiv_ocr_resources/gov_arxiv_ocr_resources
+```
+
+OCR identities have separate grains: `request_id` identifies one paper/source-mutation/processor
+request and remains unchanged across retries; `batch_id` includes attempt ordinals, so a new retry
+never overwrites prior attempt history; `processing_id` identifies one paper/PDF-content/processor
+result. The content manifest excludes request identity, allowing a new metadata mutation with an
+unchanged PDF to reuse validated artifacts without an ID collision.
+
+The deployment and its 20-minute schedule exist from bootstrap, but the schedule is paused by
+default because Kaggle GPU time is quota-bound. After configuring the username/token, provisioning
+the runner Dataset, and validating one private kernel run, resume it from Prefect UI or:
+
+```bash
+PREFECT_API_URL=http://localhost:4200/api \
+  uv run prefect deployment schedule resume etl_arxiv_ocr/etl_arxiv_ocr --all
+```
+
+Manual runs can restrict work without introducing a backfill DAG:
+
+```bash
+prefect deployment run etl_arxiv_metadata/etl_arxiv_metadata \
+  --param datestamp_date=2026-07-22
+prefect deployment run etl_arxiv_metadata/etl_arxiv_metadata \
+  --param datestamp_date=2026-07-22 --param refresh=true
+prefect deployment run etl_arxiv_ocr/etl_arxiv_ocr \
+  --param arxiv_ids='["2607.00001"]' --param batch_size=1
+```
+
+The normal metadata retry reuses a complete landing checkpoint and preserves its Iceberg snapshot
+IDs. Use `refresh=true` only for an intentional re-harvest of a closed ArXiv datestamp; that path
+replaces the exact daily raw archive and its identity-partitioned landing rows.
 
 ## Notifications
 

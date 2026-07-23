@@ -1,3 +1,4 @@
+import hashlib
 import shutil
 from pathlib import Path
 from typing import Any, BinaryIO, Protocol, cast
@@ -10,6 +11,10 @@ from mini_lakehouse.config.settings import StorageSettings
 
 class ObjectStore(Protocol):
     def exists(self, uri: str) -> bool: ...
+
+    def sha256(self, uri: str) -> str: ...
+
+    def upload(self, source: Path, destination_uri: str) -> None: ...
 
     def upload_if_absent(self, source: Path, destination_uri: str) -> bool: ...
 
@@ -45,6 +50,22 @@ class FsspecObjectStore:
 
     def exists(self, uri: str) -> bool:
         return bool(self._filesystem.exists(self._path(uri)))
+
+    def sha256(self, uri: str) -> str:
+        digest = hashlib.sha256()
+        with self._filesystem.open(self._path(uri), "rb") as raw_input_file:
+            input_file = cast(BinaryIO, raw_input_file)
+            for chunk in iter(lambda: input_file.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def upload(self, source: Path, destination_uri: str) -> None:
+        with (
+            source.open("rb") as source_file,
+            self._filesystem.open(self._path(destination_uri), "wb") as raw_destination_file,
+        ):
+            destination_file = cast(BinaryIO, raw_destination_file)
+            shutil.copyfileobj(source_file, destination_file, length=1024 * 1024)
 
     def upload_if_absent(self, source: Path, destination_uri: str) -> bool:
         try:

@@ -1,6 +1,7 @@
 from collections.abc import Iterator
 
 from pyiceberg.catalog import Catalog, load_catalog
+from pyiceberg.table import Table
 
 from mini_lakehouse.config.settings import Settings
 from mini_lakehouse.contracts import TableIdentifier
@@ -40,6 +41,16 @@ def load_iceberg_catalog(settings: Settings) -> Catalog:
         settings.polaris.catalog_name,
         **iceberg_catalog_properties(settings),
     )
+
+
+def validate_table_location(table: Table, expected: str, *, owner: str) -> None:
+    """Reject catalog drift instead of writing outside an ownership boundary."""
+    actual = table.location().rstrip("/")
+    canonical = expected.rstrip("/")
+    if actual != canonical:
+        raise RuntimeError(
+            f"{owner} table location drifted; expected {canonical!r}, found {actual!r}"
+        )
 
 
 def walk_namespaces(catalog: Catalog) -> Iterator[tuple[str, ...]]:

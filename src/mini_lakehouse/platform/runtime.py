@@ -3,6 +3,7 @@ from typing import cast
 from mini_lakehouse.config import Settings
 from mini_lakehouse.contracts import PlatformContracts
 from mini_lakehouse.contracts.base import NamespacePath, StorageTier
+from mini_lakehouse.contracts.sources import SourceContract
 
 
 def storage_uri(settings: Settings, tier: StorageTier) -> str:
@@ -18,6 +19,26 @@ def namespace_storage_uri(settings: Settings, namespace: NamespacePath) -> str:
     if len(namespace) == 1:
         return base_uri
     return f"{base_uri}/{'/'.join(namespace[1:])}/"
+
+
+def namespace_table_storage_uri(
+    settings: Settings,
+    namespace: NamespacePath,
+    table_name: str,
+) -> str:
+    """Canonical table root for a namespace with dedicated physical ownership."""
+    namespace_root = namespace_storage_uri(settings, namespace).rstrip("/")
+    return f"{namespace_root}/{table_name}"
+
+
+def source_table_storage_uri(
+    settings: Settings,
+    source: SourceContract,
+    table_key: str,
+) -> str:
+    """Canonical physical location for a table in the shared landing namespace."""
+    landing_root = settings.storage.landing_uri.rstrip("/")
+    return f"{landing_root}/{source.table_storage_prefix(table_key)}"
 
 
 def validate_runtime_contract(settings: Settings, contracts: PlatformContracts) -> None:

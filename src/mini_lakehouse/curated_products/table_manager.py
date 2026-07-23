@@ -8,6 +8,7 @@ from mini_lakehouse.contracts import (
     trino_type,
 )
 from mini_lakehouse.contracts.curated_products import CuratedTableContract
+from mini_lakehouse.platform.runtime import namespace_table_storage_uri
 from mini_lakehouse.platform.trino import SqlExecutor
 
 
@@ -25,6 +26,13 @@ class CuratedTableManager:
 
     def _relation(self, table: CuratedTableContract) -> str:
         return self._product.table_identifier(table.key).trino(self._settings.trino.catalog)
+
+    def _location(self, table: CuratedTableContract) -> str:
+        return namespace_table_storage_uri(
+            self._settings,
+            self._product.curated_namespace,
+            table.name,
+        )
 
     def ensure_tables(self, executor: SqlExecutor) -> None:
         for table in self._product.tables:
@@ -65,6 +73,11 @@ class CuratedTableManager:
         if len(create_statement.rows) != 1:
             raise RuntimeError(f"Trino returned no canonical DDL for {relation}")
         ddl = str(create_statement.rows[0][0])
+        expected_location = f"location = '{self._location(table)}'"
+        if expected_location not in ddl:
+            raise RuntimeError(
+                f"Curated table {relation} location drifted; expected {self._location(table)!r}"
+            )
         for partition in table.partitioning:
             expression = partition_expression(partition)
             if f"'{expression}'" not in ddl:

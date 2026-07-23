@@ -16,17 +16,19 @@ GitHub Archive
 ```
 
 - `landing` is one logical namespace. Transport and source identity remain in physical object
-  prefixes such as `api/github_archive/`; source-prefixed table names prevent collisions.
+  prefixes such as `api/github_archive/`; source-prefixed logical table names prevent collisions.
+  Each landing Iceberg table is physically isolated below
+  `<transport>/<source>/tables/<table-key>`.
 - `curated` drops transport identity and publishes reusable, validated source-conformed products.
 - `analytics` is organized by business domain and owns consumer semantics.
 
 For a future RDBMS source, use a unique landing table such as
 `prod.landing.warehouse_raw_orders`; retain a deterministic transport path such as
-`s3://landing/rdbms/warehouse_raw/raw/...` only for immutable source objects. Polaris owns the
-namespace location, so the engine derives the managed table path as
-`s3://landing/warehouse_raw_orders`. Its curation package publishes to a transport-free curated
-product. A future domain can consume one or more curated products without depending on their
-ingestion implementation.
+`s3://landing/rdbms/warehouse_raw/raw/...` for immutable source objects and publish the table at
+`s3://landing/rdbms/warehouse_raw/tables/orders`. The contract derives that path from source type,
+source name, and table key; it is not copied into table YAML. Its curation package publishes to a
+transport-free curated product. A future domain can consume one or more curated products without
+depending on their ingestion implementation.
 
 ## Code boundaries
 
@@ -44,6 +46,7 @@ src/mini_lakehouse/
 ├── sources/                source-owned acquisition, parsing, and landing writes
 ├── curated_products/       curated product schemas and curation services
 ├── platform/               Polaris, Trino, namespace, RBAC, and maintenance adapters
+├── processing/ocr/         provider-neutral protocol plus Kaggle resource/run adapter
 └── storage/                S3-compatible object store and Iceberg catalog adapters
 
 dbt/analytics/

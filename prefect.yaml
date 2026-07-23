@@ -18,6 +18,9 @@ definitions:
     transformation: &transformation_work_pool
       name: lakehouse-process
       work_queue_name: transformation
+    processing: &processing_work_pool
+      name: lakehouse-process
+      work_queue_name: processing
     maintenance: &maintenance_work_pool
       name: lakehouse-process
       work_queue_name: maintenance
@@ -46,6 +49,41 @@ deployments:
         active: true
     concurrency_limit: *singleton
     work_pool: *transformation_work_pool
+
+  - name: etl_arxiv_metadata
+    description: Harvest and curate the closed ArXiv OAI datestamp day.
+    entrypoint: orchestration/flows/arxiv/etl_arxiv_metadata.py:etl_arxiv_metadata
+    parameters:
+      datestamp_date: null
+      refresh: false
+    schedules:
+      - cron: "0 6 * * *"
+        timezone: UTC
+        active: true
+    concurrency_limit: *singleton
+    work_pool: *ingestion_work_pool
+
+  - name: etl_arxiv_ocr
+    description: Reconcile the exact Kaggle GLM-OCR run and submit the next bounded ArXiv batch.
+    entrypoint: orchestration/flows/arxiv/etl_arxiv_ocr.py:etl_arxiv_ocr
+    parameters:
+      arxiv_ids: null
+      batch_size: null
+    schedules:
+      - cron: "*/20 * * * *"
+        timezone: UTC
+        # Kaggle GPU time is quota-bound. Resume only after credentials and the
+        # runner Dataset and private kernel have been validated.
+        active: false
+    concurrency_limit: *singleton
+    work_pool: *processing_work_pool
+
+  - name: gov_arxiv_ocr_resources
+    description: Manually reconcile the private, versioned Kaggle OCR runner Dataset.
+    entrypoint: orchestration/flows/arxiv/gov_arxiv_ocr_resources.py:gov_arxiv_ocr_resources
+    schedules: []
+    concurrency_limit: *singleton
+    work_pool: *maintenance_work_pool
 
   - name: gov_iceberg_maintenance
     description: Apply inherited Polaris maintenance policies to discovered Iceberg tables.

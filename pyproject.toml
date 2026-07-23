@@ -18,6 +18,7 @@ dependencies = [
     "requests>=2.32,<3",
     "trino>=0.336,<1",
     "urllib3>=2.5,<3",
+    "zstandard>=0.23,<1",
 ]
 
 [project.optional-dependencies]
@@ -26,6 +27,8 @@ orchestration = [
     "dbt-trino>=1.10,<1.11",
     "prefect>=3.7,<4",
     "prefect-dbt>=0.7,<0.8",
+    "kaggle>=2,<3",
+    "kagglehub>=0.4,<1",
 ]
 
 [dependency-groups]

@@ -12,12 +12,19 @@ from pyiceberg.transforms import HourTransform, IdentityTransform
 
 from mini_lakehouse.config.settings import Settings
 from mini_lakehouse.contracts import TableIdentifier, load_contracts, partition_spec
+from mini_lakehouse.platform.runtime import source_table_storage_uri
 from mini_lakehouse.sources.github_archive.repository import GithubArchiveRepository
 
 
 def _events_partition_spec() -> PartitionSpec:
     events_contract = load_contracts().source("github_archive").table("events_raw")
     return partition_spec(events_contract.columns, events_contract.partitioning)
+
+
+def _events_location() -> str:
+    settings = Settings()
+    source = load_contracts().source("github_archive")
+    return source_table_storage_uri(settings, source, "events_raw")
 
 
 def test_nested_namespace_renders_as_one_trino_schema() -> None:
@@ -48,6 +55,7 @@ def test_landing_table_rejects_partition_spec_drift() -> None:
     table = create_autospec(Table, instance=True)
     catalog.table_exists.return_value = True
     catalog.load_table.return_value = table
+    table.location.return_value = _events_location()
     table.spec.return_value = PartitionSpec(
         PartitionField(
             source_id=11,
@@ -90,6 +98,8 @@ def test_existing_hour_is_resolved_from_partition_metadata_without_reading_rows(
     table = create_autospec(Table, instance=True)
     catalog.table_exists.return_value = True
     catalog.load_table.return_value = table
+    table.location.return_value = _events_location()
+    table.spec.return_value = _events_partition_spec()
     table.scan.return_value.plan_files.return_value = [
         SimpleNamespace(file=SimpleNamespace(record_count=40)),
         SimpleNamespace(file=SimpleNamespace(record_count=2)),
@@ -111,6 +121,7 @@ def test_new_hour_uses_checkpoint_predicate_overwrite_as_the_idempotent_commit()
     table = create_autospec(Table, instance=True)
     catalog.table_exists.return_value = True
     catalog.load_table.return_value = table
+    table.location.return_value = _events_location()
     table.spec.return_value = _events_partition_spec()
     table.scan.return_value.plan_files.return_value = []
     table.refresh.return_value.current_snapshot.return_value = SimpleNamespace(snapshot_id=9)
@@ -126,14 +137,29 @@ def test_new_hour_uses_checkpoint_predicate_overwrite_as_the_idempotent_commit()
     table.append.assert_not_called()
 
 
-def test_new_landing_table_derives_location_from_its_namespace() -> None:
+def test_new_landing_table_uses_its_source_owned_location() -> None:
     catalog = create_autospec(Catalog, instance=True)
     table = create_autospec(Table, instance=True)
     catalog.table_exists.return_value = False
     catalog.create_table.return_value = table
+    table.location.return_value = _events_location()
     table.spec.return_value = _events_partition_spec()
 
     result = GithubArchiveRepository(Settings(), catalog=catalog).ensure_table()
 
     assert result is table
-    assert "location" not in catalog.create_table.call_args.kwargs
+    assert catalog.create_table.call_args.kwargs["location"] == (
+        "s3://landing/api/github_archive/tables/events_raw"
+    )
+
+
+def test_landing_table_rejects_location_drift() -> None:
+    catalog = create_autospec(Catalog, instance=True)
+    table = create_autospec(Table, instance=True)
+    catalog.table_exists.return_value = True
+    catalog.load_table.return_value = table
+    table.location.return_value = "s3://landing/github_archive_events_raw"
+    table.spec.return_value = _events_partition_spec()
+
+    with pytest.raises(RuntimeError, match="table location drifted"):
+        GithubArchiveRepository(Settings(), catalog=catalog).ensure_table()

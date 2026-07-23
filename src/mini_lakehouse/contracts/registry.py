@@ -5,6 +5,7 @@ from mini_lakehouse.contracts.catalog import CatalogContract
 from mini_lakehouse.contracts.curated_products import CuratedProductContract
 from mini_lakehouse.contracts.domains import DomainContract
 from mini_lakehouse.contracts.policies import PolicyContract
+from mini_lakehouse.contracts.processors import ProcessorContract
 from mini_lakehouse.contracts.sources import SourceContract
 
 
@@ -12,6 +13,7 @@ class PlatformContracts(ContractModel):
     catalog: CatalogContract
     sources: tuple[SourceContract, ...]
     curated_products: tuple[CuratedProductContract, ...]
+    processors: tuple[ProcessorContract, ...]
     domains: tuple[DomainContract, ...]
     policies: tuple[PolicyContract, ...]
 
@@ -20,12 +22,15 @@ class PlatformContracts(ContractModel):
         namespace_paths = {namespace.path for namespace in self.catalog.namespaces}
         source_names = [source.name for source in self.sources]
         product_names = [product.name for product in self.curated_products]
+        processor_names = [processor.name for processor in self.processors]
         domain_names = [domain.name for domain in self.domains]
         policy_keys = [(policy.namespace, policy.name) for policy in self.policies]
         if len(source_names) != len(set(source_names)):
             raise ValueError("Source names must be unique")
         if len(product_names) != len(set(product_names)):
             raise ValueError("Curated product names must be unique")
+        if len(processor_names) != len(set(processor_names)):
+            raise ValueError("Processor names must be unique")
         if len(domain_names) != len(set(domain_names)):
             raise ValueError("Domain names must be unique")
         if len(policy_keys) != len(set(policy_keys)):
@@ -53,6 +58,24 @@ class PlatformContracts(ContractModel):
                     f"{sorted(unknown_sources)!r}"
                 )
         known_products = set(product_names)
+        products_by_name = {product.name: product for product in self.curated_products}
+        for processor in self.processors:
+            if processor.source not in known_sources:
+                raise ValueError(
+                    f"Processor {processor.name!r} references unknown source {processor.source!r}"
+                )
+            if processor.curated_product not in known_products:
+                raise ValueError(
+                    f"Processor {processor.name!r} references unknown curated product "
+                    f"{processor.curated_product!r}"
+                )
+            elif (
+                processor.source not in products_by_name[processor.curated_product].upstream_sources
+            ):
+                raise ValueError(
+                    f"Processor {processor.name!r} source {processor.source!r} is not upstream "
+                    f"of curated product {processor.curated_product!r}"
+                )
         for domain in self.domains:
             if domain.analytics_namespace not in namespace_paths:
                 raise ValueError(
@@ -176,3 +199,9 @@ class PlatformContracts(ContractModel):
             return next(product for product in self.curated_products if product.name == name)
         except StopIteration as error:
             raise KeyError(f"Unknown curated product: {name}") from error
+
+    def processor(self, name: str) -> ProcessorContract:
+        try:
+            return next(processor for processor in self.processors if processor.name == name)
+        except StopIteration as error:
+            raise KeyError(f"Unknown processor: {name}") from error

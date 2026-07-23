@@ -11,6 +11,7 @@ from mini_lakehouse.contracts.catalog import CatalogContract
 from mini_lakehouse.contracts.curated_products import CuratedProductContract
 from mini_lakehouse.contracts.domains import DomainContract
 from mini_lakehouse.contracts.policies import PolicyContract
+from mini_lakehouse.contracts.processors import ProcessorContract
 from mini_lakehouse.contracts.registry import PlatformContracts
 from mini_lakehouse.contracts.sources import SourceContract
 
@@ -104,6 +105,11 @@ def load_contracts(root: Path = Path("contracts")) -> PlatformContracts:
             resolved,
             "curated_products",
             TypeAdapter(CuratedProductContract),
+        ),
+        processors=_load_collection(
+            resolved,
+            "processors",
+            TypeAdapter(ProcessorContract),
         ),
         domains=_load_collection(resolved, "domains", TypeAdapter(DomainContract)),
         policies=_load_collection(resolved, "policies", TypeAdapter(PolicyContract)),

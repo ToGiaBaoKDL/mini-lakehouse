@@ -11,16 +11,21 @@ WORKDIR /app
 COPY --from=uv /uv /uvx /bin/
 COPY pyproject.toml uv.lock .python-version ./
 
+FROM base AS project-wheel
+COPY README.md ./
+COPY src ./src
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv build --wheel --out-dir /dist
+
 FROM base AS runtime-dependencies
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
 
 FROM runtime-dependencies AS runtime
-COPY README.md ./
-COPY src ./src
+COPY --from=project-wheel /dist /dist
 COPY contracts ./contracts
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-editable
+    uv pip install --python /app/.venv/bin/python --no-deps /dist/*.whl
 
 CMD ["lakehouse", "--help"]
 
@@ -29,14 +34,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --extra orchestration --no-install-project
 
 FROM orchestration-dependencies AS orchestration
-COPY README.md ./
-COPY src ./src
+COPY --from=project-wheel /dist /dist
 COPY contracts ./contracts
 COPY dbt ./dbt
 COPY orchestration ./orchestration
+COPY runners ./runners
 COPY prefect.yaml ./prefect.yaml
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra orchestration --no-editable
+    uv pip install --python /app/.venv/bin/python --no-deps /dist/*.whl
 
 CMD ["prefect", "--help"]
-

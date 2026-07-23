@@ -13,6 +13,7 @@ from mini_lakehouse.contracts.sources import SourceContract
 
 def test_repository_contracts_form_a_valid_registry() -> None:
     contracts = load_contracts(Path("contracts"))
+    arxiv_source = contracts.source("arxiv")
 
     assert contracts.catalog.catalog.name == "prod"
     assert {
@@ -24,10 +25,19 @@ def test_repository_contracts_form_a_valid_registry() -> None:
         "landing",
         "github_archive_events_raw",
     )
+    assert arxiv_source.storage_prefix == "api/arxiv"
+    assert arxiv_source.raw_object_prefix == "api/arxiv/raw/oai"
+    assert arxiv_source.table_storage_prefix("oai_records_raw") == (
+        "api/arxiv/tables/oai_records_raw"
+    )
     assert contracts.curated_product("github").table_identifier("events").iceberg == (
         "curated",
         "github",
         "events",
+    )
+    assert contracts.curated_product("arxiv").table("ocr_document_runs").primary_key == (
+        "batch_id",
+        "request_id",
     )
     assert (
         contracts.domain("engineering").table_identifier("repository_activity_daily").trino("prod")
@@ -103,6 +113,21 @@ def test_github_archive_iceberg_field_ids_are_stable() -> None:
     ]
 
 
+def test_arxiv_lineage_field_ids_are_stable() -> None:
+    contracts = load_contracts()
+    landing = iceberg_schema(contracts.source("arxiv").table("oai_records_raw").columns)
+    document_runs = iceberg_schema(
+        contracts.curated_product("arxiv").table("ocr_document_runs").columns
+    )
+
+    assert landing.find_field("raw_object_key").field_id == 18
+    assert landing.find_field("raw_object_sha256").field_id == 19
+    assert landing.find_field("record_sha256").field_id == 21
+    assert document_runs.find_field("request_id").field_id == 1
+    assert document_runs.find_field("source_record_sha256").field_id == 5
+    assert document_runs.find_field("processing_id").field_id == 10
+
+
 def test_registry_accepts_a_second_source_family_without_core_code_changes() -> None:
     payload = load_contracts().model_dump(mode="python")
     payload["sources"] = (
@@ -161,7 +186,10 @@ def test_contract_models_reject_unknown_fields() -> None:
         CatalogContract.model_validate(payload)
 
 
-@pytest.mark.parametrize("collection", ["sources", "curated_products", "domains", "policies"])
+@pytest.mark.parametrize(
+    "collection",
+    ["sources", "curated_products", "processors", "domains", "policies"],
+)
 def test_registry_rejects_duplicate_owned_contracts(collection: str) -> None:
     payload = _registry_payload()
     payload[collection] = (*payload[collection], payload[collection][0])
@@ -227,6 +255,14 @@ def test_source_contract_rejects_unsafe_object_prefixes() -> None:
     payload["raw_object_prefix"] = "api/../secrets"
 
     with pytest.raises(ValidationError, match="normalized relative paths"):
+        SourceContract.model_validate(payload)
+
+
+def test_source_contract_rejects_raw_objects_outside_its_raw_boundary() -> None:
+    payload = _registry_payload()["sources"][0]
+    payload["raw_object_prefix"] = "api/github_archive/archive"
+
+    with pytest.raises(ValidationError, match="raw objects must live"):
         SourceContract.model_validate(payload)
 
 

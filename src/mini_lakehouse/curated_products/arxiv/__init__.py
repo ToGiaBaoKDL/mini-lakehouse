@@ -1,0 +1,1 @@
+"""Canonical ArXiv curated product."""

@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Literal, Self
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, SecretStr, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -89,6 +89,43 @@ class GithubArchiveSettings(BaseModel):
     user_agent: str = "mini-lakehouse"
 
 
+class ArxivSettings(BaseModel):
+    base_url: str = "https://oaipmh.arxiv.org/oai"
+    metadata_prefix: Literal["arXiv"] = "arXiv"
+    request_timeout_seconds: float = Field(default=120.0, gt=0)
+    max_pages_per_day: int = Field(default=1000, ge=1, le=10000)
+    user_agent: str = "mini-lakehouse"
+
+
+class KaggleSettings(BaseModel):
+    username: str | None = None
+    api_token: SecretStr | None = None
+
+    @field_validator("username", mode="before")
+    @classmethod
+    def empty_username_is_unset(cls, value: object) -> object:
+        return None if value == "" else value
+
+    @field_validator("api_token", mode="before")
+    @classmethod
+    def empty_token_is_unset(cls, value: object) -> object:
+        return None if value == "" else value
+
+    @property
+    def configured(self) -> bool:
+        return self.username is not None and self.api_token is not None
+
+    def kernel_slug(self, kernel_name: str) -> str:
+        if self.username is None:
+            raise ValueError("Kaggle username is not configured")
+        return f"{self.username}/{kernel_name}"
+
+    def dataset_slug(self, dataset_name: str) -> str:
+        if self.username is None:
+            raise ValueError("Kaggle username is not configured")
+        return f"{self.username}/{dataset_name}"
+
+
 class NotificationSettings(BaseModel):
     prefect_ui_url: str = "http://localhost:4200"
     slack_bot_token: SecretStr | None = None
@@ -136,6 +173,8 @@ class Settings(BaseSettings):
     trino: TrinoSettings = Field(default_factory=TrinoSettings)
     dbt: DbtSettings = Field(default_factory=DbtSettings)
     github_archive: GithubArchiveSettings = Field(default_factory=GithubArchiveSettings)
+    arxiv: ArxivSettings = Field(default_factory=ArxivSettings)
+    kaggle: KaggleSettings = Field(default_factory=KaggleSettings)
     notifications: NotificationSettings = Field(default_factory=NotificationSettings)
 
     @model_validator(mode="after")

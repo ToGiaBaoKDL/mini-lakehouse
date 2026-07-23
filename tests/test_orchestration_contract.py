@@ -50,11 +50,15 @@ def test_prefect_deployments_reuse_declared_work_pool_and_concurrency_contracts(
     assert {deployment["name"] for deployment in deployments} == {
         "el_github_archive",
         "tl_github_analytics",
+        "etl_arxiv_metadata",
+        "etl_arxiv_ocr",
+        "gov_arxiv_ocr_resources",
         "gov_iceberg_maintenance",
     }
     assert set(cast(dict[str, object], definitions["work_pools"])) == {
         "ingestion",
         "transformation",
+        "processing",
         "maintenance",
     }
     assert all(
@@ -67,8 +71,16 @@ def test_prefect_deployments_reuse_declared_work_pool_and_concurrency_contracts(
     transformation = next(
         deployment for deployment in deployments if deployment["name"] == "tl_github_analytics"
     )
+    arxiv_metadata = next(
+        deployment for deployment in deployments if deployment["name"] == "etl_arxiv_metadata"
+    )
     assert ingestion["parameters"] == {"archive_hour": None}
     assert transformation["parameters"] == {"archive_hour": None}
+    assert arxiv_metadata["parameters"] == {"datestamp_date": None, "refresh": False}
+    arxiv_resources = next(
+        deployment for deployment in deployments if deployment["name"] == "gov_arxiv_ocr_resources"
+    )
+    assert arxiv_resources["schedules"] == []
     assert all("triggers" not in deployment for deployment in deployments)
     assert ingestion["schedules"] == [{"cron": "15 * * * *", "timezone": "UTC", "active": True}]
     assert transformation["schedules"] == [

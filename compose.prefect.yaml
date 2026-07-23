@@ -8,6 +8,8 @@ x-lakehouse-runtime: &lakehouse-runtime
     LAKEHOUSE_STORAGE__SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
     LAKEHOUSE_POLARIS__REALM: ${POLARIS_REALM:-POLARIS}
     LAKEHOUSE_POLARIS__CREDENTIAL: ${POLARIS_ROOT_CLIENT_ID:-root}:${POLARIS_ROOT_CLIENT_SECRET:-secretpassword}
+    LAKEHOUSE_KAGGLE__USERNAME: ${LAKEHOUSE_KAGGLE__USERNAME:-}
+    LAKEHOUSE_KAGGLE__API_TOKEN: ${LAKEHOUSE_KAGGLE__API_TOKEN:-}
     PREFECT_API_URL: http://prefect-server:4200/api
 
 x-orchestration-image: &orchestration-image
