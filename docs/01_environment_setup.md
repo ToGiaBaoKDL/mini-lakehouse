@@ -4,7 +4,7 @@ Python 3.13 is pinned in `.python-version`. The project is an installable uv pac
 `src` layout and `uv_build`; no `PYTHONPATH` or `sys.path` mutation is required.
 
 ```bash
-cp .env.example .env
+make setup
 uv sync --frozen --all-extras --all-groups
 ```
 
@@ -18,14 +18,15 @@ Stable desired state is separate from runtime settings and lives under `contract
 layers before starting services:
 
 ```bash
-uv run lakehouse validate
+make validate
 ```
 
 Start the core data plane:
 
 ```bash
-docker compose -f compose.core.yaml up -d --build
-docker compose -f compose.core.yaml ps
+make up-core
+make ps
+make smoke
 ```
 
 Compose files follow the `compose.<module>.yaml` convention. `compose.core.yaml` is the required
@@ -33,14 +34,26 @@ data plane, and `compose.prefect.yaml` adds orchestration. A BI overlay should o
 Lightdash is configured as a real service:
 
 ```bash
-docker compose -f compose.core.yaml -f compose.prefect.yaml up -d --build
+make up
 ```
 
-Compose uses floating latest service images by current project policy. Prefect is the one explicit
-major-family exception: its official current image is `prefecthq/prefect:3-latest`, while the bare
-`latest` tag resolves to the legacy major line. CI and the local integration stack are therefore
-compatibility gates. A managed production rollout should still promote tested digests between
-environments even while this repository deliberately tracks latest tags.
+Compose pins tested service versions rather than following mutable `latest` tags. The current
+compatibility set is PostgreSQL 18.4, AIStor `RELEASE.2026-06-06T02-44-06Z`, AIStor Client
+`RELEASE.2026-04-21T04-26-49Z`, Polaris 1.6.0, Trino 483, Redis 8.8.0, and Prefect 3.7.8 on
+Python 3.12. The application image pins Python 3.13.14 and uv 0.11.30. Dependabot or a deliberate
+maintenance change should update these versions together and rerun the end-to-end compatibility
+gate; deployments must not pull a new major implicitly.
+
+AIStor mounts the ignored local `minio.license` read-only at `/minio.license`. `make preflight`
+rejects a missing or empty environment/license file before deployment, and the object-store
+bootstrap verifies the active license before creating the `landing`, `curated`, and `analytics`
+buckets. The GitHub Actions end-to-end job reads the same license content from the protected
+repository secret `AISTOR_LICENSE`; fork pull requests do not receive or execute with that secret.
+
+`make down` and `make restart` preserve the named `object-store-data`, `postgres-data`,
+`trino-data`, and `redis-data` volumes. `make clean` destroys that state, while `make reset`
+performs the destructive cleanup and then deploys a fresh stack. PostgreSQL major upgrades
+additionally require a planned database migration when a volume is retained.
 
 Only S3 dependencies are installed. There is no GCS compatibility package or inactive runtime
 branch in this project.

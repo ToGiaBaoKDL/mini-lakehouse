@@ -1,6 +1,6 @@
-FROM ghcr.io/astral-sh/uv:latest AS uv
+FROM ghcr.io/astral-sh/uv:0.11.30 AS uv
 
-FROM python:3.13-slim AS base
+FROM python:3.13.14-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \

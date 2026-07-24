@@ -1,7 +1,8 @@
 # Production migration notes
 
-Local defaults deliberately use static MinIO credentials and disable Polaris credential vending
-because MinIO has no AWS STS. Do not copy that security model to cloud deployments.
+Local defaults deliberately use static AIStor credentials and disable Polaris credential vending
+because this single-node stack does not configure an STS provider. Do not copy that security model
+to cloud deployments.
 
 For a future managed-object-storage deployment:
 

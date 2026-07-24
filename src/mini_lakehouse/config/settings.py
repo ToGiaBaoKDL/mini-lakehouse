@@ -184,7 +184,7 @@ class Settings(BaseSettings):
         storage_access_key = self.storage.secret_value(self.storage.access_key)
         storage_secret_key = self.storage.secret_value(self.storage.secret_key)
         if storage_access_key == "minioadmin" or storage_secret_key == "minioadmin":
-            raise ValueError("Production cannot use the local MinIO root credentials")
+            raise ValueError("Production cannot use the local object-store root credentials")
         if self.storage.endpoint_url in {
             "http://localhost:9000",
             "http://object-store:9000",

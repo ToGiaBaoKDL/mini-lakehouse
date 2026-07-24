@@ -55,21 +55,23 @@ namespace ownership. Per-table locations are not repeated in YAML.
 
 ## Quick start
 
-Requirements: Docker with Compose v2 and [uv](https://docs.astral.sh/uv/).
+Requirements: Docker with Compose v2, [uv](https://docs.astral.sh/uv/), and an active
+AIStor license saved as the ignored local file `minio.license`.
 Compose modules consistently follow `compose.<module>.yaml`: `core` is the required data plane,
 while `prefect` is the optional orchestration overlay. The BI plane is intentionally absent until
 Lightdash is added as a real service.
 
 ```bash
-cp .env.example .env
+make setup
 uv sync --frozen --all-extras --all-groups
-uv run lakehouse validate
-docker compose -f compose.core.yaml up -d --build
+make validate
+make up-core
+make smoke
 ```
 
 The core data plane exposes only loopback ports:
 
-- MinIO API/console: `localhost:9000` / `localhost:9001`
+- AIStor S3 API/console: `localhost:9000` / `localhost:9001`
 - Polaris API/management health: `localhost:8181` / `localhost:8182`
 - Trino: `localhost:8080`
 
@@ -96,7 +98,7 @@ uv run dbt test \
 Add the orchestration control plane when you need scheduled deployments:
 
 ```bash
-docker compose -f compose.core.yaml -f compose.prefect.yaml up -d --build
+make up
 ```
 
 Set `LAKEHOUSE_KAGGLE__USERNAME` and `LAKEHOUSE_KAGGLE__API_TOKEN` in `.env` before
@@ -121,15 +123,7 @@ Prefect task/flow failures and flow success can be sent to Slack and Gmail using
 ## Development checks
 
 ```bash
-uv lock --check
-uv lock --check --directory runners/kaggle/glm_ocr
-uv run ruff format --check .
-uv run ruff check .
-uv run pyright
-uv run pytest -m "not integration"
-uv run dbt parse --project-dir dbt/analytics --profiles-dir dbt/analytics
-docker compose -f compose.core.yaml config --quiet
-docker compose -f compose.core.yaml -f compose.prefect.yaml config --quiet
+make check
 ```
 
 Integration tests mutate their disposable stack. They refuse to run unless the environment is
@@ -143,4 +137,5 @@ See [docs/00_overview.md](docs/00_overview.md) for boundaries and
 [docs/04_pipeline_execution.md](docs/04_pipeline_execution.md) for operations. Source and policy
 onboarding rules live beside the desired state in [contracts/README.md](contracts/README.md).
 The ownership matrix and safe policy migration procedure are documented in
-[docs/06_contracts_operations.md](docs/06_contracts_operations.md).
+[docs/06_contracts_operations.md](docs/06_contracts_operations.md). Production data moves use the
+blue/green procedure in [docs/07_production_migration.md](docs/07_production_migration.md).

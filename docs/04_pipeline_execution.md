@@ -135,8 +135,9 @@ consumer-owned table registry.
 ## Local operations
 
 ```bash
-docker compose -f compose.core.yaml -f compose.prefect.yaml up -d
-PREFECT_API_URL=http://localhost:4200/api uv run prefect deploy --all
+make up
+make prefect-deploy
+make prefect-deployments
 
 curl --fail http://localhost:8182/q/health/ready
 curl --fail http://localhost:8080/v1/info
@@ -148,7 +149,7 @@ The Compose overlay idempotently reconciles the local process work pool and depl
 the local stack and named volumes is destructive:
 
 ```bash
-docker compose -f compose.core.yaml -f compose.prefect.yaml down --volumes
+make clean
 ```
 
 Never use that cleanup command against shared or cloud storage.

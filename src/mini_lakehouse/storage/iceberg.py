@@ -30,7 +30,7 @@ def iceberg_catalog_properties(settings: Settings) -> dict[str, str]:
         properties["s3.secret-access-key"] = secret_key
         # PyIceberg otherwise requests vended credentials by default. Static
         # storage credentials and delegation are mutually exclusive modes; an
-        # empty explicit header prevents that default for MinIO/local and other
+        # empty explicit header prevents that default for local and other
         # static-credential deployments.
         properties["header.X-Iceberg-Access-Delegation"] = ""
     return properties

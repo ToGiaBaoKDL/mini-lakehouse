@@ -37,7 +37,7 @@ Polaris version checks and retry one concurrent update after re-reading server s
 Run the bootstrap through the core Compose module:
 
 ```bash
-docker compose -f compose.core.yaml run --rm lakehouse-bootstrap
+make reconcile
 ```
 
 The local `catalog_admin` role is explicitly granted `CATALOG_MANAGE_CONTENT`. The Polaris

@@ -25,8 +25,6 @@ dbt/**/logs/
 
 # License files
 *.license
-minio.license
-catalog/minio.license
 
 # Artifacts
 plans/

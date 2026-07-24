@@ -7,29 +7,22 @@ on:
 
 jobs:
   quality:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v8
         with:
           enable-cache: true
-          version: latest
+          version: "0.11.30"
       - uses: actions/setup-python@v6
         with:
           python-version-file: .python-version
       - run: uv sync --frozen --all-extras --all-groups
-      - run: uv lock --check
-      - run: uv lock --check --directory runners/kaggle/glm_ocr
-      - run: uv run ruff format --check .
-      - run: uv run ruff check .
-      - run: uv run pyright
-      - run: uv run pytest -m "not integration"
-      - run: uv run dbt parse --project-dir dbt/analytics --profiles-dir dbt/analytics
-      - run: docker compose -f compose.core.yaml config --quiet
-      - run: docker compose -f compose.core.yaml -f compose.prefect.yaml config --quiet
+      - run: make check
 
   lakehouse-end-to-end:
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+    runs-on: ubuntu-24.04
     needs: quality
     timeout-minutes: 30
     steps:
@@ -37,24 +30,32 @@ jobs:
       - uses: astral-sh/setup-uv@v8
         with:
           enable-cache: true
-          version: latest
+          version: "0.11.30"
       - uses: actions/setup-python@v6
         with:
           python-version-file: .python-version
       - run: uv sync --frozen --extra orchestration --all-groups
+      - run: make setup
+      - name: Install the AIStor license
+        env:
+          AISTOR_LICENSE: ${{ secrets.AISTOR_LICENSE }}
+        run: |
+          test -n "$AISTOR_LICENSE"
+          install -m 600 /dev/null minio.license
+          printf '%s\n' "$AISTOR_LICENSE" > minio.license
       - name: Start Polaris and Trino dependency chain
-        run: docker compose -f compose.core.yaml up -d --build trino
+        run: make up-core
       - name: Wait for Trino
         run: timeout 240 bash -c 'until curl --fail --silent http://localhost:8080/v1/info; do sleep 3; done'
       - name: Route the Compose S3 endpoint from host-side integration tests
         run: echo "127.0.0.1 object-store" | sudo tee -a /etc/hosts
       - name: Build orchestration image
-        run: docker compose -f compose.core.yaml -f compose.prefect.yaml build prefect-worker
+        run: make build-orchestration
       - name: Exercise landing, curation, dbt, and catalog contracts
         run: LAKEHOUSE_ENVIRONMENT=ci RUN_LAKEHOUSE_INTEGRATION=1 uv run pytest -m integration
       - name: Collect service logs
         if: failure()
-        run: docker compose -f compose.core.yaml logs --no-color
+        run: make logs
       - name: Stop services
         if: always()
-        run: docker compose -f compose.core.yaml down --volumes
+        run: make clean

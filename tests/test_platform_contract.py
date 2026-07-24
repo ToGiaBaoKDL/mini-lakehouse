@@ -42,13 +42,19 @@ def test_landing_table_locations_follow_source_ownership_not_shared_namespace_ro
     settings = Settings()
     contracts = load_contracts()
 
-    assert source_table_storage_uri(
-        settings,
-        contracts.source("arxiv"),
-        "oai_records_raw",
-    ) == "s3://landing/api/arxiv/tables/oai_records_raw"
-    assert source_table_storage_uri(
-        settings,
-        contracts.source("github_archive"),
-        "events_raw",
-    ) == "s3://landing/api/github_archive/tables/events_raw"
+    assert (
+        source_table_storage_uri(
+            settings,
+            contracts.source("arxiv"),
+            "oai_records_raw",
+        )
+        == "s3://landing/api/arxiv/tables/oai_records_raw"
+    )
+    assert (
+        source_table_storage_uri(
+            settings,
+            contracts.source("github_archive"),
+            "events_raw",
+        )
+        == "s3://landing/api/github_archive/tables/events_raw"
+    )

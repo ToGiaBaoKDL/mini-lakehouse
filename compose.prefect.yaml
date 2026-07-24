@@ -14,9 +14,8 @@ x-lakehouse-runtime: &lakehouse-runtime
 
 x-orchestration-image: &orchestration-image
   image: mini-lakehouse-orchestration:local
-  build:
-    context: .
-    target: orchestration
+
+x-prefect-image: &prefect-image prefecthq/prefect:3.7.8-python3.12
 
 x-prefect-server-environment: &prefect-server-environment
   PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://${POSTGRES_USER:-lakehouse}:${POSTGRES_PASSWORD:-lakehouse}@postgres:5432/prefect
@@ -25,10 +24,13 @@ x-prefect-server-environment: &prefect-server-environment
   PREFECT_REDIS_MESSAGING_HOST: redis
   PREFECT_REDIS_MESSAGING_PORT: 6379
   PREFECT_REDIS_MESSAGING_DB: 0
+  PREFECT_SERVER_DOCKET_URL: redis://redis:6379/1
+  PREFECT_SERVER_EVENTS_CAUSAL_ORDERING: prefect_redis.ordering
+  PREFECT_SERVER_CONCURRENCY_LEASE_STORAGE: prefect_redis.lease_storage
 
 services:
   redis:
-    image: redis:latest
+    image: redis:8.8.0
     volumes:
       - redis-data:/data
     healthcheck:
@@ -38,7 +40,7 @@ services:
       retries: 12
 
   prefect-server:
-    image: prefecthq/prefect:3-latest
+    image: *prefect-image
     depends_on:
       postgres:
         condition: service_healthy
@@ -59,7 +61,7 @@ services:
       start_period: 30s
 
   prefect-services:
-    image: prefecthq/prefect:3-latest
+    image: *prefect-image
     depends_on:
       prefect-server:
         condition: service_healthy
@@ -67,6 +69,12 @@ services:
       <<: *prefect-server-environment
     command: prefect server services start
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://prefect-server:4200/api/health', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   prefect-bootstrap:
     <<: [*orchestration-image, *lakehouse-runtime]
@@ -80,6 +88,9 @@ services:
 
   prefect-worker:
     <<: [*orchestration-image, *lakehouse-runtime]
+    build:
+      context: .
+      target: orchestration
     depends_on:
       prefect-bootstrap:
         condition: service_completed_successfully
@@ -87,8 +98,14 @@ services:
         condition: service_healthy
     command: >-
       prefect worker start --pool lakehouse-process --type process --limit 1
-      --no-create-pool-if-not-found
+      --no-create-pool-if-not-found --with-healthcheck
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8080/health', timeout=2)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   prefect-deploy:
     <<: [*orchestration-image, *lakehouse-runtime]
