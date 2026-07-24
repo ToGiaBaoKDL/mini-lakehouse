@@ -21,11 +21,11 @@ from typing import Any
 from urllib.parse import quote
 
 import fitz
+import kagglehub
 import requests
 import yaml
 import zstandard
 from glmocr import GlmOcr
-from huggingface_hub import snapshot_download
 from identity import (
     canonical_json_sha256,
     processing_id,
@@ -41,6 +41,7 @@ from protocol import (
 )
 
 SOURCE_DIRECTORY = Path(__file__).resolve().parent
+MODEL_MANIFEST_NAME = "mini_lakehouse_resource.json"
 MEDIA_TYPES = {
     ".gz": "application/gzip",
     ".jpg": "image/jpeg",
@@ -399,16 +400,44 @@ def write_config(path: Path, job: OcrJob, layout_model_path: str) -> None:
     path.write_text(yaml.safe_dump(config, sort_keys=True), encoding="utf-8")
 
 
-def start_vllm(job: OcrJob, log_path: Path) -> tuple[subprocess.Popen[bytes], Any]:
+def resolve_model_source(
+    source: str,
+    *,
+    resource_name: str,
+    repository: str,
+    revision: str,
+) -> Path:
+    path = Path(kagglehub.model_download(source))
+    try:
+        manifest = json.loads((path / MODEL_MANIFEST_NAME).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"Kaggle model {source!r} has an invalid resource manifest") from error
+    expected = {
+        "resource_name": resource_name,
+        "repository": repository,
+        "revision": revision,
+    }
+    expected_identity = canonical_json_sha256(expected)
+    if (
+        any(manifest.get(name) != value for name, value in expected.items())
+        or manifest.get("identity_sha256") != expected_identity
+    ):
+        raise RuntimeError(f"Kaggle model {source!r} does not match the OCR job")
+    return path
+
+
+def start_vllm(
+    job: OcrJob,
+    model_path: Path,
+    log_path: Path,
+) -> tuple[subprocess.Popen[bytes], Any]:
     log_file = log_path.open("wb")
     command = [
         sys.executable,
         "-m",
         "vllm.entrypoints.openai.api_server",
         "--model",
-        job.model.repository,
-        "--revision",
-        job.model.revision,
+        str(model_path),
         "--served-model-name",
         "glm-ocr",
         "--port",
@@ -467,19 +496,33 @@ def create_archive(source: Path, destination: Path) -> None:
                 bundle.addfile(info, file)
 
 
-def run(job: OcrJob, output_directory: Path) -> None:
+def run(
+    job: OcrJob,
+    output_directory: Path,
+    *,
+    model_source: str,
+    layout_model_source: str,
+) -> None:
     output_directory.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="glm-ocr-") as raw_temp:
         temp = Path(raw_temp)
         extracted = temp / "result"
         extracted.mkdir()
-        layout_path = snapshot_download(
-            repo_id=job.layout_model.repository,
+        model_path = resolve_model_source(
+            model_source,
+            resource_name="model",
+            repository=job.model.repository,
+            revision=job.model.revision,
+        )
+        layout_path = resolve_model_source(
+            layout_model_source,
+            resource_name="layout_model",
+            repository=job.layout_model.repository,
             revision=job.layout_model.revision,
         )
         config_path = temp / "glmocr.yaml"
-        write_config(config_path, job, layout_path)
-        vllm, log_file = start_vllm(job, temp / "vllm.log")
+        write_config(config_path, job, str(layout_path))
+        vllm, log_file = start_vllm(job, model_path, temp / "vllm.log")
         results: list[OcrDocumentResult] = []
         try:
             with GlmOcr(
@@ -531,9 +574,16 @@ def run(job: OcrJob, output_directory: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-directory", type=Path, required=True)
+    parser.add_argument("--model-source", required=True)
+    parser.add_argument("--layout-model-source", required=True)
     arguments = parser.parse_args()
     job = OcrJob.model_validate_json((SOURCE_DIRECTORY / "job.json").read_bytes())
-    run(job, arguments.output_directory)
+    run(
+        job,
+        arguments.output_directory,
+        model_source=arguments.model_source,
+        layout_model_source=arguments.layout_model_source,
+    )
 
 
 if __name__ == "__main__":

@@ -125,6 +125,11 @@ class KaggleSettings(BaseModel):
             raise ValueError("Kaggle username is not configured")
         return f"{self.username}/{dataset_name}"
 
+    def model_slug(self, model_name: str, *, framework: str, variation: str) -> str:
+        if self.username is None:
+            raise ValueError("Kaggle username is not configured")
+        return f"{self.username}/{model_name}/{framework}/{variation}"
+
 
 class NotificationSettings(BaseModel):
     prefect_ui_url: str = "http://localhost:4200"

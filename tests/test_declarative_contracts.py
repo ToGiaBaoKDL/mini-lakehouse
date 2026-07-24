@@ -14,6 +14,7 @@ from mini_lakehouse.contracts.sources import SourceContract
 def test_repository_contracts_form_a_valid_registry() -> None:
     contracts = load_contracts(Path("contracts"))
     arxiv_source = contracts.source("arxiv")
+    arxiv_processor = contracts.processor("arxiv_glm_ocr")
 
     assert contracts.catalog.catalog.name == "prod"
     assert {
@@ -29,6 +30,10 @@ def test_repository_contracts_form_a_valid_registry() -> None:
     assert arxiv_source.raw_object_prefix == "api/arxiv/raw/oai"
     assert arxiv_source.table_storage_prefix("oai_records_raw") == (
         "api/arxiv/tables/oai_records_raw"
+    )
+    assert arxiv_processor.runner.model_resources.model.name == "mini-lakehouse-glm-ocr"
+    assert (
+        arxiv_processor.runner.model_resources.layout_model.name == "mini-lakehouse-pp-doclayout-v3"
     )
     assert contracts.curated_product("github").table_identifier("events").iceberg == (
         "curated",

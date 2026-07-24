@@ -81,9 +81,7 @@ services:
     depends_on:
       prefect-server:
         condition: service_healthy
-    command: >-
-      prefect work-pool create lakehouse-process
-      --type process --overwrite --no-prompt
+    command: python -m mini_lakehouse.platform.prefect_runtime reconcile
     restart: "no"
 
   prefect-worker:
@@ -96,9 +94,7 @@ services:
         condition: service_completed_successfully
       trino:
         condition: service_healthy
-    command: >-
-      prefect worker start --pool lakehouse-process --type process --limit 1
-      --no-create-pool-if-not-found --with-healthcheck
+    command: python -m mini_lakehouse.platform.prefect_runtime worker
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8080/health', timeout=2)"]

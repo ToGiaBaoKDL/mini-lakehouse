@@ -10,7 +10,7 @@ Prefect has six independently retryable deployments:
 | `tl_github_analytics` | landing → curated GitHub → phased dbt analytics | `30 * * * *` UTC |
 | `etl_arxiv_metadata` | ArXiv OAI `T-1` → landing → curated ArXiv | `0 6 * * *` UTC |
 | `etl_arxiv_ocr` | Reconcile Kaggle output → curated; submit next batch | `*/20 * * * *` UTC, paused by default |
-| `gov_arxiv_ocr_resources` | Reconcile private Kaggle runner Dataset | Manual only |
+| `gov_arxiv_ocr_resources` | Reconcile private Kaggle runner and model resources | Manual only |
 | `gov_iceberg_maintenance` | Policy-driven Iceberg maintenance | Weekly schedule |
 
 The two hourly deployments are deliberately schedule-driven. There are no Prefect event sensors,
@@ -68,10 +68,12 @@ runner downloads PDFs into ephemeral storage, loads pinned layout/OCR models onc
 source PDF. `ocr_batches` is the durable outbox and `ocr_document_runs` preserves attempt history;
 Prefect remains the owner of orchestration task/run history.
 
-Runner code is a private Kaggle Dataset versioned by a deterministic SHA-256 manifest. Kernel
-metadata pins the exact Dataset version, and status, logs, and output downloads pin the exact kernel
-version. Run the manual resource deployment before the first OCR run and whenever runner code or
-its lockfile changes:
+Runner code is a private Kaggle Dataset versioned by a deterministic SHA-256 manifest. The pinned
+GLM-OCR and layout-model Hugging Face revisions are independently reconciled into private Kaggle
+Models. An unchanged resource is a no-op; changed content creates a new version rather than
+overwriting history. Kernel metadata pins all three exact resource versions, while status, logs,
+and output downloads pin the exact kernel version. Run the manual resource deployment before the
+first OCR run and whenever runner code, its lockfile, or either model revision changes:
 
 ```bash
 prefect deployment run gov_arxiv_ocr_resources/gov_arxiv_ocr_resources
@@ -85,7 +87,7 @@ unchanged PDF to reuse validated artifacts without an ID collision.
 
 The deployment and its 20-minute schedule exist from bootstrap, but the schedule is paused by
 default because Kaggle GPU time is quota-bound. After configuring the username/token, provisioning
-the runner Dataset, and validating one private kernel run, resume it from Prefect UI or:
+all runner resources, and validating one private kernel run, resume it from Prefect UI or:
 
 ```bash
 PREFECT_API_URL=http://localhost:4200/api \

@@ -11,19 +11,40 @@ definitions:
       limit: 1
       collision_strategy: ENQUEUE
 
+  runtime:
+    worker:
+      concurrency_limit: 4
+    work_pool:
+      name: &lakehouse_work_pool lakehouse-process
+      type: process
+      concurrency_limit: 4
+    work_queues:
+      - name: &ingestion_work_queue ingestion
+        priority: 2
+        concurrency_limit: 2
+      - name: &transformation_work_queue transformation
+        priority: 3
+        concurrency_limit: 1
+      - name: &processing_work_queue processing
+        priority: 4
+        concurrency_limit: 1
+      - name: &maintenance_work_queue maintenance
+        priority: 5
+        concurrency_limit: 1
+
   work_pools:
     ingestion: &ingestion_work_pool
-      name: lakehouse-process
-      work_queue_name: ingestion
+      name: *lakehouse_work_pool
+      work_queue_name: *ingestion_work_queue
     transformation: &transformation_work_pool
-      name: lakehouse-process
-      work_queue_name: transformation
+      name: *lakehouse_work_pool
+      work_queue_name: *transformation_work_queue
     processing: &processing_work_pool
-      name: lakehouse-process
-      work_queue_name: processing
+      name: *lakehouse_work_pool
+      work_queue_name: *processing_work_queue
     maintenance: &maintenance_work_pool
-      name: lakehouse-process
-      work_queue_name: maintenance
+      name: *lakehouse_work_pool
+      work_queue_name: *maintenance_work_queue
 
 deployments:
   - name: el_github_archive
@@ -79,7 +100,7 @@ deployments:
     work_pool: *processing_work_pool
 
   - name: gov_arxiv_ocr_resources
-    description: Manually reconcile the private, versioned Kaggle OCR runner Dataset.
+    description: Manually reconcile the private, versioned Kaggle OCR runner and models.
     entrypoint: orchestration/flows/arxiv/gov_arxiv_ocr_resources.py:gov_arxiv_ocr_resources
     schedules: []
     concurrency_limit: *singleton

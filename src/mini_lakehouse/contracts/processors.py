@@ -15,6 +15,18 @@ class ProcessorModelContract(ContractModel):
     revision: str = Field(pattern=r"^[0-9a-f]{40}$")
 
 
+class KaggleModelResourceContract(ContractModel):
+    name: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{2,49}$")
+    framework: Literal["transformers"]
+    variation: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,49}$")
+    license_name: Literal["Apache 2.0", "MIT"]
+
+
+class KaggleModelResourcesContract(ContractModel):
+    model: KaggleModelResourceContract
+    layout_model: KaggleModelResourceContract
+
+
 class ProcessorBatchContract(ContractModel):
     max_documents: int = Field(ge=1, le=50)
     max_pdf_bytes: int = Field(ge=1024 * 1024)
@@ -36,6 +48,7 @@ class KaggleRunnerContract(ContractModel):
     provider: Literal["kaggle"]
     kernel_name: str = Field(pattern=r"^[A-Za-z0-9_-]+$")
     runner_dataset_name: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{2,49}$")
+    model_resources: KaggleModelResourcesContract
     accelerator: Literal["NvidiaTeslaP100", "NvidiaTeslaT4"]
     timeout_seconds: int = Field(ge=300, le=12 * 60 * 60)
     minimum_gpu_quota_minutes: int = Field(ge=1, le=12 * 60)

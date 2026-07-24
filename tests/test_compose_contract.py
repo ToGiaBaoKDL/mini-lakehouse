@@ -182,7 +182,7 @@ def test_prefect_background_processes_have_meaningful_healthchecks() -> None:
     worker = services["prefect-worker"]
 
     assert "prefect-server:4200/api/health" in background["healthcheck"]["test"][-1]
-    assert "--with-healthcheck" in worker["command"]
+    assert worker["command"] == "python -m mini_lakehouse.platform.prefect_runtime worker"
     assert "localhost:8080/health" in worker["healthcheck"]["test"][-1]
 
     server_environment = background["environment"]

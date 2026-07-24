@@ -103,7 +103,8 @@ make up
 
 Set `LAKEHOUSE_KAGGLE__USERNAME` and `LAKEHOUSE_KAGGLE__API_TOKEN` in `.env` before
 enabling ArXiv OCR. Run the manual `gov_arxiv_ocr_resources` deployment once after each runner
-release; it creates or versions the private runner Dataset only when its content hash changes.
+or pinned-model revision change. It reconciles a private runner Dataset and two private Kaggle
+Models, creating a new immutable version only when that resource's desired identity changes.
 The OCR deployment's 20-minute schedule is deployed paused by default; metadata ingestion does not
 require Kaggle credentials.
 

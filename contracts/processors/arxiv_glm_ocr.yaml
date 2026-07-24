@@ -39,6 +39,17 @@ runner:
   provider: kaggle
   kernel_name: mini-lakehouse-arxiv-glm-ocr
   runner_dataset_name: mini-lakehouse-arxiv-glm-ocr-runner
+  model_resources:
+    model:
+      name: mini-lakehouse-glm-ocr
+      framework: transformers
+      variation: safetensors
+      license_name: MIT
+    layout_model:
+      name: mini-lakehouse-pp-doclayout-v3
+      framework: transformers
+      variation: safetensors
+      license_name: Apache 2.0
   accelerator: NvidiaTeslaT4
   timeout_seconds: 39600
   minimum_gpu_quota_minutes: 60

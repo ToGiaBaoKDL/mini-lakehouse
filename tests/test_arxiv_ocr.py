@@ -35,6 +35,7 @@ from mini_lakehouse.processing.ocr.identity import (
     request_id,
 )
 from mini_lakehouse.processing.ocr.kaggle import (
+    KaggleGateway,
     KaggleGpuQuota,
     KaggleKernelState,
     KaggleProvider,
@@ -42,9 +43,11 @@ from mini_lakehouse.processing.ocr.kaggle import (
     render_launcher,
 )
 from mini_lakehouse.processing.ocr.kaggle_resources import (
+    MODEL_MANIFEST_NAME,
+    KaggleOcrResourceManager,
     KaggleResourceNotFoundError,
-    KaggleResourceProvisioner,
     KaggleRunnerBundle,
+    ModelResourceManifest,
     RunnerResourceManifest,
 )
 from mini_lakehouse.processing.ocr.paths import artifact_root_uri, runner_document_path
@@ -368,19 +371,50 @@ def test_kaggle_launcher_contains_only_job_and_pinned_runner_reference() -> None
     launcher = render_launcher(
         job=_job(),
         runner_dataset_name="mini-lakehouse-arxiv-glm-ocr-runner",
+        model_source="owner/mini-lakehouse-glm-ocr/transformers/safetensors/2",
+        layout_model_source=("owner/mini-lakehouse-pp-doclayout-v3/transformers/safetensors/3"),
     )
 
     compile(launcher, "launcher.py", "exec")
     assert "/kaggle/input/mini-lakehouse-arxiv-glm-ocr-runner" in launcher
     assert RUNNER_BUNDLE.sha256 in launcher
+    assert "mini-lakehouse-glm-ocr/transformers/safetensors/2" in launcher
+    assert "mini-lakehouse-pp-doclayout-v3/transformers/safetensors/3" in launcher
     assert "job.json" not in launcher
+
+
+def test_kaggle_private_resource_forbidden_is_treated_as_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Response:
+        status_code = 403
+
+    class _ForbiddenError(RuntimeError):
+        response = _Response()
+
+    gateway = KaggleGateway(
+        KaggleSettings.model_validate({"username": "owner", "api_token": "secret"})
+    )
+
+    def raise_forbidden() -> None:
+        raise _ForbiddenError("private resource is not visible")
+
+    monkeypatch.setattr(gateway, "_api", raise_forbidden)
+
+    with pytest.raises(KaggleResourceNotFoundError):
+        gateway.dataset_version("owner/missing-dataset")
+    with pytest.raises(KaggleResourceNotFoundError):
+        gateway.model_version("owner/missing-model/transformers/default")
 
 
 class _ResourceClient:
     def __init__(self, manifest: RunnerResourceManifest | None = None) -> None:
-        self.manifest = manifest
-        self.version = 1 if manifest is not None else 0
-        self.uploads = 0
+        self.dataset_manifest = manifest
+        self.dataset_version_number = 1 if manifest is not None else 0
+        self.dataset_uploads = 0
+        self.model_manifests: dict[str, ModelResourceManifest] = {}
+        self.model_versions: dict[str, int] = {}
+        self.model_uploads: dict[str, int] = {}
 
     def download_dataset_file(
         self,
@@ -389,10 +423,10 @@ class _ResourceClient:
         destination: Path,
     ) -> Path:
         assert dataset_slug == "owner/mini-lakehouse-arxiv-glm-ocr-runner"
-        if self.manifest is None:
+        if self.dataset_manifest is None:
             raise KaggleResourceNotFoundError("missing")
         path = destination / relative_path
-        path.write_text(self.manifest.model_dump_json(), encoding="utf-8")
+        path.write_text(self.dataset_manifest.model_dump_json(), encoding="utf-8")
         return path
 
     def upload_dataset(
@@ -403,24 +437,77 @@ class _ResourceClient:
         version_notes: str,
     ) -> None:
         assert dataset_slug == "owner/mini-lakehouse-arxiv-glm-ocr-runner"
-        self.manifest = RunnerResourceManifest.model_validate_json(
+        self.dataset_manifest = RunnerResourceManifest.model_validate_json(
             (source / "resource_manifest.json").read_text(encoding="utf-8")
         )
-        assert self.manifest.bundle_sha256 in version_notes
-        self.version += 1
-        self.uploads += 1
+        assert self.dataset_manifest.bundle_sha256 in version_notes
+        self.dataset_version_number += 1
+        self.dataset_uploads += 1
 
     def dataset_version(self, dataset_slug: str) -> int:
         assert dataset_slug == "owner/mini-lakehouse-arxiv-glm-ocr-runner"
-        return self.version
+        if self.dataset_version_number == 0:
+            raise KaggleResourceNotFoundError("missing")
+        return self.dataset_version_number
+
+    def download_model_file(
+        self,
+        model_slug: str,
+        relative_path: str,
+        destination: Path,
+    ) -> Path:
+        manifest = self.model_manifests.get(model_slug)
+        if manifest is None:
+            raise KaggleResourceNotFoundError("missing")
+        path = destination / relative_path
+        path.write_text(manifest.model_dump_json(), encoding="utf-8")
+        return path
+
+    def upload_model(
+        self,
+        model_slug: str,
+        source: Path,
+        *,
+        license_name: str,
+        version_notes: str,
+    ) -> None:
+        manifest = ModelResourceManifest.model_validate_json(
+            (source / MODEL_MANIFEST_NAME).read_text(encoding="utf-8")
+        )
+        assert (source / "model.safetensors").is_file()
+        assert manifest.identity_sha256 in version_notes
+        assert license_name in {"Apache 2.0", "MIT"}
+        self.model_manifests[model_slug] = manifest
+        self.model_versions[model_slug] = self.model_versions.get(model_slug, 0) + 1
+        self.model_uploads[model_slug] = self.model_uploads.get(model_slug, 0) + 1
+
+    def model_version(self, model_slug: str) -> int:
+        try:
+            return self.model_versions[model_slug]
+        except KeyError as error:
+            raise KaggleResourceNotFoundError("missing") from error
 
 
-def _resource_provisioner(client: _ResourceClient) -> KaggleResourceProvisioner:
-    return KaggleResourceProvisioner(
+class _SnapshotClient:
+    def __init__(self) -> None:
+        self.downloads: list[tuple[str, str]] = []
+
+    def download(self, repository: str, revision: str, destination: Path) -> None:
+        self.downloads.append((repository, revision))
+        destination.mkdir(parents=True)
+        (destination / "model.safetensors").write_bytes(b"model")
+
+
+def _resource_manager(
+    client: _ResourceClient,
+    snapshots: _SnapshotClient | None = None,
+) -> KaggleOcrResourceManager:
+    return KaggleOcrResourceManager(
         KaggleSettings.model_validate({"username": "owner", "api_token": "secret"}),
         load_contracts().processor("arxiv_glm_ocr"),
         client,
         bundle=RUNNER_BUNDLE,
+        snapshots=snapshots or _SnapshotClient(),
         readiness_attempts=1,
         readiness_delay_seconds=0,
     )
@@ -428,16 +515,17 @@ def _resource_provisioner(client: _ResourceClient) -> KaggleResourceProvisioner:
 
 def test_kaggle_runner_resource_reconciliation_is_content_idempotent() -> None:
     client = _ResourceClient()
-    provisioner = _resource_provisioner(client)
+    resources = _resource_manager(client)
 
-    created = provisioner.provision()
-    unchanged = provisioner.provision()
+    created = resources.reconcile("runner")
+    unchanged = resources.reconcile("runner")
 
     assert created.action == "created"
-    assert created.dataset_source.endswith("/1")
+    assert created.name == "runner"
+    assert created.source.endswith("/1")
     assert unchanged.action == "unchanged"
-    assert unchanged.bundle_sha256 == RUNNER_BUNDLE.sha256
-    assert client.uploads == 1
+    assert unchanged.identity_sha256 == RUNNER_BUNDLE.sha256
+    assert client.dataset_uploads == 1
 
 
 def test_kaggle_runner_resource_updates_drifted_content_once() -> None:
@@ -452,11 +540,78 @@ def test_kaggle_runner_resource_updates_drifted_content_once() -> None:
     )
     client = _ResourceClient(stale)
 
-    result = _resource_provisioner(client).provision()
+    result = _resource_manager(client).reconcile("runner")
 
     assert result.action == "updated"
-    assert result.dataset_source.endswith("/2")
-    assert client.uploads == 1
+    assert result.source.endswith("/2")
+    assert client.dataset_uploads == 1
+
+
+def test_kaggle_model_resource_reconciliation_pins_revision_and_is_idempotent() -> None:
+    client = _ResourceClient()
+    snapshots = _SnapshotClient()
+    resources = _resource_manager(client, snapshots)
+
+    created = resources.reconcile("model")
+    unchanged = resources.reconcile("model")
+
+    processor = load_contracts().processor("arxiv_glm_ocr")
+    assert created.action == "created"
+    assert created.source == "owner/mini-lakehouse-glm-ocr/transformers/safetensors/1"
+    assert unchanged.action == "unchanged"
+    assert snapshots.downloads == [(processor.model.repository, processor.model.revision)]
+    assert client.model_uploads[created.source.rsplit("/", 1)[0]] == 1
+
+
+def test_kaggle_model_resource_retry_recovers_after_remote_publish() -> None:
+    class _CrashAfterPublishClient(_ResourceClient):
+        should_crash = True
+
+        def upload_model(
+            self,
+            model_slug: str,
+            source: Path,
+            *,
+            license_name: str,
+            version_notes: str,
+        ) -> None:
+            super().upload_model(
+                model_slug,
+                source,
+                license_name=license_name,
+                version_notes=version_notes,
+            )
+            if self.should_crash:
+                self.should_crash = False
+                raise RuntimeError("worker stopped after Kaggle accepted the version")
+
+    client = _CrashAfterPublishClient()
+    with pytest.raises(RuntimeError, match="worker stopped"):
+        _resource_manager(client).reconcile("model")
+
+    recovered = _resource_manager(client).reconcile("model")
+
+    assert recovered.action == "unchanged"
+    assert client.model_uploads["owner/mini-lakehouse-glm-ocr/transformers/safetensors"] == 1
+
+
+def test_kaggle_resource_manager_resolves_only_a_complete_resource_set() -> None:
+    client = _ResourceClient()
+    resources = _resource_manager(client)
+    resources.reconcile("runner")
+    resources.reconcile("model")
+
+    with pytest.raises(KaggleResourceNotFoundError, match="gov_arxiv_ocr_resources"):
+        resources.resolve_all()
+
+    resources.reconcile("layout_model")
+    resolved = resources.resolve_all()
+
+    assert resolved.runner.kind == "dataset"
+    assert resolved.model_sources == [
+        "owner/mini-lakehouse-glm-ocr/transformers/safetensors/1",
+        "owner/mini-lakehouse-pp-doclayout-v3/transformers/safetensors/1",
+    ]
 
 
 class _RunIdentityGateway:
@@ -488,6 +643,8 @@ def test_kaggle_recovery_adopts_only_the_latest_matching_batch_version() -> None
         render_launcher(
             job=job,
             runner_dataset_name=processor.runner.runner_dataset_name,
+            model_source="owner/model/transformers/default/1",
+            layout_model_source="owner/layout/transformers/default/1",
         )
     )
     provider = KaggleProvider(
@@ -533,6 +690,48 @@ class _PinnedResourceGateway:
         assert dataset_slug == "owner/mini-lakehouse-arxiv-glm-ocr-runner"
         return 4
 
+    def download_model_file(
+        self,
+        model_slug: str,
+        relative_path: str,
+        destination: Path,
+    ) -> Path:
+        processor = load_contracts().processor("arxiv_glm_ocr")
+        if model_slug == "owner/mini-lakehouse-glm-ocr/transformers/safetensors":
+            name = "model"
+            model = processor.model
+        elif model_slug == ("owner/mini-lakehouse-pp-doclayout-v3/transformers/safetensors"):
+            name = "layout_model"
+            model = processor.layout_model
+        else:
+            raise AssertionError(f"Unexpected model slug {model_slug}")
+        identity = canonical_json_sha256(
+            {
+                "repository": model.repository,
+                "resource_name": name,
+                "revision": model.revision,
+            }
+        )
+        path = destination / relative_path
+        path.write_text(
+            ModelResourceManifest(
+                schema_version="1.0.0",
+                resource_name=cast(Any, name),
+                repository=model.repository,
+                revision=model.revision,
+                identity_sha256=identity,
+            ).model_dump_json(),
+            encoding="utf-8",
+        )
+        return path
+
+    def model_version(self, model_slug: str) -> int:
+        if model_slug.endswith("/mini-lakehouse-glm-ocr/transformers/safetensors"):
+            return 2
+        if model_slug.endswith("/mini-lakehouse-pp-doclayout-v3/transformers/safetensors"):
+            return 3
+        raise AssertionError(f"Unexpected model slug {model_slug}")
+
     def download_notebook_file(
         self,
         provider_run_id: str,
@@ -568,6 +767,13 @@ def test_kaggle_submission_and_output_pin_resource_and_run_versions(tmp_path: Pa
         "launcher.py",
     ]
     assert metadata["dataset_sources"] == ["owner/mini-lakehouse-arxiv-glm-ocr-runner/4"]
+    assert metadata["model_sources"] == [
+        "owner/mini-lakehouse-glm-ocr/transformers/safetensors/2",
+        "owner/mini-lakehouse-pp-doclayout-v3/transformers/safetensors/3",
+    ]
+    launcher = (submission / "launcher.py").read_text(encoding="utf-8")
+    assert metadata["model_sources"][0] in launcher
+    assert metadata["model_sources"][1] in launcher
     assert gateway.output_calls == [
         ("owner/mini-lakehouse-arxiv-glm-ocr/17", "result_manifest.json"),
         ("owner/mini-lakehouse-arxiv-glm-ocr/17", "result.tar.zst"),

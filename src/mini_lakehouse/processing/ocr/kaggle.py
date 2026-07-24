@@ -18,10 +18,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from mini_lakehouse.config.settings import KaggleSettings
 from mini_lakehouse.contracts.processors import ProcessorContract
 from mini_lakehouse.processing.ocr.kaggle_resources import (
+    KaggleOcrResourceManager,
+    KaggleResourceName,
     KaggleResourceNotFoundError,
-    KaggleResourceProvisioner,
     KaggleResourceResult,
     KaggleRunnerBundle,
+    ModelSnapshotClient,
 )
 from mini_lakehouse.processing.ocr.protocol import OcrJob
 
@@ -82,11 +84,21 @@ class KaggleClient(Protocol):
     def download_output(self, provider_run_id: str, destination: Path) -> None: ...
 
 
-def _is_not_found(error: BaseException) -> bool:
+def _status_code(error: BaseException) -> int | None:
     response = getattr(error, "response", None)
     status_code = getattr(response, "status_code", None)
     error_code = getattr(error, "error_code", None)
-    return status_code == 404 or error_code == 404
+    return status_code if isinstance(status_code, int) else error_code
+
+
+def _is_not_found(error: BaseException) -> bool:
+    return _status_code(error) == 404
+
+
+def _is_managed_resource_missing(error: BaseException) -> bool:
+    # Kaggle deliberately returns 403 for a private Dataset/Model that is not
+    # visible yet, including a resource owned by the authenticated account.
+    return _status_code(error) in {403, 404}
 
 
 def parse_provider_run_id(provider_run_id: str) -> tuple[str, str, int]:
@@ -407,7 +419,7 @@ class KaggleGateway:
                 with api.build_kaggle_client() as client:
                     response = client.datasets.dataset_api_client.get_dataset(request)
         except Exception as error:
-            if _is_not_found(error):
+            if _is_managed_resource_missing(error):
                 raise KaggleResourceNotFoundError(
                     f"Kaggle Dataset {dataset_slug!r} does not exist"
                 ) from error
@@ -416,11 +428,76 @@ class KaggleGateway:
             ) from error
         return int(response.current_version_number)
 
+    def download_model_file(
+        self,
+        model_slug: str,
+        relative_path: str,
+        destination: Path,
+    ) -> Path:
+        try:
+            with self._credentials():
+                import kagglehub
+
+                downloaded = kagglehub.model_download(
+                    model_slug,
+                    path=relative_path,
+                    force_download=True,
+                    output_dir=str(destination),
+                )
+        except Exception as error:
+            if _is_not_found(error):
+                raise KaggleResourceNotFoundError(
+                    f"Kaggle model {model_slug!r} does not exist"
+                ) from error
+            raise KaggleCommandError(
+                f"Cannot download {relative_path!r} from Kaggle model {model_slug!r}: {error}"
+            ) from error
+        return Path(downloaded)
+
+    def upload_model(
+        self,
+        model_slug: str,
+        source: Path,
+        *,
+        license_name: str,
+        version_notes: str,
+    ) -> None:
+        try:
+            with self._credentials():
+                import kagglehub
+
+                kagglehub.model_upload(
+                    model_slug,
+                    str(source),
+                    license_name=license_name,
+                    version_notes=version_notes,
+                )
+        except Exception as error:
+            raise KaggleCommandError(
+                f"Cannot publish Kaggle model {model_slug!r}: {error}"
+            ) from error
+
+    def model_version(self, model_slug: str) -> int:
+        try:
+            with self._credentials():
+                response = self._api().model_instance_get(model_slug)
+        except Exception as error:
+            if _is_managed_resource_missing(error):
+                raise KaggleResourceNotFoundError(
+                    f"Kaggle model {model_slug!r} does not exist"
+                ) from error
+            raise KaggleCommandError(
+                f"Cannot inspect Kaggle model {model_slug!r}: {error}"
+            ) from error
+        return int(response.version_number)
+
 
 def render_launcher(
     *,
     job: OcrJob,
     runner_dataset_name: str,
+    model_source: str,
+    layout_model_source: str,
 ) -> str:
     """Render the only code file sent with a Kaggle kernel version."""
     source = f"/kaggle/input/{runner_dataset_name}"
@@ -435,6 +512,8 @@ def render_launcher(
         f"    job_json={job.model_dump_json()!r},\n"
         "    source=SOURCE,\n"
         f"    expected_bundle_sha256={job.runner_bundle_sha256!r},\n"
+        f"    model_source={model_source!r},\n"
+        f"    layout_model_source={layout_model_source!r},\n"
         ")\n"
     )
 
@@ -447,6 +526,7 @@ class KaggleProvider:
         *,
         gateway: KaggleGateway | None = None,
         bundle: KaggleRunnerBundle | None = None,
+        snapshots: ModelSnapshotClient | None = None,
     ) -> None:
         if not settings.configured:
             raise ValueError(
@@ -455,28 +535,30 @@ class KaggleProvider:
         self._settings = settings
         self._processor = processor
         self._gateway = gateway or KaggleGateway(settings)
-        self._bundle = bundle or KaggleRunnerBundle.load()
-        self._resources = KaggleResourceProvisioner(
+        self._resources = KaggleOcrResourceManager(
             settings,
             processor,
             self._gateway,
-            bundle=self._bundle,
+            bundle=bundle,
+            snapshots=snapshots,
         )
         self.kernel_slug = settings.kernel_slug(processor.runner.kernel_name)
-        self.runner_bundle_sha256 = self._bundle.sha256
+        self.runner_bundle_sha256 = self._resources.runner_bundle_sha256
 
-    def provision_resources(self) -> KaggleResourceResult:
-        return self._resources.provision()
+    def reconcile_resource(self, name: KaggleResourceName) -> KaggleResourceResult:
+        return self._resources.reconcile(name)
 
     def prepare_submission(self, destination: Path, job: OcrJob) -> None:
         if job.runner_bundle_sha256 != self.runner_bundle_sha256:
             raise ValueError("OCR job and local Kaggle runner bundle identities differ")
-        dataset_source = self._resources.resolve()
+        resources = self._resources.resolve_all()
         destination.mkdir(parents=True, exist_ok=False)
         (destination / "launcher.py").write_text(
             render_launcher(
                 job=job,
                 runner_dataset_name=self._processor.runner.runner_dataset_name,
+                model_source=resources.model.source,
+                layout_model_source=resources.layout_model.source,
             ),
             encoding="utf-8",
         )
@@ -490,10 +572,10 @@ class KaggleProvider:
             "enable_gpu": True,
             "enable_internet": True,
             "docker_image_pinning_type": "original",
-            "dataset_sources": [dataset_source],
+            "dataset_sources": [resources.runner.source],
             "competition_sources": [],
             "kernel_sources": [],
-            "model_sources": [],
+            "model_sources": resources.model_sources,
         }
         (destination / "kernel-metadata.json").write_text(
             json.dumps(metadata, indent=2, sort_keys=True) + "\n",

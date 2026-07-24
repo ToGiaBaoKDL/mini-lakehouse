@@ -58,6 +58,8 @@ def main(
     job_json: str,
     source: Path,
     expected_bundle_sha256: str,
+    model_source: str,
+    layout_model_source: str,
 ) -> None:
     _validate_bundle(source, expected_bundle_sha256)
     working = Path("/kaggle/working")
@@ -101,6 +103,10 @@ def main(
             str(project / "runtime.py"),
             "--output-directory",
             str(working),
+            "--model-source",
+            model_source,
+            "--layout-model-source",
+            layout_model_source,
         ],
         check=True,
         env=environment,
