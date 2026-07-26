@@ -405,6 +405,7 @@ def test_kaggle_private_resource_forbidden_is_treated_as_missing(
         gateway.dataset_version("owner/missing-dataset")
     with pytest.raises(KaggleResourceNotFoundError):
         gateway.model_version("owner/missing-model/transformers/default")
+    assert gateway.latest_kernel_version("owner/missing-kernel") is None
 
 
 class _ResourceClient:

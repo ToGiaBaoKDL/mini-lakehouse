@@ -219,6 +219,7 @@ def test_makefile_is_the_local_operations_entrypoint() -> None:
     ):
         assert target in makefile
     assert "--project-name $(PROJECT_NAME)" in makefile
+    assert "CORE_RUN := COMPOSE_IGNORE_ORPHANS=true $(CORE_COMPOSE)" in makefile
     assert "THIRD_PARTY_SERVICES :=" in makefile
     assert "pull $(THIRD_PARTY_SERVICES)" in makefile
     assert "$(MAKE) build-core" in makefile

@@ -95,9 +95,9 @@ def _is_not_found(error: BaseException) -> bool:
     return _status_code(error) == 404
 
 
-def _is_managed_resource_missing(error: BaseException) -> bool:
-    # Kaggle deliberately returns 403 for a private Dataset/Model that is not
-    # visible yet, including a resource owned by the authenticated account.
+def _is_private_resource_missing(error: BaseException) -> bool:
+    # Kaggle deliberately returns 403 for a private resource that is not visible
+    # yet, including a resource owned by the authenticated account.
     return _status_code(error) in {403, 404}
 
 
@@ -202,7 +202,7 @@ class KaggleGateway:
                 with api.build_kaggle_client() as client:
                     response = client.kernels.kernels_api_client.get_kernel(request)
         except Exception as error:
-            if _is_not_found(error):
+            if _is_private_resource_missing(error):
                 return None
             raise KaggleCommandError(
                 f"Cannot inspect Kaggle kernel {kernel_slug!r}: {error}"
@@ -419,7 +419,7 @@ class KaggleGateway:
                 with api.build_kaggle_client() as client:
                     response = client.datasets.dataset_api_client.get_dataset(request)
         except Exception as error:
-            if _is_managed_resource_missing(error):
+            if _is_private_resource_missing(error):
                 raise KaggleResourceNotFoundError(
                     f"Kaggle Dataset {dataset_slug!r} does not exist"
                 ) from error
@@ -482,7 +482,7 @@ class KaggleGateway:
             with self._credentials():
                 response = self._api().model_instance_get(model_slug)
         except Exception as error:
-            if _is_managed_resource_missing(error):
+            if _is_private_resource_missing(error):
                 raise KaggleResourceNotFoundError(
                     f"Kaggle model {model_slug!r} does not exist"
                 ) from error

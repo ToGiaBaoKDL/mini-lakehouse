@@ -29,7 +29,9 @@ for uri in "$LANDING_URI" "$CURATED_URI" "$ANALYTICS_URI"; do
   esac
   seen_buckets="${seen_buckets}${bucket} "
   if [ "$action" = "provision" ]; then
-    mc mb --ignore-existing "local/$bucket"
+    if ! mc stat "local/$bucket" >/dev/null 2>&1; then
+      mc mb --ignore-existing "local/$bucket"
+    fi
   else
     mc stat "local/$bucket" >/dev/null
   fi
