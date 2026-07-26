@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import os
 import threading
-from collections.abc import Generator, Iterator
+import time
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
 from datetime import UTC, timedelta
 from pathlib import Path
 from typing import Any
+
+from requests.exceptions import ChunkedEncodingError
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from urllib3.exceptions import ProtocolError
 
 from mini_lakehouse.config.settings import KaggleSettings
 from mini_lakehouse.processing.ocr.kaggle_types import (
@@ -46,12 +51,20 @@ def _is_private_resource_missing(error: BaseException) -> bool:
 class KaggleGateway:
     """One authenticated boundary around kaggle-cli's SDK and kagglehub."""
 
-    def __init__(self, settings: KaggleSettings) -> None:
+    _LOG_STREAM_MAX_FAILURES = 5
+
+    def __init__(
+        self,
+        settings: KaggleSettings,
+        *,
+        sleeper: Callable[[float], None] = time.sleep,
+    ) -> None:
         if not settings.configured:
             raise ValueError(
                 "Kaggle OCR requires LAKEHOUSE_KAGGLE__USERNAME and LAKEHOUSE_KAGGLE__API_TOKEN"
             )
         self._settings = settings
+        self._sleep = sleeper
 
     @contextmanager
     def _credentials(self) -> Generator[None]:
@@ -233,10 +246,26 @@ class KaggleGateway:
             # Do not hold _AUTH_LOCK while consuming the long-lived SSE
             # response. The authenticated client already owns its credentials,
             # and status polling must remain independently available.
-            for event in api.kernels_logs_stream(f"{owner}/{kernel}"):
-                data = event.get("data")
-                if isinstance(data, str) and data:
-                    yield data
+            seen_count = 0
+            failures_without_progress = 0
+            while True:
+                seen_before = seen_count
+                try:
+                    for index, event in enumerate(api.kernels_logs_stream(f"{owner}/{kernel}")):
+                        if index < seen_count:
+                            continue
+                        seen_count = index + 1
+                        data = event.get("data")
+                        if isinstance(data, str) and data:
+                            yield data
+                    return
+                except (ChunkedEncodingError, RequestsConnectionError, ProtocolError):
+                    failures_without_progress = (
+                        failures_without_progress + 1 if seen_count == seen_before else 0
+                    )
+                    if failures_without_progress >= self._LOG_STREAM_MAX_FAILURES:
+                        raise
+                    self._sleep(1)
         except Exception as error:
             if _is_not_found(error):
                 raise KaggleKernelNotFoundError(

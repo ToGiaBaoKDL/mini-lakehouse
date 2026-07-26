@@ -9,6 +9,7 @@ from typing import Any, cast
 
 import pytest
 import zstandard
+from requests.exceptions import ChunkedEncodingError
 
 from mini_lakehouse.config.settings import KaggleSettings, Settings
 from mini_lakehouse.contracts import load_contracts
@@ -467,6 +468,40 @@ def test_kaggle_log_stream_uses_official_events_and_preserves_lines(
         "second line",
     )
     assert gateway.kernel_logs("owner/kernel/7") == "first line\nsecond line\n"
+
+
+def test_kaggle_log_stream_reconnects_and_deduplicates_replayed_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FlakyLogApi:
+        calls = 0
+
+        def kernels_logs_stream(self, kernel_slug: str) -> Iterator[dict[str, str]]:
+            assert kernel_slug == "owner/kernel"
+            self.calls += 1
+            yield {"data": "first\n"}
+            if self.calls == 1:
+                raise ChunkedEncodingError("transient disconnect")
+            yield {"data": "second\n"}
+
+    api = _FlakyLogApi()
+    gateway = KaggleGateway(
+        KaggleSettings.model_validate({"username": "owner", "api_token": "secret"}),
+        sleeper=lambda _seconds: None,
+    )
+
+    def accept_current_version(owner: str, kernel: str, version: int) -> None:
+        assert (owner, kernel, version) == ("owner", "kernel", 7)
+
+    monkeypatch.setattr(
+        gateway,
+        "_require_current_kernel_version",
+        accept_current_version,
+    )
+    monkeypatch.setattr(gateway, "_api", lambda: api)
+
+    assert tuple(gateway.stream_kernel_logs("owner/kernel/7")) == ("first\n", "second\n")
+    assert api.calls == 2
 
 
 class _ResourceClient:

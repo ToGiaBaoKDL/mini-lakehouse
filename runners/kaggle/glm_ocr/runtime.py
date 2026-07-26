@@ -26,6 +26,7 @@ import requests
 import yaml
 import zstandard
 from glmocr import GlmOcr
+from glmocr.config import GlmOcrConfig
 
 from mini_lakehouse.processing.ocr.core.files import file_sha256
 from mini_lakehouse.processing.ocr.core.identity import (
@@ -416,25 +417,33 @@ def failed_result(request: OcrDocumentRequest, error: DocumentError) -> OcrDocum
 
 
 def write_config(path: Path, job: OcrJob, layout_model_path: str) -> None:
-    config = {
-        "logging": {"level": "INFO"},
-        "pipeline": {
-            "maas": {"enabled": False},
-            "max_workers": job.inference.max_workers,
-            "ocr_api": {
-                "api_host": "127.0.0.1",
-                "api_port": job.inference.api_port,
-                "model": "glm-ocr",
-                "request_timeout": job.inference.request_timeout_seconds,
-            },
-            "page_loader": {"pdf_max_pages": job.limits.max_pages_per_document},
-            "layout": {
-                "model_dir": layout_model_path,
-                "device": job.inference.layout_device,
-            },
-        },
-    }
-    path.write_text(yaml.safe_dump(config, sort_keys=True), encoding="utf-8")
+    # Preserve the pinned SDK's complete task/label/prompt configuration and
+    # override only settings owned by this job. A minimal YAML silently drops
+    # the official table/formula mappings and treats every region as text.
+    config = GlmOcrConfig.from_yaml().to_dict()
+    pipeline = config["pipeline"]
+    pipeline["maas"]["enabled"] = False
+    pipeline["max_workers"] = job.inference.max_workers
+    pipeline["ocr_api"].update(
+        {
+            "api_host": "127.0.0.1",
+            "api_port": job.inference.api_port,
+            "model": "glm-ocr",
+            "request_timeout": job.inference.request_timeout_seconds,
+        }
+    )
+    pipeline["page_loader"]["pdf_max_pages"] = job.limits.max_pages_per_document
+    pipeline["layout"].update(
+        {
+            "model_dir": layout_model_path,
+            "device": job.inference.layout_device,
+        }
+    )
+    validated = GlmOcrConfig.model_validate(config)
+    path.write_text(
+        yaml.safe_dump(validated.to_dict(), sort_keys=True),
+        encoding="utf-8",
+    )
 
 
 def resolve_model_source(
