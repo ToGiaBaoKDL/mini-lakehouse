@@ -534,14 +534,14 @@ class ArxivOcrRepository:
         processing_id: str,
         arxiv_id: str,
         elements: Sequence[OcrElement],
-        batch_size: int = 250,
+        chunk_size: int = 250,
     ) -> None:
         executor.execute(
             f"DELETE FROM {self._relation('ocr_document_elements')} WHERE processing_id = ?",
             (processing_id,),
         )
-        for offset in range(0, len(elements), batch_size):
-            batch = elements[offset : offset + batch_size]
+        for offset in range(0, len(elements), chunk_size):
+            batch = elements[offset : offset + chunk_size]
             placeholders = ", ".join(
                 "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)" for _ in batch
             )

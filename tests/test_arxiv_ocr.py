@@ -1261,6 +1261,17 @@ class _IdleRepository:
         return ()
 
 
+class _LimitCaptureRepository(_IdleRepository):
+    def __init__(self) -> None:
+        self.limit: int | None = None
+        self.arxiv_ids: tuple[str, ...] | None = None
+
+    def candidates(self, *_args: object, **kwargs: object) -> tuple[OcrCandidate, ...]:
+        self.limit = cast(int, kwargs["limit"])
+        self.arxiv_ids = cast(tuple[str, ...], kwargs["arxiv_ids"])
+        return ()
+
+
 def test_idle_ocr_cycle_does_not_require_kaggle_credentials() -> None:
     service = ArxivOcrService(
         Settings(),
@@ -1273,10 +1284,37 @@ def test_idle_ocr_cycle_does_not_require_kaggle_credentials() -> None:
     assert service.run_once().action == "idle"
 
 
-@pytest.mark.parametrize("batch_size", (0, 11))
-def test_ocr_cycle_rejects_batch_size_outside_the_processor_contract(
-    batch_size: int,
-) -> None:
+def test_ocr_cycle_uses_the_declared_hard_batch_limit() -> None:
+    repository = _LimitCaptureRepository()
+    service = ArxivOcrService(
+        Settings(),
+        executor=cast(Any, _NoopExecutor()),
+        table_manager=cast(Any, _NoopTableManager()),
+        repository=cast(Any, repository),
+        object_store=cast(Any, _NoopObjectStore()),
+    )
+
+    assert service.run_once().action == "idle"
+    assert repository.limit == 4
+    assert repository.arxiv_ids == ()
+
+
+def test_ocr_cycle_passes_every_explicit_identifier_without_truncating() -> None:
+    repository = _LimitCaptureRepository()
+    service = ArxivOcrService(
+        Settings(),
+        executor=cast(Any, _NoopExecutor()),
+        table_manager=cast(Any, _NoopTableManager()),
+        repository=cast(Any, repository),
+        object_store=cast(Any, _NoopObjectStore()),
+    )
+
+    assert service.run_once(arxiv_ids=("2607.00001", "2607.00002")).action == "idle"
+    assert repository.limit == 4
+    assert repository.arxiv_ids == ("2607.00001", "2607.00002")
+
+
+def test_ocr_cycle_rejects_more_explicit_ids_than_one_complete_batch() -> None:
     service = ArxivOcrService(
         Settings(),
         executor=cast(Any, _NoopExecutor()),
@@ -1285,8 +1323,8 @@ def test_ocr_cycle_rejects_batch_size_outside_the_processor_contract(
         object_store=cast(Any, _NoopObjectStore()),
     )
 
-    with pytest.raises(ValueError, match="between 1 and 10"):
-        service.run_once(batch_size=batch_size)
+    with pytest.raises(ValueError, match="at most 4 unique arxiv_ids"):
+        service.run_once(arxiv_ids=tuple(f"2607.{number:05d}" for number in range(1, 6)))
 
 
 def test_ocr_cycle_prepares_durable_state_before_remote_submission() -> None:
@@ -1301,7 +1339,7 @@ def test_ocr_cycle_prepares_durable_state_before_remote_submission() -> None:
         object_store=cast(Any, _NoopObjectStore()),
     )
 
-    result = service.run_once(batch_size=1)
+    result = service.run_once()
 
     assert result.action == "submitted"
     assert repository.prepared_job == provider.submitted_job
@@ -1327,7 +1365,7 @@ def test_ocr_cycle_defers_before_durable_prepare_when_gpu_quota_is_low() -> None
         object_store=cast(Any, _NoopObjectStore()),
     )
 
-    result = service.run_once(batch_size=1)
+    result = service.run_once()
 
     assert result.action == "deferred_quota"
     assert result.remaining_gpu_quota_minutes == 15

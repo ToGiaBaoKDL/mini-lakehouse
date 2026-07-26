@@ -90,13 +90,11 @@ class ArxivOcrService:
         self,
         *,
         arxiv_ids: tuple[str, ...] = (),
-        batch_size: int | None = None,
     ) -> OcrCycleResult:
-        limit = self._processor.batch.max_documents if batch_size is None else batch_size
-        if limit < 1 or limit > self._processor.batch.max_documents:
-            raise ValueError(
-                f"OCR batch_size must be between 1 and {self._processor.batch.max_documents}"
-            )
+        identifiers = tuple(dict.fromkeys(arxiv_ids))
+        limit = self._processor.batch.max_documents
+        if len(identifiers) > limit:
+            raise ValueError(f"An explicit OCR run accepts at most {limit} unique arxiv_ids")
         owned_executor = TrinoExecutor(self._settings.trino) if self._executor is None else None
         context = owned_executor if owned_executor is not None else nullcontext(self._executor)
         with context as executor:
@@ -116,7 +114,7 @@ class ArxivOcrService:
                 executor,
                 provider,
                 limit=limit,
-                arxiv_ids=arxiv_ids,
+                arxiv_ids=identifiers,
             )
             if submitted is not None:
                 if reconciliation is None:

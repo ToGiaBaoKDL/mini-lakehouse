@@ -89,7 +89,6 @@ deployments:
     entrypoint: orchestration/flows/arxiv/etl_arxiv_ocr.py:etl_arxiv_ocr
     parameters:
       arxiv_ids: null
-      batch_size: null
     schedules:
       - cron: "*/20 * * * *"
         timezone: UTC

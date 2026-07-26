@@ -113,7 +113,7 @@ prefect deployment run etl_arxiv_metadata/etl_arxiv_metadata \
 prefect deployment run etl_arxiv_metadata/etl_arxiv_metadata \
   --param datestamp_date=2026-07-22 --param refresh=true
 prefect deployment run etl_arxiv_ocr/etl_arxiv_ocr \
-  --param arxiv_ids='["2607.00001"]' --param batch_size=1
+  --param arxiv_ids='["2607.00001"]'
 ```
 
 The normal metadata retry reuses a complete landing checkpoint and preserves its Iceberg snapshot
