@@ -1,7 +1,9 @@
 import gzip
 import io
 import json
+import subprocess
 import tarfile
+import zipfile
 from collections.abc import Iterator, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -64,6 +66,7 @@ from mini_lakehouse.processing.ocr.kaggle_runtime import (
     RUNTIME_PYTHON_ABI,
     RUNTIME_UV_VERSION,
     RuntimeResourceManifest,
+    UvRuntimeCacheBuilder,
 )
 from mini_lakehouse.processing.ocr.kaggle_types import (
     KaggleCurrentRun,
@@ -103,6 +106,59 @@ def _runtime_manifest() -> RuntimeResourceManifest:
         cache_archive_sha256="c" * 64,
         identity_sha256=canonical_json_sha256(identity),
     )
+
+
+def test_uv_runtime_cache_builder_preserves_wheels_for_offline_sync(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = tmp_path / "runner"
+    runner.mkdir()
+    (runner / "pyproject.toml").write_text("[project]\nname = 'runner'\n", encoding="utf-8")
+    (runner / "uv.lock").write_text("version = 1\n", encoding="utf-8")
+    sync_commands: list[tuple[str, ...]] = []
+
+    def fake_run(
+        command: list[str],
+        *,
+        check: bool,
+        capture_output: bool = False,
+        text: bool = False,
+        env: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        assert check
+        if command == ["/usr/bin/uv", "--version"]:
+            assert capture_output and text
+            return subprocess.CompletedProcess(command, 0, stdout=f"uv {RUNTIME_UV_VERSION}\n")
+        assert command[1] == "sync"
+        assert env is not None
+        sync_commands.append(tuple(command))
+        cached_wheel = Path(env["UV_CACHE_DIR"]) / "wheels" / "torch.whl"
+        if "--offline" in command:
+            assert cached_wheel.is_file()
+        else:
+            cached_wheel.parent.mkdir(parents=True)
+            cached_wheel.write_bytes(b"wheel")
+        Path(env["UV_PROJECT_ENVIRONMENT"]).mkdir(parents=True)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    archive = tmp_path / RUNTIME_CACHE_ARCHIVE_NAME
+    UvRuntimeCacheBuilder(
+        runner_source=runner,
+        uv_executable="/usr/bin/uv",
+    ).build(archive)
+
+    assert len(sync_commands) == 2
+    assert all("--no-build" in command for command in sync_commands)
+    assert all(
+        command[command.index("--python-platform") + 1] == RUNTIME_PLATFORM
+        for command in sync_commands
+    )
+    assert "--offline" not in sync_commands[0]
+    assert "--offline" in sync_commands[1]
+    with zipfile.ZipFile(archive) as runtime_cache:
+        assert runtime_cache.read("wheels/torch.whl") == b"wheel"
 
 
 def _configuration_hash() -> str:

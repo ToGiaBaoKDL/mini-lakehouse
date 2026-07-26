@@ -115,7 +115,6 @@ class UvRuntimeCacheBuilder:
             environment["UV_LINK_MODE"] = "hardlink"
             environment["UV_PROJECT_ENVIRONMENT"] = str(temporary / "populate-venv")
             self._sync(project, environment)
-            self._prune(cache, environment)
             shutil.rmtree(environment["UV_PROJECT_ENVIRONMENT"], ignore_errors=True)
 
             # Prove that the published cache is complete. Runtime bootstrap has no
@@ -123,7 +122,6 @@ class UvRuntimeCacheBuilder:
             environment["UV_PROJECT_ENVIRONMENT"] = str(temporary / "verify-venv")
             self._sync(project, environment, offline=True)
             shutil.rmtree(environment["UV_PROJECT_ENVIRONMENT"], ignore_errors=True)
-            self._prune(cache, environment)
             self._write_cache_archive(cache, destination)
 
     def _sync(
@@ -152,13 +150,6 @@ class UvRuntimeCacheBuilder:
         if offline:
             command.append("--offline")
         subprocess.run(command, check=True, env=environment)
-
-    def _prune(self, cache: Path, environment: dict[str, str]) -> None:
-        subprocess.run(
-            [self._uv, "cache", "prune", "--ci", "--cache-dir", str(cache)],
-            check=True,
-            env=environment,
-        )
 
     @staticmethod
     def _write_cache_archive(cache: Path, destination: Path) -> None:
