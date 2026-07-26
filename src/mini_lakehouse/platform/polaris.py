@@ -55,7 +55,7 @@ def request_oauth_token(session: requests.Session, settings: Settings) -> str:
 
 
 class PolarisManagementClient:
-    """Small HTTP boundary for Polaris management operations used by bootstrap."""
+    """Small HTTP boundary for Polaris desired-state reconciliation."""
 
     def __init__(
         self,

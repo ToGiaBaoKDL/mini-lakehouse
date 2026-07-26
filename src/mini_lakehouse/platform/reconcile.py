@@ -12,11 +12,7 @@ from mini_lakehouse.platform.polaris import (
     create_retry_session,
     request_oauth_token,
 )
-from mini_lakehouse.platform.policy_reconciliation import (
-    apply_policy_prune_plan,
-    build_policy_prune_plan,
-    reconcile_policies,
-)
+from mini_lakehouse.platform.policy_reconciliation import reconcile_policies
 from mini_lakehouse.platform.runtime import validate_runtime_contract
 
 logger = logging.getLogger(__name__)
@@ -35,10 +31,6 @@ def main() -> None:
         with load_catalog_with_retry(settings) as catalog:
             ensure_namespaces(catalog, settings, contracts)
         policy_client = PolarisPolicyClient(session, settings, token)
-        prune_plan = build_policy_prune_plan(policy_client, contracts)
-        apply_policy_prune_plan(policy_client, prune_plan)
-        if prune_plan:
-            logger.info("Pruned %d stale managed Polaris policies", len(prune_plan))
         for result in reconcile_policies(policy_client, contracts).results:
             if result.pending_mappings:
                 logger.info(

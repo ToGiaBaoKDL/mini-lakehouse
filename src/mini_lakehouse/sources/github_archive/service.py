@@ -6,7 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from mini_lakehouse.config.settings import Settings
-from mini_lakehouse.contracts import PlatformContracts, load_contracts
+from mini_lakehouse.contracts import PlatformContracts, arrow_schema, load_contracts
 from mini_lakehouse.sources.github_archive.client import GithubArchiveClient
 from mini_lakehouse.sources.github_archive.models import ArchiveHour, IngestionResult
 from mini_lakehouse.sources.github_archive.parser import parse_archive
@@ -89,6 +89,7 @@ class GithubArchiveIngestionService:
                 local_path,
                 archive_hour,
                 max_error_ratio=self._settings.github_archive.max_parse_error_ratio,
+                schema=arrow_schema(self._source_contract.table("events_raw").columns),
             )
             write = repository.write_hour(parsed.table, archive_hour.value)
 

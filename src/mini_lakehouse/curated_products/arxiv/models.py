@@ -3,9 +3,10 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from mini_lakehouse.processing.ocr.protocol import OcrDocumentRequest
+from mini_lakehouse.processing.ocr.identity import batch_id
+from mini_lakehouse.processing.ocr.protocol import OcrDocumentRequest, OcrJob
 
 
 class ArxivProductModel(BaseModel):
@@ -46,7 +47,28 @@ class ActiveOcrBatch(ArxivProductModel):
     batch_id: str
     state: Literal["prepared", "submitted", "running"]
     provider_run_id: str | None
+    job: OcrJob
     documents: tuple[OcrBatchDocument, ...] = Field(min_length=1, max_length=10)
+
+    @model_validator(mode="after")
+    def validate_durable_job(self) -> "ActiveOcrBatch":
+        if self.job.batch_id != self.batch_id:
+            raise ValueError("Active OCR batch and immutable job identities differ")
+        requests = tuple(document.request for document in self.documents)
+        if self.job.documents != requests:
+            raise ValueError("Active OCR batch documents differ from its immutable job")
+        attempts = {
+            document.request.request_id: document.attempt_count for document in self.documents
+        }
+        expected_batch_id = batch_id(
+            [document.request.request_id for document in self.documents],
+            attempts=attempts,
+        )
+        if expected_batch_id != self.batch_id:
+            raise ValueError("Active OCR batch identity differs from its durable attempts")
+        if self.state != "prepared" and self.provider_run_id is None:
+            raise ValueError("A submitted or running OCR batch requires a provider run ID")
+        return self
 
 
 class OcrCycleResult(ArxivProductModel):

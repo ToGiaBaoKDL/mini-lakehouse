@@ -18,7 +18,9 @@ from mini_lakehouse.platform.polaris import (
     PolicyReconcileResult,
 )
 from mini_lakehouse.platform.policies import PolicyIdentifier
+from mini_lakehouse.platform.policy_prune import plan_payload
 from mini_lakehouse.platform.policy_reconciliation import (
+    PolicyPruneItem,
     apply_policy_prune_plan,
     build_policy_prune_plan,
     reconcile_policies,
@@ -73,6 +75,21 @@ def test_catalog_reconcile_updates_mutable_drift_with_entity_version() -> None:
         "properties": desired["properties"],
         "storageConfigInfo": desired["storageConfigInfo"],
     }
+
+
+def test_catalog_reconcile_removes_stale_properties_from_previous_contracts() -> None:
+    settings = Settings()
+    desired = catalog_contract(settings)
+    current = copy.deepcopy(desired)
+    current["entityVersion"] = 7
+    current["properties"]["polaris.config.drop-with-purge.enabled"] = "true"
+    session = create_autospec(requests.Session, instance=True)
+    session.get.return_value = _response(200, {"catalog": current})
+    session.put.return_value = _response(204)
+
+    ensure_catalog(PolarisManagementClient(session, settings, "token"), desired)
+
+    assert session.put.call_args.kwargs["json"]["properties"] == desired["properties"]
 
 
 def test_catalog_reconcile_rejects_immutable_drift() -> None:
@@ -288,6 +305,22 @@ def test_policy_prune_plan_removes_only_reserved_stale_policies() -> None:
     assert client.delete_policy.call_args_list == [
         call(("analytics",), "mlh-stale-policy"),
     ]
+
+
+def test_policy_prune_plan_has_a_deterministic_review_identity() -> None:
+    contracts = load_contracts()
+    client = create_autospec(PolarisPolicyClient, instance=True)
+    client.list_policies.return_value = [
+        PolicyIdentifier(namespace=("analytics",), name="mlh-stale-policy")
+    ]
+
+    plan = build_policy_prune_plan(client, contracts)
+    payload = plan_payload(plan)
+    changed = plan_payload((PolicyPruneItem(("analytics",), "mlh-other-policy"),))
+
+    assert payload["policies"] == [{"namespace": ["analytics"], "name": "mlh-stale-policy"}]
+    assert len(str(payload["plan_sha256"])) == 64
+    assert payload["plan_sha256"] != changed["plan_sha256"]
 
 
 def test_policy_reconcile_summary_tracks_pending_table_mappings() -> None:

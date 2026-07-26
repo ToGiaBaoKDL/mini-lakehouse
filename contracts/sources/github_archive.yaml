@@ -6,8 +6,6 @@ contact:
   name: Data Platform
   email: bao.to@timo.vn
 description: Public GitHub events published as immutable hourly archives.
-landing_namespace: [landing]
-raw_object_prefix: api/github_archive/raw
 
 checkpoint:
   kind: hourly_partition
@@ -16,7 +14,7 @@ checkpoint:
 tables:
   - key: events_raw
     name: github_archive_events_raw
-    schema_contract: github_archive.events_raw.v1
+    schema_version: 1
     columns:
       - {field_id: 1, name: event_id, data_type: string, required: true, description: Stable GitHub event identifier.}
       - {field_id: 2, name: event_type, data_type: string, required: true, description: GitHub event type.}
@@ -35,4 +33,3 @@ tables:
       - field: source_hour
         transform: hour
         name: archive_hour
-    write_mode: checkpoint_overwrite

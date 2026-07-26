@@ -1,7 +1,7 @@
 from pydantic import model_validator
 
 from mini_lakehouse.contracts.base import ContractModel
-from mini_lakehouse.contracts.catalog import CatalogContract
+from mini_lakehouse.contracts.catalog import CatalogContract, NamespaceContract
 from mini_lakehouse.contracts.curated_products import CuratedProductContract
 from mini_lakehouse.contracts.domains import DomainContract
 from mini_lakehouse.contracts.policies import PolicyContract
@@ -19,7 +19,6 @@ class PlatformContracts(ContractModel):
 
     @model_validator(mode="after")
     def validate_references(self) -> "PlatformContracts":
-        namespace_paths = {namespace.path for namespace in self.catalog.namespaces}
         source_names = [source.name for source in self.sources]
         product_names = [product.name for product in self.curated_products]
         processor_names = [processor.name for processor in self.processors]
@@ -36,15 +35,22 @@ class PlatformContracts(ContractModel):
         if len(policy_keys) != len(set(policy_keys)):
             raise ValueError("Policy namespace/name pairs must be unique")
 
+        managed_namespaces = self.managed_namespaces()
+        namespace_paths = {namespace.path for namespace in managed_namespaces}
+        if len(namespace_paths) != len(managed_namespaces):
+            raise ValueError("Every managed namespace must have exactly one owner")
+        for namespace in managed_namespaces:
+            if len(namespace.path) > 1 and namespace.path[:-1] not in namespace_paths:
+                raise ValueError(
+                    f"Namespace {'.'.join(namespace.path)!r} is missing its parent namespace"
+                )
+
         source_table_identifiers = [
             source.table_identifier(table.key) for source in self.sources for table in source.tables
         ]
         if len(source_table_identifiers) != len(set(source_table_identifiers)):
             raise ValueError("Landing source table identifiers must be globally unique")
 
-        for source in self.sources:
-            if source.landing_namespace not in namespace_paths:
-                raise ValueError(f"Source {source.name!r} references an unknown landing namespace")
         known_sources = set(source_names)
         for product in self.curated_products:
             if product.curated_namespace not in namespace_paths:
@@ -87,26 +93,6 @@ class PlatformContracts(ContractModel):
                     f"Domain {domain.name!r} references unknown curated products "
                     f"{sorted(unknown_products)!r}"
                 )
-
-        product_namespaces = {product.curated_namespace for product in self.curated_products}
-        curated_leaves = {
-            path
-            for path in namespace_paths
-            if path[0] == "curated"
-            and len(path) >= 2
-            and not any(other[:-1] == path for other in namespace_paths)
-        }
-        if curated_leaves != product_namespaces:
-            raise ValueError("Every curated leaf must have exactly one curated product contract")
-
-        domain_namespaces = {domain.analytics_namespace for domain in self.domains}
-        analytics_domains = {
-            path for path in namespace_paths if path[0] == "analytics" and len(path) == 2
-        }
-        if analytics_domains != domain_namespaces:
-            raise ValueError(
-                "Every direct analytics namespace must have exactly one domain contract"
-            )
 
         attachments: set[tuple[str, tuple[str, ...], str]] = set()
         table_partition_fields = {
@@ -181,6 +167,30 @@ class PlatformContracts(ContractModel):
                             f"{policy.execution.partition_field!r}, but {details}"
                         )
         return self
+
+    def managed_namespaces(self) -> tuple[NamespaceContract, ...]:
+        product_namespaces = tuple(
+            NamespaceContract(
+                path=product.curated_namespace,
+                owner=product.owner,
+                description=product.description,
+                properties={"data_product": product.name},
+            )
+            for product in self.curated_products
+        )
+        domain_namespaces = tuple(
+            NamespaceContract(
+                path=domain.analytics_namespace,
+                owner=domain.owner,
+                description=domain.description,
+                properties={
+                    "business_domain": domain.name,
+                    "business_owner": domain.business_owner,
+                },
+            )
+            for domain in self.domains
+        )
+        return (*self.catalog.namespaces, *product_namespaces, *domain_namespaces)
 
     def source(self, name: str) -> SourceContract:
         try:

@@ -12,7 +12,6 @@ tables:
   - key: papers
     name: papers
     description: Latest canonical metadata at one row per ArXiv article.
-    schema_contract: arxiv.papers.v1
     primary_key: [arxiv_id]
     columns:
       - {field_id: 1, name: arxiv_id, data_type: string, required: true, description: Stable ArXiv article identifier.}
@@ -30,12 +29,10 @@ tables:
       - {field_id: 13, name: is_deleted, data_type: boolean, required: true, description: Current OAI tombstone state.}
       - {field_id: 14, name: source_record_sha256, data_type: string, required: true, description: Winning landing mutation hash.}
       - {field_id: 15, name: curated_at, data_type: timestamptz, required: true, description: Latest curation timestamp.}
-    write_mode: merge
 
   - key: paper_authors
     name: paper_authors
     description: Ordered author occurrences for current paper metadata.
-    schema_contract: arxiv.paper_authors.v1
     primary_key: [arxiv_id, author_position]
     columns:
       - {field_id: 1, name: arxiv_id, data_type: string, required: true, description: Parent paper identifier.}
@@ -46,12 +43,10 @@ tables:
       - {field_id: 6, name: affiliation, data_type: string, required: false, description: Source affiliation when present.}
       - {field_id: 7, name: oai_datestamp, data_type: date, required: true, description: Parent metadata mutation date.}
       - {field_id: 8, name: curated_at, data_type: timestamptz, required: true, description: Latest curation timestamp.}
-    write_mode: merge
 
   - key: paper_categories
     name: paper_categories
     description: Category memberships for current paper metadata.
-    schema_contract: arxiv.paper_categories.v1
     primary_key: [arxiv_id, category]
     columns:
       - {field_id: 1, name: arxiv_id, data_type: string, required: true, description: Parent paper identifier.}
@@ -59,12 +54,10 @@ tables:
       - {field_id: 3, name: is_primary, data_type: boolean, required: true, description: Whether this is the primary category.}
       - {field_id: 4, name: oai_datestamp, data_type: date, required: true, description: Parent metadata mutation date.}
       - {field_id: 5, name: curated_at, data_type: timestamptz, required: true, description: Latest curation timestamp.}
-    write_mode: merge
 
   - key: ocr_batches
     name: ocr_batches
     description: Durable state for one prepared or submitted Kaggle OCR execution.
-    schema_contract: arxiv.ocr_batches.v1
     primary_key: [batch_id]
     columns:
       - {field_id: 1, name: batch_id, data_type: string, required: true, description: Deterministic batch execution identifier.}
@@ -79,12 +72,11 @@ tables:
       - {field_id: 10, name: error_code, data_type: string, required: false, description: Typed batch error code.}
       - {field_id: 11, name: error_message, data_type: string, required: false, description: Bounded diagnostic message.}
       - {field_id: 12, name: curated_at, data_type: timestamptz, required: true, description: Latest state publication timestamp.}
-    write_mode: merge
+      - {field_id: 13, name: job_json, data_type: string, required: false, description: Immutable validated runner request used to reconcile this durable outbox batch across retries and deployments.}
 
   - key: ocr_document_runs
     name: ocr_document_runs
     description: Stateful history with one row per document attempt and OCR batch.
-    schema_contract: arxiv.ocr_document_runs.v1
     primary_key: [batch_id, request_id]
     columns:
       - {field_id: 1, name: request_id, data_type: string, required: true, description: Deterministic paper/source-mutation/processor request identifier preserved across attempts.}
@@ -113,12 +105,10 @@ tables:
       - {field_id: 24, name: submitted_at, data_type: timestamptz, required: false, description: First confirmed Kaggle submission timestamp.}
       - {field_id: 25, name: completed_at, data_type: timestamptz, required: false, description: Terminal import timestamp.}
       - {field_id: 26, name: curated_at, data_type: timestamptz, required: true, description: Latest state publication timestamp.}
-    write_mode: merge
 
   - key: ocr_document_elements
     name: ocr_document_elements
     description: Canonical layout/content elements for successful OCR processing.
-    schema_contract: arxiv.ocr_document_elements.v1
     primary_key: [processing_id, element_id]
     columns:
       - {field_id: 1, name: processing_id, data_type: string, required: true, description: Paper/content/model/config identity.}
@@ -133,4 +123,3 @@ tables:
       - {field_id: 10, name: parent_element_id, data_type: string, required: false, description: Canonical parent element.}
       - {field_id: 11, name: raw_attributes_json, data_type: string, required: false, description: Forward-compatible model attributes.}
       - {field_id: 12, name: curated_at, data_type: timestamptz, required: true, description: Publication timestamp.}
-    write_mode: merge

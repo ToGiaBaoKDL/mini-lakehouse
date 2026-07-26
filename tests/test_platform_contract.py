@@ -15,6 +15,8 @@ def test_namespace_contract_separates_lifecycle_and_domain_ownership() -> None:
     assert ("curated", "github", "internal") not in contract
     assert contract[("analytics", "engineering")]["owner"] == "engineering-analytics"
     assert contract[("analytics", "engineering")]["location"] == "s3://analytics/engineering/"
+    assert contract[("analytics", "engineering")]["business_domain"] == "engineering"
+    assert contract[("analytics", "engineering")]["business_owner"] == "engineering"
 
 
 def test_catalog_contract_enables_bucket_root_namespaces() -> None:
@@ -36,6 +38,25 @@ def test_catalog_contract_uses_the_configured_data_plane_endpoint() -> None:
 
     assert payload["storageConfigInfo"]["endpoint"] == "http://object-store:9000"
     assert payload["storageConfigInfo"]["endpointInternal"] == ("http://object-store:9000")
+
+
+def test_catalog_contract_deduplicates_shared_allowed_locations() -> None:
+    settings = Settings.model_validate(
+        {
+            "storage": {
+                "landing_uri": "s3://shared",
+                "curated_uri": "s3://shared",
+                "analytics_uri": "s3://shared",
+            }
+        }
+    )
+
+    payload = catalog_contract(settings)
+
+    assert payload["storageConfigInfo"]["allowedLocations"] == [
+        "s3://shared/_catalog",
+        "s3://shared",
+    ]
 
 
 def test_landing_table_locations_follow_source_ownership_not_shared_namespace_root() -> None:

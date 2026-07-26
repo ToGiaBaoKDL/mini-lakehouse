@@ -21,20 +21,23 @@ class StorageSettings(BaseModel):
     curated_uri: str = "s3://curated"
     analytics_uri: str = "s3://analytics"
 
+    @field_validator("landing_uri", "curated_uri", "analytics_uri", mode="before")
+    @classmethod
+    def normalize_lifecycle_uri(cls, value: object) -> object:
+        return value.rstrip("/") if isinstance(value, str) else value
+
     @model_validator(mode="after")
     def validate_root_uris(self) -> Self:
-        expected_scheme = self.backend
         uris = (self.landing_uri, self.curated_uri, self.analytics_uri)
-        buckets: list[str] = []
         for uri in uris:
             parsed = urlparse(uri)
-            if parsed.scheme != expected_scheme or not parsed.netloc:
-                raise ValueError(f"Expected a {expected_scheme} bucket URI, got {uri!r}")
-            if parsed.path not in ("", "/"):
-                raise ValueError(f"Storage lifecycle URI must be a bucket root, got {uri!r}")
-            buckets.append(parsed.netloc)
-        if len(set(buckets)) != len(buckets):
-            raise ValueError("landing, curated, and analytics must use distinct buckets")
+            if parsed.scheme != self.backend or not parsed.netloc:
+                raise ValueError(f"Expected a {self.backend} storage URI, got {uri!r}")
+            if parsed.params or parsed.query or parsed.fragment:
+                raise ValueError(f"Storage URI cannot contain params, query, or fragment: {uri!r}")
+            path_segments = parsed.path.removeprefix("/").split("/") if parsed.path else ()
+            if any(segment in {"", ".", ".."} for segment in path_segments):
+                raise ValueError(f"Storage URI path must be normalized: {uri!r}")
         credentials = (self.access_key, self.secret_key)
         if any(value is None for value in credentials) and any(
             value is not None for value in credentials
@@ -139,6 +142,17 @@ class NotificationSettings(BaseModel):
     gmail_app_password: SecretStr | None = None
     gmail_recipients: tuple[str, ...] = ()
     timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+
+    @field_validator(
+        "slack_bot_token",
+        "slack_channel_id",
+        "gmail_sender",
+        "gmail_app_password",
+        mode="before",
+    )
+    @classmethod
+    def empty_delivery_value_is_unset(cls, value: object) -> object:
+        return None if value == "" else value
 
     @model_validator(mode="after")
     def validate_channels(self) -> Self:

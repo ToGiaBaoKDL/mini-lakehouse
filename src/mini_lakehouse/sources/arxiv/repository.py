@@ -52,17 +52,6 @@ class ArxivLandingRepository:
         self._owned_catalog = catalog is None
         self._catalog = catalog or load_iceberg_catalog(settings)
         self._source = (contracts or load_contracts(settings.contracts_dir)).source("arxiv")
-        for key in ("oai_records_raw", "oai_checkpoints"):
-            table = self._source.table(key)
-            if table.write_mode != "checkpoint_overwrite":
-                raise ValueError(f"ArXiv landing table {table.name!r} must overwrite checkpoints")
-            partitioning = tuple(
-                (partition.field, partition.transform) for partition in table.partitioning
-            )
-            if partitioning != (("datestamp_date", "identity"),):
-                raise ValueError(
-                    f"ArXiv landing table {table.name!r} must identity-partition datestamp_date"
-                )
 
     def __enter__(self) -> "ArxivLandingRepository":
         return self
@@ -194,7 +183,7 @@ class ArxivLandingRepository:
                     "raw_object_sha256": raw_object_sha256,
                     "page_count": page_count,
                     "record_count": records.num_rows,
-                    "schema_version": self._source.table("oai_records_raw").schema_contract,
+                    "schema_version": self._source.table_schema_contract("oai_records_raw"),
                     "published_at": datetime.now(UTC),
                 }
             ],

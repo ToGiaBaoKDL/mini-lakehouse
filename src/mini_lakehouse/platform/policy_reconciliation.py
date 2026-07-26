@@ -45,7 +45,7 @@ def build_policy_prune_plan(
 ) -> tuple[PolicyPruneItem, ...]:
     desired = {(policy.namespace, policy.name) for policy in contracts.policies}
     stale: set[PolicyPruneItem] = set()
-    for namespace in (item.path for item in contracts.catalog.namespaces):
+    for namespace in (item.path for item in contracts.managed_namespaces()):
         for identifier in client.list_policies(namespace):
             key = (identifier.namespace, identifier.name)
             if identifier.name.startswith(MANAGED_POLICY_PREFIX) and key not in desired:

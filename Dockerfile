@@ -27,7 +27,7 @@ COPY contracts ./contracts
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /app/.venv/bin/python --no-deps /dist/*.whl
 
-CMD ["lakehouse", "--help"]
+CMD ["python", "-m", "mini_lakehouse.platform.validate"]
 
 FROM base AS orchestration-dependencies
 RUN --mount=type=cache,target=/root/.cache/uv \

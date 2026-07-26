@@ -82,27 +82,17 @@ class CatalogContract(ContractModel):
         role_names = [grant.catalog_role for grant in self.catalog_role_grants]
         if len(role_names) != len(set(role_names)):
             raise ValueError("Catalog role grant entries must be unique")
-        known = set(paths)
         for namespace in self.namespaces:
             root = namespace.path[0]
             if root not in {"landing", "curated", "analytics"}:
                 raise ValueError(
                     f"Namespace {'.'.join(namespace.path)!r} is outside a lifecycle root"
                 )
-            if len(namespace.path) > 1 and namespace.path[:-1] not in known:
+            if namespace.storage_root is None or namespace.path != (namespace.storage_root,):
                 raise ValueError(
-                    f"Namespace {'.'.join(namespace.path)!r} is missing its parent namespace"
+                    "Catalog namespaces must be lifecycle roots; products and domains own "
+                    "their child namespaces"
                 )
-            if namespace.storage_root is not None and (
-                len(namespace.path) != 1 or namespace.path[0] != namespace.storage_root
-            ):
-                raise ValueError("Only lifecycle root namespaces can select a storage root")
-            if root == "curated" and {
-                "api",
-                "rdbms",
-                "stream",
-            }.intersection(namespace.path[1:]):
-                raise ValueError("Curated namespaces cannot expose source transport concerns")
         roots = {
             namespace.storage_root
             for namespace in self.namespaces

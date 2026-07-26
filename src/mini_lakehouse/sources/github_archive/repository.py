@@ -51,16 +51,6 @@ class GithubArchiveRepository:
             self._table_contract.columns,
             self._table_contract.partitioning,
         )
-        if self._table_contract.write_mode != "checkpoint_overwrite":
-            raise ValueError("GitHub Archive requires checkpoint_overwrite for idempotent commits")
-        contract_partitioning = tuple(
-            (partition.field, partition.transform)
-            for partition in self._table_contract.partitioning
-        )
-        if contract_partitioning != (("source_hour", "hour"),):
-            raise ValueError("GitHub Archive requires hour(source_hour) partitioning")
-        if self._table_contract.partitioning[0].name != "archive_hour":
-            raise ValueError("GitHub Archive partition must be named archive_hour")
 
     def __enter__(self) -> "GithubArchiveRepository":
         return self

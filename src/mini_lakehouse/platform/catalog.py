@@ -43,10 +43,17 @@ def catalog_contract(
             "region": storage.region,
             "stsUnavailable": storage.sts_unavailable,
             "kmsUnavailable": storage.kms_unavailable,
-            "allowedLocations": [
-                default_base_location,
-                *(storage_uri(settings, tier) for tier in ("landing", "curated", "analytics")),
-            ],
+            "allowedLocations": list(
+                dict.fromkeys(
+                    (
+                        default_base_location,
+                        *(
+                            storage_uri(settings, tier)
+                            for tier in ("landing", "curated", "analytics")
+                        ),
+                    )
+                )
+            ),
         },
     }
 
@@ -67,8 +74,8 @@ def _catalog_drift(current_payload: object, desired: Mapping[str, Any]) -> list[
     if not isinstance(current_properties, dict):
         drift.append("properties")
     else:
-        for key, value in desired_properties.items():
-            if current_properties.get(key) != value:
+        for key in sorted(current_properties.keys() | desired_properties.keys()):
+            if current_properties.get(key) != desired_properties.get(key):
                 drift.append(f"properties.{key}")
 
     current_storage = current.get("storageConfigInfo")
@@ -172,7 +179,7 @@ def ensure_catalog(client: PolarisManagementClient, desired: dict[str, Any]) -> 
         response.raise_for_status()
         return
 
-    # A concurrent bootstrap may create the catalog between the GET and POST.
+    # A concurrent reconciler may create the catalog between the GET and POST.
     response = client.get_catalog(catalog_name)
     response.raise_for_status()
     _reconcile_existing_catalog(client, desired, response.json())

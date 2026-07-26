@@ -176,7 +176,7 @@ def _insert_landing_record(
             raw_hash,
             1,
             1,
-            source.table("oai_records_raw").schema_contract,
+            source.table_schema_contract("oai_records_raw"),
             datetime(2099, 12, 31, tzinfo=UTC),
         ),
     )

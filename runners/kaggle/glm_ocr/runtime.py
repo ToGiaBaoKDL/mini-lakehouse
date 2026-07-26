@@ -7,6 +7,7 @@ import gzip
 import hashlib
 import io
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -56,6 +57,23 @@ class DocumentError(RuntimeError):
         super().__init__(message)
         self.code = code
         self.retryable = retryable
+
+
+def log_stage(event: str, started_at: float, **fields: object) -> None:
+    """Emit one machine-readable timing event to the Kaggle kernel log."""
+    with suppress(OSError):
+        print(
+            json.dumps(
+                {
+                    "event": event,
+                    "elapsed_seconds": round(time.perf_counter() - started_at, 3),
+                    **fields,
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            flush=True,
+        )
 
 
 def sha256_file(path: Path) -> str:
@@ -313,6 +331,7 @@ def successful_result(
     work_root: Path,
     output_root: Path,
 ) -> OcrDocumentResult:
+    started_at = time.perf_counter()
     pdf = work_root / "source.pdf"
     pdf_hash, pdf_size = download_pdf(request, pdf, job.limits.max_pdf_bytes)
     pages = pdf_page_count(pdf, job.limits.max_pages_per_document)
@@ -326,9 +345,8 @@ def successful_result(
     except Exception as error:
         raise DocumentError("ocr_inference_failed", str(error), retryable=True) from error
 
-    document_root = output_root / "documents" / quote(request.arxiv_id, safe="")
-    document_root = document_root / request.request_id
-    document_root.mkdir(parents=True)
+    document_root = work_root / "committed-output"
+    document_root.mkdir()
     markdown = parsed.markdown_result or ""
     layout = normalized_layout(parsed.json_result, pages)
     elements = canonical_elements(layout, current_processing_id)
@@ -366,7 +384,18 @@ def successful_result(
         processing_id=current_processing_id,
         files=[file.model_dump(mode="json") for file in files],
     )
-    return OcrDocumentResult.model_validate(payload)
+    result = OcrDocumentResult.model_validate(payload)
+    destination = output_root / "documents" / quote(request.arxiv_id, safe="") / request.request_id
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    document_root.replace(destination)
+    log_stage(
+        "document_succeeded",
+        started_at,
+        arxiv_id=request.arxiv_id,
+        page_count=pages,
+        request_id=request.request_id,
+    )
+    return result
 
 
 def failed_result(request: OcrDocumentRequest, error: DocumentError) -> OcrDocumentResult:
@@ -467,33 +496,69 @@ def start_vllm(
     deadline = time.monotonic() + 900
     while time.monotonic() < deadline:
         if process.poll() is not None:
+            diagnostic = log_path.read_text(encoding="utf-8", errors="replace")[-4000:]
             log_file.close()
-            raise RuntimeError(f"vLLM exited with status {process.returncode}")
+            raise RuntimeError(
+                f"vLLM exited with status {process.returncode}; log tail: {diagnostic}"
+            )
         try:
             if requests.get(endpoint, timeout=5).ok:
                 return process, log_file
         except requests.RequestException:
             pass
         time.sleep(5)
-    process.terminate()
-    log_file.close()
+    stop_process(process, log_file)
     raise RuntimeError("vLLM did not become ready within 15 minutes")
 
 
+def stop_process(process: subprocess.Popen[bytes], log_file: Any) -> None:
+    """Bounded, reap-complete shutdown for the local model server."""
+    try:
+        if process.poll() is None:
+            with suppress(ProcessLookupError):
+                process.terminate()
+            try:
+                process.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                with suppress(ProcessLookupError):
+                    process.kill()
+                process.wait(timeout=30)
+    finally:
+        log_file.close()
+
+
 def create_archive(source: Path, destination: Path) -> None:
-    with (
-        destination.open("xb") as raw_output,
-        zstandard.ZstdCompressor(level=9, write_checksum=True).stream_writer(raw_output) as output,
-        tarfile.open(fileobj=output, mode="w|") as bundle,
-    ):
-        for path in sorted(item for item in source.rglob("*") if item.is_file()):
-            relative = path.relative_to(source).as_posix()
-            info = tarfile.TarInfo(relative)
-            info.size = path.stat().st_size
-            info.mode = 0o644
-            info.mtime = 0
-            with path.open("rb") as file:
-                bundle.addfile(info, file)
+    temporary = destination.with_name(f".{destination.name}.{os.getpid()}.partial")
+    temporary.unlink(missing_ok=True)
+    try:
+        with (
+            temporary.open("xb") as raw_output,
+            zstandard.ZstdCompressor(level=9, write_checksum=True).stream_writer(
+                raw_output
+            ) as output,
+            tarfile.open(fileobj=output, mode="w|") as bundle,
+        ):
+            for path in sorted(item for item in source.rglob("*") if item.is_file()):
+                relative = path.relative_to(source).as_posix()
+                info = tarfile.TarInfo(relative)
+                info.size = path.stat().st_size
+                info.mode = 0o644
+                info.mtime = 0
+                with path.open("rb") as file:
+                    bundle.addfile(info, file)
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def write_text_atomic(destination: Path, content: str) -> None:
+    temporary = destination.with_name(f".{destination.name}.{os.getpid()}.partial")
+    temporary.unlink(missing_ok=True)
+    try:
+        temporary.write_text(content, encoding="utf-8")
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def run(
@@ -503,11 +568,13 @@ def run(
     model_source: str,
     layout_model_source: str,
 ) -> None:
+    batch_started_at = time.perf_counter()
     output_directory.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="glm-ocr-") as raw_temp:
         temp = Path(raw_temp)
         extracted = temp / "result"
         extracted.mkdir()
+        model_started_at = time.perf_counter()
         model_path = resolve_model_source(
             model_source,
             resource_name="model",
@@ -520,15 +587,19 @@ def run(
             repository=job.layout_model.repository,
             revision=job.layout_model.revision,
         )
+        log_stage("models_resolved", model_started_at, batch_id=job.batch_id)
         config_path = temp / "glmocr.yaml"
         write_config(config_path, job, str(layout_path))
+        server_started_at = time.perf_counter()
         vllm, log_file = start_vllm(job, model_path, temp / "vllm.log")
+        log_stage("vllm_ready", server_started_at, batch_id=job.batch_id)
         results: list[OcrDocumentResult] = []
         try:
             with GlmOcr(
                 config_path=str(config_path), layout_device=job.inference.layout_device
             ) as parser:
                 for request in job.documents:
+                    document_started_at = time.perf_counter()
                     document_work = temp / "work" / request.request_id
                     document_work.mkdir(parents=True)
                     try:
@@ -541,22 +612,35 @@ def run(
                         )
                     except DocumentError as error:
                         result = failed_result(request, error)
+                        log_stage(
+                            "document_failed",
+                            document_started_at,
+                            arxiv_id=request.arxiv_id,
+                            error_code=error.code,
+                            request_id=request.request_id,
+                        )
                     except Exception as error:
                         result = failed_result(
                             request,
                             DocumentError("unexpected_runner_error", str(error), retryable=True),
                         )
+                        log_stage(
+                            "document_failed",
+                            document_started_at,
+                            arxiv_id=request.arxiv_id,
+                            error_code="unexpected_runner_error",
+                            request_id=request.request_id,
+                        )
                     results.append(result)
         finally:
-            vllm.terminate()
-            with suppress(subprocess.TimeoutExpired):
-                vllm.wait(timeout=30)
-            if vllm.poll() is None:
-                vllm.kill()
-            log_file.close()
+            stop_process(vllm, log_file)
 
+        manifest_path = output_directory / "result_manifest.json"
+        manifest_path.unlink(missing_ok=True)
         archive = output_directory / "result.tar.zst"
+        archive_started_at = time.perf_counter()
         create_archive(extracted, archive)
+        log_stage("archive_created", archive_started_at, batch_id=job.batch_id)
         manifest = OcrBatchManifest(
             schema_version=job.schema_version,
             batch_id=job.batch_id,
@@ -565,9 +649,15 @@ def run(
             archive_size_bytes=archive.stat().st_size,
             documents=tuple(results),
         )
-        (output_directory / "result_manifest.json").write_text(
+        write_text_atomic(
+            manifest_path,
             manifest.model_dump_json(indent=2),
-            encoding="utf-8",
+        )
+        log_stage(
+            "batch_committed",
+            batch_started_at,
+            batch_id=job.batch_id,
+            document_count=len(results),
         )
 
 

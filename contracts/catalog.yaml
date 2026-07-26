@@ -6,8 +6,7 @@ catalog:
   owner: data-platform
   default_storage_root: landing
   namespace_custom_locations: true
-  properties:
-    polaris.config.drop-with-purge.enabled: "true"
+  properties: {}
 
 catalog_role_grants:
   - catalog_role: catalog_admin
@@ -28,27 +27,9 @@ namespaces:
     properties:
       data_tier: curated
 
-  - path: [curated, github]
-    owner: data-platform
-    description: Conformed GitHub entities and events.
-    properties:
-      data_product: github
-
-  - path: [curated, arxiv]
-    owner: data-platform
-    description: Canonical ArXiv papers and OCR results.
-    properties:
-      data_product: arxiv
-
   - path: [analytics]
     storage_root: analytics
     owner: analytics-platform
     description: Consumer-facing data products organized by business domain.
     properties:
       data_tier: analytics
-
-  - path: [analytics, engineering]
-    owner: engineering-analytics
-    description: Engineering activity metrics and reporting data products.
-    properties:
-      business_domain: engineering

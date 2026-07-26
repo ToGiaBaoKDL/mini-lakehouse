@@ -148,17 +148,6 @@ class ArxivOcrService:
         documents: tuple[OcrBatchDocument, ...],
     ) -> OcrJob:
         processor = self._processor
-        for document in documents:
-            request = document.request
-            expected_request_id = request_id(
-                arxiv_id=request.arxiv_id,
-                source_record_sha256=request.source_record_sha256,
-                configuration_hash=self._configuration_hash,
-            )
-            if request.request_id != expected_request_id:
-                raise RuntimeError(
-                    f"OCR request identity drifted for ArXiv paper {request.arxiv_id}"
-                )
         request_ids = [document.request.request_id for document in documents]
         attempts = {document.request.request_id: document.attempt_count for document in documents}
         if batch_key != batch_id(request_ids, attempts=attempts):
@@ -267,11 +256,21 @@ class ArxivOcrService:
         provider: KaggleClient,
         active: ActiveOcrBatch,
     ) -> OcrCycleResult:
-        job = self._job(active.batch_id, active.documents)
+        job = active.job
         provider_run_id = active.provider_run_id
         if active.state == "prepared" and provider_run_id is None:
             run = provider.latest_run(active.batch_id)
             if run is None or run.state == KaggleKernelState.FAILED:
+                if job.config_hash != self._configuration_hash:
+                    return self._failed_cycle(
+                        executor,
+                        active,
+                        error_code="stale_prepared_configuration",
+                        error_message=(
+                            "The prepared batch uses an older processor configuration and "
+                            "has no recoverable remote run; a new batch may be submitted"
+                        ),
+                    )
                 self._submit_prepared(executor, provider, job)
                 return OcrCycleResult(action="submitted", batch_id=active.batch_id)
             provider_run_id = run.provider_run_id

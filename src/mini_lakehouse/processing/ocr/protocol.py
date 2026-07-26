@@ -8,6 +8,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from mini_lakehouse.processing.ocr.identity import request_id
+
 Sha256 = str
 DocumentState = Literal[
     "succeeded",
@@ -70,6 +72,16 @@ class OcrJob(ProtocolModel):
             raise ValueError("OCR job request IDs must be unique")
         if len(arxiv_ids) != len(set(arxiv_ids)):
             raise ValueError("An OCR job may contain a paper only once")
+        for document in self.documents:
+            expected_request_id = request_id(
+                arxiv_id=document.arxiv_id,
+                source_record_sha256=document.source_record_sha256,
+                configuration_hash=self.config_hash,
+            )
+            if document.request_id != expected_request_id:
+                raise ValueError(
+                    f"OCR request identity does not match job configuration for {document.arxiv_id}"
+                )
         return self
 
 

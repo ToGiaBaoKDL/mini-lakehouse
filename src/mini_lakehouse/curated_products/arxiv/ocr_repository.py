@@ -43,6 +43,7 @@ class ArxivOcrRepository:
                 batch.state,
                 batch.provider_run_id,
                 batch.request_count,
+                batch.job_json,
                 document.request_id,
                 document.arxiv_id,
                 document.oai_datestamp,
@@ -51,7 +52,7 @@ class ArxivOcrRepository:
                 document.attempt_count,
                 document.state
             FROM {self._relation("ocr_batches")} AS batch
-            JOIN {self._relation("ocr_document_runs")} AS document
+            LEFT JOIN {self._relation("ocr_document_runs")} AS document
               ON document.batch_id = batch.batch_id
             WHERE batch.state IN ('prepared', 'submitted', 'running')
             ORDER BY batch.prepared_at, batch.batch_id, document.arxiv_id
@@ -64,28 +65,39 @@ class ArxivOcrRepository:
             return None
         first = result.rows[0]
         request_count = int(first[3])
-        if request_count != len(result.rows):
+        present_documents = sum(row[5] is not None for row in result.rows)
+        if request_count != present_documents:
             raise RuntimeError(
                 f"ArXiv OCR batch {first[0]} expects {request_count} documents, "
-                f"found {len(result.rows)}"
+                f"found {present_documents}"
             )
+        raw_job = first[4]
+        if raw_job is None:
+            raise RuntimeError(f"Active ArXiv OCR batch {first[0]} has no immutable job payload")
+        try:
+            job = OcrJob.model_validate_json(str(raw_job))
+        except ValueError as error:
+            raise RuntimeError(
+                f"Active ArXiv OCR batch {first[0]} has an invalid immutable job payload"
+            ) from error
         return ActiveOcrBatch.model_validate(
             {
                 "batch_id": str(first[0]),
                 "state": str(first[1]),
                 "provider_run_id": str(first[2]) if first[2] is not None else None,
+                "job": job,
                 "documents": tuple(
                     OcrBatchDocument.model_validate(
                         {
                             "request": OcrDocumentRequest(
-                                request_id=str(row[4]),
-                                arxiv_id=str(row[5]),
-                                oai_datestamp=row[6],
-                                source_record_sha256=str(row[7]),
-                                pdf_url=str(row[8]),
+                                request_id=str(row[5]),
+                                arxiv_id=str(row[6]),
+                                oai_datestamp=row[7],
+                                source_record_sha256=str(row[8]),
+                                pdf_url=str(row[9]),
                             ),
-                            "attempt_count": int(row[9]),
-                            "state": str(row[10]),
+                            "attempt_count": int(row[10]),
+                            "state": str(row[11]),
                         }
                     )
                     for row in result.rows
@@ -295,16 +307,18 @@ class ArxivOcrRepository:
             )
         # The batch row is the durable commit marker. Publishing it last prevents
         # a crash during document preparation from exposing an incomplete batch.
+        job_json = job.model_dump_json()
         executor.execute(
             f"""
             MERGE INTO {self._relation("ocr_batches")} AS target
             USING (
-                VALUES (?, ?, ?)
-            ) AS source(batch_id, kernel_slug, request_count)
+                VALUES (?, ?, ?, ?)
+            ) AS source(batch_id, kernel_slug, request_count, job_json)
             ON target.batch_id = source.batch_id
             WHEN MATCHED AND target.state = 'prepared' THEN UPDATE SET
                 kernel_slug = source.kernel_slug,
                 request_count = source.request_count,
+                job_json = source.job_json,
                 curated_at = current_timestamp
             WHEN NOT MATCHED THEN INSERT (
                 batch_id,
@@ -318,7 +332,8 @@ class ArxivOcrRepository:
                 completed_at,
                 error_code,
                 error_message,
-                curated_at
+                curated_at,
+                job_json
             ) VALUES (
                 source.batch_id,
                 NULL,
@@ -331,10 +346,11 @@ class ArxivOcrRepository:
                 NULL,
                 NULL,
                 NULL,
-                current_timestamp
+                current_timestamp,
+                source.job_json
             )
             """,
-            (job.batch_id, kernel_slug, len(documents)),
+            (job.batch_id, kernel_slug, len(documents), job_json),
         )
 
     def mark_batch_submitted(

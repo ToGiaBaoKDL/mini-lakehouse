@@ -45,10 +45,14 @@ def test_compose_modules_are_clean_clone_safe() -> None:
 
 
 def test_tracked_container_environment_contains_routing_but_no_secrets() -> None:
-    environment = Path("infra/config/lakehouse.container.env").read_text(encoding="utf-8")
+    platform = Path("infra/config/platform.container.env").read_text(encoding="utf-8")
+    orchestration = Path("infra/config/orchestration.container.env").read_text(encoding="utf-8")
+    environment = f"{platform}\n{orchestration}"
 
-    assert "LAKEHOUSE_POLARIS__URI=http://polaris:8181/api/catalog" in environment
-    assert "LAKEHOUSE_TRINO__HOST=trino" in environment
+    assert "LAKEHOUSE_POLARIS__URI=http://polaris:8181/api/catalog" in platform
+    assert "LAKEHOUSE_TRINO__HOST=trino" not in platform
+    assert "LAKEHOUSE_TRINO__HOST=trino" in orchestration
+    assert "LAKEHOUSE_POLARIS__URI" not in orchestration
     assert "ACCESS_KEY=" not in environment
     assert "SECRET_KEY=" not in environment
     assert "CREDENTIAL=" not in environment
@@ -103,7 +107,7 @@ def test_each_local_image_has_one_compose_build_owner() -> None:
                 build_owners.setdefault(image, []).append(f"{path.name}:{service_name}")
 
     assert build_owners == {
-        "mini-lakehouse:local": ["compose.core.yaml:lakehouse-bootstrap"],
+        "mini-lakehouse:local": ["compose.core.yaml:platform-reconcile"],
         "mini-lakehouse-orchestration:local": ["compose.prefect.yaml:prefect-worker"],
     }
 
@@ -114,12 +118,52 @@ def test_application_base_images_are_version_pinned() -> None:
     assert "FROM ghcr.io/astral-sh/uv:0.11.30 AS uv" in dockerfile
     assert "FROM python:3.13.14-slim AS base" in dockerfile
     assert ":latest" not in dockerfile
+    assert 'CMD ["python", "-m", "mini_lakehouse.platform.validate"]' in dockerfile
+    assert "lakehouse --help" not in dockerfile
+
+
+def test_generic_application_cli_is_absent() -> None:
+    project = Path("pyproject.toml").read_text(encoding="utf-8")
+
+    assert not Path("src/mini_lakehouse/cli.py").exists()
+    assert "[project.scripts]" not in project
+
+
+def test_container_environment_files_follow_service_ownership() -> None:
+    core = yaml.safe_load(Path("compose.core.yaml").read_text(encoding="utf-8"))
+    prefect = yaml.safe_load(Path("compose.prefect.yaml").read_text(encoding="utf-8"))
+
+    assert core["services"]["platform-reconcile"]["env_file"] == [
+        "./infra/config/platform.container.env"
+    ]
+    assert prefect["x-lakehouse-runtime"]["env_file"] == [
+        "./infra/config/platform.container.env",
+        "./infra/config/orchestration.container.env",
+    ]
+    runtime_environment = prefect["x-lakehouse-runtime"]["environment"]
+    for setting in (
+        "LAKEHOUSE_ARXIV__BASE_URL",
+        "LAKEHOUSE_KAGGLE__API_TOKEN",
+        "LAKEHOUSE_NOTIFICATIONS__SLACK_BOT_TOKEN",
+        "LAKEHOUSE_NOTIFICATIONS__GMAIL_APP_PASSWORD",
+        "DBT_THREADS",
+    ):
+        assert setting in runtime_environment
+
+
+def test_trino_identity_and_catalog_are_runtime_parameters() -> None:
+    node = Path("infra/trino/etc/node.properties").read_text(encoding="utf-8")
+    catalog = Path("infra/trino/etc/catalog/prod.properties").read_text(encoding="utf-8")
+
+    assert "node.id=${ENV:TRINO_NODE_ID}" in node
+    assert "ffffffff-ffff" not in node
+    assert "iceberg.rest-catalog.warehouse=${ENV:POLARIS_CATALOG}" in catalog
 
 
 def test_aistor_license_and_data_are_mounted_at_canonical_paths() -> None:
     payload = yaml.safe_load(Path("compose.core.yaml").read_text(encoding="utf-8"))
     object_store = payload["services"]["object-store"]
-    bootstrap = payload["services"]["object-store-bootstrap"]
+    provision = payload["services"]["object-store-provision"]
 
     assert "./minio.license:/minio.license:ro" in object_store["volumes"]
     assert "object-store-data:/mnt/data" in object_store["volumes"]
@@ -132,7 +176,12 @@ def test_aistor_license_and_data_are_mounted_at_canonical_paths() -> None:
         "--license",
         "/minio.license",
     ]
-    assert "mc license info local >/dev/null" in bootstrap["command"][0]
+    assert provision["entrypoint"] == ["/bin/sh", "/opt/object-store/lifecycle-buckets.sh"]
+    assert provision["command"] == ["provision"]
+    assert (
+        "./infra/object-store/lifecycle-buckets.sh:/opt/object-store/lifecycle-buckets.sh:ro"
+        in provision["volumes"]
+    )
 
 
 def test_makefile_is_the_local_operations_entrypoint() -> None:
@@ -158,11 +207,15 @@ def test_makefile_is_the_local_operations_entrypoint() -> None:
         "ps-all:",
         "logs:",
         "logs-follow:",
+        "smoke-core:",
+        "smoke-prefect:",
         "smoke:",
         "wait-prefect-deploy:",
         "prefect-deployments:",
         "prefect-deploy:",
-        "reconcile:",
+        "platform-reconcile:",
+        "policy-prune-plan:",
+        "policy-prune-apply:",
     ):
         assert target in makefile
     assert "--project-name $(PROJECT_NAME)" in makefile

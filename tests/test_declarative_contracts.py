@@ -147,14 +147,12 @@ def test_registry_accepts_a_second_source_family_without_core_code_changes() -> 
                 "email": "warehouse-source-team@example.com",
             },
             "description": "Fixture proving source-family extensibility.",
-            "landing_namespace": ["landing"],
-            "raw_object_prefix": "rdbms/warehouse_raw/raw",
             "checkpoint": {"kind": "timestamp", "field": "updated_at"},
             "tables": [
                 {
                     "key": "orders",
                     "name": "warehouse_raw_orders",
-                    "schema_contract": "warehouse.orders.v1",
+                    "schema_version": 1,
                     "columns": [
                         {
                             "field_id": 1,
@@ -165,7 +163,6 @@ def test_registry_accepts_a_second_source_family_without_core_code_changes() -> 
                         }
                     ],
                     "partitioning": [{"field": "updated_at", "transform": "day"}],
-                    "write_mode": "checkpoint_overwrite",
                 }
             ],
         },
@@ -224,14 +221,6 @@ def test_source_contract_rejects_duplicate_table_identifiers() -> None:
         SourceContract.model_validate(payload)
 
 
-def test_source_contract_rejects_a_non_landing_namespace() -> None:
-    payload = _registry_payload()
-    payload["sources"][0]["landing_namespace"] = ("unknown",)
-
-    with pytest.raises(ValidationError, match="shared landing namespace"):
-        PlatformContracts.model_validate(payload)
-
-
 def test_catalog_rejects_namespaces_outside_lifecycle_roots() -> None:
     payload = _registry_payload()["catalog"]
     payload["namespaces"] = (
@@ -255,20 +244,21 @@ def test_source_checkpoint_is_a_discriminated_union() -> None:
         SourceContract.model_validate(payload)
 
 
-def test_source_contract_rejects_unsafe_object_prefixes() -> None:
-    payload = _registry_payload()["sources"][0]
-    payload["raw_object_prefix"] = "api/../secrets"
+def test_source_contract_rejects_unsafe_raw_subpaths() -> None:
+    payload = load_contracts().source("arxiv").model_dump(mode="python")
+    payload["raw_subpath"] = "../secrets"
 
     with pytest.raises(ValidationError, match="normalized relative paths"):
         SourceContract.model_validate(payload)
 
 
-def test_source_contract_rejects_raw_objects_outside_its_raw_boundary() -> None:
-    payload = _registry_payload()["sources"][0]
-    payload["raw_object_prefix"] = "api/github_archive/archive"
+def test_source_contract_derives_raw_object_boundary() -> None:
+    payload = load_contracts().source("arxiv").model_dump(mode="python")
+    payload["raw_subpath"] = "archive/pages"
 
-    with pytest.raises(ValidationError, match="raw objects must live"):
-        SourceContract.model_validate(payload)
+    source = SourceContract.model_validate(payload)
+
+    assert source.raw_object_prefix == "api/arxiv/raw/archive/pages"
 
 
 def test_normalized_registry_is_deterministic_across_loads() -> None:

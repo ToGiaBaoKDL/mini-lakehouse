@@ -7,9 +7,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
-UV_VERSION = "0.11.28"
+UV_VERSION = "0.11.30"
 MANIFEST_NAME = "resource_manifest.json"
 
 
@@ -53,6 +54,22 @@ def _validate_bundle(source: Path, expected_bundle_sha256: str) -> None:
             raise RuntimeError(f"Mounted Kaggle runner file failed validation: {name!r}")
 
 
+def _run(stage: str, command: list[str], *, environment: dict[str, str] | None = None) -> None:
+    started_at = time.perf_counter()
+    print(json.dumps({"event": f"{stage}_started"}, separators=(",", ":")), flush=True)
+    subprocess.run(command, check=True, env=environment)
+    print(
+        json.dumps(
+            {
+                "event": f"{stage}_completed",
+                "elapsed_seconds": round(time.perf_counter() - started_at, 3),
+            },
+            separators=(",", ":"),
+        ),
+        flush=True,
+    )
+
+
 def main(
     *,
     job_json: str,
@@ -65,49 +82,52 @@ def main(
     working = Path("/kaggle/working")
     working.mkdir(parents=True, exist_ok=True)
     project = Path(tempfile.mkdtemp(prefix="mini-lakehouse-glm-ocr-"))
-    shutil.copytree(source, project, dirs_exist_ok=True)
-    (project / "job.json").write_text(job_json, encoding="utf-8")
-    environment = os.environ.copy()
-    environment["UV_PROJECT_ENVIRONMENT"] = str(project / ".venv")
-    environment["UV_CACHE_DIR"] = "/tmp/mini-lakehouse-uv-cache"
-    uv = shutil.which("uv")
-    if uv is None:
-        subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "install",
-                "--disable-pip-version-check",
-                f"uv=={UV_VERSION}",
-            ],
-            check=True,
-        )
+    try:
+        shutil.copytree(source, project, dirs_exist_ok=True)
+        (project / "job.json").write_text(job_json, encoding="utf-8")
+        environment = os.environ.copy()
+        environment["UV_PROJECT_ENVIRONMENT"] = str(project / ".venv")
+        environment["UV_CACHE_DIR"] = "/tmp/mini-lakehouse-uv-cache"
         uv = shutil.which("uv")
-    if uv is None:
-        raise RuntimeError("uv installation completed but the executable is unavailable")
-    subprocess.run(
-        [uv, "sync", "--project", str(project), "--frozen", "--no-dev"],
-        check=True,
-        env=environment,
-    )
-    subprocess.run(
-        [
-            uv,
-            "run",
-            "--project",
-            str(project),
-            "--frozen",
-            "--no-sync",
-            "python",
-            str(project / "runtime.py"),
-            "--output-directory",
-            str(working),
-            "--model-source",
-            model_source,
-            "--layout-model-source",
-            layout_model_source,
-        ],
-        check=True,
-        env=environment,
-    )
+        if uv is None:
+            _run(
+                "uv_install",
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--disable-pip-version-check",
+                    f"uv=={UV_VERSION}",
+                ],
+            )
+            uv = shutil.which("uv")
+        if uv is None:
+            raise RuntimeError("uv installation completed but the executable is unavailable")
+        _run(
+            "dependency_sync",
+            [uv, "sync", "--project", str(project), "--frozen", "--no-dev"],
+            environment=environment,
+        )
+        _run(
+            "ocr_runtime",
+            [
+                uv,
+                "run",
+                "--project",
+                str(project),
+                "--frozen",
+                "--no-sync",
+                "python",
+                str(project / "runtime.py"),
+                "--output-directory",
+                str(working),
+                "--model-source",
+                model_source,
+                "--layout-model-source",
+                layout_model_source,
+            ],
+            environment=environment,
+        )
+    finally:
+        shutil.rmtree(project, ignore_errors=True)

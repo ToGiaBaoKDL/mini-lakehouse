@@ -13,6 +13,10 @@ example, `LAKEHOUSE_STORAGE__LANDING_URI` maps to `settings.storage.landing_uri`
 mounted under `/run/secrets` in a managed deployment. The local `.env` is ignored by Git.
 dbt's profile reads the same `LAKEHOUSE_TRINO__*` keys as Python, so catalog and Trino endpoints
 do not have a second `DBT_CATALOG`/`TRINO_HOST` source of truth.
+Tracked container-only routing is split by ownership:
+`infra/config/platform.container.env` contains shared storage/Polaris routes, while
+`infra/config/orchestration.container.env` contains Trino/dbt/Prefect routes. Secrets and
+lifecycle URIs remain in `.env` and are injected explicitly by Compose.
 
 Stable desired state is separate from runtime settings and lives under `contracts/`. Validate both
 layers before starting services:
@@ -26,7 +30,7 @@ Start the core data plane:
 ```bash
 make up-core
 make ps
-make smoke
+make smoke-core
 ```
 
 Compose files follow the `compose.<module>.yaml` convention. `compose.core.yaml` is the required
@@ -46,8 +50,9 @@ gate; deployments must not pull a new major implicitly.
 
 AIStor mounts the ignored local `minio.license` read-only at `/minio.license`. `make preflight`
 rejects a missing or empty environment/license file before deployment, and the object-store
-bootstrap verifies the active license before creating the `landing`, `curated`, and `analytics`
-buckets. The GitHub Actions end-to-end job reads the same license content from the protected
+provisioner verifies the active license before creating any missing lifecycle buckets. The bucket
+names are derived from the three configured lifecycle URIs, including deployments that isolate
+tiers with prefixes in one bucket. The GitHub Actions end-to-end job reads the same license content from the protected
 repository secret `AISTOR_LICENSE`; fork pull requests do not receive or execute with that secret.
 
 `make down` and `make restart` preserve the named `object-store-data`, `postgres-data`,
@@ -58,6 +63,7 @@ additionally require a planned database migration when a volume is retained.
 Only S3 dependencies are installed. There is no GCS compatibility package or inactive runtime
 branch in this project.
 
-The local Polaris metastore is PostgreSQL-backed. `polaris-admin` bootstraps its realm idempotently,
-then the application bootstrap creates catalog `prod` and the governed namespace locations. No
-package is installed dynamically when a container starts.
+The local Polaris metastore is PostgreSQL-backed. `polaris-bootstrap` only initializes the realm
+and root principal. `object-store-provision` only ensures physical buckets exist.
+`platform-reconcile` then converges catalog `prod`, namespaces, access grants, and desired policy
+content. No package is installed dynamically when a container starts.

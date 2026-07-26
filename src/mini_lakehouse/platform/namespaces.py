@@ -23,7 +23,7 @@ def namespace_contract(
         namespace.path: namespace.iceberg_properties(
             namespace_storage_uri(settings, namespace.path)
         )
-        for namespace in registry.catalog.namespaces
+        for namespace in registry.managed_namespaces()
     }
 
 

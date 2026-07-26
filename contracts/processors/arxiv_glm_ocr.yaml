@@ -51,7 +51,7 @@ runner:
       variation: safetensors
       license_name: Apache 2.0
   accelerator: NvidiaTeslaT4
-  timeout_seconds: 39600
+  timeout_seconds: 14400
   minimum_gpu_quota_minutes: 60
 
 retry:

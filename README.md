@@ -66,7 +66,7 @@ make setup
 uv sync --frozen --all-extras --all-groups
 make validate
 make up-core
-make smoke
+make smoke-core
 ```
 
 The core data plane exposes only loopback ports:
@@ -75,12 +75,19 @@ The core data plane exposes only loopback ports:
 - Polaris API/management health: `localhost:8181` / `localhost:8182`
 - Trino: `localhost:8080`
 
-Ingest and curate the previous complete UTC hour, then run the same phased analytics build used by
-Prefect:
+The generic application CLI has been removed. Operational entrypoints are the domain-owned Prefect
+flows, so scheduling, parameters, retries, task history, and notifications follow one path. Add
+the orchestration control plane, then trigger the same deployments used by schedules:
 
 ```bash
-uv run lakehouse ingest github-archive
-uv run lakehouse curate github
+make up
+uv run prefect deployment run el_github_archive/el_github_archive
+uv run prefect deployment run tl_github_analytics/tl_github_analytics
+```
+
+The transformation flow runs the following phased dbt build:
+
+```bash
 uv run dbt source freshness \
   --project-dir dbt/analytics --profiles-dir dbt/analytics \
   --selector github_sources
@@ -93,12 +100,6 @@ uv run dbt run \
 uv run dbt test \
   --project-dir dbt/analytics --profiles-dir dbt/analytics \
   --selector engineering_marts
-```
-
-Add the orchestration control plane when you need scheduled deployments:
-
-```bash
-make up
 ```
 
 Set `LAKEHOUSE_KAGGLE__USERNAME` and `LAKEHOUSE_KAGGLE__API_TOKEN` in `.env` before

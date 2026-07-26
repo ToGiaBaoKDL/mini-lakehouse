@@ -2,14 +2,41 @@
 
 x-lakehouse-runtime: &lakehouse-runtime
   env_file:
-    - ./infra/config/lakehouse.container.env
+    - ./infra/config/platform.container.env
+    - ./infra/config/orchestration.container.env
   environment:
+    LAKEHOUSE_ENVIRONMENT: ${LAKEHOUSE_ENVIRONMENT:-local}
+    LAKEHOUSE_LOG_LEVEL: ${LAKEHOUSE_LOG_LEVEL:-INFO}
+    LAKEHOUSE_STORAGE__BACKEND: ${LAKEHOUSE_STORAGE__BACKEND:-s3}
     LAKEHOUSE_STORAGE__ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
     LAKEHOUSE_STORAGE__SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    LAKEHOUSE_STORAGE__REGION: ${LAKEHOUSE_STORAGE__REGION:-us-east-1}
+    LAKEHOUSE_STORAGE__PATH_STYLE_ACCESS: "${LAKEHOUSE_STORAGE__PATH_STYLE_ACCESS:-true}"
+    LAKEHOUSE_STORAGE__ICEBERG_ACCESS_DELEGATION: ${LAKEHOUSE_STORAGE__ICEBERG_ACCESS_DELEGATION:-none}
+    LAKEHOUSE_STORAGE__STS_UNAVAILABLE: "${LAKEHOUSE_STORAGE__STS_UNAVAILABLE:-true}"
+    LAKEHOUSE_STORAGE__KMS_UNAVAILABLE: "${LAKEHOUSE_STORAGE__KMS_UNAVAILABLE:-true}"
+    LAKEHOUSE_STORAGE__LANDING_URI: ${LAKEHOUSE_STORAGE__LANDING_URI:-s3://landing}
+    LAKEHOUSE_STORAGE__CURATED_URI: ${LAKEHOUSE_STORAGE__CURATED_URI:-s3://curated}
+    LAKEHOUSE_STORAGE__ANALYTICS_URI: ${LAKEHOUSE_STORAGE__ANALYTICS_URI:-s3://analytics}
+    LAKEHOUSE_POLARIS__CATALOG_NAME: ${LAKEHOUSE_POLARIS__CATALOG_NAME:-prod}
     LAKEHOUSE_POLARIS__REALM: ${POLARIS_REALM:-POLARIS}
     LAKEHOUSE_POLARIS__CREDENTIAL: ${POLARIS_ROOT_CLIENT_ID:-root}:${POLARIS_ROOT_CLIENT_SECRET:-secretpassword}
+    LAKEHOUSE_POLARIS__SCOPE: ${LAKEHOUSE_POLARIS__SCOPE:-PRINCIPAL_ROLE:ALL}
+    LAKEHOUSE_ARXIV__BASE_URL: ${LAKEHOUSE_ARXIV__BASE_URL:-https://oaipmh.arxiv.org/oai}
+    LAKEHOUSE_ARXIV__METADATA_PREFIX: ${LAKEHOUSE_ARXIV__METADATA_PREFIX:-arXiv}
+    LAKEHOUSE_ARXIV__REQUEST_TIMEOUT_SECONDS: "${LAKEHOUSE_ARXIV__REQUEST_TIMEOUT_SECONDS:-120}"
+    LAKEHOUSE_ARXIV__MAX_PAGES_PER_DAY: "${LAKEHOUSE_ARXIV__MAX_PAGES_PER_DAY:-1000}"
+    LAKEHOUSE_ARXIV__USER_AGENT: ${LAKEHOUSE_ARXIV__USER_AGENT:-mini-lakehouse}
     LAKEHOUSE_KAGGLE__USERNAME: ${LAKEHOUSE_KAGGLE__USERNAME:-}
     LAKEHOUSE_KAGGLE__API_TOKEN: ${LAKEHOUSE_KAGGLE__API_TOKEN:-}
+    LAKEHOUSE_NOTIFICATIONS__PREFECT_UI_URL: ${LAKEHOUSE_NOTIFICATIONS__PREFECT_UI_URL:-http://localhost:4200}
+    LAKEHOUSE_NOTIFICATIONS__SLACK_BOT_TOKEN: ${LAKEHOUSE_NOTIFICATIONS__SLACK_BOT_TOKEN:-}
+    LAKEHOUSE_NOTIFICATIONS__SLACK_CHANNEL_ID: ${LAKEHOUSE_NOTIFICATIONS__SLACK_CHANNEL_ID:-}
+    LAKEHOUSE_NOTIFICATIONS__GMAIL_SENDER: ${LAKEHOUSE_NOTIFICATIONS__GMAIL_SENDER:-}
+    LAKEHOUSE_NOTIFICATIONS__GMAIL_APP_PASSWORD: ${LAKEHOUSE_NOTIFICATIONS__GMAIL_APP_PASSWORD:-}
+    LAKEHOUSE_NOTIFICATIONS__GMAIL_RECIPIENTS: '${LAKEHOUSE_NOTIFICATIONS__GMAIL_RECIPIENTS:-[]}'
+    DBT_TARGET: ${DBT_TARGET:-local}
+    DBT_THREADS: "${DBT_THREADS:-4}"
     PREFECT_API_URL: http://prefect-server:4200/api
 
 x-orchestration-image: &orchestration-image
@@ -76,7 +103,7 @@ services:
       retries: 3
       start_period: 30s
 
-  prefect-bootstrap:
+  prefect-reconcile:
     <<: [*orchestration-image, *lakehouse-runtime]
     depends_on:
       prefect-server:
@@ -90,7 +117,7 @@ services:
       context: .
       target: orchestration
     depends_on:
-      prefect-bootstrap:
+      prefect-reconcile:
         condition: service_completed_successfully
       trino:
         condition: service_healthy
@@ -106,7 +133,7 @@ services:
   prefect-deploy:
     <<: [*orchestration-image, *lakehouse-runtime]
     depends_on:
-      prefect-bootstrap:
+      prefect-reconcile:
         condition: service_completed_successfully
       prefect-worker:
         condition: service_started

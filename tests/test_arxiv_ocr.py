@@ -814,9 +814,51 @@ def test_ocr_repository_publishes_the_batch_commit_marker_last() -> None:
     assert '"ocr_document_runs"' in executor.calls[0][0]
     assert "target.batch_id = source.batch_id" in executor.calls[0][0]
     assert '"ocr_batches"' in executor.calls[-1][0]
+    assert "job_json" in executor.calls[-1][0]
+    assert executor.calls[-1][1] is not None
+    assert executor.calls[-1][1][-1] == job.model_dump_json()
     assert all(
         statement.count("?") == len(parameters or ()) for statement, parameters in executor.calls
     )
+
+
+class _ActiveBatchExecutor:
+    def __init__(self, job: OcrJob) -> None:
+        request = job.documents[0]
+        self.rows = (
+            (
+                job.batch_id,
+                "running",
+                "owner/kernel/7",
+                1,
+                job.model_dump_json(),
+                request.request_id,
+                request.arxiv_id,
+                request.oai_datestamp,
+                request.source_record_sha256,
+                request.pdf_url,
+                1,
+                "running",
+            ),
+        )
+
+    def execute(
+        self,
+        statement: str,
+        parameters: Sequence[Any] | None = None,
+    ) -> QueryResult:
+        del statement, parameters
+        return QueryResult(columns=(), rows=self.rows)
+
+
+def test_active_ocr_batch_restores_its_immutable_job_payload() -> None:
+    job = _job()
+
+    active = ArxivOcrRepository(Settings()).active_batch(_ActiveBatchExecutor(job))
+
+    assert active is not None
+    assert active.job == job
+    assert active.documents[0].request == job.documents[0]
 
 
 def test_ocr_candidates_use_config_identity_and_ignore_orphan_attempts() -> None:
@@ -1081,6 +1123,7 @@ def test_exhausted_remote_failure_becomes_terminal_without_resubmission() -> Non
         batch_id=job.batch_id,
         state="running",
         provider_run_id="owner/mini-lakehouse-arxiv-glm-ocr/1",
+        job=job,
         documents=(OcrBatchDocument(request=job.documents[0], attempt_count=3),),
     )
     repository = _FailedRepository(active)
@@ -1109,6 +1152,7 @@ def test_invalid_remote_output_becomes_a_typed_retryable_attempt() -> None:
         batch_id=job.batch_id,
         state="running",
         provider_run_id="owner/mini-lakehouse-arxiv-glm-ocr/1",
+        job=job,
         documents=(OcrBatchDocument(request=job.documents[0], attempt_count=1),),
     )
     repository = _FailedRepository(active)
@@ -1135,6 +1179,7 @@ def test_remote_batch_failure_never_downgrades_an_imported_document() -> None:
         batch_id=job.batch_id,
         state="running",
         provider_run_id="owner/mini-lakehouse-arxiv-glm-ocr/1",
+        job=job,
         documents=(
             OcrBatchDocument(
                 request=job.documents[0],
@@ -1160,3 +1205,54 @@ def test_remote_batch_failure_never_downgrades_an_imported_document() -> None:
     assert result.terminal_failures == 0
     assert repository.document_state is None
     assert repository.batch_state == "failed"
+
+
+def test_prepared_batch_from_an_old_configuration_is_released_for_a_new_batch() -> None:
+    current_job = _job()
+    old_configuration_hash = "f" * 64
+    current_request = current_job.documents[0]
+    old_request = current_request.model_copy(
+        update={
+            "request_id": request_id(
+                arxiv_id=current_request.arxiv_id,
+                source_record_sha256=current_request.source_record_sha256,
+                configuration_hash=old_configuration_hash,
+            )
+        }
+    )
+    old_batch_id = batch_id(
+        (old_request.request_id,),
+        attempts={old_request.request_id: 1},
+    )
+    old_job = OcrJob.model_validate(
+        {
+            **current_job.model_dump(),
+            "batch_id": old_batch_id,
+            "config_hash": old_configuration_hash,
+            "documents": (old_request,),
+        }
+    )
+    active = ActiveOcrBatch(
+        batch_id=old_job.batch_id,
+        state="prepared",
+        provider_run_id=None,
+        job=old_job,
+        documents=(OcrBatchDocument(request=old_job.documents[0], attempt_count=1),),
+    )
+    repository = _FailedRepository(active)
+    provider = _SubmissionProvider()
+    service = ArxivOcrService(
+        Settings(),
+        executor=cast(Any, _NoopExecutor()),
+        table_manager=cast(Any, _NoopTableManager()),
+        repository=cast(Any, repository),
+        provider=provider,
+        object_store=cast(Any, _NoopObjectStore()),
+    )
+
+    result = service.run_once()
+
+    assert result.action == "reconciled"
+    assert repository.document_state == "retryable_failed"
+    assert repository.batch_state == "failed"
+    assert provider.submitted_job is None

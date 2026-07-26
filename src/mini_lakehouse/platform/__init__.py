@@ -1,1 +1,1 @@
-"""Local platform bootstrap utilities."""
+"""Platform lifecycle and catalog integration boundaries."""

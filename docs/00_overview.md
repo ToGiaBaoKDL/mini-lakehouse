@@ -34,7 +34,7 @@ depending on their ingestion implementation.
 
 ```text
 contracts/
-├── catalog.yaml            catalog, namespaces, locations, grants
+├── catalog.yaml            catalog, lifecycle roots, storage tiers, grants
 ├── sources/                landing ownership and checkpoints
 ├── curated_products/       canonical curated products
 ├── domains/                analytics ownership and published marts
@@ -74,6 +74,7 @@ source or product business behavior. It is intentionally not a Python package an
 | `analytics.engineering` | Engineering Analytics | Metric definitions, grains, dbt tests/contracts, BI-facing tables |
 | Catalog and maintenance | Data Platform | Polaris desired state, access grants, policy reconciliation, Iceberg maintenance |
 
-The registry validates source → curated product → analytics domain references. dbt source metadata,
+The registry derives each curated-product and analytics-domain namespace from its owning contract,
+then validates source → curated product → analytics domain references. dbt source metadata,
 contracts, tests, and future BI metadata repeat only the pieces dbt-native tooling needs; runtime
 secrets remain environment-only.

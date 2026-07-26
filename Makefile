@@ -5,13 +5,13 @@ SHELL := /bin/sh
 PROJECT_NAME ?= mini-lakehouse
 CORE_COMPOSE := docker compose --project-name $(PROJECT_NAME) -f compose.core.yaml
 COMPOSE := $(CORE_COMPOSE) -f compose.prefect.yaml
-THIRD_PARTY_SERVICES := postgres object-store object-store-bootstrap polaris-admin polaris trino \
+THIRD_PARTY_SERVICES := postgres object-store object-store-provision polaris-bootstrap polaris trino \
 	redis prefect-server
 
 .PHONY: help setup preflight config validate lint test check pull build build-core \
 	build-orchestration start-core start up-core up down restart clean reset ps \
-	ps-all logs logs-follow smoke wait-prefect-deploy prefect-deployments \
-	prefect-deploy reconcile
+	ps-all logs logs-follow smoke-core smoke-prefect smoke wait-prefect-deploy prefect-deployments \
+	prefect-deploy platform-reconcile policy-prune-plan policy-prune-apply
 
 help: ## Show the available project commands.
 	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -30,7 +30,7 @@ config: ## Render and validate the complete Compose configuration.
 	$(COMPOSE) config --quiet
 
 validate: config ## Validate declarative lakehouse contracts and settings.
-	uv run lakehouse validate
+	uv run python -m mini_lakehouse.platform.validate
 
 lint: ## Run formatting, linting, and static type checks.
 	uv run ruff format --check .
@@ -56,7 +56,7 @@ build: ## Build local images sequentially to keep peak resource usage bounded.
 	$(MAKE) build-orchestration
 
 build-core: preflight ## Build only the local core runtime image.
-	$(CORE_COMPOSE) build lakehouse-bootstrap
+	$(CORE_COMPOSE) build platform-reconcile
 
 build-orchestration: preflight ## Build only the local orchestration image.
 	$(COMPOSE) build prefect-worker
@@ -103,13 +103,18 @@ logs: ## Print recent stack logs (use ARGS="service").
 logs-follow: ## Follow stack logs (use ARGS="service").
 	$(COMPOSE) logs --follow --tail=200 $(ARGS)
 
-smoke: preflight ## Verify AIStor, Polaris, Trino, Prefect, and bucket bootstrap.
+smoke-core: preflight ## Read-only health and catalog verification for the core data plane.
 	@curl --fail --silent http://localhost:9000/minio/health/live >/dev/null
 	@curl --fail --silent http://localhost:8182/q/health/ready >/dev/null
 	@curl --fail --silent http://localhost:8080/v1/info >/dev/null
+	$(CORE_COMPOSE) run --rm --no-deps --entrypoint /bin/sh object-store-provision \
+		/opt/object-store/lifecycle-buckets.sh verify
+	$(CORE_COMPOSE) exec -T trino trino --execute "SHOW SCHEMAS FROM prod"
+
+smoke-prefect: preflight ## Verify the optional Prefect control plane.
 	@curl --fail --silent http://localhost:4200/api/health >/dev/null
-	$(COMPOSE) run --rm --no-deps object-store-bootstrap
-	$(COMPOSE) exec -T trino trino --execute "SHOW SCHEMAS FROM prod"
+
+smoke: smoke-core smoke-prefect ## Verify the complete stack.
 
 wait-prefect-deploy: preflight ## Wait for Prefect deployment registration.
 	@container_id="$$( $(COMPOSE) ps --all --quiet prefect-deploy )"; \
@@ -120,8 +125,17 @@ wait-prefect-deploy: preflight ## Wait for Prefect deployment registration.
 prefect-deployments: preflight ## List registered Prefect deployments.
 	$(COMPOSE) exec -T prefect-worker prefect deployment ls
 
-reconcile: preflight ## Reconcile catalog, namespaces, and access in a running stack.
-	$(COMPOSE) run --rm --no-deps lakehouse-bootstrap
+platform-reconcile: preflight ## Reconcile catalog, namespaces, access, and policies.
+	$(CORE_COMPOSE) run --rm --no-deps platform-reconcile
+
+policy-prune-plan: preflight ## Print stale repository-managed Polaris policies.
+	$(CORE_COMPOSE) run --rm --no-deps platform-reconcile \
+		python -m mini_lakehouse.platform.policy_prune
+
+policy-prune-apply: preflight ## Apply the exact reviewed plan (requires PLAN_SHA256).
+	@test -n "$(PLAN_SHA256)" || { printf '%s\n' "PLAN_SHA256 is required."; exit 1; }
+	$(CORE_COMPOSE) run --rm --no-deps platform-reconcile \
+		python -m mini_lakehouse.platform.policy_prune --apply-plan-sha256 "$(PLAN_SHA256)"
 
 prefect-deploy: preflight ## Register all Prefect flow deployments.
 	$(COMPOSE) run --rm --no-deps prefect-deploy

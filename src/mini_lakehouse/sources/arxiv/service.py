@@ -47,7 +47,7 @@ class ArxivMetadataService:
             if repository is None:
                 raise RuntimeError("An ArXiv landing repository is required")
             existing = repository.day_state(day.value)
-            expected_schema = self._source.table("oai_records_raw").schema_contract
+            expected_schema = self._source.table_schema_contract("oai_records_raw")
             if (
                 existing is not None
                 and (

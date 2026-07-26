@@ -41,9 +41,6 @@ dev = [
     "types-requests>=2.32,<3",
 ]
 
-[project.scripts]
-lakehouse = "mini_lakehouse.cli:main"
-
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"
 testpaths = ["tests"]

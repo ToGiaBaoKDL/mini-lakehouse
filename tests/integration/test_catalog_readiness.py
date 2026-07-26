@@ -17,5 +17,5 @@ def test_expected_namespaces_are_readable() -> None:
     contracts = load_contracts(settings.contracts_dir)
 
     with load_iceberg_catalog(settings) as catalog:
-        for namespace in contracts.catalog.namespaces:
+        for namespace in contracts.managed_namespaces():
             assert catalog.namespace_exists(namespace.path), ".".join(namespace.path)

@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from mini_lakehouse.contracts import arrow_schema, load_contracts
 from mini_lakehouse.sources.github_archive.models import ArchiveHour
 from mini_lakehouse.sources.github_archive.parser import parse_archive
 
@@ -35,6 +36,7 @@ def test_parse_archive_preserves_raw_json_and_uses_real_timestamps(tmp_path: Pat
         archive_path,
         ArchiveHour.parse("2025-01-02T03:00:00Z"),
         max_error_ratio=0,
+        schema=arrow_schema(load_contracts().source("github_archive").table("events_raw").columns),
     )
 
     assert parsed.table.num_rows == 1
@@ -55,4 +57,7 @@ def test_parse_archive_fails_when_reject_ratio_exceeds_contract(tmp_path: Path) 
             archive_path,
             ArchiveHour.parse("2025-01-02T03:00:00Z"),
             max_error_ratio=0.1,
+            schema=arrow_schema(
+                load_contracts().source("github_archive").table("events_raw").columns
+            ),
         )

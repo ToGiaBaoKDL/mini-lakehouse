@@ -1,9 +1,11 @@
 # GitHub Archive ingestion
 
-The command below targets the previous complete UTC hour unless `--hour` is supplied:
+The generic application CLI is intentionally absent. Run the source-owned Prefect deployment and
+pass an hour only for a manual replay:
 
 ```bash
-uv run lakehouse ingest github-archive --hour 2025-01-01T00:00:00Z
+prefect deployment run el_github_archive/el_github_archive \
+  --param archive_hour=2025-01-01T00:00:00Z
 ```
 
 The application performs four explicit operations:

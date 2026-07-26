@@ -46,7 +46,7 @@ phased dbt pipeline; there is no alternate historical-run branch.
 
 Idempotency is enforced at the write that owns each boundary:
 
-- Raw objects use S3 conditional create and are immutable.
+- GitHub raw objects use S3 conditional create and are immutable.
 - Landing atomically overwrites one source-hour checkpoint using an equality predicate projected
   onto the hidden hourly partition; completed retries resolve from metadata without downloading or
   parsing again.
@@ -66,6 +66,9 @@ reconcile that exact version, import each successful document independently, and
 next batch of ten. It checks available Kaggle GPU quota before preparing durable batch state. The
 runner downloads PDFs into ephemeral storage, loads pinned layout/OCR models once, and emits no
 source PDF. `ocr_batches` is the durable outbox and `ocr_document_runs` preserves attempt history;
+the outbox stores the immutable validated runner request used to reconcile an in-flight batch
+across Prefect retries and code deployments. A prepared batch from an older processor configuration
+is closed and reselected under the current configuration only when no matching remote run exists.
 Prefect remains the owner of orchestration task/run history.
 
 Runner code is a private Kaggle Dataset versioned by a deterministic SHA-256 manifest. The pinned
@@ -79,14 +82,22 @@ first OCR run and whenever runner code, its lockfile, or either model revision c
 prefect deployment run gov_arxiv_ocr_resources/gov_arxiv_ocr_resources
 ```
 
+The Kaggle script exits normally after the result archive and final manifest commit marker are
+written; Kaggle then releases the session. It does not depend on notebook JavaScript shutdown
+calls. A four-hour kernel timeout is the remote quota guardrail. The runner logs separate
+dependency-sync, model-startup, document, archive, and total timings so cold-start cost is visible
+before introducing a larger prebuilt dependency artifact. Failed documents cannot leak partial
+files into the archive, result files are atomically replaced, and the local vLLM process is
+terminated, killed if necessary, waited, and reaped on every exit path.
+
 OCR identities have separate grains: `request_id` identifies one paper/source-mutation/processor
 request and remains unchanged across retries; `batch_id` includes attempt ordinals, so a new retry
 never overwrites prior attempt history; `processing_id` identifies one paper/PDF-content/processor
 result. The content manifest excludes request identity, allowing a new metadata mutation with an
 unchanged PDF to reuse validated artifacts without an ID collision.
 
-The deployment and its 20-minute schedule exist from bootstrap, but the schedule is paused by
-default because Kaggle GPU time is quota-bound. After configuring the username/token, provisioning
+The deployment and its 20-minute schedule are registered by `prefect-deploy`, but the schedule is
+paused by default because Kaggle GPU time is quota-bound. After configuring the username/token, provisioning
 all runner resources, and validating one private kernel run, resume it from Prefect UI or:
 
 ```bash

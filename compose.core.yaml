@@ -46,21 +46,24 @@ services:
       timeout: 5s
       retries: 20
 
-  object-store-bootstrap:
+  object-store-provision:
     image: quay.io/minio/aistor/mc:RELEASE.2026-04-21T04-26-49Z
     depends_on:
       object-store:
         condition: service_healthy
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - >-
-        mc alias set local http://object-store:9000
-        ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin} &&
-        mc license info local >/dev/null &&
-        mc mb --ignore-existing local/landing local/curated local/analytics
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      LANDING_URI: ${LAKEHOUSE_STORAGE__LANDING_URI:-s3://landing}
+      CURATED_URI: ${LAKEHOUSE_STORAGE__CURATED_URI:-s3://curated}
+      ANALYTICS_URI: ${LAKEHOUSE_STORAGE__ANALYTICS_URI:-s3://analytics}
+    volumes:
+      - ./infra/object-store/lifecycle-buckets.sh:/opt/object-store/lifecycle-buckets.sh:ro
+    entrypoint: ["/bin/sh", "/opt/object-store/lifecycle-buckets.sh"]
+    command: ["provision"]
     restart: "no"
 
-  polaris-admin:
+  polaris-bootstrap:
     image: apache/polaris-admin-tool:1.6.0
     depends_on:
       postgres:
@@ -81,16 +84,14 @@ services:
   polaris:
     image: apache/polaris:1.6.0
     depends_on:
-      polaris-admin:
+      polaris-bootstrap:
         condition: service_completed_successfully
-      object-store-bootstrap:
+      object-store-provision:
         condition: service_completed_successfully
     environment:
       <<: *polaris-database
       POLARIS_REALM_CONTEXT_REALMS: ${POLARIS_REALM:-POLARIS}
-      POLARIS_READINESS_IGNORE_SEVERE_ISSUES: "true"
-      QUARKUS_CONFIG_VALIDATE_UNKNOWN: "false"
-      AWS_REGION: us-east-1
+      AWS_REGION: ${LAKEHOUSE_STORAGE__REGION:-us-east-1}
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       AWS_ENDPOINT_URL_S3: http://object-store:9000
@@ -107,7 +108,7 @@ services:
       timeout: 5s
       retries: 24
 
-  lakehouse-bootstrap:
+  platform-reconcile:
     image: mini-lakehouse:local
     build:
       context: .
@@ -116,19 +117,32 @@ services:
       polaris:
         condition: service_healthy
     env_file:
-      - ./infra/config/lakehouse.container.env
+      - ./infra/config/platform.container.env
     environment:
+      LAKEHOUSE_ENVIRONMENT: ${LAKEHOUSE_ENVIRONMENT:-local}
+      LAKEHOUSE_LOG_LEVEL: ${LAKEHOUSE_LOG_LEVEL:-INFO}
+      LAKEHOUSE_STORAGE__BACKEND: ${LAKEHOUSE_STORAGE__BACKEND:-s3}
       LAKEHOUSE_STORAGE__ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
       LAKEHOUSE_STORAGE__SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      LAKEHOUSE_STORAGE__REGION: ${LAKEHOUSE_STORAGE__REGION:-us-east-1}
+      LAKEHOUSE_STORAGE__PATH_STYLE_ACCESS: "${LAKEHOUSE_STORAGE__PATH_STYLE_ACCESS:-true}"
+      LAKEHOUSE_STORAGE__ICEBERG_ACCESS_DELEGATION: ${LAKEHOUSE_STORAGE__ICEBERG_ACCESS_DELEGATION:-none}
+      LAKEHOUSE_STORAGE__STS_UNAVAILABLE: "${LAKEHOUSE_STORAGE__STS_UNAVAILABLE:-true}"
+      LAKEHOUSE_STORAGE__KMS_UNAVAILABLE: "${LAKEHOUSE_STORAGE__KMS_UNAVAILABLE:-true}"
+      LAKEHOUSE_STORAGE__LANDING_URI: ${LAKEHOUSE_STORAGE__LANDING_URI:-s3://landing}
+      LAKEHOUSE_STORAGE__CURATED_URI: ${LAKEHOUSE_STORAGE__CURATED_URI:-s3://curated}
+      LAKEHOUSE_STORAGE__ANALYTICS_URI: ${LAKEHOUSE_STORAGE__ANALYTICS_URI:-s3://analytics}
+      LAKEHOUSE_POLARIS__CATALOG_NAME: ${LAKEHOUSE_POLARIS__CATALOG_NAME:-prod}
       LAKEHOUSE_POLARIS__REALM: ${POLARIS_REALM:-POLARIS}
       LAKEHOUSE_POLARIS__CREDENTIAL: ${POLARIS_ROOT_CLIENT_ID:-root}:${POLARIS_ROOT_CLIENT_SECRET:-secretpassword}
-    command: python -m mini_lakehouse.platform.bootstrap
+      LAKEHOUSE_POLARIS__SCOPE: ${LAKEHOUSE_POLARIS__SCOPE:-PRINCIPAL_ROLE:ALL}
+    command: python -m mini_lakehouse.platform.reconcile
     restart: "no"
 
   trino:
     image: trinodb/trino:483
     depends_on:
-      lakehouse-bootstrap:
+      platform-reconcile:
         condition: service_completed_successfully
     environment:
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
@@ -138,6 +152,9 @@ services:
       S3_PATH_STYLE_ACCESS: ${LAKEHOUSE_STORAGE__PATH_STYLE_ACCESS:-true}
       ICEBERG_VENDED_CREDENTIALS_ENABLED: "false"
       POLARIS_CREDENTIAL: ${POLARIS_ROOT_CLIENT_ID:-root}:${POLARIS_ROOT_CLIENT_SECRET:-secretpassword}
+      POLARIS_CATALOG: ${LAKEHOUSE_POLARIS__CATALOG_NAME:-prod}
+      TRINO_NODE_ENVIRONMENT: local
+      TRINO_NODE_ID: mini-lakehouse-coordinator
     ports:
       - "127.0.0.1:8080:8080"
     volumes:

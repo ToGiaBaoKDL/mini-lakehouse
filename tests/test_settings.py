@@ -19,18 +19,25 @@ def test_default_contract_uses_three_distinct_buckets() -> None:
     assert settings.storage.analytics_uri == "s3://analytics"
 
 
-def test_storage_rejects_reused_bucket() -> None:
-    with pytest.raises(ValidationError, match="distinct buckets"):
-        StorageSettings(
-            landing_uri="s3://shared",
-            curated_uri="s3://shared",
-            analytics_uri="s3://analytics",
-        )
+def test_storage_accepts_isolated_prefixes_in_one_object_store_bucket() -> None:
+    settings = StorageSettings(
+        landing_uri="s3://shared/landing",
+        curated_uri="s3://shared/curated",
+        analytics_uri="s3://shared/analytics",
+    )
+
+    assert settings.curated_uri == "s3://shared/curated"
 
 
-def test_storage_rejects_a_prefix_instead_of_a_bucket_root() -> None:
-    with pytest.raises(ValidationError, match="bucket root"):
-        StorageSettings(landing_uri="s3://landing/shared-prefix")
+def test_storage_normalizes_trailing_slashes() -> None:
+    settings = StorageSettings(landing_uri="s3://landing/")
+
+    assert settings.landing_uri == "s3://landing"
+
+
+def test_storage_rejects_non_normalized_prefixes() -> None:
+    with pytest.raises(ValidationError, match="must be normalized"):
+        StorageSettings(landing_uri="s3://shared/../landing")
 
 
 def test_storage_rejects_an_uninstalled_backend() -> None:
@@ -61,3 +68,19 @@ def test_gmail_notification_channel_requires_complete_delivery_config() -> None:
 def test_slack_credentials_must_be_configured_as_a_pair() -> None:
     with pytest.raises(ValidationError, match="bot_token and channel_id"):
         NotificationSettings(slack_channel_id="C0123456789")
+
+
+def test_empty_notification_environment_values_are_disabled() -> None:
+    settings = NotificationSettings.model_validate(
+        {
+            "slack_bot_token": "",
+            "slack_channel_id": "",
+            "gmail_sender": "",
+            "gmail_app_password": "",
+        }
+    )
+
+    assert settings.slack_bot_token is None
+    assert settings.slack_channel_id is None
+    assert settings.gmail_sender is None
+    assert settings.gmail_app_password is None
