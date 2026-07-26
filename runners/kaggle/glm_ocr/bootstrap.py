@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 UV_VERSION = "0.11.30"
 MANIFEST_NAME = "resource_manifest.json"
@@ -41,16 +41,19 @@ def _validate_bundle(source: Path, expected_bundle_sha256: str) -> None:
     if manifest_identity != expected_bundle_sha256:
         raise RuntimeError("Mounted Kaggle runner file manifest has an invalid content identity")
     for name, expected_sha256 in files.items():
-        path = source / name
+        relative = PurePosixPath(name) if isinstance(name, str) else PurePosixPath(".")
         if (
             not isinstance(name, str)
-            or "/" in name
             or "\\" in name
             or name in {".", ".."}
+            or relative.is_absolute()
+            or name != relative.as_posix()
+            or ".." in relative.parts
             or not isinstance(expected_sha256, str)
-            or not path.is_file()
-            or _sha256(path) != expected_sha256
         ):
+            raise RuntimeError(f"Mounted Kaggle runner file failed validation: {name!r}")
+        path = source.joinpath(*relative.parts)
+        if not path.is_file() or _sha256(path) != expected_sha256:
             raise RuntimeError(f"Mounted Kaggle runner file failed validation: {name!r}")
 
 

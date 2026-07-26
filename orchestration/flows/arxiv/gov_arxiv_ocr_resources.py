@@ -4,8 +4,8 @@ from prefect import flow, task
 
 from mini_lakehouse.config import get_settings
 from mini_lakehouse.contracts import load_contracts
-from mini_lakehouse.processing.ocr.kaggle import KaggleProvider
-from mini_lakehouse.processing.ocr.kaggle_resources import KaggleResourceName
+from mini_lakehouse.processing.ocr.kaggle_provider import KaggleProvider
+from mini_lakehouse.processing.ocr.kaggle_types import KaggleResourceName
 from orchestration.plugins.notifications import (
     notify_flow_failure,
     notify_flow_running,

@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 
-from mini_lakehouse.processing.ocr.protocol import OcrElement
+from mini_lakehouse.processing.ocr.core.protocol import OcrElement
 
 
 def serialize_plain_text(elements: Sequence[OcrElement]) -> str:

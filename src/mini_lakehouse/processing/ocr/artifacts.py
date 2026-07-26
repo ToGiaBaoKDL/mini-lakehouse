@@ -1,18 +1,8 @@
-"""Canonical local and object-store paths for OCR results."""
-
-from pathlib import PurePosixPath
-from urllib.parse import quote
+"""Lakehouse object-store paths for canonical OCR artifacts."""
 
 from mini_lakehouse.config.settings import Settings
 from mini_lakehouse.contracts.processors import ProcessorContract
-
-
-def encoded_arxiv_id(arxiv_id: str) -> str:
-    return quote(arxiv_id, safe="")
-
-
-def runner_document_path(arxiv_id: str, request_id: str) -> PurePosixPath:
-    return PurePosixPath("documents", encoded_arxiv_id(arxiv_id), request_id)
+from mini_lakehouse.processing.ocr.core.paths import encoded_arxiv_id
 
 
 def artifact_root_uri(

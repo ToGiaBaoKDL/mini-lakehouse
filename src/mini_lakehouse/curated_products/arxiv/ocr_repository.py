@@ -14,7 +14,7 @@ from mini_lakehouse.curated_products.arxiv.models import (
     OcrCandidate,
 )
 from mini_lakehouse.platform.trino import SqlExecutor
-from mini_lakehouse.processing.ocr.protocol import (
+from mini_lakehouse.processing.ocr.core.protocol import (
     OcrDocumentRequest,
     OcrDocumentResult,
     OcrElement,

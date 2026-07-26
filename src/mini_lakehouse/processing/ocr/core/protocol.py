@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from mini_lakehouse.processing.ocr.identity import request_id
+from mini_lakehouse.processing.ocr.core.identity import request_id
 
 Sha256 = str
 DocumentState = Literal[
@@ -43,11 +43,17 @@ class OcrModel(ProtocolModel):
 
 class OcrInference(ProtocolModel):
     api_port: int = Field(ge=1024, le=65535)
-    dtype: Literal["half"]
+    # ``half`` is retained only for immutable schema-v1 jobs already persisted
+    # before the canonical spelling was changed to ``float16``. vLLM treats the
+    # two values as the same dtype; new processor contracts emit ``float16``.
+    dtype: Literal["half", "float16"]
     max_model_len: int = Field(ge=4096)
     gpu_memory_utilization: float = Field(gt=0, le=0.9)
     speculative_tokens: int = Field(ge=0, le=8)
+    enforce_eager: bool = False
+    max_num_seqs: int = Field(default=1, ge=1, le=32)
     max_workers: int = Field(ge=1, le=32)
+    request_timeout_seconds: int = Field(default=600, ge=30, le=3600)
     layout_device: Literal["cpu", "cuda:0"]
 
 

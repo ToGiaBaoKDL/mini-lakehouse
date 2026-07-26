@@ -2,7 +2,7 @@ import gzip
 import io
 import json
 import tarfile
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -24,34 +24,19 @@ from mini_lakehouse.processing.ocr.archive import (
     InvalidOcrOutputError,
     document_manifest_sha256,
     extract_archive,
-    file_sha256,
     validate_runner_output,
 )
-from mini_lakehouse.processing.ocr.identity import (
+from mini_lakehouse.processing.ocr.artifacts import artifact_root_uri
+from mini_lakehouse.processing.ocr.core.files import file_sha256
+from mini_lakehouse.processing.ocr.core.identity import (
     batch_id,
     canonical_json_sha256,
     config_hash,
     processing_id,
     request_id,
 )
-from mini_lakehouse.processing.ocr.kaggle import (
-    KaggleGateway,
-    KaggleGpuQuota,
-    KaggleKernelState,
-    KaggleProvider,
-    KaggleRunStatus,
-    render_launcher,
-)
-from mini_lakehouse.processing.ocr.kaggle_resources import (
-    MODEL_MANIFEST_NAME,
-    KaggleOcrResourceManager,
-    KaggleResourceNotFoundError,
-    KaggleRunnerBundle,
-    ModelResourceManifest,
-    RunnerResourceManifest,
-)
-from mini_lakehouse.processing.ocr.paths import artifact_root_uri, runner_document_path
-from mini_lakehouse.processing.ocr.protocol import (
+from mini_lakehouse.processing.ocr.core.paths import runner_document_path
+from mini_lakehouse.processing.ocr.core.protocol import (
     ArtifactFile,
     OcrBatchManifest,
     OcrDocumentRequest,
@@ -61,6 +46,22 @@ from mini_lakehouse.processing.ocr.protocol import (
     OcrJob,
     OcrLimits,
     OcrModel,
+)
+from mini_lakehouse.processing.ocr.kaggle_bundle import (
+    MODEL_MANIFEST_NAME,
+    KaggleRunnerBundle,
+    ModelResourceManifest,
+    RunnerResourceManifest,
+)
+from mini_lakehouse.processing.ocr.kaggle_gateway import KaggleGateway
+from mini_lakehouse.processing.ocr.kaggle_provider import KaggleProvider, render_launcher
+from mini_lakehouse.processing.ocr.kaggle_resources import KaggleOcrResourceManager
+from mini_lakehouse.processing.ocr.kaggle_types import (
+    KaggleCurrentRun,
+    KaggleGpuQuota,
+    KaggleKernelState,
+    KaggleResourceNotFoundError,
+    KaggleRunStatus,
 )
 from mini_lakehouse.processing.ocr.text import serialize_plain_text
 
@@ -202,6 +203,14 @@ def _successful_output(output: Path, job: OcrJob, *, include_untracked_file: boo
 
 def test_ocr_identity_and_paths_are_deterministic_and_paper_readable() -> None:
     processor = load_contracts().processor("arxiv_glm_ocr")
+    assert processor.inference.enforce_eager is True
+    assert processor.inference.max_num_seqs == 1
+    assert processor.inference.max_workers == 1
+    assert processor.inference.request_timeout_seconds == 600
+    assert processor.inference.layout_device == "cpu"
+    assert '"wrapt==2.2.2"' in (
+        Path("runners/kaggle/glm_ocr/pyproject.toml").read_text(encoding="utf-8")
+    )
     first_hash = config_hash(processor, runner_bundle_sha256=RUNNER_BUNDLE.sha256)
     first = request_id(
         arxiv_id="hep-th/9901001",
@@ -370,17 +379,36 @@ def test_archive_rejects_path_traversal(tmp_path: Path) -> None:
 def test_kaggle_launcher_contains_only_job_and_pinned_runner_reference() -> None:
     launcher = render_launcher(
         job=_job(),
-        runner_dataset_name="mini-lakehouse-arxiv-glm-ocr-runner",
+        runner_dataset_source=("owner/mini-lakehouse-arxiv-glm-ocr-runner/versions/4"),
         model_source="owner/mini-lakehouse-glm-ocr/transformers/safetensors/2",
         layout_model_source=("owner/mini-lakehouse-pp-doclayout-v3/transformers/safetensors/3"),
     )
 
     compile(launcher, "launcher.py", "exec")
-    assert "/kaggle/input/mini-lakehouse-arxiv-glm-ocr-runner" in launcher
+    assert (
+        "kagglehub.dataset_download('owner/mini-lakehouse-arxiv-glm-ocr-runner/versions/4')"
+    ) in launcher
     assert RUNNER_BUNDLE.sha256 in launcher
     assert "mini-lakehouse-glm-ocr/transformers/safetensors/2" in launcher
     assert "mini-lakehouse-pp-doclayout-v3/transformers/safetensors/3" in launcher
     assert "job.json" not in launcher
+
+
+def test_kaggle_runner_bundle_preserves_the_shared_package_namespace(
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "runner"
+
+    RUNNER_BUNDLE.write(destination)
+
+    package = destination / "mini_lakehouse" / "processing" / "ocr" / "core"
+    assert (package / "__init__.py").is_file()
+    assert (package / "files.py").is_file()
+    assert (package / "identity.py").is_file()
+    assert (package / "paths.py").is_file()
+    assert (package / "protocol.py").is_file()
+    assert not (destination / "identity.py").exists()
+    assert not (destination / "protocol.py").exists()
 
 
 def test_kaggle_private_resource_forbidden_is_treated_as_missing(
@@ -405,7 +433,40 @@ def test_kaggle_private_resource_forbidden_is_treated_as_missing(
         gateway.dataset_version("owner/missing-dataset")
     with pytest.raises(KaggleResourceNotFoundError):
         gateway.model_version("owner/missing-model/transformers/default")
-    assert gateway.latest_kernel_version("owner/missing-kernel") is None
+    assert gateway.current_kernel_run("owner/missing-kernel") is None
+
+
+def test_kaggle_log_stream_uses_official_events_and_preserves_lines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _LogApi:
+        def kernels_logs_stream(self, kernel_slug: str) -> Sequence[dict[str, str]]:
+            assert kernel_slug == "owner/kernel"
+            return (
+                {"data": "first line\n"},
+                {"data": "second line"},
+                {"stream_name": "stdout"},
+            )
+
+    gateway = KaggleGateway(
+        KaggleSettings.model_validate({"username": "owner", "api_token": "secret"})
+    )
+
+    def accept_current_version(owner: str, kernel: str, version: int) -> None:
+        assert (owner, kernel, version) == ("owner", "kernel", 7)
+
+    monkeypatch.setattr(
+        gateway,
+        "_require_current_kernel_version",
+        accept_current_version,
+    )
+    monkeypatch.setattr(gateway, "_api", _LogApi)
+
+    assert tuple(gateway.stream_kernel_logs("owner/kernel/7")) == (
+        "first line\n",
+        "second line",
+    )
+    assert gateway.kernel_logs("owner/kernel/7") == "first line\nsecond line\n"
 
 
 class _ResourceClient:
@@ -523,7 +584,7 @@ def test_kaggle_runner_resource_reconciliation_is_content_idempotent() -> None:
 
     assert created.action == "created"
     assert created.name == "runner"
-    assert created.source.endswith("/1")
+    assert created.source.endswith("/versions/1")
     assert unchanged.action == "unchanged"
     assert unchanged.identity_sha256 == RUNNER_BUNDLE.sha256
     assert client.dataset_uploads == 1
@@ -544,7 +605,7 @@ def test_kaggle_runner_resource_updates_drifted_content_once() -> None:
     result = _resource_manager(client).reconcile("runner")
 
     assert result.action == "updated"
-    assert result.source.endswith("/2")
+    assert result.source.endswith("/versions/2")
     assert client.dataset_uploads == 1
 
 
@@ -618,21 +679,17 @@ def test_kaggle_resource_manager_resolves_only_a_complete_resource_set() -> None
 class _RunIdentityGateway:
     def __init__(self, source: str) -> None:
         self.source = source
-        self.status_run_ids: list[str] = []
+        self.current_run_calls: list[str] = []
 
-    def latest_kernel_version(self, kernel_slug: str) -> int:
+    def current_kernel_run(self, kernel_slug: str) -> KaggleCurrentRun:
         assert kernel_slug == "owner/mini-lakehouse-arxiv-glm-ocr"
-        return 7
-
-    def kernel_source(self, provider_run_id: str) -> str:
-        assert provider_run_id == "owner/mini-lakehouse-arxiv-glm-ocr/7"
-        return self.source
-
-    def kernel_status(self, provider_run_id: str) -> KaggleRunStatus:
-        self.status_run_ids.append(provider_run_id)
-        return KaggleRunStatus(
-            provider_run_id=provider_run_id,
-            state=KaggleKernelState.RUNNING,
+        self.current_run_calls.append(kernel_slug)
+        return KaggleCurrentRun(
+            status=KaggleRunStatus(
+                provider_run_id="owner/mini-lakehouse-arxiv-glm-ocr/7",
+                state=KaggleKernelState.RUNNING,
+            ),
+            source=self.source,
         )
 
 
@@ -643,7 +700,7 @@ def test_kaggle_recovery_adopts_only_the_latest_matching_batch_version() -> None
     matching = _RunIdentityGateway(
         render_launcher(
             job=job,
-            runner_dataset_name=processor.runner.runner_dataset_name,
+            runner_dataset_source=("owner/mini-lakehouse-arxiv-glm-ocr-runner/versions/1"),
             model_source="owner/model/transformers/default/1",
             layout_model_source="owner/layout/transformers/default/1",
         )
@@ -659,7 +716,7 @@ def test_kaggle_recovery_adopts_only_the_latest_matching_batch_version() -> None
 
     assert run is not None
     assert run.provider_run_id.endswith("/7")
-    assert matching.status_run_ids == [run.provider_run_id]
+    assert matching.current_run_calls == ["owner/mini-lakehouse-arxiv-glm-ocr"]
 
     unrelated = _RunIdentityGateway("# mini-lakehouse-batch-id: " + "0" * 64 + "\n")
     unrelated_provider = KaggleProvider(
@@ -669,7 +726,7 @@ def test_kaggle_recovery_adopts_only_the_latest_matching_batch_version() -> None
         bundle=RUNNER_BUNDLE,
     )
     assert unrelated_provider.latest_run(job.batch_id) is None
-    assert unrelated.status_run_ids == []
+    assert unrelated.current_run_calls == ["owner/mini-lakehouse-arxiv-glm-ocr"]
 
 
 class _PinnedResourceGateway:
@@ -767,7 +824,7 @@ def test_kaggle_submission_and_output_pin_resource_and_run_versions(tmp_path: Pa
         "kernel-metadata.json",
         "launcher.py",
     ]
-    assert metadata["dataset_sources"] == ["owner/mini-lakehouse-arxiv-glm-ocr-runner/4"]
+    assert metadata["dataset_sources"] == ["owner/mini-lakehouse-arxiv-glm-ocr-runner"]
     assert metadata["model_sources"] == [
         "owner/mini-lakehouse-glm-ocr/transformers/safetensors/2",
         "owner/mini-lakehouse-pp-doclayout-v3/transformers/safetensors/3",
@@ -824,7 +881,7 @@ def test_ocr_repository_publishes_the_batch_commit_marker_last() -> None:
 
 
 class _ActiveBatchExecutor:
-    def __init__(self, job: OcrJob) -> None:
+    def __init__(self, job: OcrJob, *, raw_job: str | None = None) -> None:
         request = job.documents[0]
         self.rows = (
             (
@@ -832,7 +889,7 @@ class _ActiveBatchExecutor:
                 "running",
                 "owner/kernel/7",
                 1,
-                job.model_dump_json(),
+                raw_job or job.model_dump_json(),
                 request.request_id,
                 request.arxiv_id,
                 request.oai_datestamp,
@@ -860,6 +917,21 @@ def test_active_ocr_batch_restores_its_immutable_job_payload() -> None:
     assert active is not None
     assert active.job == job
     assert active.documents[0].request == job.documents[0]
+
+
+def test_active_ocr_batch_restores_schema_v1_inference_defaults() -> None:
+    current_job = _job()
+    legacy_payload = current_job.model_dump(mode="json")
+    legacy_payload["inference"]["dtype"] = "half"
+    del legacy_payload["inference"]["enforce_eager"]
+
+    active = ArxivOcrRepository(Settings()).active_batch(
+        _ActiveBatchExecutor(current_job, raw_job=json.dumps(legacy_payload))
+    )
+
+    assert active is not None
+    assert active.job.inference.dtype == "half"
+    assert active.job.inference.enforce_eager is False
 
 
 def test_ocr_candidates_use_config_identity_and_ignore_orphan_attempts() -> None:
@@ -951,6 +1023,10 @@ class _SubmissionProvider:
     def logs(self, provider_run_id: str) -> str:
         del provider_run_id
         return ""
+
+    def stream_logs(self, provider_run_id: str) -> Iterator[str]:
+        del provider_run_id
+        return iter(())
 
     def gpu_quota(self) -> KaggleGpuQuota:
         return KaggleGpuQuota(remaining_minutes=120)

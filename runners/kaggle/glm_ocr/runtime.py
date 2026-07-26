@@ -19,7 +19,6 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 import fitz
 import kagglehub
@@ -27,12 +26,15 @@ import requests
 import yaml
 import zstandard
 from glmocr import GlmOcr
-from identity import (
+
+from mini_lakehouse.processing.ocr.core.files import file_sha256
+from mini_lakehouse.processing.ocr.core.identity import (
     canonical_json_sha256,
     processing_id,
     successful_document_manifest_sha256,
 )
-from protocol import (
+from mini_lakehouse.processing.ocr.core.paths import runner_document_path
+from mini_lakehouse.processing.ocr.core.protocol import (
     ArtifactFile,
     OcrBatchManifest,
     OcrDocumentRequest,
@@ -43,6 +45,17 @@ from protocol import (
 
 SOURCE_DIRECTORY = Path(__file__).resolve().parent
 MODEL_MANIFEST_NAME = "mini_lakehouse_resource.json"
+VLLM_DIAGNOSTIC_CHARACTERS = 32_000
+VLLM_LOG_EVENT_CHARACTERS = 8_000
+VLLM_METRIC_CHARACTERS = 16_000
+VLLM_DIAGNOSTIC_METRICS = (
+    "vllm:num_requests_running",
+    "vllm:num_requests_waiting",
+    "vllm:kv_cache_usage_perc",
+    "vllm:request_queue_time_seconds",
+    "vllm:time_to_first_token_seconds",
+    "vllm:e2e_request_latency_seconds",
+)
 MEDIA_TYPES = {
     ".gz": "application/gzip",
     ".jpg": "image/jpeg",
@@ -74,14 +87,6 @@ def log_stage(event: str, started_at: float, **fields: object) -> None:
             ),
             flush=True,
         )
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as file:
-        for chunk in iter(lambda: file.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def download_pdf(request: OcrDocumentRequest, destination: Path, max_bytes: int) -> tuple[str, int]:
@@ -316,7 +321,7 @@ def artifact_files(root: Path, maximum_bytes: int) -> tuple[ArtifactFile, ...]:
         files.append(
             ArtifactFile(
                 relative_path=relative,
-                sha256=sha256_file(path),
+                sha256=file_sha256(path),
                 size_bytes=size,
                 media_type=MEDIA_TYPES.get(path.suffix.lower(), "application/octet-stream"),
             )
@@ -385,7 +390,9 @@ def successful_result(
         files=[file.model_dump(mode="json") for file in files],
     )
     result = OcrDocumentResult.model_validate(payload)
-    destination = output_root / "documents" / quote(request.arxiv_id, safe="") / request.request_id
+    destination = output_root.joinpath(
+        *runner_document_path(request.arxiv_id, request.request_id).parts
+    )
     destination.parent.mkdir(parents=True, exist_ok=True)
     document_root.replace(destination)
     log_stage(
@@ -418,6 +425,7 @@ def write_config(path: Path, job: OcrJob, layout_model_path: str) -> None:
                 "api_host": "127.0.0.1",
                 "api_port": job.inference.api_port,
                 "model": "glm-ocr",
+                "request_timeout": job.inference.request_timeout_seconds,
             },
             "page_loader": {"pdf_max_pages": job.limits.max_pages_per_document},
             "layout": {
@@ -477,7 +485,11 @@ def start_vllm(
         str(job.inference.max_model_len),
         "--gpu-memory-utilization",
         str(job.inference.gpu_memory_utilization),
+        "--max-num-seqs",
+        str(job.inference.max_num_seqs),
     ]
+    if job.inference.enforce_eager:
+        command.append("--enforce-eager")
     if job.inference.speculative_tokens:
         command.extend(
             [
@@ -496,7 +508,9 @@ def start_vllm(
     deadline = time.monotonic() + 900
     while time.monotonic() < deadline:
         if process.poll() is not None:
-            diagnostic = log_path.read_text(encoding="utf-8", errors="replace")[-4000:]
+            diagnostic = log_path.read_text(encoding="utf-8", errors="replace")[
+                -VLLM_DIAGNOSTIC_CHARACTERS:
+            ]
             log_file.close()
             raise RuntimeError(
                 f"vLLM exited with status {process.returncode}; log tail: {diagnostic}"
@@ -561,6 +575,74 @@ def write_text_atomic(destination: Path, content: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _vllm_log_tail(log_path: Path) -> str:
+    try:
+        return log_path.read_text(encoding="utf-8", errors="replace")[-VLLM_DIAGNOSTIC_CHARACTERS:]
+    except OSError as error:
+        return f"vLLM log unavailable: {error}"
+
+
+def _vllm_metrics(api_port: int) -> str:
+    try:
+        response = requests.get(f"http://127.0.0.1:{api_port}/metrics", timeout=5)
+        response.raise_for_status()
+    except requests.RequestException as error:
+        return f"vLLM metrics unavailable: {error}"
+    metrics = "\n".join(
+        line
+        for line in response.text.splitlines()
+        if not line.startswith("#") and any(name in line for name in VLLM_DIAGNOSTIC_METRICS)
+    )
+    return metrics[-VLLM_METRIC_CHARACTERS:] or "No selected vLLM metrics were reported"
+
+
+def persist_vllm_diagnostic(
+    output_directory: Path,
+    log_path: Path,
+    job: OcrJob,
+    *,
+    error: BaseException,
+    request: OcrDocumentRequest | None,
+) -> None:
+    """Persist bounded server evidence and mirror a useful tail to the kernel log."""
+    log_tail = _vllm_log_tail(log_path)
+    payload = {
+        "batch_id": job.batch_id,
+        "captured_at": datetime.now(UTC).isoformat(),
+        "error": str(error)[:2000],
+        "request_id": None if request is None else request.request_id,
+        "arxiv_id": None if request is None else request.arxiv_id,
+        "metrics": _vllm_metrics(job.inference.api_port),
+        "vllm_log_tail": log_tail,
+    }
+    diagnostics = output_directory / "diagnostics"
+    name = "runtime" if request is None else request.request_id
+    diagnostic_file: str | None = f"diagnostics/{name}.json"
+    try:
+        diagnostics.mkdir(parents=True, exist_ok=True)
+        write_text_atomic(
+            diagnostics / f"{name}.json",
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        )
+    except OSError as diagnostic_error:
+        diagnostic_file = None
+        payload["persistence_error"] = str(diagnostic_error)
+    print(
+        json.dumps(
+            {
+                **payload,
+                "event": "vllm_diagnostic",
+                "diagnostic_file": diagnostic_file,
+                "vllm_log_tail": log_tail[-VLLM_LOG_EVENT_CHARACTERS:],
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+
+
 def run(
     job: OcrJob,
     output_directory: Path,
@@ -591,7 +673,8 @@ def run(
         config_path = temp / "glmocr.yaml"
         write_config(config_path, job, str(layout_path))
         server_started_at = time.perf_counter()
-        vllm, log_file = start_vllm(job, model_path, temp / "vllm.log")
+        vllm_log_path = temp / "vllm.log"
+        vllm, log_file = start_vllm(job, model_path, vllm_log_path)
         log_stage("vllm_ready", server_started_at, batch_id=job.batch_id)
         results: list[OcrDocumentResult] = []
         try:
@@ -611,6 +694,13 @@ def run(
                             extracted,
                         )
                     except DocumentError as error:
+                        persist_vllm_diagnostic(
+                            output_directory,
+                            vllm_log_path,
+                            job,
+                            error=error,
+                            request=request,
+                        )
                         result = failed_result(request, error)
                         log_stage(
                             "document_failed",
@@ -620,10 +710,19 @@ def run(
                             request_id=request.request_id,
                         )
                     except Exception as error:
-                        result = failed_result(
-                            request,
-                            DocumentError("unexpected_runner_error", str(error), retryable=True),
+                        document_error = DocumentError(
+                            "unexpected_runner_error",
+                            str(error),
+                            retryable=True,
                         )
+                        persist_vllm_diagnostic(
+                            output_directory,
+                            vllm_log_path,
+                            job,
+                            error=document_error,
+                            request=request,
+                        )
+                        result = failed_result(request, document_error)
                         log_stage(
                             "document_failed",
                             document_started_at,
@@ -632,6 +731,15 @@ def run(
                             request_id=request.request_id,
                         )
                     results.append(result)
+        except Exception as error:
+            persist_vllm_diagnostic(
+                output_directory,
+                vllm_log_path,
+                job,
+                error=error,
+                request=None,
+            )
+            raise
         finally:
             stop_process(vllm, log_file)
 
@@ -645,7 +753,7 @@ def run(
             schema_version=job.schema_version,
             batch_id=job.batch_id,
             created_at=datetime.now(UTC),
-            archive_sha256=sha256_file(archive),
+            archive_sha256=file_sha256(archive),
             archive_size_bytes=archive.stat().st_size,
             documents=tuple(results),
         )

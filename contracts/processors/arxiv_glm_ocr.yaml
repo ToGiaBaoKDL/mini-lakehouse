@@ -28,12 +28,15 @@ batch:
 
 inference:
   api_port: 8080
-  dtype: half
+  dtype: float16
   max_model_len: 16384
   gpu_memory_utilization: 0.80
   speculative_tokens: 3
-  max_workers: 8
-  layout_device: cuda:0
+  enforce_eager: true
+  max_num_seqs: 1
+  max_workers: 1
+  request_timeout_seconds: 600
+  layout_device: cpu
 
 runner:
   provider: kaggle

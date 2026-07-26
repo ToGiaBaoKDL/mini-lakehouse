@@ -9,12 +9,13 @@ from mini_lakehouse.platform.trino import SqlExecutor
 from mini_lakehouse.processing.ocr.archive import (
     artifact_paths,
     document_manifest_payload,
-    file_sha256,
     load_elements,
 )
-from mini_lakehouse.processing.ocr.identity import canonical_json_bytes
-from mini_lakehouse.processing.ocr.paths import artifact_root_uri, runner_document_path
-from mini_lakehouse.processing.ocr.protocol import OcrDocumentResult, OcrJob
+from mini_lakehouse.processing.ocr.artifacts import artifact_root_uri
+from mini_lakehouse.processing.ocr.core.files import file_sha256
+from mini_lakehouse.processing.ocr.core.identity import canonical_json_bytes
+from mini_lakehouse.processing.ocr.core.paths import runner_document_path
+from mini_lakehouse.processing.ocr.core.protocol import OcrDocumentResult, OcrJob
 from mini_lakehouse.storage.object_store import ObjectStore
 
 

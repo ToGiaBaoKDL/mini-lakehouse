@@ -1,87 +1,29 @@
-"""Typed Kaggle adapter for versioned OCR resources and kernel runs."""
+"""Authenticated Kaggle SDK and KaggleHub boundary."""
 
 from __future__ import annotations
 
-import json
 import os
-import shutil
 import threading
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
-from enum import StrEnum
+from datetime import UTC, timedelta
 from pathlib import Path
-from typing import Any, Protocol
-
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Any
 
 from mini_lakehouse.config.settings import KaggleSettings
-from mini_lakehouse.contracts.processors import ProcessorContract
-from mini_lakehouse.processing.ocr.kaggle_resources import (
-    KaggleOcrResourceManager,
-    KaggleResourceName,
+from mini_lakehouse.processing.ocr.kaggle_types import (
+    KaggleCommandError,
+    KaggleCurrentRun,
+    KaggleGpuQuota,
+    KaggleKernelNotFoundError,
+    KaggleKernelState,
     KaggleResourceNotFoundError,
-    KaggleResourceResult,
-    KaggleRunnerBundle,
-    ModelSnapshotClient,
+    KaggleRunStatus,
+    parse_provider_run_id,
 )
-from mini_lakehouse.processing.ocr.protocol import OcrJob
 
 _AUTH_LOCK = threading.Lock()
 _MISSING = object()
-
-
-class KaggleKernelState(StrEnum):
-    QUEUED = "queued"
-    RUNNING = "running"
-    COMPLETE = "complete"
-    FAILED = "failed"
-
-    @property
-    def active(self) -> bool:
-        return self in {self.QUEUED, self.RUNNING}
-
-
-class KaggleCommandError(RuntimeError):
-    pass
-
-
-class KaggleKernelNotFoundError(KaggleCommandError):
-    pass
-
-
-class KaggleRunStatus(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    provider_run_id: str
-    state: KaggleKernelState
-    failure_message: str | None = None
-
-
-class KaggleGpuQuota(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    remaining_minutes: int = Field(ge=0)
-    refresh_at: datetime | None = None
-
-
-class KaggleClient(Protocol):
-    kernel_slug: str
-    runner_bundle_sha256: str
-
-    def prepare_submission(self, destination: Path, job: OcrJob) -> None: ...
-
-    def submit(self, submission_directory: Path) -> str: ...
-
-    def latest_run(self, batch_id: str) -> KaggleRunStatus | None: ...
-
-    def status(self, provider_run_id: str) -> KaggleRunStatus: ...
-
-    def logs(self, provider_run_id: str) -> str: ...
-
-    def gpu_quota(self) -> KaggleGpuQuota: ...
-
-    def download_output(self, provider_run_id: str, destination: Path) -> None: ...
 
 
 def _status_code(error: BaseException) -> int | None:
@@ -99,19 +41,6 @@ def _is_private_resource_missing(error: BaseException) -> bool:
     # Kaggle deliberately returns 403 for a private resource that is not visible
     # yet, including a resource owned by the authenticated account.
     return _status_code(error) in {403, 404}
-
-
-def parse_provider_run_id(provider_run_id: str) -> tuple[str, str, int]:
-    parts = provider_run_id.split("/")
-    if len(parts) != 3 or not parts[0] or not parts[1]:
-        raise ValueError(f"Invalid Kaggle provider run ID {provider_run_id!r}")
-    try:
-        version = int(parts[2])
-    except ValueError as error:
-        raise ValueError(f"Invalid Kaggle provider run ID {provider_run_id!r}") from error
-    if version < 1:
-        raise ValueError(f"Invalid Kaggle provider run ID {provider_run_id!r}")
-    return parts[0], parts[1], version
 
 
 class KaggleGateway:
@@ -163,6 +92,22 @@ class KaggleGateway:
             raise ValueError(f"Invalid Kaggle resource slug {slug!r}")
         return parts[0], parts[1]
 
+    @staticmethod
+    def _downloaded_file(
+        downloaded: str,
+        destination: Path,
+        relative_path: str,
+        *,
+        resource: str,
+    ) -> Path:
+        actual = Path(downloaded)
+        expected = destination / relative_path
+        if actual.resolve() != expected.resolve() or not expected.is_file():
+            raise KaggleCommandError(
+                f"KaggleHub returned an unexpected path for {resource}: {actual}"
+            )
+        return expected
+
     def push_kernel(
         self,
         submission_directory: Path,
@@ -189,7 +134,7 @@ class KaggleGateway:
             raise KaggleCommandError(f"Kaggle rejected the kernel submission: {detail}")
         return int(response.version_number)
 
-    def latest_kernel_version(self, kernel_slug: str) -> int | None:
+    def _current_kernel(self, kernel_slug: str) -> Any | None:
         owner, kernel = self._split_slug(kernel_slug)
         try:
             with self._credentials():
@@ -207,37 +152,36 @@ class KaggleGateway:
             raise KaggleCommandError(
                 f"Cannot inspect Kaggle kernel {kernel_slug!r}: {error}"
             ) from error
+        return response
+
+    def current_kernel_run(self, kernel_slug: str) -> KaggleCurrentRun | None:
+        response = self._current_kernel(kernel_slug)
+        if response is None:
+            return None
         metadata = response.metadata
         version = 0 if metadata is None else int(metadata.current_version_number)
-        return version or None
-
-    def kernel_source(self, provider_run_id: str) -> str:
-        owner, kernel, version = parse_provider_run_id(provider_run_id)
-        try:
-            with self._credentials():
-                from kagglesdk.kernels.types.kernels_api_service import ApiGetKernelRequest
-
-                request = ApiGetKernelRequest()
-                request.user_name = owner
-                request.kernel_slug = kernel
-                request.version_label = str(version)
-                api = self._api()
-                with api.build_kaggle_client() as client:
-                    response = client.kernels.kernels_api_client.get_kernel(request)
-        except Exception as error:
-            if _is_not_found(error):
-                raise KaggleKernelNotFoundError(
-                    f"Kaggle run {provider_run_id!r} does not exist"
-                ) from error
-            raise KaggleCommandError(
-                f"Cannot inspect Kaggle source for {provider_run_id!r}: {error}"
-            ) from error
+        if version < 1:
+            return None
         if response.blob is None or not response.blob.source:
-            raise KaggleCommandError(f"Kaggle run {provider_run_id!r} has no source")
-        return response.blob.source
+            raise KaggleCommandError(f"Kaggle kernel {kernel_slug!r} has no source")
+        owner, kernel = self._split_slug(kernel_slug)
+        provider_run_id = f"{kernel_slug}/{version}"
+        return KaggleCurrentRun(
+            status=self._read_kernel_status(owner, kernel, provider_run_id),
+            source=response.blob.source,
+        )
 
     def kernel_status(self, provider_run_id: str) -> KaggleRunStatus:
         owner, kernel, version = parse_provider_run_id(provider_run_id)
+        self._require_current_kernel_version(owner, kernel, version)
+        return self._read_kernel_status(owner, kernel, provider_run_id)
+
+    def _read_kernel_status(
+        self,
+        owner: str,
+        kernel: str,
+        provider_run_id: str,
+    ) -> KaggleRunStatus:
         try:
             with self._credentials():
                 from kagglesdk.kernels.types.kernels_api_service import (
@@ -247,7 +191,6 @@ class KaggleGateway:
                 request = ApiGetKernelSessionStatusRequest()
                 request.user_name = owner
                 request.kernel_slug = kernel
-                request.version_label = str(version)
                 api = self._api()
                 with api.build_kaggle_client() as client:
                     response = client.kernels.kernels_api_client.get_kernel_session_status(request)
@@ -280,31 +223,47 @@ class KaggleGateway:
             failure_message=response.failure_message or None,
         )
 
-    def kernel_logs(self, provider_run_id: str) -> str:
+    def stream_kernel_logs(self, provider_run_id: str) -> Iterator[str]:
+        """Yield the official latest-session log stream without blocking status calls."""
         owner, kernel, version = parse_provider_run_id(provider_run_id)
+        self._require_current_kernel_version(owner, kernel, version)
         try:
             with self._credentials():
-                from kagglesdk.kernels.types.kernels_api_service import (
-                    ApiListKernelSessionOutputRequest,
-                )
-
-                request = ApiListKernelSessionOutputRequest()
-                request.user_name = owner
-                request.kernel_slug = kernel
-                request.version_label = str(version)
-                request.page_size = 1
                 api = self._api()
-                with api.build_kaggle_client() as client:
-                    response = client.kernels.kernels_api_client.list_kernel_session_output(request)
+            # Do not hold _AUTH_LOCK while consuming the long-lived SSE
+            # response. The authenticated client already owns its credentials,
+            # and status polling must remain independently available.
+            for event in api.kernels_logs_stream(f"{owner}/{kernel}"):
+                data = event.get("data")
+                if isinstance(data, str) and data:
+                    yield data
         except Exception as error:
             if _is_not_found(error):
                 raise KaggleKernelNotFoundError(
                     f"Kaggle run {provider_run_id!r} does not exist"
                 ) from error
             raise KaggleCommandError(
-                f"Cannot retrieve Kaggle logs for {provider_run_id!r}: {error}"
+                f"Cannot stream Kaggle logs for {provider_run_id!r}: {error}"
             ) from error
-        return response.log
+
+    def kernel_logs(self, provider_run_id: str) -> str:
+        chunks: list[str] = []
+        for chunk in self.stream_kernel_logs(provider_run_id):
+            chunks.append(chunk)
+            if not chunk.endswith("\n"):
+                chunks.append("\n")
+        return "".join(chunks)
+
+    def _require_current_kernel_version(self, owner: str, kernel: str, version: int) -> None:
+        """Guard latest-only Kaggle status/log endpoints with the persisted run version."""
+        kernel_slug = f"{owner}/{kernel}"
+        response = self._current_kernel(kernel_slug)
+        metadata = None if response is None else response.metadata
+        current_version = 0 if metadata is None else int(metadata.current_version_number)
+        if current_version != version:
+            raise KaggleKernelNotFoundError(
+                f"Kaggle run {kernel_slug}/{version!s} is not the current kernel version"
+            )
 
     def gpu_quota(self) -> KaggleGpuQuota:
         try:
@@ -357,7 +316,12 @@ class KaggleGateway:
             raise KaggleCommandError(
                 f"Cannot download Kaggle output {relative_path!r} for {provider_run_id!r}: {error}"
             ) from error
-        return Path(downloaded)
+        return self._downloaded_file(
+            downloaded,
+            destination,
+            relative_path,
+            resource=f"notebook output {provider_run_id!r}",
+        )
 
     def download_dataset_file(
         self,
@@ -383,7 +347,12 @@ class KaggleGateway:
             raise KaggleCommandError(
                 f"Cannot download {relative_path!r} from Kaggle Dataset {dataset_slug!r}: {error}"
             ) from error
-        return Path(downloaded)
+        return self._downloaded_file(
+            downloaded,
+            destination,
+            relative_path,
+            resource=f"Dataset {dataset_slug!r}",
+        )
 
     def upload_dataset(
         self,
@@ -452,7 +421,12 @@ class KaggleGateway:
             raise KaggleCommandError(
                 f"Cannot download {relative_path!r} from Kaggle model {model_slug!r}: {error}"
             ) from error
-        return Path(downloaded)
+        return self._downloaded_file(
+            downloaded,
+            destination,
+            relative_path,
+            resource=f"model {model_slug!r}",
+        )
 
     def upload_model(
         self,
@@ -490,141 +464,3 @@ class KaggleGateway:
                 f"Cannot inspect Kaggle model {model_slug!r}: {error}"
             ) from error
         return int(response.version_number)
-
-
-def render_launcher(
-    *,
-    job: OcrJob,
-    runner_dataset_name: str,
-    model_source: str,
-    layout_model_source: str,
-) -> str:
-    """Render the only code file sent with a Kaggle kernel version."""
-    source = f"/kaggle/input/{runner_dataset_name}"
-    return (
-        f"# mini-lakehouse-batch-id: {job.batch_id}\n"
-        "from pathlib import Path\n"
-        "import sys\n\n"
-        f"SOURCE = Path({source!r})\n"
-        "sys.path.insert(0, str(SOURCE))\n"
-        "from bootstrap import main\n\n"
-        "main(\n"
-        f"    job_json={job.model_dump_json()!r},\n"
-        "    source=SOURCE,\n"
-        f"    expected_bundle_sha256={job.runner_bundle_sha256!r},\n"
-        f"    model_source={model_source!r},\n"
-        f"    layout_model_source={layout_model_source!r},\n"
-        ")\n"
-    )
-
-
-class KaggleProvider:
-    def __init__(
-        self,
-        settings: KaggleSettings,
-        processor: ProcessorContract,
-        *,
-        gateway: KaggleGateway | None = None,
-        bundle: KaggleRunnerBundle | None = None,
-        snapshots: ModelSnapshotClient | None = None,
-    ) -> None:
-        if not settings.configured:
-            raise ValueError(
-                "Kaggle OCR requires LAKEHOUSE_KAGGLE__USERNAME and LAKEHOUSE_KAGGLE__API_TOKEN"
-            )
-        self._settings = settings
-        self._processor = processor
-        self._gateway = gateway or KaggleGateway(settings)
-        self._resources = KaggleOcrResourceManager(
-            settings,
-            processor,
-            self._gateway,
-            bundle=bundle,
-            snapshots=snapshots,
-        )
-        self.kernel_slug = settings.kernel_slug(processor.runner.kernel_name)
-        self.runner_bundle_sha256 = self._resources.runner_bundle_sha256
-
-    def reconcile_resource(self, name: KaggleResourceName) -> KaggleResourceResult:
-        return self._resources.reconcile(name)
-
-    def prepare_submission(self, destination: Path, job: OcrJob) -> None:
-        if job.runner_bundle_sha256 != self.runner_bundle_sha256:
-            raise ValueError("OCR job and local Kaggle runner bundle identities differ")
-        resources = self._resources.resolve_all()
-        destination.mkdir(parents=True, exist_ok=False)
-        (destination / "launcher.py").write_text(
-            render_launcher(
-                job=job,
-                runner_dataset_name=self._processor.runner.runner_dataset_name,
-                model_source=resources.model.source,
-                layout_model_source=resources.layout_model.source,
-            ),
-            encoding="utf-8",
-        )
-        metadata = {
-            "id": self.kernel_slug,
-            "title": "Mini Lakehouse ArXiv GLM OCR",
-            "code_file": "launcher.py",
-            "language": "python",
-            "kernel_type": "script",
-            "is_private": True,
-            "enable_gpu": True,
-            "enable_internet": True,
-            "docker_image_pinning_type": "original",
-            "dataset_sources": [resources.runner.source],
-            "competition_sources": [],
-            "kernel_sources": [],
-            "model_sources": resources.model_sources,
-        }
-        (destination / "kernel-metadata.json").write_text(
-            json.dumps(metadata, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-
-    def submit(self, submission_directory: Path) -> str:
-        version = self._gateway.push_kernel(
-            submission_directory,
-            timeout_seconds=self._processor.runner.timeout_seconds,
-            accelerator=self._processor.runner.accelerator,
-        )
-        return f"{self.kernel_slug}/{version}"
-
-    def latest_run(self, batch_id: str) -> KaggleRunStatus | None:
-        version = self._gateway.latest_kernel_version(self.kernel_slug)
-        if version is None:
-            return None
-        provider_run_id = f"{self.kernel_slug}/{version}"
-        source = self._gateway.kernel_source(provider_run_id)
-        if f"# mini-lakehouse-batch-id: {batch_id}\n" not in source:
-            return None
-        return self.status(provider_run_id)
-
-    def status(self, provider_run_id: str) -> KaggleRunStatus:
-        self._validate_run_id(provider_run_id)
-        return self._gateway.kernel_status(provider_run_id)
-
-    def logs(self, provider_run_id: str) -> str:
-        self._validate_run_id(provider_run_id)
-        return self._gateway.kernel_logs(provider_run_id)
-
-    def gpu_quota(self) -> KaggleGpuQuota:
-        return self._gateway.gpu_quota()
-
-    def download_output(self, provider_run_id: str, destination: Path) -> None:
-        self._validate_run_id(provider_run_id)
-        destination.mkdir(parents=True, exist_ok=False)
-        for filename in ("result_manifest.json", "result.tar.zst"):
-            downloaded = self._gateway.download_notebook_file(
-                provider_run_id,
-                filename,
-                destination,
-            )
-            expected = destination / filename
-            if downloaded.resolve() != expected.resolve():
-                shutil.copy2(downloaded, expected)
-
-    def _validate_run_id(self, provider_run_id: str) -> None:
-        owner, kernel, _ = parse_provider_run_id(provider_run_id)
-        if f"{owner}/{kernel}" != self.kernel_slug:
-            raise ValueError("Kaggle provider run does not belong to the configured kernel")

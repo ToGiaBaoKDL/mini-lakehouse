@@ -3,20 +3,20 @@
 from __future__ import annotations
 
 import gzip
-import hashlib
 import tarfile
 from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 
 import zstandard
 
-from mini_lakehouse.processing.ocr.identity import (
+from mini_lakehouse.processing.ocr.core.files import file_sha256
+from mini_lakehouse.processing.ocr.core.identity import (
     canonical_json_sha256,
     processing_id,
     successful_document_manifest_payload,
 )
-from mini_lakehouse.processing.ocr.paths import runner_document_path
-from mini_lakehouse.processing.ocr.protocol import (
+from mini_lakehouse.processing.ocr.core.paths import runner_document_path
+from mini_lakehouse.processing.ocr.core.protocol import (
     OcrBatchManifest,
     OcrDocumentResult,
     OcrElement,
@@ -30,14 +30,6 @@ class InvalidOcrOutputError(ValueError):
 
 class OcrBatchMismatchError(InvalidOcrOutputError):
     """The downloaded latest Kaggle output belongs to a different batch."""
-
-
-def file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as file:
-        for chunk in iter(lambda: file.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def document_manifest_payload(result: OcrDocumentResult) -> dict[str, object]:

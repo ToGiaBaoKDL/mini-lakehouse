@@ -21,29 +21,29 @@ from mini_lakehouse.platform.trino import SqlExecutor, TrinoExecutor
 from mini_lakehouse.processing.ocr.archive import (
     InvalidOcrOutputError,
     OcrBatchMismatchError,
-    file_sha256,
     validate_runner_output,
 )
-from mini_lakehouse.processing.ocr.identity import (
+from mini_lakehouse.processing.ocr.core.files import file_sha256
+from mini_lakehouse.processing.ocr.core.identity import (
     batch_id,
     config_hash,
     request_id,
 )
-from mini_lakehouse.processing.ocr.kaggle import (
-    KaggleClient,
-    KaggleCommandError,
-    KaggleKernelNotFoundError,
-    KaggleKernelState,
-    KaggleProvider,
-    KaggleRunStatus,
-)
-from mini_lakehouse.processing.ocr.kaggle_resources import KaggleRunnerBundle
-from mini_lakehouse.processing.ocr.protocol import (
+from mini_lakehouse.processing.ocr.core.protocol import (
     OcrDocumentRequest,
     OcrInference,
     OcrJob,
     OcrLimits,
     OcrModel,
+)
+from mini_lakehouse.processing.ocr.kaggle_bundle import KaggleRunnerBundle
+from mini_lakehouse.processing.ocr.kaggle_provider import KaggleProvider
+from mini_lakehouse.processing.ocr.kaggle_types import (
+    KaggleClient,
+    KaggleCommandError,
+    KaggleKernelNotFoundError,
+    KaggleKernelState,
+    KaggleRunStatus,
 )
 from mini_lakehouse.storage.object_store import ObjectStore, create_object_store
 

@@ -5,8 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from mini_lakehouse.processing.ocr.identity import batch_id
-from mini_lakehouse.processing.ocr.protocol import OcrDocumentRequest, OcrJob
+from mini_lakehouse.processing.ocr.core.identity import batch_id
+from mini_lakehouse.processing.ocr.core.protocol import OcrDocumentRequest, OcrJob
 
 
 class ArxivProductModel(BaseModel):
