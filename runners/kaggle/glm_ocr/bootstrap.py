@@ -1,4 +1,4 @@
-"""Bootstrap the locked OCR environment from a versioned Kaggle Dataset."""
+"""Bootstrap the locked OCR environment from the versioned runner Dataset."""
 
 import hashlib
 import json
@@ -8,11 +8,10 @@ import subprocess
 import sys
 import tempfile
 import time
-import zipfile
 from pathlib import Path, PurePosixPath
 
+UV_VERSION = "0.11.30"
 MANIFEST_NAME = "resource_manifest.json"
-RUNTIME_MANIFEST_NAME = "runtime_manifest.json"
 
 
 def _sha256(path: Path) -> str:
@@ -56,78 +55,6 @@ def _validate_bundle(source: Path, expected_bundle_sha256: str) -> None:
         path = source.joinpath(*relative.parts)
         if not path.is_file() or _sha256(path) != expected_sha256:
             raise RuntimeError(f"Mounted Kaggle runner file failed validation: {name!r}")
-
-
-def _runtime_identity(payload: dict[str, object]) -> str:
-    fields = (
-        "lock_sha256",
-        "platform",
-        "project_sha256",
-        "python",
-        "python_abi",
-        "resource_name",
-        "uv_version",
-    )
-    identity = {name: payload.get(name) for name in fields}
-    return hashlib.sha256(
-        json.dumps(
-            identity,
-            ensure_ascii=False,
-            allow_nan=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode()
-    ).hexdigest()
-
-
-def _validate_runtime(
-    runtime: Path,
-    expected_runtime_sha256: str,
-) -> tuple[dict[str, object], Path]:
-    payload = json.loads((runtime / RUNTIME_MANIFEST_NAME).read_text(encoding="utf-8"))
-    if payload.get("identity_sha256") != expected_runtime_sha256:
-        raise RuntimeError("Mounted Kaggle runtime Dataset has an unexpected content identity")
-    if _runtime_identity(payload) != expected_runtime_sha256:
-        raise RuntimeError("Mounted Kaggle runtime manifest has an invalid content identity")
-    if payload.get("python") != "3.12" or payload.get("python_abi") != "cp312":
-        raise RuntimeError("Mounted Kaggle runtime Dataset targets an unsupported Python")
-    if tuple(sys.version_info[:2]) != (3, 12):
-        raise RuntimeError(
-            f"Kaggle OCR runtime requires Python 3.12, found {sys.version_info.major}."
-            f"{sys.version_info.minor}"
-        )
-    archive_name = payload.get("cache_archive")
-    archive_sha256 = payload.get("cache_archive_sha256")
-    if (
-        not isinstance(archive_name, str)
-        or PurePosixPath(archive_name).name != archive_name
-        or not isinstance(archive_sha256, str)
-        or len(archive_sha256) != 64
-    ):
-        raise RuntimeError("Mounted Kaggle runtime Dataset has an invalid cache declaration")
-    archive = runtime / archive_name
-    if not archive.is_file() or _sha256(archive) != archive_sha256:
-        raise RuntimeError("Mounted Kaggle runtime cache failed checksum validation")
-    return payload, archive
-
-
-def _extract_runtime_cache(archive_path: Path, destination: Path) -> None:
-    destination.mkdir(parents=True, exist_ok=False)
-    with zipfile.ZipFile(archive_path) as archive:
-        for member in archive.infolist():
-            relative = PurePosixPath(member.filename)
-            file_type = (member.external_attr >> 16) & 0o170000
-            if (
-                not member.filename
-                or "\\" in member.filename
-                or relative.is_absolute()
-                or ".." in relative.parts
-                or file_type == 0o120000
-            ):
-                raise RuntimeError(
-                    f"Mounted Kaggle runtime cache contains an unsafe path: {member.filename!r}"
-                )
-        archive.extractall(destination)
 
 
 def _uv_version(uv: str) -> str | None:
@@ -183,41 +110,21 @@ def main(
     job_json: str,
     source: Path,
     expected_bundle_sha256: str,
-    runtime: Path,
-    expected_runtime_sha256: str,
     model_source: str,
     layout_model_source: str,
 ) -> None:
     _validate_bundle(source, expected_bundle_sha256)
-    runtime_manifest, runtime_archive = _validate_runtime(runtime, expected_runtime_sha256)
     working = Path("/kaggle/working")
     working.mkdir(parents=True, exist_ok=True)
     project = Path(tempfile.mkdtemp(prefix="mini-lakehouse-glm-ocr-"))
     try:
         shutil.copytree(source, project, dirs_exist_ok=True)
         (project / "job.json").write_text(job_json, encoding="utf-8")
-        cache = project / ".uv-cache"
-        started_at = time.perf_counter()
-        print(json.dumps({"event": "runtime_cache_extract_started"}, separators=(",", ":")))
-        _extract_runtime_cache(runtime_archive, cache)
-        print(
-            json.dumps(
-                {
-                    "event": "runtime_cache_extract_completed",
-                    "elapsed_seconds": round(time.perf_counter() - started_at, 3),
-                },
-                separators=(",", ":"),
-            ),
-            flush=True,
-        )
         environment = os.environ.copy()
         environment["UV_PROJECT_ENVIRONMENT"] = str(project / ".venv")
-        environment["UV_CACHE_DIR"] = str(cache)
+        environment["UV_CACHE_DIR"] = "/tmp/mini-lakehouse-uv-cache"
         environment["UV_LINK_MODE"] = "hardlink"
-        uv_version = runtime_manifest.get("uv_version")
-        if not isinstance(uv_version, str):
-            raise RuntimeError("Mounted Kaggle runtime Dataset has no uv version")
-        uv = _ensure_uv(uv_version)
+        uv = _ensure_uv(UV_VERSION)
         _run(
             "dependency_sync",
             [
@@ -228,7 +135,6 @@ def main(
                 "--frozen",
                 "--no-dev",
                 "--no-build",
-                "--offline",
                 "--link-mode",
                 "hardlink",
             ],

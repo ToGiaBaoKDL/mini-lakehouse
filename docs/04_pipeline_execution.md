@@ -10,7 +10,7 @@ Prefect has six independently retryable deployments:
 | `tl_github_analytics` | landing → curated GitHub → phased dbt analytics | `30 * * * *` UTC |
 | `etl_arxiv_metadata` | ArXiv OAI `T-1` → landing → curated ArXiv | `0 6 * * *` UTC |
 | `etl_arxiv_ocr` | Reconcile Kaggle output → curated; submit next batch | `*/20 * * * *` UTC, paused by default |
-| `gov_arxiv_ocr_resources` | Reconcile private Kaggle runner, runtime, and model resources | Manual only |
+| `gov_arxiv_ocr_resources` | Reconcile private Kaggle runner and model resources | Manual only |
 | `gov_iceberg_maintenance` | Policy-driven Iceberg maintenance | Weekly schedule |
 
 The two hourly deployments are deliberately schedule-driven. There are no Prefect event sensors,

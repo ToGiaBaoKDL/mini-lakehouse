@@ -41,7 +41,6 @@ def gov_arxiv_ocr_resources() -> dict[str, Any]:
     """Reconcile every immutable Kaggle resource required by the ArXiv OCR runner."""
     return {
         "runner": reconcile_arxiv_ocr_resource("runner"),
-        "runtime": reconcile_arxiv_ocr_resource("runtime"),
         "model": reconcile_arxiv_ocr_resource("model"),
         "layout_model": reconcile_arxiv_ocr_resource("layout_model"),
     }

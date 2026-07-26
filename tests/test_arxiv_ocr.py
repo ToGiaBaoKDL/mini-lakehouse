@@ -1,9 +1,7 @@
 import gzip
 import io
 import json
-import subprocess
 import tarfile
-import zipfile
 from collections.abc import Iterator, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -59,15 +57,6 @@ from mini_lakehouse.processing.ocr.kaggle_bundle import (
 from mini_lakehouse.processing.ocr.kaggle_gateway import KaggleGateway
 from mini_lakehouse.processing.ocr.kaggle_provider import KaggleProvider, render_launcher
 from mini_lakehouse.processing.ocr.kaggle_resources import KaggleOcrResourceManager
-from mini_lakehouse.processing.ocr.kaggle_runtime import (
-    RUNTIME_CACHE_ARCHIVE_NAME,
-    RUNTIME_PLATFORM,
-    RUNTIME_PYTHON,
-    RUNTIME_PYTHON_ABI,
-    RUNTIME_UV_VERSION,
-    RuntimeResourceManifest,
-    UvRuntimeCacheBuilder,
-)
 from mini_lakehouse.processing.ocr.kaggle_types import (
     KaggleCurrentRun,
     KaggleGpuQuota,
@@ -79,86 +68,6 @@ from mini_lakehouse.processing.ocr.text import serialize_plain_text
 
 SOURCE_RECORD_SHA256 = "a" * 64
 RUNNER_BUNDLE = KaggleRunnerBundle.load()
-
-
-def _runtime_manifest() -> RuntimeResourceManifest:
-    project_sha256 = file_sha256(Path("runners/kaggle/glm_ocr/pyproject.toml"))
-    lock_sha256 = file_sha256(Path("runners/kaggle/glm_ocr/uv.lock"))
-    identity = {
-        "lock_sha256": lock_sha256,
-        "platform": RUNTIME_PLATFORM,
-        "project_sha256": project_sha256,
-        "python": RUNTIME_PYTHON,
-        "python_abi": RUNTIME_PYTHON_ABI,
-        "resource_name": "runtime",
-        "uv_version": RUNTIME_UV_VERSION,
-    }
-    return RuntimeResourceManifest(
-        schema_version="1.0.0",
-        resource_name="runtime",
-        project_sha256=project_sha256,
-        lock_sha256=lock_sha256,
-        python=RUNTIME_PYTHON,
-        python_abi=RUNTIME_PYTHON_ABI,
-        platform=RUNTIME_PLATFORM,
-        uv_version=RUNTIME_UV_VERSION,
-        cache_archive=RUNTIME_CACHE_ARCHIVE_NAME,
-        cache_archive_sha256="c" * 64,
-        identity_sha256=canonical_json_sha256(identity),
-    )
-
-
-def test_uv_runtime_cache_builder_preserves_wheels_for_offline_sync(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    runner = tmp_path / "runner"
-    runner.mkdir()
-    (runner / "pyproject.toml").write_text("[project]\nname = 'runner'\n", encoding="utf-8")
-    (runner / "uv.lock").write_text("version = 1\n", encoding="utf-8")
-    sync_commands: list[tuple[str, ...]] = []
-
-    def fake_run(
-        command: list[str],
-        *,
-        check: bool,
-        capture_output: bool = False,
-        text: bool = False,
-        env: dict[str, str] | None = None,
-    ) -> subprocess.CompletedProcess[str]:
-        assert check
-        if command == ["/usr/bin/uv", "--version"]:
-            assert capture_output and text
-            return subprocess.CompletedProcess(command, 0, stdout=f"uv {RUNTIME_UV_VERSION}\n")
-        assert command[1] == "sync"
-        assert env is not None
-        sync_commands.append(tuple(command))
-        cached_wheel = Path(env["UV_CACHE_DIR"]) / "wheels" / "torch.whl"
-        if "--offline" in command:
-            assert cached_wheel.is_file()
-        else:
-            cached_wheel.parent.mkdir(parents=True)
-            cached_wheel.write_bytes(b"wheel")
-        Path(env["UV_PROJECT_ENVIRONMENT"]).mkdir(parents=True)
-        return subprocess.CompletedProcess(command, 0)
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    archive = tmp_path / RUNTIME_CACHE_ARCHIVE_NAME
-    UvRuntimeCacheBuilder(
-        runner_source=runner,
-        uv_executable="/usr/bin/uv",
-    ).build(archive)
-
-    assert len(sync_commands) == 2
-    assert all("--no-build" in command for command in sync_commands)
-    assert all(
-        command[command.index("--python-platform") + 1] == RUNTIME_PLATFORM
-        for command in sync_commands
-    )
-    assert "--offline" not in sync_commands[0]
-    assert "--offline" in sync_commands[1]
-    with zipfile.ZipFile(archive) as runtime_cache:
-        assert runtime_cache.read("wheels/torch.whl") == b"wheel"
 
 
 def _configuration_hash() -> str:
@@ -492,8 +401,6 @@ def test_kaggle_launcher_contains_only_job_and_pinned_runner_reference() -> None
     launcher = render_launcher(
         job=_job(),
         runner_dataset_source=("owner/mini-lakehouse-arxiv-glm-ocr-runner/versions/4"),
-        runtime_dataset_source=("owner/mini-lakehouse-arxiv-glm-ocr-runtime/versions/2"),
-        runtime_identity_sha256=_runtime_manifest().identity_sha256,
         model_source="owner/mini-lakehouse-glm-ocr/transformers/safetensors/2",
         layout_model_source=("owner/mini-lakehouse-pp-doclayout-v3/transformers/safetensors/3"),
     )
@@ -502,10 +409,6 @@ def test_kaggle_launcher_contains_only_job_and_pinned_runner_reference() -> None
     assert (
         "kagglehub.dataset_download('owner/mini-lakehouse-arxiv-glm-ocr-runner/versions/4')"
     ) in launcher
-    assert (
-        "kagglehub.dataset_download('owner/mini-lakehouse-arxiv-glm-ocr-runtime/versions/2')"
-    ) in launcher
-    assert _runtime_manifest().identity_sha256 in launcher
     assert RUNNER_BUNDLE.sha256 in launcher
     assert "mini-lakehouse-glm-ocr/transformers/safetensors/2" in launcher
     assert "mini-lakehouse-pp-doclayout-v3/transformers/safetensors/3" in launcher
@@ -624,15 +527,8 @@ def test_kaggle_log_stream_reconnects_and_deduplicates_replayed_events(
 class _ResourceClient:
     def __init__(self, manifest: RunnerResourceManifest | None = None) -> None:
         self.dataset_manifest = manifest
-        self.runtime_manifest: RuntimeResourceManifest | None = None
-        self.dataset_versions = {
-            "owner/mini-lakehouse-arxiv-glm-ocr-runner": 1 if manifest is not None else 0,
-            "owner/mini-lakehouse-arxiv-glm-ocr-runtime": 0,
-        }
-        self.dataset_uploads = {
-            "owner/mini-lakehouse-arxiv-glm-ocr-runner": 0,
-            "owner/mini-lakehouse-arxiv-glm-ocr-runtime": 0,
-        }
+        self.dataset_version_number = 1 if manifest is not None else 0
+        self.dataset_uploads = 0
         self.model_manifests: dict[str, ModelResourceManifest] = {}
         self.model_versions: dict[str, int] = {}
         self.model_uploads: dict[str, int] = {}
@@ -643,16 +539,11 @@ class _ResourceClient:
         relative_path: str,
         destination: Path,
     ) -> Path:
-        if dataset_slug == "owner/mini-lakehouse-arxiv-glm-ocr-runner":
-            manifest = self.dataset_manifest
-        elif dataset_slug == "owner/mini-lakehouse-arxiv-glm-ocr-runtime":
-            manifest = self.runtime_manifest
-        else:
-            raise AssertionError(f"Unexpected dataset slug {dataset_slug}")
-        if manifest is None:
+        assert dataset_slug == "owner/mini-lakehouse-arxiv-glm-ocr-runner"
+        if self.dataset_manifest is None:
             raise KaggleResourceNotFoundError("missing")
         path = destination / relative_path
-        path.write_text(manifest.model_dump_json(), encoding="utf-8")
+        path.write_text(self.dataset_manifest.model_dump_json(), encoding="utf-8")
         return path
 
     def upload_dataset(
@@ -662,26 +553,19 @@ class _ResourceClient:
         *,
         version_notes: str,
     ) -> None:
-        if dataset_slug == "owner/mini-lakehouse-arxiv-glm-ocr-runner":
-            self.dataset_manifest = RunnerResourceManifest.model_validate_json(
-                (source / "resource_manifest.json").read_text(encoding="utf-8")
-            )
-            assert self.dataset_manifest.bundle_sha256 in version_notes
-        elif dataset_slug == "owner/mini-lakehouse-arxiv-glm-ocr-runtime":
-            self.runtime_manifest = RuntimeResourceManifest.model_validate_json(
-                (source / "runtime_manifest.json").read_text(encoding="utf-8")
-            )
-            assert (source / RUNTIME_CACHE_ARCHIVE_NAME).is_file()
-            assert self.runtime_manifest.identity_sha256 in version_notes
-        else:
-            raise AssertionError(f"Unexpected dataset slug {dataset_slug}")
-        self.dataset_versions[dataset_slug] += 1
-        self.dataset_uploads[dataset_slug] += 1
+        assert dataset_slug == "owner/mini-lakehouse-arxiv-glm-ocr-runner"
+        self.dataset_manifest = RunnerResourceManifest.model_validate_json(
+            (source / "resource_manifest.json").read_text(encoding="utf-8")
+        )
+        assert self.dataset_manifest.bundle_sha256 in version_notes
+        self.dataset_version_number += 1
+        self.dataset_uploads += 1
 
     def dataset_version(self, dataset_slug: str) -> int:
-        if self.dataset_versions.get(dataset_slug, 0) == 0:
+        assert dataset_slug == "owner/mini-lakehouse-arxiv-glm-ocr-runner"
+        if self.dataset_version_number == 0:
             raise KaggleResourceNotFoundError("missing")
-        return self.dataset_versions[dataset_slug]
+        return self.dataset_version_number
 
     def download_model_file(
         self,
@@ -731,19 +615,9 @@ class _SnapshotClient:
         (destination / "model.safetensors").write_bytes(b"model")
 
 
-class _RuntimeBuilder:
-    def __init__(self) -> None:
-        self.builds = 0
-
-    def build(self, destination: Path) -> None:
-        self.builds += 1
-        destination.write_bytes(b"offline uv cache")
-
-
 def _resource_manager(
     client: _ResourceClient,
     snapshots: _SnapshotClient | None = None,
-    runtime_builder: _RuntimeBuilder | None = None,
 ) -> KaggleOcrResourceManager:
     return KaggleOcrResourceManager(
         KaggleSettings.model_validate({"username": "owner", "api_token": "secret"}),
@@ -751,7 +625,6 @@ def _resource_manager(
         client,
         bundle=RUNNER_BUNDLE,
         snapshots=snapshots or _SnapshotClient(),
-        runtime_builder=runtime_builder or _RuntimeBuilder(),
         readiness_attempts=1,
         readiness_delay_seconds=0,
     )
@@ -769,7 +642,7 @@ def test_kaggle_runner_resource_reconciliation_is_content_idempotent() -> None:
     assert created.source.endswith("/versions/1")
     assert unchanged.action == "unchanged"
     assert unchanged.identity_sha256 == RUNNER_BUNDLE.sha256
-    assert client.dataset_uploads["owner/mini-lakehouse-arxiv-glm-ocr-runner"] == 1
+    assert client.dataset_uploads == 1
 
 
 def test_kaggle_runner_resource_updates_drifted_content_once() -> None:
@@ -788,23 +661,7 @@ def test_kaggle_runner_resource_updates_drifted_content_once() -> None:
 
     assert result.action == "updated"
     assert result.source.endswith("/versions/2")
-    assert client.dataset_uploads["owner/mini-lakehouse-arxiv-glm-ocr-runner"] == 1
-
-
-def test_kaggle_runtime_resource_reconciliation_is_lock_idempotent() -> None:
-    client = _ResourceClient()
-    builder = _RuntimeBuilder()
-    resources = _resource_manager(client, runtime_builder=builder)
-
-    created = resources.reconcile("runtime")
-    unchanged = resources.reconcile("runtime")
-
-    assert created.action == "created"
-    assert created.name == "runtime"
-    assert created.source.endswith("/versions/1")
-    assert unchanged.action == "unchanged"
-    assert builder.builds == 1
-    assert client.dataset_uploads["owner/mini-lakehouse-arxiv-glm-ocr-runtime"] == 1
+    assert client.dataset_uploads == 1
 
 
 def test_kaggle_model_resource_reconciliation_pins_revision_and_is_idempotent() -> None:
@@ -859,7 +716,6 @@ def test_kaggle_resource_manager_resolves_only_a_complete_resource_set() -> None
     client = _ResourceClient()
     resources = _resource_manager(client)
     resources.reconcile("runner")
-    resources.reconcile("runtime")
     resources.reconcile("model")
 
     with pytest.raises(KaggleResourceNotFoundError, match="gov_arxiv_ocr_resources"):
@@ -900,8 +756,6 @@ def test_kaggle_recovery_adopts_only_the_latest_matching_batch_version() -> None
         render_launcher(
             job=job,
             runner_dataset_source=("owner/mini-lakehouse-arxiv-glm-ocr-runner/versions/1"),
-            runtime_dataset_source=("owner/mini-lakehouse-arxiv-glm-ocr-runtime/versions/1"),
-            runtime_identity_sha256=_runtime_manifest().identity_sha256,
             model_source="owner/model/transformers/default/1",
             layout_model_source="owner/layout/transformers/default/1",
         )
@@ -940,22 +794,14 @@ class _PinnedResourceGateway:
         relative_path: str,
         destination: Path,
     ) -> Path:
+        assert dataset_slug == "owner/mini-lakehouse-arxiv-glm-ocr-runner"
         path = destination / relative_path
-        if dataset_slug == "owner/mini-lakehouse-arxiv-glm-ocr-runner":
-            manifest = RUNNER_BUNDLE.manifest
-        elif dataset_slug == "owner/mini-lakehouse-arxiv-glm-ocr-runtime":
-            manifest = _runtime_manifest()
-        else:
-            raise AssertionError(f"Unexpected dataset slug {dataset_slug}")
-        path.write_text(manifest.model_dump_json(), encoding="utf-8")
+        path.write_text(RUNNER_BUNDLE.manifest.model_dump_json(), encoding="utf-8")
         return path
 
     def dataset_version(self, dataset_slug: str) -> int:
-        if dataset_slug == "owner/mini-lakehouse-arxiv-glm-ocr-runner":
-            return 4
-        if dataset_slug == "owner/mini-lakehouse-arxiv-glm-ocr-runtime":
-            return 2
-        raise AssertionError(f"Unexpected dataset slug {dataset_slug}")
+        assert dataset_slug == "owner/mini-lakehouse-arxiv-glm-ocr-runner"
+        return 4
 
     def download_model_file(
         self,
@@ -1033,16 +879,12 @@ def test_kaggle_submission_and_output_pin_resource_and_run_versions(tmp_path: Pa
         "kernel-metadata.json",
         "launcher.py",
     ]
-    assert metadata["dataset_sources"] == [
-        "owner/mini-lakehouse-arxiv-glm-ocr-runner",
-        "owner/mini-lakehouse-arxiv-glm-ocr-runtime",
-    ]
+    assert metadata["dataset_sources"] == ["owner/mini-lakehouse-arxiv-glm-ocr-runner"]
     assert metadata["model_sources"] == [
         "owner/mini-lakehouse-glm-ocr/transformers/safetensors/2",
         "owner/mini-lakehouse-pp-doclayout-v3/transformers/safetensors/3",
     ]
     launcher = (submission / "launcher.py").read_text(encoding="utf-8")
-    assert "mini-lakehouse-arxiv-glm-ocr-runtime/versions/2" in launcher
     assert metadata["model_sources"][0] in launcher
     assert metadata["model_sources"][1] in launcher
     assert gateway.output_calls == [

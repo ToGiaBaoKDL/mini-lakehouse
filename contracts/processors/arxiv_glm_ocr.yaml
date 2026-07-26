@@ -42,7 +42,6 @@ runner:
   provider: kaggle
   kernel_name: mini-lakehouse-arxiv-glm-ocr
   runner_dataset_name: mini-lakehouse-arxiv-glm-ocr-runner
-  runtime_dataset_name: mini-lakehouse-arxiv-glm-ocr-runtime
   model_resources:
     model:
       name: mini-lakehouse-glm-ocr

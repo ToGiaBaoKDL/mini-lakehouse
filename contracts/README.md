@@ -12,7 +12,7 @@ file with strict Pydantic models before making a network or storage call.
 - `curated_products/*.yaml`: canonical curated product owner, upstream sources, keys, stable field
   IDs, partitions, and schemas.
 - `processors/*.yaml`: external processing owner, pinned model revisions, output protocol,
-  resource limits, artifact prefix, runner/runtime resources, and retry policy.
+  resource limits, artifact prefix, runner and model resources, and retry policy.
 - `domains/*.yaml`: analytics-domain owner, upstream curated products, mart grain, partitioning,
   and public relation registry.
 - `policies/*.yaml`: one Polaris policy per file, including typed content, attachments, bounded

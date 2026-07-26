@@ -93,13 +93,13 @@ deployments:
       - cron: "*/20 * * * *"
         timezone: UTC
         # Kaggle GPU time is quota-bound. Resume only after credentials and the
-        # runner/runtime Datasets and private kernel have been validated.
+        # runner Dataset, models, and private kernel have been validated.
         active: false
     concurrency_limit: *singleton
     work_pool: *processing_work_pool
 
   - name: gov_arxiv_ocr_resources
-    description: Manually reconcile private, versioned Kaggle OCR runner, runtime, and models.
+    description: Manually reconcile the private, versioned Kaggle OCR runner and models.
     entrypoint: orchestration/flows/arxiv/gov_arxiv_ocr_resources.py:gov_arxiv_ocr_resources
     schedules: []
     concurrency_limit: *singleton

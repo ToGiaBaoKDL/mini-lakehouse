@@ -116,9 +116,9 @@ uv run dbt test \
 Set `LAKEHOUSE_KAGGLE__USERNAME` and `LAKEHOUSE_KAGGLE__API_TOKEN` in `.env` before
 enabling ArXiv OCR. Run the manual `gov_arxiv_ocr_resources` deployment once after each runner
 dependency-lock, or pinned-model revision change. It reconciles separate private runner and
-offline-runtime Datasets plus two private Kaggle Models, creating a new immutable version only
-when that resource's desired identity changes. OCR jobs install exclusively from the verified
-runtime cache; they do not fall back to downloading Python dependencies.
+two private Kaggle Models, creating a new immutable version only when that resource's desired
+identity changes. The runner installs its locked Python dependencies directly in each Kaggle job;
+there is no separately provisioned runtime Dataset.
 The OCR deployment's 20-minute schedule is deployed paused by default; metadata ingestion does not
 require Kaggle credentials.
 
