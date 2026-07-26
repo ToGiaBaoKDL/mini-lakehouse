@@ -20,7 +20,13 @@ from mini_lakehouse.contracts import (
 )
 from mini_lakehouse.contracts.sources import SourceTableContract
 from mini_lakehouse.platform.runtime import source_table_storage_uri
-from mini_lakehouse.storage.iceberg import load_iceberg_catalog, validate_table_location
+from mini_lakehouse.storage.iceberg import (
+    iceberg_metadata_retention_properties,
+    load_iceberg_catalog,
+    metadata_retention_for_table,
+    reconcile_metadata_retention,
+    validate_table_location,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +57,8 @@ class ArxivLandingRepository:
         self._settings = settings
         self._owned_catalog = catalog is None
         self._catalog = catalog or load_iceberg_catalog(settings)
-        self._source = (contracts or load_contracts(settings.contracts_dir)).source("arxiv")
+        self._contracts = contracts or load_contracts(settings.contracts_dir)
+        self._source = self._contracts.source("arxiv")
 
     def __enter__(self) -> "ArxivLandingRepository":
         return self
@@ -68,21 +75,25 @@ class ArxivLandingRepository:
     def _ensure_table(self, key: str) -> Table:
         contract = self._source.table(key)
         identifier = self._source.table_identifier(key)
+        metadata_retention = metadata_retention_for_table(self._contracts, identifier)
         expected_location = source_table_storage_uri(self._settings, self._source, key)
         expected_spec = partition_spec(contract.columns, contract.partitioning)
         if self._catalog.table_exists(identifier.iceberg):
             table = self._catalog.load_table(identifier.iceberg)
+            table = reconcile_metadata_retention(table, metadata_retention)
         else:
+            properties = {
+                "format-version": "2",
+                "write.format.default": "parquet",
+                "write.parquet.compression-codec": "zstd",
+                **iceberg_metadata_retention_properties(metadata_retention),
+            }
             table = self._catalog.create_table(
                 identifier=identifier.iceberg,
                 schema=iceberg_schema(contract.columns),
                 location=expected_location,
                 partition_spec=expected_spec,
-                properties={
-                    "format-version": "2",
-                    "write.format.default": "parquet",
-                    "write.parquet.compression-codec": "zstd",
-                },
+                properties=properties,
             )
         validate_table_location(table, expected_location, owner="ArXiv landing")
         if table.spec() != expected_spec:

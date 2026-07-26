@@ -41,8 +41,10 @@ def build_maintenance_plan(
     policy_contracts = {(policy.namespace, policy.name): policy for policy in contracts.policies}
     plan: list[MaintenancePlanItem] = []
     for table in sorted(discover_tables(catalog), key=lambda item: item.iceberg):
+        iceberg_table = catalog.load_table(table.iceberg)
         statements = maintenance_statements(
             table,
+            iceberg_table,
             trino_catalog,
             policy_client.applicable_policies(table),
             policy_contracts,

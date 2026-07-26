@@ -58,8 +58,8 @@ namespace ownership. Per-table locations are not repeated in YAML.
 Requirements: Docker with Compose v2, [uv](https://docs.astral.sh/uv/), and an active
 AIStor license saved as the ignored local file `minio.license`.
 Compose modules consistently follow `compose.<module>.yaml`: `core` is the required data plane,
-while `prefect` is the optional orchestration overlay. The BI plane is intentionally absent until
-Lightdash is added as a real service.
+while `prefect` and the read-only `ocr-review` application are optional overlays. The BI plane is
+intentionally absent until Lightdash is added as a real service.
 
 ```bash
 make setup
@@ -74,6 +74,17 @@ The core data plane exposes only loopback ports:
 - AIStor S3 API/console: `localhost:9000` / `localhost:9001`
 - Polaris API/management health: `localhost:8181` / `localhost:8182`
 - Trino: `localhost:8080`
+
+To review imported OCR pages and their canonical elements without starting Prefect:
+
+```bash
+make up-ocr-review
+make smoke-ocr-review
+```
+
+OCR Review is available at `localhost:8501`. It queries Iceberg through short-lived Trino
+connections and resolves immutable artifacts through their verified manifests; the UI never lists
+bucket paths or constructs storage keys.
 
 The generic application CLI has been removed. Operational entrypoints are the domain-owned Prefect
 flows, so scheduling, parameters, retries, task history, and notifications follow one path. Add
@@ -104,13 +115,15 @@ uv run dbt test \
 
 Set `LAKEHOUSE_KAGGLE__USERNAME` and `LAKEHOUSE_KAGGLE__API_TOKEN` in `.env` before
 enabling ArXiv OCR. Run the manual `gov_arxiv_ocr_resources` deployment once after each runner
-or pinned-model revision change. It reconciles a private runner Dataset and two private Kaggle
-Models, creating a new immutable version only when that resource's desired identity changes.
+dependency-lock, or pinned-model revision change. It reconciles separate private runner and
+offline-runtime Datasets plus two private Kaggle Models, creating a new immutable version only
+when that resource's desired identity changes. OCR jobs install exclusively from the verified
+runtime cache; they do not fall back to downloading Python dependencies.
 The OCR deployment's 20-minute schedule is deployed paused by default; metadata ingestion does not
 require Kaggle credentials.
 
-Prefect is then available at `localhost:4200`. BI services are not deployed by the current Compose
-stack. When Lightdash is added, it
+Prefect is then available at `localhost:4200`; the full stack also exposes OCR Review at
+`localhost:8501`. A BI service is not deployed by the current Compose stack. When Lightdash is added, it
 should consume only public analytics marts and dbt metadata, not landing or curated tables directly.
 
 GitHub ingestion runs hourly at minute 15 UTC. A single transformation deployment runs at

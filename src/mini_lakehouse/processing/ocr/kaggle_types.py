@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from mini_lakehouse.processing.ocr.core.protocol import OcrJob
 
-KaggleResourceName = Literal["runner", "model", "layout_model"]
+KaggleResourceName = Literal["runner", "runtime", "model", "layout_model"]
 KaggleResourceKind = Literal["dataset", "model"]
 KaggleResourceAction = Literal["created", "updated", "unchanged"]
 
@@ -150,6 +150,7 @@ class KaggleOcrResourceReferences(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     runner: KaggleResourceReference
+    runtime: KaggleResourceReference
     model: KaggleResourceReference
     layout_model: KaggleResourceReference
 
@@ -158,6 +159,8 @@ class KaggleOcrResourceReferences(BaseModel):
         if (
             self.runner.name != "runner"
             or self.runner.kind != "dataset"
+            or self.runtime.name != "runtime"
+            or self.runtime.kind != "dataset"
             or self.model.name != "model"
             or self.model.kind != "model"
             or self.layout_model.name != "layout_model"

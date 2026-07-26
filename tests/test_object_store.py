@@ -2,6 +2,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import cast
 
+import pytest
 from fsspec.spec import AbstractFileSystem
 
 from mini_lakehouse.config.settings import StorageSettings
@@ -14,13 +15,16 @@ class _NonClosingBytesIO(BytesIO):
 
 
 class _Filesystem:
-    def __init__(self, *, exists: bool = False) -> None:
+    def __init__(self, *, exists: bool = False, content: bytes = b"") -> None:
         self.object_exists = exists
+        self.content = content
         self.calls: list[tuple[str, str]] = []
         self.written = _NonClosingBytesIO()
 
     def open(self, destination: str, mode: str) -> BytesIO:
         self.calls.append((destination, mode))
+        if mode == "rb":
+            return BytesIO(self.content)
         if self.object_exists:
             raise FileExistsError(destination)
         return self.written
@@ -58,3 +62,12 @@ def test_concurrent_raw_upload_is_an_idempotent_noop(tmp_path: Path) -> None:
     archive.write_bytes(b"archive")
 
     assert store.upload_if_absent(archive, "s3://landing/archive.json.gz") is False
+
+
+def test_bounded_object_read_rejects_oversized_content() -> None:
+    store = _store(_Filesystem(content=b"artifact"))
+
+    assert store.read_bytes("s3://curated/artifact", max_bytes=8) == b"artifact"
+
+    with pytest.raises(ValueError, match="read limit"):
+        store.read_bytes("s3://curated/artifact", max_bytes=7)

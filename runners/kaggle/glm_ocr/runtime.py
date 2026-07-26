@@ -660,6 +660,15 @@ def run(
     layout_model_source: str,
 ) -> None:
     batch_started_at = time.perf_counter()
+    log_stage(
+        "batch_started",
+        batch_started_at,
+        batch_id=job.batch_id,
+        document_count=len(job.documents),
+        enforce_eager=job.inference.enforce_eager,
+        max_num_seqs=job.inference.max_num_seqs,
+        max_workers=job.inference.max_workers,
+    )
     output_directory.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="glm-ocr-") as raw_temp:
         temp = Path(raw_temp)

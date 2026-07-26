@@ -24,6 +24,8 @@ def render_launcher(
     *,
     job: OcrJob,
     runner_dataset_source: str,
+    runtime_dataset_source: str,
+    runtime_identity_sha256: str,
     model_source: str,
     layout_model_source: str,
 ) -> str:
@@ -34,12 +36,15 @@ def render_launcher(
         "import sys\n\n"
         "import kagglehub\n\n"
         f"SOURCE = Path(kagglehub.dataset_download({runner_dataset_source!r}))\n"
+        f"RUNTIME = Path(kagglehub.dataset_download({runtime_dataset_source!r}))\n"
         "sys.path.insert(0, str(SOURCE))\n"
         "from bootstrap import main\n\n"
         "main(\n"
         f"    job_json={job.model_dump_json()!r},\n"
         "    source=SOURCE,\n"
         f"    expected_bundle_sha256={job.runner_bundle_sha256!r},\n"
+        "    runtime=RUNTIME,\n"
+        f"    expected_runtime_sha256={runtime_identity_sha256!r},\n"
         f"    model_source={model_source!r},\n"
         f"    layout_model_source={layout_model_source!r},\n"
         ")\n"
@@ -85,6 +90,8 @@ class KaggleProvider:
             render_launcher(
                 job=job,
                 runner_dataset_source=resources.runner.source,
+                runtime_dataset_source=resources.runtime.source,
+                runtime_identity_sha256=resources.runtime.identity_sha256,
                 model_source=resources.model.source,
                 layout_model_source=resources.layout_model.source,
             ),
@@ -101,7 +108,8 @@ class KaggleProvider:
             "enable_internet": True,
             "docker_image_pinning_type": "original",
             "dataset_sources": [
-                self._settings.dataset_slug(self._processor.runner.runner_dataset_name)
+                self._settings.dataset_slug(self._processor.runner.runner_dataset_name),
+                self._settings.dataset_slug(self._processor.runner.runtime_dataset_name),
             ],
             "competition_sources": [],
             "kernel_sources": [],

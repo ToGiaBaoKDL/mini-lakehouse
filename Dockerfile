@@ -29,6 +29,20 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 CMD ["python", "-m", "mini_lakehouse.platform.validate"]
 
+FROM base AS ocr-review-dependencies
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --extra ocr-review --no-install-project
+
+FROM ocr-review-dependencies AS ocr-review
+COPY --from=project-wheel /dist /dist
+COPY contracts ./contracts
+COPY apps ./apps
+COPY .streamlit ./.streamlit
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python /app/.venv/bin/python --no-deps /dist/*.whl
+
+CMD ["streamlit", "run", "apps/ocr_review/app.py"]
+
 FROM base AS orchestration-dependencies
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --extra orchestration --no-install-project

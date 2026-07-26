@@ -1,0 +1,38 @@
+# Optional read-only OCR inspection surface. Always combine with compose.core.yaml.
+
+services:
+  ocr-review:
+    image: mini-lakehouse-ocr-review:local
+    build:
+      context: .
+      target: ocr-review
+    depends_on:
+      trino:
+        condition: service_healthy
+    env_file:
+      - ./infra/config/platform.container.env
+      - ./infra/config/ocr-review.container.env
+    environment:
+      LAKEHOUSE_ENVIRONMENT: ${LAKEHOUSE_ENVIRONMENT:-local}
+      LAKEHOUSE_LOG_LEVEL: ${LAKEHOUSE_LOG_LEVEL:-INFO}
+      LAKEHOUSE_STORAGE__ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      LAKEHOUSE_STORAGE__SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      LAKEHOUSE_STORAGE__REGION: ${LAKEHOUSE_STORAGE__REGION:-us-east-1}
+      LAKEHOUSE_STORAGE__PATH_STYLE_ACCESS: "${LAKEHOUSE_STORAGE__PATH_STYLE_ACCESS:-true}"
+      LAKEHOUSE_STORAGE__CURATED_URI: ${LAKEHOUSE_STORAGE__CURATED_URI:-s3://curated}
+      LAKEHOUSE_TRINO__CATALOG: ${LAKEHOUSE_POLARIS__CATALOG_NAME:-prod}
+    ports:
+      - "127.0.0.1:8501:8501"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request as u; u.urlopen('http://localhost:8501/_stcore/health', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped

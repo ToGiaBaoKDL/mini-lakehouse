@@ -70,10 +70,7 @@ class ArxivOcrService:
         self._runner_bundle = KaggleRunnerBundle.load()
         if provider is not None and provider.runner_bundle_sha256 != self._runner_bundle.sha256:
             raise ValueError("Injected Kaggle provider uses a different runner bundle")
-        self._configuration_hash = config_hash(
-            self._processor,
-            runner_bundle_sha256=self._runner_bundle.sha256,
-        )
+        self._configuration_hash = config_hash(self._processor)
         self._executor = executor
         self._table_manager = table_manager or CuratedTableManager(
             settings,
@@ -95,7 +92,7 @@ class ArxivOcrService:
         arxiv_ids: tuple[str, ...] = (),
         batch_size: int | None = None,
     ) -> OcrCycleResult:
-        limit = batch_size or self._processor.batch.max_documents
+        limit = self._processor.batch.max_documents if batch_size is None else batch_size
         if limit < 1 or limit > self._processor.batch.max_documents:
             raise ValueError(
                 f"OCR batch_size must be between 1 and {self._processor.batch.max_documents}"

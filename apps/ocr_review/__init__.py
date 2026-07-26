@@ -1,0 +1,1 @@
+"""Streamlit OCR review application."""

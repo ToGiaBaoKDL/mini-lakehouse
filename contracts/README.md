@@ -12,10 +12,11 @@ file with strict Pydantic models before making a network or storage call.
 - `curated_products/*.yaml`: canonical curated product owner, upstream sources, keys, stable field
   IDs, partitions, and schemas.
 - `processors/*.yaml`: external processing owner, pinned model revisions, output protocol,
-  resource limits, artifact prefix, runner, and retry policy.
+  resource limits, artifact prefix, runner/runtime resources, and retry policy.
 - `domains/*.yaml`: analytics-domain owner, upstream curated products, mart grain, partitioning,
   and public relation registry.
-- `policies/*.yaml`: one Polaris policy per file, including typed content and attachments.
+- `policies/*.yaml`: one Polaris policy per file, including typed content, attachments, bounded
+  maintenance execution, and per-tier Iceberg metadata retention.
 
 Runtime endpoints and credentials do not belong here. They remain in environment variables or a
 secret manager. dbt SQL, model tests, and future BI metadata remain in native dbt files.
@@ -41,6 +42,17 @@ Polaris allows engine-specific keys in policy `config`, but this project intenti
 only fields that its Trino maintenance runner can enforce. Unsupported fields fail validation
 instead of being silently ignored.
 
+Each tier's metadata-compaction policy is also the source of truth for
+`write.metadata.delete-after-commit.enabled` and `write.metadata.previous-versions-max`. Table
+creation maps those values to PyIceberg or Trino syntax, while scheduled maintenance reconciles
+existing tables only when the persisted properties have drifted. Snapshot and orphan retention
+remain separate policies because they control data recovery and garbage collection rather than
+metadata-version history.
+
+dbt cannot load the platform contract during Jinja parsing, so its project variables contain the
+engine-native analytics projection. A cross-layer contract test requires that projection to equal
+the analytics policy and fails CI on drift.
+
 Platform reconciliation safely creates or updates desired policy bodies and mappings. The `mlh-`
 prefix is reserved for this repository. Removing stale managed policies is a separate, explicit
 plan/apply operation; normal deployment never deletes them.
@@ -58,7 +70,10 @@ plan/apply operation; normal deployment never deletes them.
 6. Add convention-named EL and TL DAGs that co-locate their Prefect tasks; prefer explicit
    schedules over cross-deployment event sensors when a fixed source SLA exists.
 7. Add `processors/<processor>.yaml` only when compute leaves the lakehouse runtime; pin every
-   output-affecting model/config and keep provider credentials in the environment.
+   output-affecting model/config and keep provider credentials in the environment. Bump
+   `adapter_version` whenever parsing or canonicalization code changes; ports, retries,
+   concurrency, memory allocation, eager execution, and resource packaging are operational and
+   must not invalidate successful outputs.
 8. Declare the curated product as a dbt source; keep dbt staging/intermediate models ephemeral.
 9. Reference the product from each consuming analytics domain contract.
 10. Attach the tier policy; change its name when changing targets so stale mappings are prunable.

@@ -15,6 +15,13 @@ flags:
   send_anonymous_usage_stats: false
   require_certificate_validation: true
 
+vars:
+  # dbt cannot import the platform contract at parse time. A cross-layer test
+  # requires this engine projection to match the analytics metadata policy.
+  iceberg_metadata_retention:
+    delete_after_commit: true
+    previous_versions_max: 30
+
 models:
   mini_lakehouse_analytics:
     +persist_docs:

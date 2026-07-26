@@ -11,7 +11,6 @@ content:
     target_file_size_bytes: 134217728
 execution:
   partition_field: source_hour
-  partition_type: timestamptz
   lookback_days: 2
 targets:
   - type: table-like

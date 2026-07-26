@@ -32,6 +32,7 @@ def test_compose_modules_are_clean_clone_safe() -> None:
 
     assert [path.name for path in compose_files] == [
         "compose.core.yaml",
+        "compose.ocr-review.yaml",
         "compose.prefect.yaml",
     ]
     for compose_file in compose_files:
@@ -47,11 +48,14 @@ def test_compose_modules_are_clean_clone_safe() -> None:
 def test_tracked_container_environment_contains_routing_but_no_secrets() -> None:
     platform = Path("infra/config/platform.container.env").read_text(encoding="utf-8")
     orchestration = Path("infra/config/orchestration.container.env").read_text(encoding="utf-8")
-    environment = f"{platform}\n{orchestration}"
+    review = Path("infra/config/ocr-review.container.env").read_text(encoding="utf-8")
+    environment = f"{platform}\n{orchestration}\n{review}"
 
     assert "LAKEHOUSE_POLARIS__URI=http://polaris:8181/api/catalog" in platform
     assert "LAKEHOUSE_TRINO__HOST=trino" not in platform
     assert "LAKEHOUSE_TRINO__HOST=trino" in orchestration
+    assert "LAKEHOUSE_TRINO__HOST=trino" in review
+    assert "LAKEHOUSE_TRINO__USER=ocr-review" in review
     assert "LAKEHOUSE_POLARIS__URI" not in orchestration
     assert "ACCESS_KEY=" not in environment
     assert "SECRET_KEY=" not in environment
@@ -81,7 +85,6 @@ def test_docs_do_not_reference_removed_dashboard_stack() -> None:
     for path in docs:
         content = path.read_text(encoding="utf-8")
         assert "compose.dashboard.yaml" not in content
-        assert "Streamlit" not in content
 
 
 def test_external_service_images_are_version_pinned() -> None:
@@ -108,8 +111,39 @@ def test_each_local_image_has_one_compose_build_owner() -> None:
 
     assert build_owners == {
         "mini-lakehouse:local": ["compose.core.yaml:platform-reconcile"],
+        "mini-lakehouse-ocr-review:local": ["compose.ocr-review.yaml:ocr-review"],
         "mini-lakehouse-orchestration:local": ["compose.prefect.yaml:prefect-worker"],
     }
+
+
+def test_restart_policies_match_service_lifecycle() -> None:
+    services: dict[str, dict[str, Any]] = {}
+    for path in sorted(Path.cwd().glob("compose*.yaml")):
+        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+        services.update(payload.get("services", {}))
+
+    long_running = {
+        "postgres",
+        "object-store",
+        "polaris",
+        "trino",
+        "redis",
+        "prefect-server",
+        "prefect-services",
+        "prefect-worker",
+        "ocr-review",
+    }
+    one_shot = {
+        "object-store-provision",
+        "polaris-bootstrap",
+        "platform-reconcile",
+        "prefect-reconcile",
+        "prefect-deploy",
+    }
+
+    assert long_running | one_shot == set(services)
+    assert all(services[name].get("restart") == "unless-stopped" for name in long_running)
+    assert all(services[name].get("restart") == "no" for name in one_shot)
 
 
 def test_application_base_images_are_version_pinned() -> None:
@@ -132,6 +166,7 @@ def test_generic_application_cli_is_absent() -> None:
 def test_container_environment_files_follow_service_ownership() -> None:
     core = yaml.safe_load(Path("compose.core.yaml").read_text(encoding="utf-8"))
     prefect = yaml.safe_load(Path("compose.prefect.yaml").read_text(encoding="utf-8"))
+    review = yaml.safe_load(Path("compose.ocr-review.yaml").read_text(encoding="utf-8"))
 
     assert core["services"]["platform-reconcile"]["env_file"] == [
         "./infra/config/platform.container.env"
@@ -139,6 +174,10 @@ def test_container_environment_files_follow_service_ownership() -> None:
     assert prefect["x-lakehouse-runtime"]["env_file"] == [
         "./infra/config/platform.container.env",
         "./infra/config/orchestration.container.env",
+    ]
+    assert review["services"]["ocr-review"]["env_file"] == [
+        "./infra/config/platform.container.env",
+        "./infra/config/ocr-review.container.env",
     ]
     runtime_environment = prefect["x-lakehouse-runtime"]["environment"]
     for setting in (
@@ -196,9 +235,12 @@ def test_makefile_is_the_local_operations_entrypoint() -> None:
         "build:",
         "build-core:",
         "build-orchestration:",
+        "build-ocr-review:",
         "start-core:",
+        "start-ocr-review:",
         "start:",
         "up-core:",
+        "up-ocr-review:",
         "up:",
         "down:",
         "clean:",
@@ -209,6 +251,7 @@ def test_makefile_is_the_local_operations_entrypoint() -> None:
         "logs-follow:",
         "smoke-core:",
         "smoke-prefect:",
+        "smoke-ocr-review:",
         "smoke:",
         "wait-prefect-deploy:",
         "prefect-deployments:",
@@ -220,10 +263,12 @@ def test_makefile_is_the_local_operations_entrypoint() -> None:
         assert target in makefile
     assert "--project-name $(PROJECT_NAME)" in makefile
     assert "CORE_RUN := COMPOSE_IGNORE_ORPHANS=true $(CORE_COMPOSE)" in makefile
+    assert "OCR_REVIEW_RUN := COMPOSE_IGNORE_ORPHANS=true $(OCR_REVIEW_COMPOSE)" in makefile
     assert "THIRD_PARTY_SERVICES :=" in makefile
     assert "pull $(THIRD_PARTY_SERVICES)" in makefile
     assert "$(MAKE) build-core" in makefile
     assert "$(MAKE) build-orchestration" in makefile
+    assert "$(MAKE) build-ocr-review" in makefile
     assert "up -d --no-build --remove-orphans --wait" in makefile
     assert 'exit_code="$$(docker wait "$$container_id")"' in makefile
     assert "down --volumes --remove-orphans" in makefile

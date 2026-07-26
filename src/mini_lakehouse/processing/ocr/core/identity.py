@@ -27,19 +27,27 @@ def canonical_json_sha256(value: Any) -> str:
 
 def config_hash(
     processor: ProcessorContract,
-    *,
-    runner_bundle_sha256: str,
 ) -> str:
-    """Hash only settings that can alter one document's canonical output."""
+    """Hash canonical output semantics, excluding execution and delivery tuning.
+
+    ``adapter_version`` owns changes to parsing/normalization code. The explicit
+    inference fields below may alter generated content. Ports, timeouts, memory
+    allocation, concurrency, eager execution, and runner packaging affect only
+    how that output is produced and therefore must not invalidate existing OCR.
+    """
     payload = {
         "adapter": processor.adapter,
         "adapter_version": processor.adapter_version,
-        "inference": processor.inference.model_dump(mode="json"),
+        "inference": {
+            "dtype": processor.inference.dtype,
+            "layout_device": processor.inference.layout_device,
+            "max_model_len": processor.inference.max_model_len,
+            "speculative_tokens": processor.inference.speculative_tokens,
+        },
         "layout_model": processor.layout_model.model_dump(mode="json"),
         "model": processor.model.model_dump(mode="json"),
         "output_schema_version": processor.output_schema_version,
     }
-    payload["runner_bundle_sha256"] = runner_bundle_sha256
     return canonical_json_sha256(payload)
 
 

@@ -12,6 +12,8 @@ from mini_lakehouse.config.settings import StorageSettings
 class ObjectStore(Protocol):
     def exists(self, uri: str) -> bool: ...
 
+    def read_bytes(self, uri: str, *, max_bytes: int) -> bytes: ...
+
     def sha256(self, uri: str) -> str: ...
 
     def upload(self, source: Path, destination_uri: str) -> None: ...
@@ -50,6 +52,16 @@ class FsspecObjectStore:
 
     def exists(self, uri: str) -> bool:
         return bool(self._filesystem.exists(self._path(uri)))
+
+    def read_bytes(self, uri: str, *, max_bytes: int) -> bytes:
+        if max_bytes < 1:
+            raise ValueError("max_bytes must be positive")
+        with self._filesystem.open(self._path(uri), "rb") as raw_input_file:
+            input_file = cast(BinaryIO, raw_input_file)
+            content = input_file.read(max_bytes + 1)
+        if len(content) > max_bytes:
+            raise ValueError(f"Object exceeds the {max_bytes}-byte read limit: {uri}")
+        return content
 
     def sha256(self, uri: str) -> str:
         digest = hashlib.sha256()

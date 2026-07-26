@@ -1,16 +1,26 @@
-from typing import cast
+from typing import Any, cast
+from unittest.mock import create_autospec
 
 import pytest
 from pyiceberg.catalog import Catalog
+from pyiceberg.partitioning import PartitionField, PartitionSpec
+from pyiceberg.schema import Schema
+from pyiceberg.table import Table
+from pyiceberg.transforms import HourTransform, IdentityTransform, MonthTransform, Transform
+from pyiceberg.types import DateType, IcebergType, NestedField, TimestamptzType
 
 from mini_lakehouse.contracts import TableIdentifier, load_contracts
-from mini_lakehouse.contracts.policies import policy_content_json
+from mini_lakehouse.contracts.policies import (
+    MetadataCompactionPolicyContract,
+    policy_content_json,
+)
 from mini_lakehouse.platform.maintenance import build_maintenance_plan
 from mini_lakehouse.platform.polaris import PolarisPolicyClient
 from mini_lakehouse.platform.policies import (
     PolarisPolicy,
     maintenance_statements,
 )
+from mini_lakehouse.storage.iceberg import iceberg_metadata_retention_properties
 
 
 def _target_applies(table: TableIdentifier, target_type: str, path: tuple[str, ...]) -> bool:
@@ -41,6 +51,33 @@ def _policy_contracts() -> dict[tuple[tuple[str, ...], str], object]:
     return {(policy.namespace, policy.name): policy for policy in load_contracts().policies}
 
 
+def _partitioned_table(
+    field_name: str,
+    field_type: IcebergType,
+    transform: Transform[Any, Any],
+    properties: dict[str, str] | None = None,
+) -> Table:
+    table = create_autospec(Table, instance=True)
+    table.schema.return_value = Schema(
+        NestedField(
+            field_id=1,
+            name=field_name,
+            field_type=field_type,
+            required=False,
+        )
+    )
+    table.spec.return_value = PartitionSpec(
+        PartitionField(
+            source_id=1,
+            field_id=1000,
+            transform=transform,
+            name=f"{field_name}_partition",
+        )
+    )
+    table.properties = properties or {}
+    return table
+
+
 def test_maintenance_contract_is_isolated_by_lifecycle_tier() -> None:
     specs = load_contracts().policies
 
@@ -67,13 +104,16 @@ def test_polaris_policies_compile_to_safe_trino_maintenance() -> None:
 
     assert maintenance_statements(
         table,
+        _partitioned_table("activity_date", DateType(), MonthTransform()),
         "prod",
         _policies(table),
         _policy_contracts(),
     ) == (
         'ALTER TABLE "prod"."analytics.engineering"."fct_repository_activity_daily" '
+        "SET PROPERTIES delete_after_commit_enabled = true, max_previous_versions = 30",
+        'ALTER TABLE "prod"."analytics.engineering"."fct_repository_activity_daily" '
         "EXECUTE optimize(file_size_threshold => '128MB') WHERE \"activity_date\" "
-        ">= current_date - INTERVAL '30' DAY",
+        ">= CAST(date_trunc('month', current_date - INTERVAL '30' DAY) AS date)",
         'ALTER TABLE "prod"."analytics.engineering"."fct_repository_activity_daily" '
         "EXECUTE optimize_manifests",
         'ALTER TABLE "prod"."analytics.engineering"."fct_repository_activity_daily" '
@@ -83,6 +123,63 @@ def test_polaris_policies_compile_to_safe_trino_maintenance() -> None:
     )
 
 
+def test_hour_partition_compaction_aligns_the_timestamp_boundary() -> None:
+    table = TableIdentifier(("landing",), "github_archive_events_raw")
+
+    statements = maintenance_statements(
+        table,
+        _partitioned_table("source_hour", TimestamptzType(), HourTransform()),
+        "prod",
+        _policies(table),
+        _policy_contracts(),
+    )
+
+    assert statements[1] == (
+        'ALTER TABLE "prod"."landing"."github_archive_events_raw" '
+        "EXECUTE optimize(file_size_threshold => '128MB') WHERE \"source_hour\" "
+        ">= date_trunc('hour', current_timestamp - INTERVAL '2' DAY)"
+    )
+
+
+def test_identity_partition_compaction_keeps_the_exact_date_boundary() -> None:
+    table = TableIdentifier(("curated", "github"), "events")
+
+    statements = maintenance_statements(
+        table,
+        _partitioned_table("event_date_utc", DateType(), IdentityTransform()),
+        "prod",
+        _policies(table),
+        _policy_contracts(),
+    )
+
+    assert statements[1].endswith("WHERE \"event_date_utc\" >= current_date - INTERVAL '7' DAY")
+
+
+def test_current_metadata_retention_does_not_generate_a_redundant_commit() -> None:
+    table = TableIdentifier(("curated", "github"), "events")
+    policy = next(
+        spec
+        for spec in load_contracts().policies
+        if isinstance(spec, MetadataCompactionPolicyContract) and spec.namespace == ("curated",)
+    )
+    iceberg_table = _partitioned_table(
+        "event_date_utc",
+        DateType(),
+        IdentityTransform(),
+        iceberg_metadata_retention_properties(policy.retention),
+    )
+
+    statements = maintenance_statements(
+        table,
+        iceberg_table,
+        "prod",
+        _policies(table),
+        _policy_contracts(),
+    )
+
+    assert not any(" SET PROPERTIES " in statement for statement in statements)
+
+
 def test_duplicate_policy_type_is_rejected() -> None:
     table = TableIdentifier(("curated", "github"), "events")
     policies = _policies(table)
@@ -90,6 +187,7 @@ def test_duplicate_policy_type_is_rejected() -> None:
     with pytest.raises(ValueError, match="Multiple maintenance policies"):
         maintenance_statements(
             table,
+            _partitioned_table("event_date_utc", DateType(), IdentityTransform()),
             "prod",
             [*policies, policies[0]],
             _policy_contracts(),
@@ -114,6 +212,11 @@ class _Catalog:
         }
         return tables.get(namespace, [])
 
+    def load_table(self, identifier: tuple[str, ...]) -> Table:
+        if identifier[0] == "analytics":
+            return _partitioned_table("activity_date", DateType(), MonthTransform())
+        return _partitioned_table("event_date_utc", DateType(), IdentityTransform())
+
 
 class _PolicyClient:
     def applicable_policies(self, table: TableIdentifier) -> list[PolarisPolicy]:
@@ -132,4 +235,4 @@ def test_maintenance_plan_discovers_nested_tables_without_an_allowlist() -> None
         '"prod"."analytics.engineering"."fct_repository_activity_daily"',
         '"prod"."curated.github"."events"',
     ]
-    assert all(len(item.statements) == 4 for item in plan)
+    assert all(len(item.statements) == 5 for item in plan)

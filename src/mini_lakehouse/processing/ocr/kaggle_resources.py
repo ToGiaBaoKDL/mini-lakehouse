@@ -23,6 +23,11 @@ from mini_lakehouse.processing.ocr.kaggle_bundle import (
     ModelResourceManifest,
     RunnerResourceManifest,
 )
+from mini_lakehouse.processing.ocr.kaggle_runtime import (
+    KaggleRuntimeDatasetResource,
+    RuntimeCacheBuilder,
+    UvRuntimeCacheBuilder,
+)
 from mini_lakehouse.processing.ocr.kaggle_types import (
     KaggleOcrResourceReferences,
     KaggleResourceAction,
@@ -301,6 +306,7 @@ class KaggleOcrResourceManager:
         *,
         bundle: KaggleRunnerBundle | None = None,
         snapshots: ModelSnapshotClient | None = None,
+        runtime_builder: RuntimeCacheBuilder | None = None,
         readiness_attempts: int = 36,
         readiness_delay_seconds: float = 5,
         sleeper: Callable[[float], None] = time.sleep,
@@ -311,6 +317,7 @@ class KaggleOcrResourceManager:
                 "LAKEHOUSE_KAGGLE__API_TOKEN"
             )
         runner_bundle = bundle or KaggleRunnerBundle.load()
+        runner_source = Path("runners/kaggle/glm_ocr")
         model_targets = processor.runner.model_resources
         snapshot_client = snapshots or HuggingFaceSnapshotClient()
         self._resources: dict[KaggleResourceName, ManagedKaggleResource] = {
@@ -318,6 +325,12 @@ class KaggleOcrResourceManager:
                 settings.dataset_slug(processor.runner.runner_dataset_name),
                 runner_bundle,
                 client,
+            ),
+            "runtime": KaggleRuntimeDatasetResource(
+                dataset_slug=settings.dataset_slug(processor.runner.runtime_dataset_name),
+                runner_source=runner_source,
+                client=client,
+                builder=runtime_builder or UvRuntimeCacheBuilder(runner_source=runner_source),
             ),
             "model": KaggleModelResource(
                 name="model",
@@ -349,6 +362,7 @@ class KaggleOcrResourceManager:
     def resolve_all(self) -> KaggleOcrResourceReferences:
         return KaggleOcrResourceReferences(
             runner=self._reconciler.resolve(self._resources["runner"]),
+            runtime=self._reconciler.resolve(self._resources["runtime"]),
             model=self._reconciler.resolve(self._resources["model"]),
             layout_model=self._reconciler.resolve(self._resources["layout_model"]),
         )

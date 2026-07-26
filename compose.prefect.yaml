@@ -58,6 +58,7 @@ x-prefect-server-environment: &prefect-server-environment
 services:
   redis:
     image: redis:8.8.0
+    restart: unless-stopped
     volumes:
       - redis-data:/data
     healthcheck:
@@ -68,6 +69,7 @@ services:
 
   prefect-server:
     image: *prefect-image
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy

@@ -20,7 +20,13 @@ from mini_lakehouse.contracts import (
     partition_spec,
 )
 from mini_lakehouse.platform.runtime import source_table_storage_uri
-from mini_lakehouse.storage.iceberg import load_iceberg_catalog, validate_table_location
+from mini_lakehouse.storage.iceberg import (
+    iceberg_metadata_retention_properties,
+    load_iceberg_catalog,
+    metadata_retention_for_table,
+    reconcile_metadata_retention,
+    validate_table_location,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,11 +46,14 @@ class GithubArchiveRepository:
         self._settings = settings
         self._owned_catalog = catalog is None
         self._catalog = catalog or load_iceberg_catalog(settings)
-        self._source = (contracts or load_contracts(settings.contracts_dir)).source(
-            "github_archive"
-        )
+        platform_contracts = contracts or load_contracts(settings.contracts_dir)
+        self._source = platform_contracts.source("github_archive")
         self._table_contract = self._source.table("events_raw")
         self._identifier = self._source.table_identifier("events_raw")
+        self._metadata_retention = metadata_retention_for_table(
+            platform_contracts,
+            self._identifier,
+        )
         self._location = source_table_storage_uri(settings, self._source, "events_raw")
         self._schema = iceberg_schema(self._table_contract.columns)
         self._partition_spec = partition_spec(
@@ -67,18 +76,21 @@ class GithubArchiveRepository:
     def ensure_table(self) -> Table:
         if self._catalog.table_exists(self._identifier.iceberg):
             table = self._catalog.load_table(self._identifier.iceberg)
+            table = reconcile_metadata_retention(table, self._metadata_retention)
             self._validate_table(table)
             return table
+        properties = {
+            "format-version": "2",
+            "write.format.default": "parquet",
+            "write.parquet.compression-codec": "zstd",
+            **iceberg_metadata_retention_properties(self._metadata_retention),
+        }
         table = self._catalog.create_table(
             identifier=self._identifier.iceberg,
             schema=self._schema,
             location=self._location,
             partition_spec=self._partition_spec,
-            properties={
-                "format-version": "2",
-                "write.format.default": "parquet",
-                "write.parquet.compression-codec": "zstd",
-            },
+            properties=properties,
         )
         self._validate_table(table)
         return table

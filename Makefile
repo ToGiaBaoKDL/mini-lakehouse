@@ -5,13 +5,16 @@ SHELL := /bin/sh
 PROJECT_NAME ?= mini-lakehouse
 CORE_COMPOSE := docker compose --project-name $(PROJECT_NAME) -f compose.core.yaml
 CORE_RUN := COMPOSE_IGNORE_ORPHANS=true $(CORE_COMPOSE)
-COMPOSE := $(CORE_COMPOSE) -f compose.prefect.yaml
+OCR_REVIEW_COMPOSE := $(CORE_COMPOSE) -f compose.ocr-review.yaml
+OCR_REVIEW_RUN := COMPOSE_IGNORE_ORPHANS=true $(OCR_REVIEW_COMPOSE)
+COMPOSE := $(CORE_COMPOSE) -f compose.prefect.yaml -f compose.ocr-review.yaml
 THIRD_PARTY_SERVICES := postgres object-store object-store-provision polaris-bootstrap polaris trino \
 	redis prefect-server
 
 .PHONY: help setup preflight config validate lint test check pull build build-core \
-	build-orchestration start-core start up-core up down restart clean reset ps \
-	ps-all logs logs-follow smoke-core smoke-prefect smoke wait-prefect-deploy prefect-deployments \
+	build-orchestration build-ocr-review start-core start-ocr-review start up-core \
+	up-ocr-review up down restart clean reset ps ps-all logs logs-follow smoke-core \
+	smoke-prefect smoke-ocr-review smoke wait-prefect-deploy prefect-deployments \
 	prefect-deploy platform-reconcile policy-prune-plan policy-prune-apply
 
 help: ## Show the available project commands.
@@ -55,6 +58,7 @@ pull: preflight ## Pull all pinned third-party service images.
 build: ## Build local images sequentially to keep peak resource usage bounded.
 	$(MAKE) build-core
 	$(MAKE) build-orchestration
+	$(MAKE) build-ocr-review
 
 build-core: preflight ## Build only the local core runtime image.
 	$(CORE_COMPOSE) build platform-reconcile
@@ -62,8 +66,14 @@ build-core: preflight ## Build only the local core runtime image.
 build-orchestration: preflight ## Build only the local orchestration image.
 	$(COMPOSE) build prefect-worker
 
+build-ocr-review: preflight ## Build only the read-only OCR review image.
+	$(OCR_REVIEW_COMPOSE) build ocr-review
+
 start-core: preflight ## Start core services from existing images without building.
 	$(CORE_COMPOSE) up -d --no-build --remove-orphans --wait --wait-timeout 300
+
+start-ocr-review: preflight ## Start core services and OCR Review from existing images.
+	$(OCR_REVIEW_RUN) up -d --no-build --wait --wait-timeout 300
 
 start: preflight ## Start all services from existing images without building.
 	$(COMPOSE) up -d --no-build --remove-orphans --wait --wait-timeout 300
@@ -72,6 +82,11 @@ start: preflight ## Start all services from existing images without building.
 up-core: ## Build and start only the core data plane.
 	$(MAKE) build-core
 	$(MAKE) start-core
+
+up-ocr-review: ## Build and start the core data plane plus OCR Review.
+	$(MAKE) build-core
+	$(MAKE) build-ocr-review
+	$(MAKE) start-ocr-review
 
 up: ## Build and start the complete local stack.
 	$(MAKE) build
@@ -115,7 +130,10 @@ smoke-core: preflight ## Read-only health and catalog verification for the core 
 smoke-prefect: preflight ## Verify the optional Prefect control plane.
 	@curl --fail --silent http://localhost:4200/api/health >/dev/null
 
-smoke: smoke-core smoke-prefect ## Verify the complete stack.
+smoke-ocr-review: preflight ## Verify the optional OCR Review application.
+	@curl --fail --silent http://localhost:8501/_stcore/health >/dev/null
+
+smoke: smoke-core smoke-prefect smoke-ocr-review ## Verify the complete stack.
 
 wait-prefect-deploy: preflight ## Wait for Prefect deployment registration.
 	@container_id="$$( $(COMPOSE) ps --all --quiet prefect-deploy )"; \

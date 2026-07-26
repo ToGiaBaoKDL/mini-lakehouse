@@ -8,6 +8,7 @@ x-polaris-database: &polaris-database
 services:
   postgres:
     image: postgres:18.4
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-lakehouse}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lakehouse}
@@ -23,6 +24,7 @@ services:
 
   object-store:
     image: quay.io/minio/aistor/minio:RELEASE.2026-06-06T02-44-06Z
+    restart: unless-stopped
     command:
       - minio
       - server
@@ -83,6 +85,7 @@ services:
 
   polaris:
     image: apache/polaris:1.6.0
+    restart: unless-stopped
     depends_on:
       polaris-bootstrap:
         condition: service_completed_successfully
@@ -141,6 +144,7 @@ services:
 
   trino:
     image: trinodb/trino:483
+    restart: unless-stopped
     depends_on:
       platform-reconcile:
         condition: service_completed_successfully

@@ -10,6 +10,10 @@ from mini_lakehouse.contracts import (
 from mini_lakehouse.contracts.curated_products import CuratedTableContract
 from mini_lakehouse.platform.runtime import namespace_table_storage_uri
 from mini_lakehouse.platform.trino import SqlExecutor
+from mini_lakehouse.storage.iceberg import (
+    metadata_retention_for_table,
+    trino_metadata_retention_properties,
+)
 
 
 class CuratedTableManager:
@@ -20,9 +24,8 @@ class CuratedTableManager:
         contracts: PlatformContracts | None = None,
     ) -> None:
         self._settings = settings
-        self._product = (contracts or load_contracts(settings.contracts_dir)).curated_product(
-            product_name
-        )
+        self._contracts = contracts or load_contracts(settings.contracts_dir)
+        self._product = self._contracts.curated_product(product_name)
 
     def _relation(self, table: CuratedTableContract) -> str:
         return self._product.table_identifier(table.key).trino(self._settings.trino.catalog)
@@ -48,6 +51,14 @@ class CuratedTableManager:
             "format = 'PARQUET'",
             "format_version = 2",
         ]
+        retention = metadata_retention_for_table(
+            self._contracts,
+            self._product.table_identifier(table.key),
+        )
+        properties.extend(
+            f"{name} = {value}"
+            for name, value in trino_metadata_retention_properties(retention).items()
+        )
         if table.partitioning:
             values = ", ".join(
                 f"'{partition_expression(partition)}'" for partition in table.partitioning
@@ -97,6 +108,16 @@ class CuratedTableManager:
                 raise RuntimeError(
                     f"Curated table {relation} is missing partition expression {expression!r}"
                 )
+        retention = metadata_retention_for_table(
+            self._contracts,
+            self._product.table_identifier(table.key),
+        )
+        retention_properties = trino_metadata_retention_properties(retention)
+        if not all(f"{name} = {value}" in ddl for name, value in retention_properties.items()):
+            assignments = ", ".join(
+                f"{name} = {value}" for name, value in retention_properties.items()
+            )
+            executor.execute(f"ALTER TABLE {relation} SET PROPERTIES {assignments}")
 
     @staticmethod
     def _describe_columns(

@@ -5,6 +5,7 @@ from typing import cast
 import yaml
 
 from mini_lakehouse.contracts import load_contracts, partition_expression
+from mini_lakehouse.contracts.policies import MetadataCompactionPolicyContract
 
 
 def _yaml(path: str) -> dict[str, object]:
@@ -64,6 +65,19 @@ def test_dbt_engineering_marts_match_the_domain_contract() -> None:
     assert marts["+on_table_exists"] == "replace"
     assert engineering["+schema"] == ".".join(domain.analytics_namespace)
 
+    retention_policy = next(
+        policy
+        for policy in load_contracts().policies
+        if isinstance(policy, MetadataCompactionPolicyContract)
+        and policy.namespace == ("analytics",)
+    )
+    project_vars = cast(dict[str, object], project_file["vars"])
+    dbt_retention = cast(dict[str, object], project_vars["iceberg_metadata_retention"])
+    assert dbt_retention == {
+        "delete_after_commit": retention_policy.retention.delete_after_commit,
+        "previous_versions_max": retention_policy.retention.previous_versions_max,
+    }
+
 
 def test_dbt_does_not_use_groups_for_current_scope() -> None:
     assert not Path("dbt/analytics/models/_groups.yml").exists()
@@ -98,6 +112,8 @@ def test_dbt_sql_uses_explicit_projection_and_namespace_owned_locations() -> Non
     assert "LAKEHOUSE_STORAGE__ANALYTICS_URI" not in macro
     assert "split(" not in macro
     assert "expected_schema = 'analytics.' ~ domain" in macro
+    assert "'delete_after_commit_enabled'" in macro
+    assert "'max_previous_versions'" in macro
 
     trino_catalog = Path("infra/trino/etc/catalog/prod.properties").read_text(encoding="utf-8")
     assert "iceberg.unique-table-location=false" in trino_catalog

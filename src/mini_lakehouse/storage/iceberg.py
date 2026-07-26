@@ -1,10 +1,19 @@
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 
 from pyiceberg.catalog import Catalog, load_catalog
 from pyiceberg.table import Table
 
 from mini_lakehouse.config.settings import Settings
-from mini_lakehouse.contracts import TableIdentifier
+from mini_lakehouse.contracts import PlatformContracts, TableIdentifier
+from mini_lakehouse.contracts.policies import (
+    MetadataCompactionPolicyContract,
+    MetadataRetentionContract,
+)
+
+ICEBERG_DELETE_AFTER_COMMIT = "write.metadata.delete-after-commit.enabled"
+ICEBERG_PREVIOUS_VERSIONS_MAX = "write.metadata.previous-versions-max"
+TRINO_DELETE_AFTER_COMMIT = "delete_after_commit_enabled"
+TRINO_PREVIOUS_VERSIONS_MAX = "max_previous_versions"
 
 
 def iceberg_catalog_properties(settings: Settings) -> dict[str, str]:
@@ -51,6 +60,68 @@ def validate_table_location(table: Table, expected: str, *, owner: str) -> None:
         raise RuntimeError(
             f"{owner} table location drifted; expected {canonical!r}, found {actual!r}"
         )
+
+
+def metadata_retention_for_table(
+    contracts: PlatformContracts,
+    table: TableIdentifier,
+) -> MetadataRetentionContract:
+    policies = [
+        policy
+        for policy in contracts.policies
+        if isinstance(policy, MetadataCompactionPolicyContract)
+        and any(
+            target.type == "catalog"
+            or (target.type == "namespace" and table.namespace[: len(target.path)] == target.path)
+            or (target.type == "table-like" and table.iceberg == target.path)
+            for target in policy.targets
+        )
+    ]
+    if len(policies) != 1:
+        raise ValueError(
+            f"Table {table.iceberg!r} must have exactly one metadata retention policy; "
+            f"found {len(policies)}"
+        )
+    return policies[0].retention
+
+
+def iceberg_metadata_retention_properties(
+    retention: MetadataRetentionContract,
+) -> dict[str, str]:
+    return {
+        ICEBERG_DELETE_AFTER_COMMIT: str(retention.delete_after_commit).lower(),
+        ICEBERG_PREVIOUS_VERSIONS_MAX: str(retention.previous_versions_max),
+    }
+
+
+def trino_metadata_retention_properties(
+    retention: MetadataRetentionContract,
+) -> dict[str, str]:
+    return {
+        TRINO_DELETE_AFTER_COMMIT: str(retention.delete_after_commit).lower(),
+        TRINO_PREVIOUS_VERSIONS_MAX: str(retention.previous_versions_max),
+    }
+
+
+def metadata_retention_is_current(
+    properties: Mapping[str, str],
+    retention: MetadataRetentionContract,
+) -> bool:
+    expected = iceberg_metadata_retention_properties(retention)
+    return all(str(properties.get(key, "")).lower() == value for key, value in expected.items())
+
+
+def reconcile_metadata_retention(
+    table: Table,
+    retention: MetadataRetentionContract,
+) -> Table:
+    if metadata_retention_is_current(table.properties, retention):
+        return table
+    table.transaction().set_properties(
+        iceberg_metadata_retention_properties(retention)
+    ).commit_transaction()
+    table.refresh()
+    return table
 
 
 def walk_namespaces(catalog: Catalog) -> Iterator[tuple[str, ...]]:

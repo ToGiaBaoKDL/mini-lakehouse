@@ -117,7 +117,20 @@ class ArxivOcrRepository:
         if limit < 1 or limit > processor.batch.max_documents:
             raise ValueError("OCR candidate limit exceeds the processor batch contract")
         identifiers = ""
-        parameters: list[Any] = [configuration_hash, processor.retry.max_document_attempts]
+        parameters: list[Any] = [
+            configuration_hash,
+            processor.model.repository,
+            processor.model.revision,
+            processor.layout_model.repository,
+            processor.layout_model.revision,
+            processor.adapter_version,
+            processor.output_schema_version,
+            processor.inference.dtype,
+            processor.inference.max_model_len,
+            processor.inference.speculative_tokens,
+            processor.inference.layout_device,
+            processor.retry.max_document_attempts,
+        ]
         if arxiv_ids:
             identifiers = f"AND paper.arxiv_id IN ({', '.join('?' for _ in arxiv_ids)})"
             parameters.extend(arxiv_ids)
@@ -157,6 +170,40 @@ class ArxivOcrRepository:
                     WHERE document.config_hash = ?
                 )
                 WHERE attempt_rank = 1
+            ),
+            compatible_success AS (
+                SELECT DISTINCT
+                    document.arxiv_id,
+                    document.source_record_sha256
+                FROM {self._relation("ocr_document_runs")} AS document
+                JOIN {self._relation("ocr_batches")} AS batch
+                  ON batch.batch_id = document.batch_id
+                WHERE document.state = 'succeeded'
+                  AND document.model_repository = ?
+                  AND document.model_revision = ?
+                  AND document.layout_model_repository = ?
+                  AND document.layout_model_revision = ?
+                  AND document.adapter_version = ?
+                  AND json_extract_scalar(
+                        batch.job_json,
+                        '$.output_schema_version'
+                      ) = ?
+                  AND CASE json_extract_scalar(batch.job_json, '$.inference.dtype')
+                        WHEN 'half' THEN 'float16'
+                        ELSE json_extract_scalar(batch.job_json, '$.inference.dtype')
+                      END = ?
+                  AND CAST(
+                        json_extract_scalar(batch.job_json, '$.inference.max_model_len')
+                        AS bigint
+                      ) = ?
+                  AND CAST(
+                        json_extract_scalar(batch.job_json, '$.inference.speculative_tokens')
+                        AS integer
+                      ) = ?
+                  AND json_extract_scalar(
+                        batch.job_json,
+                        '$.inference.layout_device'
+                      ) = ?
             )
             SELECT
                 paper.arxiv_id,
@@ -168,8 +215,12 @@ class ArxivOcrRepository:
             LEFT JOIN latest_document AS document
               ON document.arxiv_id = paper.arxiv_id
              AND document.source_record_sha256 = paper.source_record_sha256
+            LEFT JOIN compatible_success AS success
+              ON success.arxiv_id = paper.arxiv_id
+             AND success.source_record_sha256 = paper.source_record_sha256
             WHERE NOT paper.is_deleted
               AND paper.pdf_url IS NOT NULL
+              AND success.arxiv_id IS NULL
               AND (
                     document.request_id IS NULL
                     OR (

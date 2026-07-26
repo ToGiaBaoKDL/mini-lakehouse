@@ -12,6 +12,9 @@ from mini_lakehouse.platform.trino import QueryResult, SqlExecutor
 
 
 class _TestTableManager(CuratedTableManager):
+    def create_table_sql(self, table: CuratedTableContract) -> str:
+        return self._create_table_sql(table)
+
     def validate_table(
         self,
         executor: SqlExecutor,
@@ -26,9 +29,11 @@ class _SchemaExecutor:
         columns: tuple[tuple[str, str], ...],
         *,
         expected_location: str,
+        include_retention: bool = True,
     ) -> None:
         self.columns = list(columns)
         self.expected_location = expected_location
+        self.include_retention = include_retention
         self.calls: list[str] = []
 
     def execute(
@@ -40,13 +45,18 @@ class _SchemaExecutor:
         self.calls.append(statement)
         if statement.startswith("DESCRIBE"):
             return QueryResult(columns=("Column", "Type"), rows=tuple(self.columns))
-        if statement.startswith("ALTER TABLE"):
+        if statement.startswith("ALTER TABLE") and " ADD COLUMN " in statement:
             self.columns.append(("job_json", "varchar"))
             return QueryResult(columns=(), rows=())
         if statement.startswith("SHOW CREATE TABLE"):
+            retention = (
+                "\ndelete_after_commit_enabled = true,\nmax_previous_versions = 30"
+                if self.include_retention
+                else ""
+            )
             return QueryResult(
                 columns=("Create Table",),
-                rows=((f"location = '{self.expected_location}'",),),
+                rows=((f"location = '{self.expected_location}'{retention}",),),
             )
         return QueryResult(columns=(), rows=())
 
@@ -112,3 +122,27 @@ def test_curated_table_manager_rejects_existing_type_drift() -> None:
         manager.validate_table(executor, table)
 
     assert not any(statement.startswith("ALTER TABLE") for statement in executor.calls)
+
+
+def test_curated_table_ddl_and_reconciliation_share_metadata_retention() -> None:
+    contracts = load_contracts()
+    table = contracts.curated_product("arxiv").table("ocr_batches")
+    manager = _TestTableManager(Settings(), "arxiv", contracts)
+    columns = tuple((column.name, trino_type(column)) for column in table.columns)
+    executor = _SchemaExecutor(
+        columns,
+        expected_location="s3://curated/arxiv/ocr_batches",
+        include_retention=False,
+    )
+
+    ddl = manager.create_table_sql(table)
+    manager.validate_table(executor, table)
+
+    assert "delete_after_commit_enabled = true" in ddl
+    assert "max_previous_versions = 30" in ddl
+    assert any(
+        statement.endswith(
+            "SET PROPERTIES delete_after_commit_enabled = true, max_previous_versions = 30"
+        )
+        for statement in executor.calls
+    )

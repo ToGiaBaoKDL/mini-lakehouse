@@ -1,0 +1,20 @@
+[theme]
+primaryColor = "#B7F34A"
+backgroundColor = "#08110C"
+secondaryBackgroundColor = "#111D16"
+textColor = "#F2F7EF"
+linkColor = "#B7F34A"
+baseRadius = "large"
+buttonRadius = "full"
+showWidgetBorder = true
+base = "dark"
+
+[server]
+address = "0.0.0.0"
+port = 8501
+headless = true
+runOnSave = false
+fileWatcherType = "none"
+
+[browser]
+gatherUsageStats = false

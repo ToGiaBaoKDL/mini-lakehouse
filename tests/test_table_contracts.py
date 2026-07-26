@@ -14,6 +14,10 @@ from mini_lakehouse.config.settings import Settings
 from mini_lakehouse.contracts import TableIdentifier, load_contracts, partition_spec
 from mini_lakehouse.platform.runtime import source_table_storage_uri
 from mini_lakehouse.sources.github_archive.repository import GithubArchiveRepository
+from mini_lakehouse.storage.iceberg import (
+    ICEBERG_DELETE_AFTER_COMMIT,
+    ICEBERG_PREVIOUS_VERSIONS_MAX,
+)
 
 
 def _events_partition_spec() -> PartitionSpec:
@@ -150,6 +154,32 @@ def test_new_landing_table_uses_its_source_owned_location() -> None:
     assert result is table
     assert catalog.create_table.call_args.kwargs["location"] == (
         "s3://landing/api/github_archive/tables/events_raw"
+    )
+    assert (
+        catalog.create_table.call_args.kwargs["properties"][ICEBERG_DELETE_AFTER_COMMIT] == "true"
+    )
+    assert (
+        catalog.create_table.call_args.kwargs["properties"][ICEBERG_PREVIOUS_VERSIONS_MAX] == "30"
+    )
+
+
+def test_existing_landing_table_reconciles_metadata_retention_once() -> None:
+    catalog = create_autospec(Catalog, instance=True)
+    table = create_autospec(Table, instance=True)
+    catalog.table_exists.return_value = True
+    catalog.load_table.return_value = table
+    table.location.return_value = _events_location()
+    table.spec.return_value = _events_partition_spec()
+    table.properties = {}
+    repository = GithubArchiveRepository(Settings(), catalog=catalog)
+
+    repository.ensure_table()
+
+    table.transaction.return_value.set_properties.assert_called_once_with(
+        {
+            ICEBERG_DELETE_AFTER_COMMIT: "true",
+            ICEBERG_PREVIOUS_VERSIONS_MAX: "30",
+        }
     )
 
 
