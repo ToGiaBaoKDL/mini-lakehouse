@@ -21,7 +21,7 @@ layout_model:
   revision: 97d101e6db2642e162a1d05392d1b0231c91033e
 
 batch:
-  max_documents: 4
+  max_documents: 2
   max_pdf_bytes: 104857600
   max_pages_per_document: 500
   max_output_bytes: 1073741824

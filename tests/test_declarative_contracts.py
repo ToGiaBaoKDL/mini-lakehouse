@@ -32,7 +32,7 @@ def test_repository_contracts_form_a_valid_registry() -> None:
         "api/arxiv/tables/oai_records_raw"
     )
     assert arxiv_processor.runner.runner_dataset_name == "mini-lakehouse-arxiv-glm-ocr-runner"
-    assert arxiv_processor.batch.max_documents == 4
+    assert arxiv_processor.batch.max_documents == 2
     assert arxiv_processor.runner.model_resources.model.name == "mini-lakehouse-glm-ocr"
     assert (
         arxiv_processor.runner.model_resources.layout_model.name == "mini-lakehouse-pp-doclayout-v3"

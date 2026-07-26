@@ -27,6 +27,7 @@ import yaml
 import zstandard
 from glmocr import GlmOcr
 from glmocr.config import GlmOcrConfig
+from progress import GlmOcrPageProgress
 
 from mini_lakehouse.processing.ocr.core.files import file_sha256
 from mini_lakehouse.processing.ocr.core.identity import (
@@ -336,18 +337,41 @@ def successful_result(
     parser: GlmOcr,
     work_root: Path,
     output_root: Path,
+    *,
+    document_count: int,
+    document_index: int,
+    started_at: float,
 ) -> OcrDocumentResult:
-    started_at = time.perf_counter()
     pdf = work_root / "source.pdf"
     pdf_hash, pdf_size = download_pdf(request, pdf, job.limits.max_pdf_bytes)
     pages = pdf_page_count(pdf, job.limits.max_pages_per_document)
+    log_stage(
+        "document_loaded",
+        started_at,
+        arxiv_id=request.arxiv_id,
+        document_count=document_count,
+        document_index=document_index,
+        page_count=pages,
+        pdf_size_bytes=pdf_size,
+        request_id=request.request_id,
+    )
     current_processing_id = processing_id(
         arxiv_id=request.arxiv_id,
         pdf_sha256=pdf_hash,
         configuration_hash=job.config_hash,
     )
     try:
-        parsed = parser.parse(pdf, save_layout_visualization=True)
+        with GlmOcrPageProgress(
+            parser,
+            arxiv_id=request.arxiv_id,
+            document_count=document_count,
+            document_index=document_index,
+            page_count=pages,
+            request_id=request.request_id,
+            started_at=started_at,
+            emit=log_stage,
+        ):
+            parsed = parser.parse(pdf, save_layout_visualization=True)
     except Exception as error:
         raise DocumentError("ocr_inference_failed", str(error), retryable=True) from error
 
@@ -400,6 +424,8 @@ def successful_result(
         "document_succeeded",
         started_at,
         arxiv_id=request.arxiv_id,
+        document_count=document_count,
+        document_index=document_index,
         page_count=pages,
         request_id=request.request_id,
     )
@@ -668,6 +694,7 @@ def run(
         enforce_eager=job.inference.enforce_eager,
         max_num_seqs=job.inference.max_num_seqs,
         max_workers=job.inference.max_workers,
+        arxiv_ids=[request.arxiv_id for request in job.documents],
     )
     output_directory.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="glm-ocr-") as raw_temp:
@@ -699,10 +726,19 @@ def run(
             with GlmOcr(
                 config_path=str(config_path), layout_device=job.inference.layout_device
             ) as parser:
-                for request in job.documents:
+                document_count = len(job.documents)
+                for document_index, request in enumerate(job.documents, start=1):
                     document_started_at = time.perf_counter()
                     document_work = temp / "work" / request.request_id
                     document_work.mkdir(parents=True)
+                    log_stage(
+                        "document_started",
+                        document_started_at,
+                        arxiv_id=request.arxiv_id,
+                        document_count=document_count,
+                        document_index=document_index,
+                        request_id=request.request_id,
+                    )
                     try:
                         result = successful_result(
                             job,
@@ -710,6 +746,9 @@ def run(
                             parser,
                             document_work,
                             extracted,
+                            document_count=document_count,
+                            document_index=document_index,
+                            started_at=document_started_at,
                         )
                     except DocumentError as error:
                         persist_vllm_diagnostic(
@@ -724,6 +763,8 @@ def run(
                             "document_failed",
                             document_started_at,
                             arxiv_id=request.arxiv_id,
+                            document_count=document_count,
+                            document_index=document_index,
                             error_code=error.code,
                             request_id=request.request_id,
                         )
@@ -745,10 +786,21 @@ def run(
                             "document_failed",
                             document_started_at,
                             arxiv_id=request.arxiv_id,
+                            document_count=document_count,
+                            document_index=document_index,
                             error_code="unexpected_runner_error",
                             request_id=request.request_id,
                         )
                     results.append(result)
+                    log_stage(
+                        "batch_progress",
+                        batch_started_at,
+                        batch_id=job.batch_id,
+                        completed_documents=len(results),
+                        document_count=document_count,
+                        failed_documents=sum(item.state != "succeeded" for item in results),
+                        succeeded_documents=sum(item.state == "succeeded" for item in results),
+                    )
         except Exception as error:
             persist_vllm_diagnostic(
                 output_directory,

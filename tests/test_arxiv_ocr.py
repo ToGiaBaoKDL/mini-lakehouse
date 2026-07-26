@@ -1193,7 +1193,7 @@ def test_ocr_cycle_uses_the_declared_hard_batch_limit() -> None:
     )
 
     assert service.run_once().action == "idle"
-    assert repository.limit == 4
+    assert repository.limit == 2
     assert repository.arxiv_ids == ()
 
 
@@ -1208,7 +1208,7 @@ def test_ocr_cycle_passes_every_explicit_identifier_without_truncating() -> None
     )
 
     assert service.run_once(arxiv_ids=("2607.00001", "2607.00002")).action == "idle"
-    assert repository.limit == 4
+    assert repository.limit == 2
     assert repository.arxiv_ids == ("2607.00001", "2607.00002")
 
 
@@ -1221,8 +1221,8 @@ def test_ocr_cycle_rejects_more_explicit_ids_than_one_complete_batch() -> None:
         object_store=cast(Any, _NoopObjectStore()),
     )
 
-    with pytest.raises(ValueError, match="at most 4 unique arxiv_ids"):
-        service.run_once(arxiv_ids=tuple(f"2607.{number:05d}" for number in range(1, 6)))
+    with pytest.raises(ValueError, match="at most 2 unique arxiv_ids"):
+        service.run_once(arxiv_ids=tuple(f"2607.{number:05d}" for number in range(1, 4)))
 
 
 def test_ocr_cycle_prepares_durable_state_before_remote_submission() -> None:

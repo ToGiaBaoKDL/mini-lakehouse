@@ -16,6 +16,7 @@ RUNNER_MANIFEST_NAME = "resource_manifest.json"
 MODEL_MANIFEST_NAME = "mini_lakehouse_resource.json"
 RUNNER_FILES = (
     "bootstrap.py",
+    "progress.py",
     "runtime.py",
     "pyproject.toml",
     "uv.lock",
