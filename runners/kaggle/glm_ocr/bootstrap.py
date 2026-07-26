@@ -227,6 +227,7 @@ def main(
                 str(project),
                 "--frozen",
                 "--no-dev",
+                "--no-build",
                 "--offline",
                 "--link-mode",
                 "hardlink",

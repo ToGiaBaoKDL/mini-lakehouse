@@ -25,7 +25,8 @@ RUNTIME_MANIFEST_NAME = "runtime_manifest.json"
 RUNTIME_CACHE_ARCHIVE_NAME = "uv-cache.zip"
 RUNTIME_PYTHON = "3.12"
 RUNTIME_PYTHON_ABI = "cp312"
-RUNTIME_PLATFORM = "x86_64-manylinux_2_28"
+# Oldest Linux ABI shared by every pinned wheel and the Kaggle runtime.
+RUNTIME_PLATFORM = "x86_64-manylinux_2_31"
 RUNTIME_UV_VERSION = "0.11.30"
 
 
@@ -40,7 +41,7 @@ class RuntimeResourceManifest(BaseModel):
     lock_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     python: Literal["3.12"]
     python_abi: Literal["cp312"]
-    platform: Literal["x86_64-manylinux_2_28"]
+    platform: Literal["x86_64-manylinux_2_31"]
     uv_version: str = Field(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")
     cache_archive: Literal["uv-cache.zip"]
     cache_archive_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -139,6 +140,7 @@ class UvRuntimeCacheBuilder:
             str(project),
             "--frozen",
             "--no-dev",
+            "--no-build",
             "--python",
             RUNTIME_PYTHON,
             "--python-platform",
