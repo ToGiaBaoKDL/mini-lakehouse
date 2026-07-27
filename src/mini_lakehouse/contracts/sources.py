@@ -1,82 +1,30 @@
-from typing import Annotated, Literal
+from typing import Literal
 
 from pydantic import Field, model_validator
 
 from mini_lakehouse.contracts.base import (
-    ColumnContract,
     ContactContract,
     ContractModel,
     ContractName,
     Identifier,
-    PartitionTransformContract,
     validate_relative_prefix,
 )
-from mini_lakehouse.contracts.identifiers import TableIdentifier
+from mini_lakehouse.contracts.tables import ManagedIcebergTableContract, TableIdentifier
 
 
-class HourlyPartitionCheckpoint(ContractModel):
-    kind: Literal["hourly_partition"]
+class CheckpointContract(ContractModel):
+    kind: Literal[
+        "hourly_partition",
+        "daily_partition",
+        "timestamp",
+        "cursor",
+        "offset",
+    ]
     field: Identifier
 
 
-class DailyPartitionCheckpoint(ContractModel):
-    kind: Literal["daily_partition"]
-    field: Identifier
-
-
-class TimestampCheckpoint(ContractModel):
-    kind: Literal["timestamp"]
-    field: Identifier
-
-
-class CursorCheckpoint(ContractModel):
-    kind: Literal["cursor"]
-    field: Identifier
-
-
-class OffsetCheckpoint(ContractModel):
-    kind: Literal["offset"]
-    field: Identifier
-
-
-type CheckpointContract = Annotated[
-    HourlyPartitionCheckpoint
-    | DailyPartitionCheckpoint
-    | TimestampCheckpoint
-    | CursorCheckpoint
-    | OffsetCheckpoint,
-    Field(discriminator="kind"),
-]
-
-
-class SourceTableContract(ContractModel):
-    key: ContractName
-    name: Identifier
+class SourceTableContract(ManagedIcebergTableContract):
     schema_version: int = Field(ge=1)
-    columns: tuple[ColumnContract, ...] = Field(min_length=1)
-    partitioning: tuple[PartitionTransformContract, ...] = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def validate_table(self) -> "SourceTableContract":
-        column_names = [column.name for column in self.columns]
-        field_ids = [column.field_id for column in self.columns]
-        if len(column_names) != len(set(column_names)):
-            raise ValueError(f"Table {self.name!r} column names must be unique")
-        if len(field_ids) != len(set(field_ids)) or any(field_id < 1 for field_id in field_ids):
-            raise ValueError(f"Table {self.name!r} field IDs must be unique positive integers")
-        partition_fields = [partition.field for partition in self.partitioning]
-        if len(partition_fields) != len(set(partition_fields)):
-            raise ValueError(f"Table {self.name!r} partition fields must be unique")
-        unknown_partition_fields = set(partition_fields) - set(column_names)
-        if unknown_partition_fields:
-            raise ValueError(
-                f"Table {self.name!r} partitions by unknown columns "
-                f"{sorted(unknown_partition_fields)!r}"
-            )
-        partition_names = [partition.name for partition in self.partitioning if partition.name]
-        if len(partition_names) != len(set(partition_names)):
-            raise ValueError(f"Table {self.name!r} partition names must be unique")
-        return self
 
 
 class SourceContract(ContractModel):

@@ -12,6 +12,7 @@ type ContractName = Annotated[
     StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$"),
 ]
 type StorageTier = Literal["landing", "curated", "analytics"]
+LIFECYCLE_TIERS: tuple[StorageTier, ...] = ("landing", "curated", "analytics")
 type NamespacePath = tuple[Identifier, ...]
 type LogicalType = Literal["string", "long", "boolean", "timestamptz", "date"]
 

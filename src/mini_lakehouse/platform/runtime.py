@@ -37,12 +37,12 @@ def source_table_storage_uri(
     table_key: str,
 ) -> str:
     """Canonical physical location for a table in the shared landing namespace."""
-    landing_root = settings.storage.landing_uri.rstrip("/")
+    landing_root = storage_uri(settings, "landing").rstrip("/")
     return f"{landing_root}/{source.table_storage_prefix(table_key)}"
 
 
 def validate_runtime_contract(settings: Settings, contracts: PlatformContracts) -> None:
-    contract_catalog = contracts.catalog.catalog.name
+    contract_catalog = contracts.platform.catalog.name
     configured_catalogs = {
         settings.polaris.catalog_name,
         settings.trino.catalog,

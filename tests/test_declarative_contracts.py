@@ -1,12 +1,14 @@
+import shutil
 from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from mini_lakehouse.contracts import iceberg_schema, load_contracts
-from mini_lakehouse.contracts.catalog import CatalogContract
-from mini_lakehouse.contracts.policies import DataCompactionPolicyContract
+from mini_lakehouse.contracts.maintenance import MaintenanceContract
+from mini_lakehouse.contracts.platform import PlatformContract
 from mini_lakehouse.contracts.registry import PlatformContracts
 from mini_lakehouse.contracts.sources import SourceContract
 
@@ -16,10 +18,10 @@ def test_repository_contracts_form_a_valid_registry() -> None:
     arxiv_source = contracts.source("arxiv")
     arxiv_processor = contracts.processor("arxiv_glm_ocr")
 
-    assert contracts.catalog.catalog.name == "prod"
+    assert contracts.platform.catalog.name == "prod"
     assert {
         namespace.storage_root
-        for namespace in contracts.catalog.namespaces
+        for namespace in contracts.platform.namespaces
         if namespace.storage_root is not None
     } == {"landing", "curated", "analytics"}
     assert contracts.source("github_archive").table_identifier("events_raw").iceberg == (
@@ -60,41 +62,93 @@ def test_repository_contracts_form_a_valid_registry() -> None:
     assert all(
         ocr_batch_columns[name].required for name in ("job_json", "provider", "provider_reference")
     )
-    assert (
-        contracts.domain("engineering").table_identifier("repository_activity_daily").trino("prod")
-        == '"prod"."analytics.engineering"."fct_repository_activity_daily"'
-    )
-    assert contracts.domain("engineering").table("repository_activity_daily").grain == (
-        "activity_date",
-        "repository_id",
-    )
+    engineering = contracts.domain("engineering")
+    assert engineering.analytics_namespace == ("analytics", "engineering")
+    assert "tables" not in type(engineering).model_fields
 
 
-def test_policy_contract_rejects_content_the_trino_runner_would_ignore() -> None:
+def test_contract_layout_has_one_file_per_platform_concern() -> None:
+    contract_files = {
+        path.relative_to("contracts").as_posix() for path in Path("contracts").rglob("*.yaml")
+    }
+
+    assert contract_files == {
+        "access.yaml",
+        "curated/arxiv.yaml",
+        "curated/github.yaml",
+        "domains/engineering.yaml",
+        "maintenance.yaml",
+        "platform.yaml",
+        "processors/arxiv_glm_ocr.yaml",
+        "sources/arxiv.yaml",
+        "sources/github_archive.yaml",
+    }
+    assert not Path("contracts/catalog.yaml").exists()
+    assert not Path("contracts/curated_products").exists()
+    assert not Path("contracts/policies").exists()
+
+
+def test_entity_contract_collections_can_start_empty(tmp_path: Path) -> None:
+    root = tmp_path / "contracts"
+    shutil.copytree("contracts", root)
+    for folder in ("sources", "curated", "processors", "domains"):
+        for contract_file in (root / folder).glob("*.yaml"):
+            contract_file.unlink()
+    maintenance_path = root / "maintenance.yaml"
+    maintenance = yaml.safe_load(maintenance_path.read_text(encoding="utf-8"))
+    for tier in maintenance["tiers"]:
+        tier["optimizations"] = []
+    maintenance_path.write_text(yaml.safe_dump(maintenance), encoding="utf-8")
+
+    contracts = load_contracts(root)
+
+    assert contracts.sources == ()
+    assert contracts.curated == ()
+    assert contracts.processors == ()
+    assert contracts.domains == ()
+
+
+def test_maintenance_contract_rejects_unknown_optimization_fields() -> None:
     with pytest.raises(ValidationError, match="compaction_strategy"):
-        DataCompactionPolicyContract.model_validate(
+        MaintenanceContract.model_validate(
             {
                 "version": 1,
-                "name": "compact",
-                "namespace": ["curated"],
-                "owner": "data-platform",
-                "policy_type": "system.data-compaction",
-                "description": "Compaction",
-                "content": {
-                    "version": "2025-02-03",
-                    "enable": True,
-                    "config": {
-                        "target_file_size_bytes": 134217728,
-                        "compaction_strategy": "bin-pack",
-                    },
-                },
-                "targets": [{"type": "namespace", "path": ["curated"]}],
+                "tiers": [
+                    {
+                        "tier": tier,
+                        "owner": "data-platform",
+                        "metadata_retention": {
+                            "delete_after_commit": True,
+                            "previous_versions_max": 30,
+                        },
+                        "snapshot_max_age_days": 14,
+                        "orphan_file_max_age_days": 30,
+                        "optimizations": (
+                            [
+                                {
+                                    "name": "compact",
+                                    "target": {
+                                        "type": "namespace",
+                                        "path": [tier],
+                                    },
+                                    "partition_field": "event_date",
+                                    "lookback_days": 7,
+                                    "target_file_size_bytes": 134217728,
+                                    "compaction_strategy": "bin-pack",
+                                }
+                            ]
+                            if tier == "curated"
+                            else []
+                        ),
+                    }
+                    for tier in ("landing", "curated", "analytics")
+                ],
             }
         )
 
 
 def test_contract_loader_rejects_duplicate_yaml_keys(tmp_path: Path) -> None:
-    (tmp_path / "catalog.yaml").write_text(
+    (tmp_path / "platform.yaml").write_text(
         "version: 1\nversion: 1\n",
         encoding="utf-8",
     )
@@ -104,7 +158,7 @@ def test_contract_loader_rejects_duplicate_yaml_keys(tmp_path: Path) -> None:
 
 
 def test_contract_loader_rejects_secret_like_keys(tmp_path: Path) -> None:
-    (tmp_path / "catalog.yaml").write_text(
+    (tmp_path / "platform.yaml").write_text(
         "version: 1\ncredential: do-not-commit\n",
         encoding="utf-8",
     )
@@ -168,6 +222,7 @@ def test_registry_accepts_a_second_source_family_without_core_code_changes() -> 
                 {
                     "key": "orders",
                     "name": "warehouse_raw_orders",
+                    "description": "Raw warehouse order updates.",
                     "schema_version": 1,
                     "columns": [
                         {
@@ -178,7 +233,13 @@ def test_registry_accepts_a_second_source_family_without_core_code_changes() -> 
                             "description": "Source update checkpoint.",
                         }
                     ],
-                    "partitioning": [{"field": "updated_at", "transform": "day"}],
+                    "partitioning": [
+                        {
+                            "field_id": 1000,
+                            "field": "updated_at",
+                            "transform": "day",
+                        }
+                    ],
                 }
             ],
         },
@@ -197,16 +258,16 @@ def _registry_payload() -> dict[str, Any]:
 
 
 def test_contract_models_reject_unknown_fields() -> None:
-    payload = _registry_payload()["catalog"]
+    payload = _registry_payload()["platform"]
     payload["unmanaged_setting"] = True
 
     with pytest.raises(ValidationError, match="unmanaged_setting"):
-        CatalogContract.model_validate(payload)
+        PlatformContract.model_validate(payload)
 
 
 @pytest.mark.parametrize(
     "collection",
-    ["sources", "curated_products", "processors", "domains", "policies"],
+    ["sources", "curated", "processors", "domains"],
 )
 def test_registry_rejects_duplicate_owned_contracts(collection: str) -> None:
     payload = _registry_payload()
@@ -216,14 +277,10 @@ def test_registry_rejects_duplicate_owned_contracts(collection: str) -> None:
         PlatformContracts.model_validate(payload)
 
 
-def test_registry_rejects_analytics_policy_partition_drift() -> None:
+def test_registry_rejects_managed_table_policy_partition_drift() -> None:
     payload = _registry_payload()
-    analytics_compaction = next(
-        policy
-        for policy in payload["policies"]
-        if policy["name"] == "mlh-analytics-engineering-compact-data-files"
-    )
-    analytics_compaction["execution"]["partition_field"] = "source_hour"
+    landing = next(tier for tier in payload["maintenance"]["tiers"] if tier["tier"] == "landing")
+    landing["optimizations"][0]["partition_field"] = "activity_date"
 
     with pytest.raises(ValidationError, match="bounds optimize by"):
         PlatformContracts.model_validate(payload)
@@ -238,25 +295,38 @@ def test_source_contract_rejects_duplicate_table_identifiers() -> None:
 
 
 def test_catalog_rejects_namespaces_outside_lifecycle_roots() -> None:
-    payload = _registry_payload()["catalog"]
+    payload = _registry_payload()["platform"]
     payload["namespaces"] = (
         *payload["namespaces"],
         {
             "path": ("sandbox",),
+            "storage_root": "landing",
             "owner": "data-platform",
             "description": "Invalid lifecycle root.",
         },
     )
 
-    with pytest.raises(ValidationError, match="outside a lifecycle root"):
-        CatalogContract.model_validate(payload)
+    with pytest.raises(ValidationError, match="lifecycle roots"):
+        PlatformContract.model_validate(payload)
 
 
-def test_source_checkpoint_is_a_discriminated_union() -> None:
+def test_maintenance_contract_requires_each_tier_once() -> None:
+    payload = _registry_payload()["maintenance"]
+    payload["tiers"] = (
+        payload["tiers"][0],
+        payload["tiers"][0],
+        payload["tiers"][2],
+    )
+
+    with pytest.raises(ValidationError, match="must be unique"):
+        MaintenanceContract.model_validate(payload)
+
+
+def test_source_checkpoint_rejects_unknown_kinds() -> None:
     payload = _registry_payload()["sources"][0]
     payload["checkpoint"] = {"kind": "custom", "field": "source_hour"}
 
-    with pytest.raises(ValidationError, match="union_tag_invalid"):
+    with pytest.raises(ValidationError, match="literal_error"):
         SourceContract.model_validate(payload)
 
 
@@ -294,6 +364,18 @@ def test_managed_table_contracts_do_not_duplicate_physical_locations() -> None:
     )
     assert all(
         "location_prefix" not in table.model_fields_set
-        for product in contracts.curated_products
+        for product in contracts.curated
         for table in product.tables
     )
+
+
+def test_platform_and_storage_code_are_source_agnostic() -> None:
+    source_names = {source.name for source in load_contracts().sources}
+    modules = [
+        *Path("src/mini_lakehouse/platform").glob("*.py"),
+        *Path("src/mini_lakehouse/storage").glob("*.py"),
+    ]
+
+    for module in modules:
+        content = module.read_text(encoding="utf-8")
+        assert all(source_name not in content for source_name in source_names), module

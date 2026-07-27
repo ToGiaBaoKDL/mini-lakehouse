@@ -1,26 +1,32 @@
 from pydantic import model_validator
 
+from mini_lakehouse.contracts.access import AccessContract
 from mini_lakehouse.contracts.base import ContractModel
-from mini_lakehouse.contracts.catalog import CatalogContract, NamespaceContract
-from mini_lakehouse.contracts.curated_products import CuratedProductContract
+from mini_lakehouse.contracts.curated import CuratedProductContract
 from mini_lakehouse.contracts.domains import DomainContract
-from mini_lakehouse.contracts.policies import PolicyContract
+from mini_lakehouse.contracts.maintenance import MaintenanceContract, MaintenancePolicy
+from mini_lakehouse.contracts.platform import NamespaceContract, PlatformContract
 from mini_lakehouse.contracts.processors import ProcessorContract
 from mini_lakehouse.contracts.sources import SourceContract
 
 
 class PlatformContracts(ContractModel):
-    catalog: CatalogContract
+    platform: PlatformContract
+    access: AccessContract
+    maintenance: MaintenanceContract
     sources: tuple[SourceContract, ...]
-    curated_products: tuple[CuratedProductContract, ...]
+    curated: tuple[CuratedProductContract, ...]
     processors: tuple[ProcessorContract, ...]
     domains: tuple[DomainContract, ...]
-    policies: tuple[PolicyContract, ...]
+
+    @property
+    def policies(self) -> tuple[MaintenancePolicy, ...]:
+        return self.maintenance.policies()
 
     @model_validator(mode="after")
     def validate_references(self) -> "PlatformContracts":
         source_names = [source.name for source in self.sources]
-        product_names = [product.name for product in self.curated_products]
+        product_names = [product.name for product in self.curated]
         processor_names = [processor.name for processor in self.processors]
         domain_names = [domain.name for domain in self.domains]
         policy_keys = [(policy.namespace, policy.name) for policy in self.policies]
@@ -52,7 +58,7 @@ class PlatformContracts(ContractModel):
             raise ValueError("Landing source table identifiers must be globally unique")
 
         known_sources = set(source_names)
-        for product in self.curated_products:
+        for product in self.curated:
             if product.curated_namespace not in namespace_paths:
                 raise ValueError(
                     f"Curated product {product.name!r} references an unknown curated namespace"
@@ -64,7 +70,7 @@ class PlatformContracts(ContractModel):
                     f"{sorted(unknown_sources)!r}"
                 )
         known_products = set(product_names)
-        products_by_name = {product.name: product for product in self.curated_products}
+        products_by_name = {product.name: product for product in self.curated}
         for processor in self.processors:
             if processor.source not in known_sources:
                 raise ValueError(
@@ -107,17 +113,8 @@ class PlatformContracts(ContractModel):
                 product.table_identifier(table.key).iceberg: {
                     partition.field for partition in table.partitioning
                 }
-                for product in self.curated_products
+                for product in self.curated
                 for table in product.tables
-            }
-        )
-        table_partition_fields.update(
-            {
-                domain.table_identifier(table.key).iceberg: {
-                    partition.field for partition in table.partitioning
-                }
-                for domain in self.domains
-                for table in domain.tables
             }
         )
         for policy in self.policies:
@@ -139,19 +136,21 @@ class PlatformContracts(ContractModel):
                     )
                 attachments.add(key)
                 if policy.policy_type == "system.data-compaction":
+                    if policy.execution is None:
+                        raise ValueError(
+                            f"Policy {policy.name!r} has no bounded optimization contract"
+                        )
                     if target.type == "table-like":
                         known_fields = table_partition_fields.get(target.path)
                         matching_tables = (
                             {target.path: known_fields} if known_fields is not None else {}
                         )
-                    elif target.type == "namespace":
+                    else:
                         matching_tables = {
                             path: fields
                             for path, fields in table_partition_fields.items()
                             if path[:-1][: len(target.path)] == target.path
                         }
-                    else:
-                        matching_tables = table_partition_fields
                     incompatible_tables = {
                         path: fields
                         for path, fields in matching_tables.items()
@@ -176,7 +175,7 @@ class PlatformContracts(ContractModel):
                 description=product.description,
                 properties={"data_product": product.name},
             )
-            for product in self.curated_products
+            for product in self.curated
         )
         domain_namespaces = tuple(
             NamespaceContract(
@@ -190,7 +189,7 @@ class PlatformContracts(ContractModel):
             )
             for domain in self.domains
         )
-        return (*self.catalog.namespaces, *product_namespaces, *domain_namespaces)
+        return (*self.platform.namespaces, *product_namespaces, *domain_namespaces)
 
     def source(self, name: str) -> SourceContract:
         try:
@@ -206,7 +205,7 @@ class PlatformContracts(ContractModel):
 
     def curated_product(self, name: str) -> CuratedProductContract:
         try:
-            return next(product for product in self.curated_products if product.name == name)
+            return next(product for product in self.curated if product.name == name)
         except StopIteration as error:
             raise KeyError(f"Unknown curated product: {name}") from error
 

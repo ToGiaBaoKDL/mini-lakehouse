@@ -13,15 +13,15 @@ from requests.exceptions import ChunkedEncodingError
 
 from mini_lakehouse.config.settings import KaggleSettings, Settings
 from mini_lakehouse.contracts import load_contracts
-from mini_lakehouse.curated_products.arxiv.models import (
+from mini_lakehouse.curated.arxiv.models import (
     ActiveOcrBatch,
     OcrBatchDocument,
     OcrCandidate,
     OcrRunState,
 )
-from mini_lakehouse.curated_products.arxiv.ocr_publisher import ArxivOcrPublisher
-from mini_lakehouse.curated_products.arxiv.ocr_repository import ArxivOcrRepository
-from mini_lakehouse.curated_products.arxiv.ocr_service import ArxivOcrService
+from mini_lakehouse.curated.arxiv.ocr_publisher import ArxivOcrPublisher
+from mini_lakehouse.curated.arxiv.ocr_repository import ArxivOcrRepository
+from mini_lakehouse.curated.arxiv.ocr_service import ArxivOcrService
 from mini_lakehouse.platform.trino import QueryResult
 from mini_lakehouse.processing.ocr.archive import (
     InvalidOcrOutputError,
@@ -1259,11 +1259,6 @@ def test_document_state_is_committed_before_batch_state() -> None:
     assert '"ocr_batches"' in executor.calls[1][0]
 
 
-class _NoopTableManager:
-    def ensure_tables(self, _executor: object) -> None:
-        pass
-
-
 class _NoopObjectStore:
     def exists(self, _uri: str) -> bool:
         return False
@@ -1389,7 +1384,6 @@ def test_idle_ocr_cycle_does_not_require_kaggle_credentials() -> None:
     service = ArxivOcrService(
         Settings(),
         executor=cast(Any, _NoopExecutor()),
-        table_manager=cast(Any, _NoopTableManager()),
         repository=cast(Any, _IdleRepository()),
         object_store=cast(Any, _NoopObjectStore()),
     )
@@ -1402,7 +1396,6 @@ def test_ocr_cycle_uses_the_declared_hard_batch_limit() -> None:
     service = ArxivOcrService(
         Settings(),
         executor=cast(Any, _NoopExecutor()),
-        table_manager=cast(Any, _NoopTableManager()),
         repository=cast(Any, repository),
         object_store=cast(Any, _NoopObjectStore()),
     )
@@ -1418,7 +1411,6 @@ def test_ocr_cycle_passes_every_explicit_identifier_without_truncating() -> None
     service = ArxivOcrService(
         Settings(),
         executor=cast(Any, _NoopExecutor()),
-        table_manager=cast(Any, _NoopTableManager()),
         repository=cast(Any, repository),
         object_store=cast(Any, _NoopObjectStore()),
     )
@@ -1434,7 +1426,6 @@ def test_ocr_cycle_forces_a_bounded_pdf_verification() -> None:
     service = ArxivOcrService(
         Settings(),
         executor=cast(Any, _NoopExecutor()),
-        table_manager=cast(Any, _NoopTableManager()),
         repository=cast(Any, repository),
         object_store=cast(Any, _NoopObjectStore()),
     )
@@ -1448,7 +1439,6 @@ def test_ocr_cycle_rejects_unbounded_pdf_verification() -> None:
     service = ArxivOcrService(
         Settings(),
         executor=cast(Any, _NoopExecutor()),
-        table_manager=cast(Any, _NoopTableManager()),
         repository=cast(Any, _IdleRepository()),
         object_store=cast(Any, _NoopObjectStore()),
     )
@@ -1461,7 +1451,6 @@ def test_ocr_cycle_rejects_more_explicit_ids_than_one_complete_batch() -> None:
     service = ArxivOcrService(
         Settings(),
         executor=cast(Any, _NoopExecutor()),
-        table_manager=cast(Any, _NoopTableManager()),
         repository=cast(Any, _IdleRepository()),
         object_store=cast(Any, _NoopObjectStore()),
     )
@@ -1476,7 +1465,6 @@ def test_ocr_cycle_prepares_durable_state_before_remote_submission() -> None:
     service = ArxivOcrService(
         Settings(),
         executor=cast(Any, _NoopExecutor()),
-        table_manager=cast(Any, _NoopTableManager()),
         repository=cast(Any, repository),
         provider=provider,
         object_store=cast(Any, _NoopObjectStore()),
@@ -1503,7 +1491,6 @@ def test_ocr_cycle_defers_before_durable_prepare_when_gpu_quota_is_low() -> None
     service = ArxivOcrService(
         Settings(),
         executor=cast(Any, _NoopExecutor()),
-        table_manager=cast(Any, _NoopTableManager()),
         repository=cast(Any, repository),
         provider=_QuotaExhaustedProvider(),
         object_store=cast(Any, _NoopObjectStore()),
@@ -1580,7 +1567,6 @@ def test_exhausted_remote_failure_becomes_terminal_without_resubmission() -> Non
     service = ArxivOcrService(
         Settings(),
         executor=cast(Any, _NoopExecutor()),
-        table_manager=cast(Any, _NoopTableManager()),
         repository=cast(Any, repository),
         provider=provider,
         object_store=cast(Any, _NoopObjectStore()),
@@ -1610,7 +1596,6 @@ def test_invalid_remote_output_becomes_a_typed_retryable_attempt() -> None:
     service = ArxivOcrService(
         Settings(),
         executor=cast(Any, _NoopExecutor()),
-        table_manager=cast(Any, _NoopTableManager()),
         repository=cast(Any, repository),
         provider=_InvalidOutputProvider(),
         object_store=cast(Any, _NoopObjectStore()),
@@ -1645,7 +1630,6 @@ def test_remote_batch_failure_never_downgrades_an_imported_document() -> None:
     service = ArxivOcrService(
         Settings(),
         executor=cast(Any, _NoopExecutor()),
-        table_manager=cast(Any, _NoopTableManager()),
         repository=cast(Any, repository),
         provider=_FailedProvider(),
         object_store=cast(Any, _NoopObjectStore()),
@@ -1699,7 +1683,6 @@ def test_prepared_batch_from_an_old_configuration_is_released_for_a_new_batch() 
     service = ArxivOcrService(
         Settings(),
         executor=cast(Any, _NoopExecutor()),
-        table_manager=cast(Any, _NoopTableManager()),
         repository=cast(Any, repository),
         provider=provider,
         object_store=cast(Any, _NoopObjectStore()),

@@ -8,8 +8,8 @@ import pyarrow as pa
 import pytest
 
 from mini_lakehouse.config import get_settings
-from mini_lakehouse.contracts import arrow_schema, load_contracts
-from mini_lakehouse.curated_products.github.service import GithubCurationService
+from mini_lakehouse.contracts import TableIdentifier, arrow_schema, load_contracts
+from mini_lakehouse.curated.github.service import GithubCurationService
 from mini_lakehouse.platform.trino import TrinoExecutor
 from mini_lakehouse.sources.github_archive.models import ArchiveHour
 from mini_lakehouse.sources.github_archive.repository import GithubArchiveRepository
@@ -163,12 +163,14 @@ def test_landing_curation_merge_and_analytics_build_end_to_end() -> None:
     _run_dbt("run", "--selector", "engineering_marts", "--threads", "1")
     _run_dbt("test", "--selector", "engineering_marts")
 
-    repository_mart_relation = domain.table_identifier("repository_activity_daily").trino(
-        settings.trino.catalog
-    )
-    contributor_mart_relation = domain.table_identifier("contributor_activity_daily").trino(
-        settings.trino.catalog
-    )
+    repository_mart_relation = TableIdentifier(
+        domain.analytics_namespace,
+        "fct_repository_activity_daily",
+    ).trino(settings.trino.catalog)
+    contributor_mart_relation = TableIdentifier(
+        domain.analytics_namespace,
+        "fct_contributor_activity_daily",
+    ).trino(settings.trino.catalog)
     with TrinoExecutor(settings.trino) as executor:
         repository_mart = executor.execute(
             f"""

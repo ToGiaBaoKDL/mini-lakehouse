@@ -1,0 +1,5 @@
+version: 1
+
+catalog_role_grants:
+  - catalog_role: catalog_admin
+    privileges: [CATALOG_MANAGE_CONTENT]

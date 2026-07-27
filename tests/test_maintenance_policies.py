@@ -10,15 +10,14 @@ from pyiceberg.transforms import HourTransform, IdentityTransform, MonthTransfor
 from pyiceberg.types import DateType, IcebergType, NestedField, TimestamptzType
 
 from mini_lakehouse.contracts import TableIdentifier, load_contracts
-from mini_lakehouse.contracts.policies import (
-    MetadataCompactionPolicyContract,
-    policy_content_json,
-)
-from mini_lakehouse.platform.maintenance import build_maintenance_plan
-from mini_lakehouse.platform.polaris import PolarisPolicyClient
-from mini_lakehouse.platform.policies import (
-    PolarisPolicy,
+from mini_lakehouse.contracts.maintenance import MaintenancePolicy, policy_content_json
+from mini_lakehouse.platform.maintenance import (
+    build_maintenance_plan,
     maintenance_statements,
+)
+from mini_lakehouse.platform.polaris import (
+    PolarisPolicy,
+    PolarisPolicyClient,
 )
 from mini_lakehouse.storage.iceberg import iceberg_metadata_retention_properties
 
@@ -47,7 +46,7 @@ def _policies(table: TableIdentifier) -> list[PolarisPolicy]:
     ]
 
 
-def _policy_contracts() -> dict[tuple[tuple[str, ...], str], object]:
+def _policy_contracts() -> dict[tuple[tuple[str, ...], str], MaintenancePolicy]:
     return {(policy.namespace, policy.name): policy for policy in load_contracts().policies}
 
 
@@ -97,6 +96,15 @@ def test_maintenance_contract_is_isolated_by_lifecycle_tier() -> None:
         all(not target.path or target.path[0] == spec.namespace[0] for target in spec.targets)
         for spec in specs
     )
+
+
+def test_contract_resolves_table_retention_before_the_storage_boundary() -> None:
+    retention = load_contracts().maintenance.metadata_retention(
+        TableIdentifier(("curated", "github"), "events")
+    )
+
+    assert retention.delete_after_commit is True
+    assert retention.previous_versions_max == 30
 
 
 def test_polaris_policies_compile_to_safe_trino_maintenance() -> None:
@@ -160,8 +168,9 @@ def test_current_metadata_retention_does_not_generate_a_redundant_commit() -> No
     policy = next(
         spec
         for spec in load_contracts().policies
-        if isinstance(spec, MetadataCompactionPolicyContract) and spec.namespace == ("curated",)
+        if spec.policy_type == "system.metadata-compaction" and spec.namespace == ("curated",)
     )
+    assert policy.retention is not None
     iceberg_table = _partitioned_table(
         "event_date_utc",
         DateType(),

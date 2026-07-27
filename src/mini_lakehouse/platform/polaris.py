@@ -1,20 +1,75 @@
+import json
 from dataclasses import dataclass
 from typing import Any, Literal
 from urllib.parse import quote
 
 import requests
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from mini_lakehouse.config.settings import Settings
 from mini_lakehouse.contracts import TableIdentifier
-from mini_lakehouse.contracts.policies import PolicyContract, policy_content_json
-from mini_lakehouse.platform.policies import (
-    ApplicablePoliciesResponse,
-    ListPoliciesResponse,
-    PolarisPolicy,
-    PolicyIdentifier,
-)
+from mini_lakehouse.contracts.maintenance import MaintenancePolicy, policy_content_json
+
+
+class PolarisPolicy(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    name: str
+    policy_type: str = Field(validation_alias=AliasChoices("policy-type", "type"))
+    description: str = ""
+    content: str | dict[str, Any]
+    version: int = Field(default=0, ge=0)
+    inheritable: bool = False
+    inherited: bool = False
+    namespace: tuple[str, ...] = ()
+
+    @field_validator("content", mode="before")
+    @classmethod
+    def validate_content(cls, value: object) -> str | dict[str, Any]:
+        if isinstance(value, (str, dict)):
+            return value
+        raise ValueError("Policy content must be a JSON string or object")
+
+    def content_object(self) -> dict[str, Any]:
+        value = json.loads(self.content) if isinstance(self.content, str) else self.content
+        if not isinstance(value, dict):
+            raise ValueError(f"Policy {self.name!r} content must be a JSON object")
+        return value
+
+    def canonical_content(self) -> str:
+        return json.dumps(self.content_object(), sort_keys=True, separators=(",", ":"))
+
+
+class ApplicablePoliciesResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    applicable_policies: list[PolarisPolicy] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("applicable-policies", "policies"),
+    )
+    next_page_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("next-page-token", "nextPageToken", "next_page_token"),
+    )
+
+
+class PolicyIdentifier(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    namespace: tuple[str, ...]
+    name: str
+
+
+class ListPoliciesResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    identifiers: list[PolicyIdentifier] = Field(default_factory=list)
+    next_page_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("next-page-token", "nextPageToken", "next_page_token"),
+    )
 
 
 def create_retry_session() -> requests.Session:
@@ -196,7 +251,7 @@ class PolarisPolicyClient:
         if response.status_code != 404:
             response.raise_for_status()
 
-    def reconcile_policy(self, spec: PolicyContract) -> PolicyReconcileResult:
+    def reconcile_policy(self, spec: MaintenancePolicy) -> PolicyReconcileResult:
         collection_url = self._policies_url(spec.namespace)
         policy_url = f"{collection_url}/{quote(spec.name, safe='')}"
         desired_content = policy_content_json(spec)

@@ -4,7 +4,7 @@ from typing import Any
 from prefect import flow, task
 
 from mini_lakehouse.config import get_settings
-from mini_lakehouse.curated_products.arxiv.service import ArxivCurationService
+from mini_lakehouse.curated.arxiv.service import ArxivCurationService
 from mini_lakehouse.sources.arxiv.models import OaiDay
 from mini_lakehouse.sources.arxiv.service import ArxivMetadataService
 from orchestration.plugins.notifications import (

@@ -1,0 +1,61 @@
+version: 1
+name: github
+owner: data-platform
+contact:
+  name: Data Platform
+  email: bao.to@timo.vn
+description: Canonical validated GitHub entities and events for downstream data products.
+curated_namespace: [curated, github]
+upstream_sources: [github_archive]
+
+tables:
+  - key: events
+    name: events
+    description: Deduplicated and normalized GitHub events at one row per stable event ID.
+    primary_key: [event_id]
+    columns:
+      - {field_id: 1, name: event_id, data_type: string, required: true, description: Stable GitHub event identifier.}
+      - {field_id: 2, name: event_type, data_type: string, required: true, description: GitHub event type.}
+      - {field_id: 3, name: actor_id, data_type: long, required: false, description: GitHub actor identifier when present.}
+      - {field_id: 4, name: actor_login, data_type: string, required: false, description: Normalized actor login.}
+      - {field_id: 5, name: repository_id, data_type: long, required: false, description: GitHub repository identifier when present.}
+      - {field_id: 6, name: repository_name, data_type: string, required: false, description: Normalized repository full name.}
+      - {field_id: 7, name: is_public, data_type: boolean, required: true, description: Whether the source event is public.}
+      - {field_id: 8, name: occurred_at, data_type: timestamptz, required: true, description: Event occurrence timestamp.}
+      - {field_id: 9, name: event_date_utc, data_type: date, required: true, description: UTC event calendar date.}
+      - {field_id: 10, name: push_commit_count, data_type: long, required: false, description: Commit count reported by a push event.}
+      - {field_id: 11, name: event_action, data_type: string, required: false, description: Payload action when present.}
+      - {field_id: 12, name: ref_type, data_type: string, required: false, description: Git reference type when present.}
+      - {field_id: 13, name: issue_number, data_type: long, required: false, description: Issue number when present.}
+      - {field_id: 14, name: pull_request_number, data_type: long, required: false, description: Pull request number when present.}
+      - {field_id: 15, name: comment_id, data_type: long, required: false, description: Comment identifier when present.}
+      - {field_id: 16, name: source_file, data_type: string, required: true, description: Source archive filename.}
+      - {field_id: 17, name: source_hour, data_type: timestamptz, required: true, description: Source archive checkpoint hour.}
+      - {field_id: 18, name: ingested_at, data_type: timestamptz, required: true, description: Landing ingestion timestamp used for deterministic conflict resolution.}
+      - {field_id: 19, name: curated_at, data_type: timestamptz, required: true, description: Timestamp of the latest curated mutation.}
+    partitioning:
+      - field_id: 1000
+        field: event_date_utc
+        transform: identity
+
+  - key: actors_current
+    name: actors_current
+    description: Latest observed GitHub actor attributes at one row per actor ID.
+    primary_key: [actor_id]
+    columns:
+      - {field_id: 1, name: actor_id, data_type: long, required: true, description: Stable GitHub actor identifier.}
+      - {field_id: 2, name: actor_login, data_type: string, required: false, description: Latest observed actor login.}
+      - {field_id: 3, name: is_bot, data_type: boolean, required: true, description: Heuristic bot classification.}
+      - {field_id: 4, name: last_observed_at, data_type: timestamptz, required: true, description: Latest event timestamp for this actor.}
+      - {field_id: 5, name: curated_at, data_type: timestamptz, required: true, description: Timestamp of the latest curated mutation.}
+
+  - key: repositories_current
+    name: repositories_current
+    description: Latest observed GitHub repository attributes at one row per repository ID.
+    primary_key: [repository_id]
+    columns:
+      - {field_id: 1, name: repository_id, data_type: long, required: true, description: Stable GitHub repository identifier.}
+      - {field_id: 2, name: repository_name, data_type: string, required: false, description: Latest observed repository full name.}
+      - {field_id: 3, name: repository_owner, data_type: string, required: false, description: Owner component of the repository full name.}
+      - {field_id: 4, name: last_observed_at, data_type: timestamptz, required: true, description: Latest event timestamp for this repository.}
+      - {field_id: 5, name: curated_at, data_type: timestamptz, required: true, description: Timestamp of the latest curated mutation.}

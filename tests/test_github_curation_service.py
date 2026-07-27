@@ -5,8 +5,7 @@ from typing import Any
 import pytest
 
 from mini_lakehouse.config.settings import Settings
-from mini_lakehouse.contracts import load_contracts, partition_expression, trino_type
-from mini_lakehouse.curated_products.github.service import GithubCurationService
+from mini_lakehouse.curated.github.service import GithubCurationService
 from mini_lakehouse.platform.trino import QueryResult
 from mini_lakehouse.sources.github_archive.models import ArchiveHour
 
@@ -15,7 +14,6 @@ class FakeTrinoExecutor:
     def __init__(self, source_hours: tuple[tuple[datetime, int], ...]) -> None:
         self.source_hours = source_hours
         self.calls: list[tuple[str, tuple[Any, ...] | None]] = []
-        self.product = load_contracts().curated_product("github")
 
     def execute(
         self,
@@ -24,20 +22,6 @@ class FakeTrinoExecutor:
     ) -> QueryResult:
         bound_parameters = tuple(parameters) if parameters is not None else None
         self.calls.append((statement, bound_parameters))
-        normalized = statement.strip()
-        if normalized.startswith("DESCRIBE"):
-            table_key = normalized.rsplit('"', 2)[1]
-            table = self.product.table(table_key)
-            rows = tuple((column.name, trino_type(column)) for column in table.columns)
-            return QueryResult(columns=("Column", "Type"), rows=rows)
-        if normalized.startswith("SHOW CREATE TABLE"):
-            table_key = normalized.rsplit('"', 2)[1]
-            table = self.product.table(table_key)
-            partitioning = " ".join(
-                f"'{partition_expression(value)}'" for value in table.partitioning
-            )
-            ddl = f"location = 's3://curated/github/{table.name}' {partitioning}"
-            return QueryResult(columns=("Create Table",), rows=((ddl,),))
         if "GROUP BY source_hour" in statement:
             return QueryResult(
                 columns=("source_hour", "source_event_date", "row_count"),
@@ -78,9 +62,7 @@ def test_curation_is_bounded_to_one_source_hour() -> None:
     assert "source.ingested_at," in event_merge
     assert "source.source_hour," in event_merge
     assert "source.source_file" in event_merge
-    create_calls = [call[0] for call in executor.calls if call[0].startswith("CREATE TABLE")]
-    assert create_calls
-    assert all("location =" not in statement.lower() for statement in create_calls)
+    assert not any(call[0].startswith("CREATE TABLE") for call in executor.calls)
 
 
 def test_curation_rejects_a_missing_landing_hour() -> None:

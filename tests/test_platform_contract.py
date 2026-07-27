@@ -1,12 +1,16 @@
 from mini_lakehouse.config.settings import Settings
 from mini_lakehouse.contracts import load_contracts
-from mini_lakehouse.platform.catalog import catalog_contract
-from mini_lakehouse.platform.namespaces import namespace_contract
+from mini_lakehouse.platform.desired_state import DesiredPlatformState, compile_desired_state
 from mini_lakehouse.platform.runtime import source_table_storage_uri
 
 
+def _state(settings: Settings | None = None) -> DesiredPlatformState:
+    return compile_desired_state(settings or Settings(), load_contracts())
+
+
 def test_namespace_contract_separates_lifecycle_and_domain_ownership() -> None:
-    contract = namespace_contract(Settings())
+    state = _state()
+    contract = {namespace.path: namespace.iceberg_properties() for namespace in state.namespaces}
 
     assert contract[("landing",)]["location"] == "s3://landing"
     assert not any(path[:2] == ("landing", "api") for path in contract)
@@ -20,7 +24,7 @@ def test_namespace_contract_separates_lifecycle_and_domain_ownership() -> None:
 
 
 def test_catalog_contract_enables_bucket_root_namespaces() -> None:
-    payload = catalog_contract(Settings())
+    payload = _state().catalog.management_payload()
 
     assert payload["properties"]["polaris.config.namespace-custom-location.enabled"] == "true"
     assert payload["storageConfigInfo"]["allowedLocations"] == [
@@ -32,12 +36,39 @@ def test_catalog_contract_enables_bucket_root_namespaces() -> None:
 
 
 def test_catalog_contract_uses_the_configured_data_plane_endpoint() -> None:
-    settings = Settings.model_validate({"storage": {"endpoint_url": "http://object-store:9000"}})
+    settings = Settings.model_validate(
+        {
+            "storage": {
+                "endpoints": {
+                    "external_url": "https://storage.example.com",
+                    "internal_url": "http://object-store:9000",
+                }
+            }
+        }
+    )
 
-    payload = catalog_contract(settings)
+    payload = _state(settings).catalog.management_payload()
 
-    assert payload["storageConfigInfo"]["endpoint"] == "http://object-store:9000"
+    assert payload["storageConfigInfo"]["endpoint"] == "https://storage.example.com"
     assert payload["storageConfigInfo"]["endpointInternal"] == ("http://object-store:9000")
+
+
+def test_catalog_contract_omits_custom_endpoints_for_native_s3() -> None:
+    settings = Settings.model_validate(
+        {
+            "storage": {
+                "endpoints": {
+                    "external_url": None,
+                    "internal_url": None,
+                }
+            }
+        }
+    )
+
+    storage = _state(settings).catalog.management_payload()["storageConfigInfo"]
+
+    assert "endpoint" not in storage
+    assert "endpointInternal" not in storage
 
 
 def test_catalog_contract_deduplicates_shared_allowed_locations() -> None:
@@ -51,7 +82,7 @@ def test_catalog_contract_deduplicates_shared_allowed_locations() -> None:
         }
     )
 
-    payload = catalog_contract(settings)
+    payload = _state(settings).catalog.management_payload()
 
     assert payload["storageConfigInfo"]["allowedLocations"] == [
         "s3://shared/_catalog",

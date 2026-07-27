@@ -14,7 +14,7 @@ from mini_lakehouse.apps.ocr_review.components import (
 )
 from mini_lakehouse.apps.ocr_review.theme import apply_theme
 from mini_lakehouse.config.settings import get_settings
-from mini_lakehouse.curated_products.arxiv.review import (
+from mini_lakehouse.curated.arxiv.review import (
     ArxivOcrReviewService,
     OcrDocumentFilter,
     OcrDocumentRun,
@@ -24,7 +24,7 @@ from mini_lakehouse.curated_products.arxiv.review import (
     OcrStateFilter,
     PublishedOcrManifest,
 )
-from mini_lakehouse.curated_products.arxiv.review.artifacts import OcrArtifactContent
+from mini_lakehouse.curated.arxiv.review.artifacts import OcrArtifactContent
 from mini_lakehouse.processing.ocr.core.protocol import OcrPageMarkdownBundle
 
 LOGGER = logging.getLogger(__name__)

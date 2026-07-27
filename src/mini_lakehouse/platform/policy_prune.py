@@ -5,23 +5,48 @@ import hashlib
 import json
 import logging
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from mini_lakehouse.config import get_settings
-from mini_lakehouse.contracts import load_contracts
+from mini_lakehouse.contracts import PlatformContracts, load_contracts
 from mini_lakehouse.logging import configure_logging
 from mini_lakehouse.platform.polaris import (
     PolarisPolicyClient,
     create_retry_session,
     request_oauth_token,
 )
-from mini_lakehouse.platform.policy_reconciliation import (
-    PolicyPruneItem,
-    apply_policy_prune_plan,
-    build_policy_prune_plan,
-)
 from mini_lakehouse.platform.runtime import validate_runtime_contract
 
 logger = logging.getLogger(__name__)
+MANAGED_POLICY_PREFIX = "mlh-"
+
+
+@dataclass(frozen=True, slots=True)
+class PolicyPruneItem:
+    namespace: tuple[str, ...]
+    name: str
+
+
+def build_policy_prune_plan(
+    client: PolarisPolicyClient,
+    contracts: PlatformContracts,
+) -> tuple[PolicyPruneItem, ...]:
+    desired = {(policy.namespace, policy.name) for policy in contracts.policies}
+    stale: set[PolicyPruneItem] = set()
+    for namespace in (item.path for item in contracts.managed_namespaces()):
+        for identifier in client.list_policies(namespace):
+            key = (identifier.namespace, identifier.name)
+            if identifier.name.startswith(MANAGED_POLICY_PREFIX) and key not in desired:
+                stale.add(PolicyPruneItem(*key))
+    return tuple(sorted(stale, key=lambda item: (item.namespace, item.name)))
+
+
+def apply_policy_prune_plan(
+    client: PolarisPolicyClient,
+    plan: tuple[PolicyPruneItem, ...],
+) -> None:
+    for item in plan:
+        client.delete_policy(item.namespace, item.name)
 
 
 def plan_payload(plan: tuple[PolicyPruneItem, ...]) -> dict[str, object]:
@@ -50,6 +75,7 @@ def main(arguments: Sequence[str] | None = None) -> None:
 
     settings = get_settings()
     configure_logging(settings.log_level)
+    settings.platform_admin.require_reconciliation_capability()
     contracts = load_contracts(settings.contracts_dir)
     validate_runtime_contract(settings, contracts)
     with create_retry_session() as session:

@@ -15,6 +15,7 @@ checkpoint:
 tables:
   - key: oai_records_raw
     name: arxiv_oai_records_raw
+    description: Parsed immutable OAI records for one ArXiv datestamp checkpoint.
     schema_version: 1
     columns:
       - {field_id: 1, name: oai_identifier, data_type: string, required: true, description: Stable OAI identifier.}
@@ -40,11 +41,13 @@ tables:
       - {field_id: 21, name: record_sha256, data_type: string, required: true, description: Hash of the canonical serialized OAI record XML.}
       - {field_id: 22, name: ingested_at, data_type: timestamptz, required: true, description: Landing ingestion timestamp.}
     partitioning:
-      - field: datestamp_date
+      - field_id: 1000
+        field: datestamp_date
         transform: identity
 
   - key: oai_checkpoints
     name: arxiv_oai_checkpoints
+    description: Successful ArXiv OAI publication checkpoints and raw-object lineage.
     schema_version: 1
     columns:
       - {field_id: 1, name: datestamp_date, data_type: date, required: true, description: Successfully published OAI datestamp day.}
@@ -55,5 +58,6 @@ tables:
       - {field_id: 6, name: schema_version, data_type: string, required: true, description: Landing parser schema version.}
       - {field_id: 7, name: published_at, data_type: timestamptz, required: true, description: Successful publication timestamp.}
     partitioning:
-      - field: datestamp_date
+      - field_id: 1000
+        field: datestamp_date
         transform: identity

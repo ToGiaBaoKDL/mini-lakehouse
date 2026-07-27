@@ -5,7 +5,7 @@ from html import escape
 
 import streamlit as st
 
-from mini_lakehouse.curated_products.arxiv.review import (
+from mini_lakehouse.curated.arxiv.review import (
     OcrDocumentRun,
     OcrDocumentSummary,
     OcrPageElement,

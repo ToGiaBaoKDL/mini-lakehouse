@@ -3,7 +3,7 @@ from typing import Any
 from prefect import flow, task
 
 from mini_lakehouse.config import get_settings
-from mini_lakehouse.curated_products.arxiv.ocr_service import ArxivOcrService
+from mini_lakehouse.curated.arxiv.ocr_service import ArxivOcrService
 from mini_lakehouse.processing.ocr.provider import OcrProviderName
 from orchestration.plugins.notifications import (
     notify_flow_failure,

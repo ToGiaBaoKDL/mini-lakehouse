@@ -14,19 +14,10 @@ from mini_lakehouse.config.settings import Settings
 from mini_lakehouse.contracts import (
     PlatformContracts,
     arrow_schema,
-    iceberg_schema,
     load_contracts,
-    partition_spec,
 )
 from mini_lakehouse.contracts.sources import SourceTableContract
-from mini_lakehouse.platform.runtime import source_table_storage_uri
-from mini_lakehouse.storage.iceberg import (
-    iceberg_metadata_retention_properties,
-    load_iceberg_catalog,
-    metadata_retention_for_table,
-    reconcile_metadata_retention,
-    validate_table_location,
-)
+from mini_lakehouse.storage.iceberg import load_iceberg_catalog
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,11 +45,10 @@ class ArxivLandingRepository:
         catalog: Catalog | None = None,
         contracts: PlatformContracts | None = None,
     ) -> None:
-        self._settings = settings
         self._owned_catalog = catalog is None
         self._catalog = catalog or load_iceberg_catalog(settings)
-        self._contracts = contracts or load_contracts(settings.contracts_dir)
-        self._source = self._contracts.source("arxiv")
+        registry = contracts or load_contracts(settings.contracts_dir)
+        self._source = registry.source("arxiv")
 
     def __enter__(self) -> "ArxivLandingRepository":
         return self
@@ -72,36 +62,14 @@ class ArxivLandingRepository:
         if self._owned_catalog:
             self._catalog.__exit__(exc_type, exc_val, exc_tb)
 
-    def _ensure_table(self, key: str) -> Table:
-        contract = self._source.table(key)
+    def _table(self, key: str) -> Table:
         identifier = self._source.table_identifier(key)
-        metadata_retention = metadata_retention_for_table(self._contracts, identifier)
-        expected_location = source_table_storage_uri(self._settings, self._source, key)
-        expected_spec = partition_spec(contract.columns, contract.partitioning)
-        if self._catalog.table_exists(identifier.iceberg):
-            table = self._catalog.load_table(identifier.iceberg)
-            table = reconcile_metadata_retention(table, metadata_retention)
-        else:
-            properties = {
-                "format-version": "2",
-                "write.format.default": "parquet",
-                "write.parquet.compression-codec": "zstd",
-                **iceberg_metadata_retention_properties(metadata_retention),
-            }
-            table = self._catalog.create_table(
-                identifier=identifier.iceberg,
-                schema=iceberg_schema(contract.columns),
-                location=expected_location,
-                partition_spec=expected_spec,
-                properties=properties,
-            )
-        validate_table_location(table, expected_location, owner="ArXiv landing")
-        if table.spec() != expected_spec:
+        if not self._catalog.table_exists(identifier.iceberg):
             raise RuntimeError(
-                f"ArXiv landing table {contract.name!r} partition spec drifted; "
-                f"expected {expected_spec}, found {table.spec()}"
+                f"ArXiv landing table {identifier.name!r} is missing; "
+                "run platform reconciliation first"
             )
-        return table
+        return self._catalog.load_table(identifier.iceberg)
 
     @staticmethod
     def _snapshot_id(table: Table) -> int | None:
@@ -113,17 +81,8 @@ class ArxivLandingRepository:
         return EqualTo(term=Reference(name="datestamp_date"), value=literal(day))
 
     def day_state(self, datestamp_date: date) -> ArxivLandingDayState | None:
-        records_identifier = self._source.table_identifier("oai_records_raw")
-        checkpoint_identifier = self._source.table_identifier("oai_checkpoints")
-        records_exists = self._catalog.table_exists(records_identifier.iceberg)
-        checkpoints_exist = self._catalog.table_exists(checkpoint_identifier.iceberg)
-        if not records_exists and not checkpoints_exist:
-            return None
-        if records_exists != checkpoints_exist:
-            raise RuntimeError("ArXiv landing records/checkpoint tables must exist together")
-
-        records_table = self._ensure_table("oai_records_raw")
-        checkpoint_table = self._ensure_table("oai_checkpoints")
+        records_table = self._table("oai_records_raw")
+        checkpoint_table = self._table("oai_checkpoints")
         rows = checkpoint_table.scan(
             row_filter=self._day_filter(datestamp_date),
             selected_fields=(
@@ -181,7 +140,7 @@ class ArxivLandingRepository:
                 f"Every ArXiv landing row must match {datestamp_date}; found {observed_days!r}"
             )
 
-        records_table = self._ensure_table("oai_records_raw")
+        records_table = self._table("oai_records_raw")
         records_table.overwrite(records, overwrite_filter=self._day_filter(datestamp_date))
         records_snapshot_id = self._snapshot_id(records_table)
 
@@ -200,7 +159,7 @@ class ArxivLandingRepository:
             ],
             schema=arrow_schema(checkpoint_contract.columns),
         )
-        checkpoint_table = self._ensure_table("oai_checkpoints")
+        checkpoint_table = self._table("oai_checkpoints")
         checkpoint_table.overwrite(
             checkpoint,
             overwrite_filter=self._day_filter(datestamp_date),

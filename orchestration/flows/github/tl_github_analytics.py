@@ -4,7 +4,7 @@ from typing import Any
 from prefect import flow, task
 
 from mini_lakehouse.config import get_settings
-from mini_lakehouse.curated_products.github.service import GithubCurationService
+from mini_lakehouse.curated.github.service import GithubCurationService
 from mini_lakehouse.sources.github_archive.models import ArchiveHour
 from orchestration.plugins.notifications import (
     notify_flow_failure,

@@ -32,9 +32,6 @@ class _Filesystem:
     def exists(self, _destination: str) -> bool:
         return self.object_exists
 
-    def _strip_protocol(self, uri: str) -> str:
-        return uri.removeprefix("s3://")
-
 
 def _store(filesystem: _Filesystem) -> FsspecObjectStore:
     return FsspecObjectStore(
@@ -71,3 +68,10 @@ def test_bounded_object_read_rejects_oversized_content() -> None:
 
     with pytest.raises(ValueError, match="read limit"):
         store.read_bytes("s3://curated/artifact", max_bytes=7)
+
+
+def test_object_store_rejects_a_uri_owned_by_another_backend() -> None:
+    store = _store(_Filesystem())
+
+    with pytest.raises(ValueError, match="Expected a s3 object URI"):
+        store.exists("file:///tmp/artifact")

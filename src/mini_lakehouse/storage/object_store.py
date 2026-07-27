@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, BinaryIO, Protocol, cast
 
 import fsspec
+from fsspec.core import split_protocol
 from fsspec.spec import AbstractFileSystem
 
 from mini_lakehouse.config.settings import StorageSettings
@@ -29,7 +30,7 @@ class FsspecObjectStore:
         settings: StorageSettings,
         filesystem: AbstractFileSystem | None = None,
     ) -> None:
-        self._settings = settings
+        self._backend = settings.backend
         options: dict[str, Any] = {
             "client_kwargs": {"region_name": settings.region},
             "config_kwargs": {
@@ -45,10 +46,10 @@ class FsspecObjectStore:
         self._filesystem = filesystem or fsspec.filesystem(settings.backend, **options)
 
     def _path(self, uri: str) -> str:
-        return cast(
-            str,
-            self._filesystem._strip_protocol(uri),  # pyright: ignore[reportPrivateUsage]
-        )
+        protocol, path = split_protocol(uri)
+        if protocol != self._backend or not path:
+            raise ValueError(f"Expected a {self._backend} object URI, got {uri!r}")
+        return path
 
     def exists(self, uri: str) -> bool:
         return bool(self._filesystem.exists(self._path(uri)))

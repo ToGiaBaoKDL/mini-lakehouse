@@ -8,14 +8,14 @@ import pytest
 
 from mini_lakehouse.apps.ocr_review import components, state
 from mini_lakehouse.config.settings import Settings
-from mini_lakehouse.curated_products.arxiv.review.artifacts import OcrArtifactReader
-from mini_lakehouse.curated_products.arxiv.review.models import (
+from mini_lakehouse.curated.arxiv.review.artifacts import OcrArtifactReader
+from mini_lakehouse.curated.arxiv.review.models import (
     OcrDocumentFilter,
     OcrDocumentRun,
     OcrRunState,
     OcrStateFilter,
 )
-from mini_lakehouse.curated_products.arxiv.review.repository import ArxivOcrReviewRepository
+from mini_lakehouse.curated.arxiv.review.repository import ArxivOcrReviewRepository
 from mini_lakehouse.platform.trino import QueryResult
 from mini_lakehouse.processing.ocr.core.identity import canonical_json_bytes
 from mini_lakehouse.processing.ocr.core.protocol import (

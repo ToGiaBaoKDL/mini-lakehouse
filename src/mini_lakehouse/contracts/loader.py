@@ -7,10 +7,11 @@ import yaml
 from pydantic import BaseModel, TypeAdapter
 from yaml.nodes import MappingNode, Node, SequenceNode
 
-from mini_lakehouse.contracts.catalog import CatalogContract
-from mini_lakehouse.contracts.curated_products import CuratedProductContract
+from mini_lakehouse.contracts.access import AccessContract
+from mini_lakehouse.contracts.curated import CuratedProductContract
 from mini_lakehouse.contracts.domains import DomainContract
-from mini_lakehouse.contracts.policies import PolicyContract
+from mini_lakehouse.contracts.maintenance import MaintenanceContract
+from mini_lakehouse.contracts.platform import PlatformContract
 from mini_lakehouse.contracts.processors import ProcessorContract
 from mini_lakehouse.contracts.registry import PlatformContracts
 from mini_lakehouse.contracts.sources import SourceContract
@@ -74,6 +75,17 @@ def _load_model[ContractT: BaseModel](path: Path, model: type[ContractT]) -> Con
         raise ValueError(f"Invalid contract {path}: {error}") from error
 
 
+def _load_required_model[ContractT: BaseModel](
+    root: Path,
+    filename: str,
+    model: type[ContractT],
+) -> ContractT:
+    path = root / filename
+    if not path.is_file():
+        raise ValueError(f"Required contract does not exist: {path}")
+    return _load_model(path, model)
+
+
 def _load_collection[ContractT: BaseModel](
     root: Path,
     folder: str,
@@ -81,8 +93,6 @@ def _load_collection[ContractT: BaseModel](
 ) -> tuple[ContractT, ...]:
     directory = root / folder
     paths = sorted(directory.rglob("*.yaml"))
-    if not paths:
-        raise ValueError(f"Contract directory contains no YAML files: {directory}")
     contracts: list[ContractT] = []
     for path in paths:
         try:
@@ -95,15 +105,18 @@ def _load_collection[ContractT: BaseModel](
 @lru_cache(maxsize=8)
 def load_contracts(root: Path = Path("contracts")) -> PlatformContracts:
     resolved = root.resolve()
-    catalog_path = resolved / "catalog.yaml"
-    if not catalog_path.is_file():
-        raise ValueError(f"Catalog contract does not exist: {catalog_path}")
     return PlatformContracts(
-        catalog=_load_model(catalog_path, CatalogContract),
-        sources=_load_collection(resolved, "sources", TypeAdapter(SourceContract)),
-        curated_products=_load_collection(
+        platform=_load_required_model(resolved, "platform.yaml", PlatformContract),
+        access=_load_required_model(resolved, "access.yaml", AccessContract),
+        maintenance=_load_required_model(
             resolved,
-            "curated_products",
+            "maintenance.yaml",
+            MaintenanceContract,
+        ),
+        sources=_load_collection(resolved, "sources", TypeAdapter(SourceContract)),
+        curated=_load_collection(
+            resolved,
+            "curated",
             TypeAdapter(CuratedProductContract),
         ),
         processors=_load_collection(
@@ -112,5 +125,4 @@ def load_contracts(root: Path = Path("contracts")) -> PlatformContracts:
             TypeAdapter(ProcessorContract),
         ),
         domains=_load_collection(resolved, "domains", TypeAdapter(DomainContract)),
-        policies=_load_collection(resolved, "policies", TypeAdapter(PolicyContract)),
     )

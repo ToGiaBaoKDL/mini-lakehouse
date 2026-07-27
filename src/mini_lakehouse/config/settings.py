@@ -7,9 +7,28 @@ from pydantic import BaseModel, Field, SecretStr, field_validator, model_validat
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+class StorageEndpointSettings(BaseModel):
+    external_url: str | None = "http://localhost:9000"
+    internal_url: str | None = "http://object-store:9000"
+
+    @field_validator("external_url", "internal_url")
+    @classmethod
+    def validate_endpoint(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        endpoint = value.rstrip("/")
+        parsed = urlparse(endpoint)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError(f"Storage endpoint must be an HTTP(S) URL, got {value!r}")
+        if parsed.params or parsed.query or parsed.fragment or parsed.path not in {"", "/"}:
+            raise ValueError(f"Storage endpoint cannot contain a path or query: {value!r}")
+        return endpoint
+
+
 class StorageSettings(BaseModel):
     backend: Literal["s3"] = "s3"
-    endpoint_url: str | None = "http://localhost:9000"
+    network_scope: Literal["external", "internal"] = "external"
+    endpoints: StorageEndpointSettings = Field(default_factory=StorageEndpointSettings)
     access_key: SecretStr | None = SecretStr("minioadmin")
     secret_key: SecretStr | None = SecretStr("minioadmin")
     region: str = "us-east-1"
@@ -20,6 +39,14 @@ class StorageSettings(BaseModel):
     landing_uri: str = "s3://landing"
     curated_uri: str = "s3://curated"
     analytics_uri: str = "s3://analytics"
+
+    @property
+    def endpoint_url(self) -> str | None:
+        return (
+            self.endpoints.external_url
+            if self.network_scope == "external"
+            else self.endpoints.internal_url
+        )
 
     @field_validator("landing_uri", "curated_uri", "analytics_uri", mode="before")
     @classmethod
@@ -53,6 +80,24 @@ class StorageSettings(BaseModel):
 
     def secret_value(self, value: SecretStr | None) -> str | None:
         return value.get_secret_value() if value is not None else None
+
+
+class PlatformAdminSettings(BaseModel):
+    enabled: bool = False
+    container_marker: Path = Path("/.dockerenv")
+    guard_file: Path = Path("/run/secrets/platform_reconcile_guard")
+
+    def require_reconciliation_capability(self) -> None:
+        if not self.enabled:
+            raise RuntimeError("Platform reconciliation is disabled outside its admin container")
+        if not self.container_marker.is_file():
+            raise RuntimeError("Platform reconciliation requires a container runtime marker")
+        try:
+            guard = self.guard_file.read_text(encoding="utf-8").strip()
+        except OSError as error:
+            raise RuntimeError("Platform reconciliation guard is not mounted") from error
+        if guard != "platform-reconcile":
+            raise RuntimeError("Platform reconciliation guard is invalid")
 
 
 class PolarisSettings(BaseModel):
@@ -207,7 +252,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         env_prefix="LAKEHOUSE_",
         env_nested_delimiter="__",
-        env_nested_max_split=1,
+        env_nested_max_split=2,
         secrets_dir=Path("/run/secrets") if Path("/run/secrets").is_dir() else None,
         extra="ignore",
     )
@@ -216,6 +261,7 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     contracts_dir: Path = Path("contracts")
     storage: StorageSettings = Field(default_factory=StorageSettings)
+    platform_admin: PlatformAdminSettings = Field(default_factory=PlatformAdminSettings)
     polaris: PolarisSettings = Field(default_factory=PolarisSettings)
     trino: TrinoSettings = Field(default_factory=TrinoSettings)
     dbt: DbtSettings = Field(default_factory=DbtSettings)
@@ -233,10 +279,13 @@ class Settings(BaseSettings):
         storage_secret_key = self.storage.secret_value(self.storage.secret_key)
         if storage_access_key == "minioadmin" or storage_secret_key == "minioadmin":
             raise ValueError("Production cannot use the local object-store root credentials")
-        if self.storage.endpoint_url in {
-            "http://localhost:9000",
-            "http://object-store:9000",
-        }:
+        local_endpoints = {"http://localhost:9000", "http://object-store:9000"}
+        if local_endpoints.intersection(
+            {
+                self.storage.endpoints.external_url,
+                self.storage.endpoints.internal_url,
+            }
+        ):
             raise ValueError("Production cannot use the local object-store endpoint")
         if self.polaris.credential.get_secret_value() == "root:secretpassword":
             raise ValueError("Production cannot use the local Polaris root credential")

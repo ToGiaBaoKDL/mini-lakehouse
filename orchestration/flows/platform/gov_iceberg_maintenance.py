@@ -15,7 +15,7 @@ from mini_lakehouse.platform.polaris import (
     create_retry_session,
     request_oauth_token,
 )
-from mini_lakehouse.platform.policy_reconciliation import reconcile_policies
+from mini_lakehouse.platform.reconcile import reconcile_policies
 from mini_lakehouse.storage.iceberg import load_iceberg_catalog
 from orchestration.plugins.notifications import (
     notify_flow_failure,
@@ -39,11 +39,12 @@ def discover_maintenance_plan() -> list[MaintenancePlanItem]:
         token = request_oauth_token(session, settings)
         policy_client = PolarisPolicyClient(session, settings, token)
         contracts = load_contracts(settings.contracts_dir)
-        summary = reconcile_policies(policy_client, contracts)
-        if summary.pending_mappings:
+        policy_results = reconcile_policies(policy_client, contracts)
+        pending_mappings = sum(result.pending_mappings for result in policy_results)
+        if pending_mappings:
             logger.info(
                 "Policy reconciliation left %d table-like mappings pending",
-                summary.pending_mappings,
+                pending_mappings,
             )
         return build_maintenance_plan(
             catalog,

@@ -8,22 +8,3 @@ business_owner: engineering
 description: Consumer-facing engineering activity metrics.
 analytics_namespace: [analytics, engineering]
 upstream_curated_products: [github]
-
-tables:
-  - key: repository_activity_daily
-    name: fct_repository_activity_daily
-    access: public
-    description: Daily repository activity at activity date and repository grain.
-    grain: [activity_date, repository_id]
-    partitioning:
-      - field: activity_date
-        transform: month
-
-  - key: contributor_activity_daily
-    name: fct_contributor_activity_daily
-    access: public
-    description: Daily contributor activity at activity date and actor grain.
-    grain: [activity_date, actor_id]
-    partitioning:
-      - field: activity_date
-        transform: month

@@ -5,13 +5,8 @@ from datetime import UTC, date, datetime
 import pytest
 
 from mini_lakehouse.config import get_settings
-from mini_lakehouse.contracts import (
-    PlatformContracts,
-    load_contracts,
-    partition_expression,
-    trino_type,
-)
-from mini_lakehouse.curated_products.arxiv.service import ArxivCurationService
+from mini_lakehouse.contracts import PlatformContracts, load_contracts
+from mini_lakehouse.curated.arxiv.service import ArxivCurationService
 from mini_lakehouse.platform.trino import SqlExecutor, TrinoExecutor
 
 pytestmark = [
@@ -24,36 +19,6 @@ pytestmark = [
 
 _TEST_DAY = date(2099, 12, 31)
 _ARXIV_ID = "mini-lakehouse-e2e-arxiv"
-
-
-def _ensure_landing_tables(
-    executor: SqlExecutor,
-    contracts: PlatformContracts,
-) -> None:
-    settings = get_settings()
-    source = contracts.source("arxiv")
-    for table in source.tables:
-        columns = ",\n    ".join(
-            f'"{column.name}" {trino_type(column)}{" NOT NULL" if column.required else ""}'
-            for column in table.columns
-        )
-        partitioning = ", ".join(
-            f"'{partition_expression(partition)}'" for partition in table.partitioning
-        )
-        executor.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {
-                source.table_identifier(table.key).trino(settings.trino.catalog)
-            } (
-                {columns}
-            )
-            WITH (
-                format = 'PARQUET',
-                format_version = 2,
-                partitioning = ARRAY[{partitioning}]
-            )
-            """
-        )
 
 
 def _delete_test_rows(
@@ -206,7 +171,6 @@ def test_arxiv_curation_expands_authors_and_is_idempotent() -> None:
 
     try:
         with TrinoExecutor(settings.trino) as executor:
-            _ensure_landing_tables(executor, contracts)
             _delete_test_rows(executor, contracts)
             _insert_landing_record(executor, contracts)
             curation = ArxivCurationService(

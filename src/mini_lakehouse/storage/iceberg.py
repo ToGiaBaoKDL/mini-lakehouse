@@ -4,12 +4,12 @@ from pyiceberg.catalog import Catalog, load_catalog
 from pyiceberg.table import Table
 
 from mini_lakehouse.config.settings import Settings
-from mini_lakehouse.contracts import PlatformContracts, TableIdentifier
-from mini_lakehouse.contracts.policies import (
-    MetadataCompactionPolicyContract,
-    MetadataRetentionContract,
-)
+from mini_lakehouse.contracts import TableIdentifier
+from mini_lakehouse.contracts.maintenance import MetadataRetentionContract
 
+MANAGED_ICEBERG_FORMAT_VERSION = 2
+MANAGED_ICEBERG_FILE_FORMAT = "parquet"
+MANAGED_PARQUET_COMPRESSION = "zstd"
 ICEBERG_DELETE_AFTER_COMMIT = "write.metadata.delete-after-commit.enabled"
 ICEBERG_PREVIOUS_VERSIONS_MAX = "write.metadata.previous-versions-max"
 TRINO_DELETE_AFTER_COMMIT = "delete_after_commit_enabled"
@@ -62,29 +62,6 @@ def validate_table_location(table: Table, expected: str, *, owner: str) -> None:
         )
 
 
-def metadata_retention_for_table(
-    contracts: PlatformContracts,
-    table: TableIdentifier,
-) -> MetadataRetentionContract:
-    policies = [
-        policy
-        for policy in contracts.policies
-        if isinstance(policy, MetadataCompactionPolicyContract)
-        and any(
-            target.type == "catalog"
-            or (target.type == "namespace" and table.namespace[: len(target.path)] == target.path)
-            or (target.type == "table-like" and table.iceberg == target.path)
-            for target in policy.targets
-        )
-    ]
-    if len(policies) != 1:
-        raise ValueError(
-            f"Table {table.iceberg!r} must have exactly one metadata retention policy; "
-            f"found {len(policies)}"
-        )
-    return policies[0].retention
-
-
 def iceberg_metadata_retention_properties(
     retention: MetadataRetentionContract,
 ) -> dict[str, str]:
@@ -103,25 +80,20 @@ def trino_metadata_retention_properties(
     }
 
 
+def managed_table_properties(retention: MetadataRetentionContract) -> dict[str, str]:
+    return {
+        "write.format.default": MANAGED_ICEBERG_FILE_FORMAT,
+        "write.parquet.compression-codec": MANAGED_PARQUET_COMPRESSION,
+        **iceberg_metadata_retention_properties(retention),
+    }
+
+
 def metadata_retention_is_current(
     properties: Mapping[str, str],
     retention: MetadataRetentionContract,
 ) -> bool:
     expected = iceberg_metadata_retention_properties(retention)
     return all(str(properties.get(key, "")).lower() == value for key, value in expected.items())
-
-
-def reconcile_metadata_retention(
-    table: Table,
-    retention: MetadataRetentionContract,
-) -> Table:
-    if metadata_retention_is_current(table.properties, retention):
-        return table
-    table.transaction().set_properties(
-        iceberg_metadata_retention_properties(retention)
-    ).commit_transaction()
-    table.refresh()
-    return table
 
 
 def walk_namespaces(catalog: Catalog) -> Iterator[tuple[str, ...]]:

@@ -3,7 +3,7 @@ from datetime import date
 from typing import Any
 
 from mini_lakehouse.config.settings import Settings
-from mini_lakehouse.curated_products.arxiv.repository import ArxivCurationRepository
+from mini_lakehouse.curated.arxiv.repository import ArxivCurationRepository
 from mini_lakehouse.platform.trino import QueryResult
 
 

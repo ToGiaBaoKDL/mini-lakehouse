@@ -13,20 +13,8 @@ from pyiceberg.expressions.literals import literal
 from pyiceberg.table import Table
 
 from mini_lakehouse.config.settings import Settings
-from mini_lakehouse.contracts import (
-    PlatformContracts,
-    iceberg_schema,
-    load_contracts,
-    partition_spec,
-)
-from mini_lakehouse.platform.runtime import source_table_storage_uri
-from mini_lakehouse.storage.iceberg import (
-    iceberg_metadata_retention_properties,
-    load_iceberg_catalog,
-    metadata_retention_for_table,
-    reconcile_metadata_retention,
-    validate_table_location,
-)
+from mini_lakehouse.contracts import PlatformContracts, load_contracts
+from mini_lakehouse.storage.iceberg import load_iceberg_catalog
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,23 +31,11 @@ class GithubArchiveRepository:
         catalog: Catalog | None = None,
         contracts: PlatformContracts | None = None,
     ) -> None:
-        self._settings = settings
         self._owned_catalog = catalog is None
         self._catalog = catalog or load_iceberg_catalog(settings)
         platform_contracts = contracts or load_contracts(settings.contracts_dir)
         self._source = platform_contracts.source("github_archive")
-        self._table_contract = self._source.table("events_raw")
         self._identifier = self._source.table_identifier("events_raw")
-        self._metadata_retention = metadata_retention_for_table(
-            platform_contracts,
-            self._identifier,
-        )
-        self._location = source_table_storage_uri(settings, self._source, "events_raw")
-        self._schema = iceberg_schema(self._table_contract.columns)
-        self._partition_spec = partition_spec(
-            self._table_contract.columns,
-            self._table_contract.partitioning,
-        )
 
     def __enter__(self) -> "GithubArchiveRepository":
         return self
@@ -73,42 +49,15 @@ class GithubArchiveRepository:
         if self._owned_catalog:
             self._catalog.__exit__(exc_type, exc_val, exc_tb)
 
-    def ensure_table(self) -> Table:
-        if self._catalog.table_exists(self._identifier.iceberg):
-            table = self._catalog.load_table(self._identifier.iceberg)
-            table = reconcile_metadata_retention(table, self._metadata_retention)
-            self._validate_table(table)
-            return table
-        properties = {
-            "format-version": "2",
-            "write.format.default": "parquet",
-            "write.parquet.compression-codec": "zstd",
-            **iceberg_metadata_retention_properties(self._metadata_retention),
-        }
-        table = self._catalog.create_table(
-            identifier=self._identifier.iceberg,
-            schema=self._schema,
-            location=self._location,
-            partition_spec=self._partition_spec,
-            properties=properties,
-        )
-        self._validate_table(table)
-        return table
-
-    def _validate_table(self, table: Table) -> None:
-        validate_table_location(table, self._location, owner="GitHub Archive")
-        current = table.spec()
-        if current != self._partition_spec:
+    def _table(self) -> Table:
+        if not self._catalog.table_exists(self._identifier.iceberg):
             raise RuntimeError(
-                "GitHub Archive partition spec drifted from its source contract; "
-                f"expected {self._partition_spec}, found {current}"
+                "GitHub Archive landing table is missing; run platform reconciliation first"
             )
+        return self._catalog.load_table(self._identifier.iceberg)
 
     def hour_state(self, source_hour: datetime) -> GithubArchiveWrite | None:
-        if not self._catalog.table_exists(self._identifier.iceberg):
-            return None
-        table = self._catalog.load_table(self._identifier.iceberg)
-        self._validate_table(table)
+        table = self._table()
         files = tuple(
             table.scan(
                 row_filter=EqualTo(
@@ -136,7 +85,7 @@ class GithubArchiveRepository:
                 f"expected {source_hour.isoformat()}, found {source_hours!r}"
             )
 
-        table = self.ensure_table()
+        table = self._table()
         existing = self.hour_state(source_hour)
         if existing is not None:
             return existing
@@ -161,4 +110,4 @@ class GithubArchiveRepository:
         )
 
     def properties(self) -> Mapping[str, Any]:
-        return self.ensure_table().properties
+        return self._table().properties

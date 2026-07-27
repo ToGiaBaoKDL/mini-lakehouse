@@ -8,21 +8,24 @@ from pyiceberg.exceptions import NamespaceAlreadyExistsError
 
 from mini_lakehouse.config.settings import Settings
 from mini_lakehouse.contracts import load_contracts
-from mini_lakehouse.contracts.policies import policy_content_json
-from mini_lakehouse.platform.access import ensure_catalog_role_grants
-from mini_lakehouse.platform.catalog import catalog_contract, ensure_catalog
-from mini_lakehouse.platform.namespaces import ensure_namespaces, namespace_contract
+from mini_lakehouse.contracts.maintenance import policy_content_json
+from mini_lakehouse.platform.desired_state import DesiredCatalog, compile_desired_state
 from mini_lakehouse.platform.polaris import (
     PolarisManagementClient,
     PolarisPolicyClient,
+    PolicyIdentifier,
     PolicyReconcileResult,
 )
-from mini_lakehouse.platform.policies import PolicyIdentifier
-from mini_lakehouse.platform.policy_prune import plan_payload
-from mini_lakehouse.platform.policy_reconciliation import (
+from mini_lakehouse.platform.policy_prune import (
     PolicyPruneItem,
     apply_policy_prune_plan,
     build_policy_prune_plan,
+    plan_payload,
+)
+from mini_lakehouse.platform.reconcile import (
+    ensure_catalog,
+    ensure_catalog_role_grants,
+    ensure_namespaces,
     reconcile_policies,
 )
 
@@ -37,11 +40,19 @@ def _response(status_code: int, payload: object | None = None) -> requests.Respo
     return response
 
 
+def _desired_catalog(settings: Settings) -> DesiredCatalog:
+    return compile_desired_state(
+        settings,
+        load_contracts(),
+    ).catalog
+
+
 def test_catalog_reconcile_is_a_noop_when_current_state_matches() -> None:
     settings = Settings()
-    desired = catalog_contract(settings)
+    desired = _desired_catalog(settings)
+    payload = desired.management_payload()
     session = create_autospec(requests.Session, instance=True)
-    session.get.return_value = _response(200, {"catalog": desired})
+    session.get.return_value = _response(200, {"catalog": payload})
 
     ensure_catalog(PolarisManagementClient(session, settings, "token"), desired)
 
@@ -49,18 +60,20 @@ def test_catalog_reconcile_is_a_noop_when_current_state_matches() -> None:
 
 
 def test_catalog_contract_includes_default_location_in_allowed_locations() -> None:
-    desired = catalog_contract(Settings())
+    desired = _desired_catalog(Settings())
+    payload = desired.management_payload()
 
     assert (
-        desired["properties"]["default-base-location"]
-        in desired["storageConfigInfo"]["allowedLocations"]
+        payload["properties"]["default-base-location"]
+        in payload["storageConfigInfo"]["allowedLocations"]
     )
 
 
 def test_catalog_reconcile_updates_mutable_drift_with_entity_version() -> None:
     settings = Settings()
-    desired = catalog_contract(settings)
-    current = copy.deepcopy(desired)
+    desired = _desired_catalog(settings)
+    payload = desired.management_payload()
+    current = copy.deepcopy(payload)
     current["entityVersion"] = 7
     current["storageConfigInfo"]["allowedLocations"] = ["s3://wrong"]
     session = create_autospec(requests.Session, instance=True)
@@ -72,15 +85,16 @@ def test_catalog_reconcile_updates_mutable_drift_with_entity_version() -> None:
     session.put.assert_called_once()
     assert session.put.call_args.kwargs["json"] == {
         "currentEntityVersion": 7,
-        "properties": desired["properties"],
-        "storageConfigInfo": desired["storageConfigInfo"],
+        "properties": payload["properties"],
+        "storageConfigInfo": payload["storageConfigInfo"],
     }
 
 
 def test_catalog_reconcile_removes_stale_properties_from_previous_contracts() -> None:
     settings = Settings()
-    desired = catalog_contract(settings)
-    current = copy.deepcopy(desired)
+    desired = _desired_catalog(settings)
+    payload = desired.management_payload()
+    current = copy.deepcopy(payload)
     current["entityVersion"] = 7
     current["properties"]["polaris.config.drop-with-purge.enabled"] = "true"
     session = create_autospec(requests.Session, instance=True)
@@ -89,13 +103,13 @@ def test_catalog_reconcile_removes_stale_properties_from_previous_contracts() ->
 
     ensure_catalog(PolarisManagementClient(session, settings, "token"), desired)
 
-    assert session.put.call_args.kwargs["json"]["properties"] == desired["properties"]
+    assert session.put.call_args.kwargs["json"]["properties"] == payload["properties"]
 
 
 def test_catalog_reconcile_rejects_immutable_drift() -> None:
     settings = Settings()
-    desired = catalog_contract(settings)
-    current = copy.deepcopy(desired)
+    desired = _desired_catalog(settings)
+    current = copy.deepcopy(desired.management_payload())
     current["type"] = "EXTERNAL"
     current["entityVersion"] = 2
     session = create_autospec(requests.Session, instance=True)
@@ -113,11 +127,12 @@ def test_catalog_reconcile_rejects_immutable_drift() -> None:
 
 def test_catalog_reconcile_retries_once_after_concurrent_update() -> None:
     settings = Settings()
-    desired = catalog_contract(settings)
-    stale = copy.deepcopy(desired)
+    desired = _desired_catalog(settings)
+    payload = desired.management_payload()
+    stale = copy.deepcopy(payload)
     stale["entityVersion"] = 3
     stale["properties"]["owner"] = "stale-owner"
-    current = copy.deepcopy(desired)
+    current = copy.deepcopy(payload)
     current["entityVersion"] = 4
     session = create_autospec(requests.Session, instance=True)
     session.get.side_effect = [
@@ -135,6 +150,7 @@ def test_catalog_reconcile_retries_once_after_concurrent_update() -> None:
 def test_catalog_role_reconcile_only_grants_missing_privileges() -> None:
     settings = Settings()
     contracts = load_contracts()
+    state = compile_desired_state(settings, contracts)
     session = create_autospec(requests.Session, instance=True)
     session.get.return_value = _response(
         200,
@@ -146,9 +162,7 @@ def test_catalog_role_reconcile_only_grants_missing_privileges() -> None:
     )
     session.put.return_value = _response(204)
 
-    granted = ensure_catalog_role_grants(
-        PolarisManagementClient(session, settings, "token"), contracts
-    )
+    granted = ensure_catalog_role_grants(PolarisManagementClient(session, settings, "token"), state)
 
     assert granted == 1
     session.put.assert_called_once()
@@ -161,6 +175,7 @@ def test_catalog_role_reconcile_only_grants_missing_privileges() -> None:
 def test_catalog_role_reconcile_is_noop_when_privilege_exists() -> None:
     settings = Settings()
     contracts = load_contracts()
+    state = compile_desired_state(settings, contracts)
     session = create_autospec(requests.Session, instance=True)
     session.get.return_value = _response(
         200,
@@ -171,9 +186,7 @@ def test_catalog_role_reconcile_is_noop_when_privilege_exists() -> None:
         },
     )
 
-    granted = ensure_catalog_role_grants(
-        PolarisManagementClient(session, settings, "token"), contracts
-    )
+    granted = ensure_catalog_role_grants(PolarisManagementClient(session, settings, "token"), state)
 
     assert granted == 0
     session.put.assert_not_called()
@@ -182,7 +195,8 @@ def test_catalog_role_reconcile_is_noop_when_privilege_exists() -> None:
 def test_namespace_reconcile_only_writes_changed_properties() -> None:
     settings = Settings()
     contracts = load_contracts()
-    desired = namespace_contract(settings, contracts)
+    state = compile_desired_state(settings, contracts)
+    desired = {namespace.path: namespace.iceberg_properties() for namespace in state.namespaces}
     catalog = create_autospec(Catalog, instance=True)
     catalog.create_namespace.side_effect = NamespaceAlreadyExistsError
 
@@ -194,11 +208,38 @@ def test_namespace_reconcile_only_writes_changed_properties() -> None:
 
     catalog.load_namespace_properties.side_effect = current_properties
 
-    ensure_namespaces(catalog, settings, contracts)
+    ensure_namespaces(catalog, state)
 
     catalog.update_namespace_properties.assert_called_once_with(
         ("analytics", "engineering"),
+        removals=set(),
         updates={"owner": "engineering-analytics"},
+    )
+
+
+def test_namespace_reconcile_removes_properties_deleted_from_the_contract() -> None:
+    state = compile_desired_state(Settings(), load_contracts())
+    catalog = create_autospec(Catalog, instance=True)
+    catalog.create_namespace.side_effect = NamespaceAlreadyExistsError
+
+    def current_properties(namespace: tuple[str, ...]) -> dict[str, str]:
+        return {
+            **next(
+                desired.iceberg_properties()
+                for desired in state.namespaces
+                if desired.path == namespace
+            ),
+            "stale_property": "remove-me",
+        }
+
+    catalog.load_namespace_properties.side_effect = current_properties
+
+    ensure_namespaces(catalog, state)
+
+    assert catalog.update_namespace_properties.call_count == len(state.namespaces)
+    assert all(
+        call_item.kwargs["removals"] == {"stale_property"}
+        for call_item in catalog.update_namespace_properties.call_args_list
     )
 
 
@@ -336,8 +377,8 @@ def test_policy_reconcile_summary_tracks_pending_table_mappings() -> None:
         for index, policy in enumerate(contracts.policies)
     ]
 
-    summary = reconcile_policies(client, contracts)
+    results = reconcile_policies(client, contracts)
 
-    assert summary.ensured_mappings == len(contracts.policies)
-    assert summary.pending_mappings == 1
+    assert sum(result.ensured_mappings for result in results) == len(contracts.policies)
+    assert sum(result.pending_mappings for result in results) == 1
     assert client.reconcile_policy.call_count == len(contracts.policies)
