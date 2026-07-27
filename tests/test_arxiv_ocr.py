@@ -466,6 +466,72 @@ def test_kaggle_private_resource_forbidden_is_treated_as_missing(
     assert gateway.current_kernel_run("owner/missing-kernel") is None
 
 
+def test_kaggle_existing_runner_dataset_publishes_a_version(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    gateway = KaggleGateway(
+        KaggleSettings.model_validate({"username": "owner", "api_token": "secret"})
+    )
+    published: list[tuple[str, Path, str]] = []
+
+    def current_version(_slug: str) -> int:
+        return 3
+
+    def publish_version(
+        slug: str,
+        source: Path,
+        *,
+        version_notes: str,
+    ) -> None:
+        published.append((slug, source, version_notes))
+
+    monkeypatch.setattr(gateway, "dataset_version", current_version)
+    monkeypatch.setattr(gateway, "_upload_dataset_version", publish_version)
+
+    gateway.upload_dataset(
+        "owner/runner",
+        tmp_path,
+        version_notes="runner bundle abc",
+    )
+
+    assert published == [("owner/runner", tmp_path, "runner bundle abc")]
+
+
+def test_kaggle_missing_runner_dataset_uses_kagglehub_create(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import kagglehub
+
+    gateway = KaggleGateway(
+        KaggleSettings.model_validate({"username": "owner", "api_token": "secret"})
+    )
+    published: list[tuple[str, str, str]] = []
+
+    def missing(_slug: str) -> int:
+        raise KaggleResourceNotFoundError("missing")
+
+    def create_dataset(
+        slug: str,
+        source: str,
+        *,
+        version_notes: str,
+    ) -> None:
+        published.append((slug, source, version_notes))
+
+    monkeypatch.setattr(gateway, "dataset_version", missing)
+    monkeypatch.setattr(kagglehub, "dataset_upload", create_dataset)
+
+    gateway.upload_dataset(
+        "owner/runner",
+        tmp_path,
+        version_notes="initial runner bundle",
+    )
+
+    assert published == [("owner/runner", str(tmp_path), "initial runner bundle")]
+
+
 def test_kaggle_log_stream_uses_official_events_and_preserves_lines(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
