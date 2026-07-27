@@ -51,7 +51,7 @@ logical ownership; dbt layers remain a modeling concern inside the analytics pro
 | Streamlit | Read-only OCR result review |
 | uv + Pydantic | Reproducible Python environments and strict YAML contracts |
 
-## Data modeling
+## Source-to-product flows
 
 GitHub Archive follows the complete path:
 
@@ -62,9 +62,23 @@ prod.landing.github_archive_events_raw
                                    fct_contributor_activity_daily}
 ```
 
-dbt reads curated products - not landing tables. `staging` and `intermediate` models are ephemeral;
-only domain marts are materialized in analytics. ArXiv curation owns current paper metadata,
-authors, categories, OCR lineage, immutable artifacts, and canonical page elements.
+ArXiv metadata follows a separate source-owned path:
+
+```text
+ArXiv OAI-PMH
+  → s3://landing/api/arxiv/raw/oai/datestamp=<date>/responses.tar.zst
+  → prod.landing.{arxiv_oai_records_raw, arxiv_oai_checkpoints}
+  → prod."curated.arxiv".{papers, paper_authors, paper_categories}
+  → bounded Kaggle OCR
+  → prod."curated.arxiv".{ocr_batches, ocr_document_runs,
+                           ocr_document_elements}
+    + s3://curated/arxiv/ocr/papers/<arxiv-id>/<processing-id>/
+```
+
+Landing preserves replayable OAI responses and parsed source mutations. Curated keeps the current
+paper state and OCR results. ArXiv does not currently publish an analytics mart. dbt reads curated
+products - not landing tables; its `staging` and `intermediate` models are ephemeral, and only
+domain marts are materialized in analytics.
 
 ## OCR pipeline
 
@@ -183,6 +197,17 @@ LAKEHOUSE_ENVIRONMENT=ci \
 RUN_LAKEHOUSE_INTEGRATION=1 \
 uv run pytest -m integration
 ```
+
+These tests run against a disposable AIStor, Polaris, and Trino data plane and verify:
+
+- all contract-managed Polaris namespaces are readable;
+- synthetic GitHub events converge through landing, curation, dbt freshness/tests, and analytics
+  marts without duplicate merge keys;
+- a synthetic ArXiv landing mutation expands into current papers, ordered authors, and categories,
+  and a repeated curation creates no new Iceberg snapshots.
+
+They deliberately do not call GitHub Archive, ArXiv OAI-PMH, Kaggle, Prefect schedules,
+notifications, or the OCR Review UI.
 
 See [architecture and ownership](docs/00_overview.md),
 [pipeline operations](docs/04_pipeline_execution.md), and
