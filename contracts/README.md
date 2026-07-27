@@ -1,32 +1,43 @@
 # Declarative contracts
 
-This directory is the reviewed, non-secret desired state for the lakehouse. Python loads every
-file with strict Pydantic models before making a network or storage call.
+This directory is the reviewed, non-secret source of truth for stable lakehouse
+metadata. Contracts are loaded with strict Pydantic models before any network or
+storage operation.
 
 ## Ownership
 
-- `catalog.yaml`: catalog owner, three lifecycle roots, technical owners, catalog properties, and
-  required catalog-role grants.
-- `sources/*.yaml`: source boundary, optional raw-object subpath, checkpoint key, stable field IDs,
-  partition transform, and schema version.
-- `curated_products/*.yaml`: canonical curated product owner, upstream sources, keys, stable field
-  IDs, partitions, and schemas.
-- `processors/*.yaml`: external processing owner, pinned model revisions, output protocol,
-  resource limits, artifact prefix, runner and model resources, and retry policy.
-- `domains/*.yaml`: analytics-domain owner, upstream curated products, mart grain, partitioning,
-  and public relation registry.
-- `policies/*.yaml`: one Polaris policy per file, including typed content, attachments, bounded
-  maintenance execution, and per-tier Iceberg metadata retention.
+| Contract | Owns |
+|---|---|
+| `platform.yaml` | Catalog identity and the three lifecycle root namespaces |
+| `access.yaml` | Catalog roles and grants |
+| `maintenance.yaml` | Tier retention defaults and bounded optimization overrides |
+| `sources/*.yaml` | External source boundary, landing schemas, checkpoints, and partitions |
+| `curated/*.yaml` | Canonical product schemas, keys, partitions, and upstream sources |
+| `processors/*.yaml` | Stable processor input/output semantics and remote resource requirements |
+| `domains/*.yaml` | Analytics domain ownership, namespace, and upstream products |
 
-Runtime endpoints and credentials do not belong here. They remain in environment variables or a
-secret manager. dbt SQL, model tests, and future BI metadata remain in native dbt files.
-Physical locations of managed Iceberg tables are also absent from individual table declarations.
-Namespace roots come from `catalog.yaml`; curated product and analytics domain contracts own their
-child namespaces. Curated/analytics locations follow those dedicated namespaces, while landing
-locations are derived centrally as
-`<landing>/<source-type>/<source-name>/tables/<table-key>` because all sources share one logical
-namespace. Raw roots are derived as `<source-type>/<source-name>/raw[/<raw-subpath>]`. The
-repository implements bounded idempotent writes from the declared checkpoint and partition.
+Analytics model schemas, grains, tests, and materializations live only in dbt.
+Executable extraction and transformation logic lives only in Python or SQL.
+Endpoints, storage roots, and credentials are runtime settings rather than
+contract fields.
+
+The compiler derives:
+
+- Catalog and namespace payloads.
+- Landing and curated table identifiers and physical locations.
+- Iceberg schemas and partition specs with stable field IDs.
+- Polaris maintenance policies from tier defaults.
+- A deterministic contract digest for reconciliation and review.
+
+`platform.yaml`, `access.yaml`, and `maintenance.yaml` are the required control-plane
+contracts. Entity collections under `sources/`, `curated/`, `processors/`, and `domains/`
+may start empty and grow independently; cross-file validation rejects a reference until its
+owner contract exists.
+
+Landing table locations follow
+`<landing>/<source-type>/<source>/tables/<table-key>`. Curated table locations
+follow `<curated>/<product>/<table>`. No contract declares a full physical table
+location, catalog UUID, or engine-generated file name.
 
 ## Validation
 
@@ -34,47 +45,20 @@ repository implements bounded idempotent writes from the declared checkpoint and
 make validate
 ```
 
-Validation rejects unknown fields, duplicate YAML keys, missing namespace references, duplicate
-policy attachments, unsafe object prefixes, and source tables that do not partition by their
-checkpoint field.
+Validation rejects unknown fields, duplicate YAML keys, secret-like keys,
+duplicate ownership, broken cross-contract references, unsafe prefixes, invalid
+keys, unstable partition definitions, and maintenance targets that disagree with
+managed table partitions.
 
-Polaris allows engine-specific keys in policy `config`, but this project intentionally accepts
-only fields that its Trino maintenance runner can enforce. Unsupported fields fail validation
-instead of being silently ignored.
+## Adding a source
 
-Each tier's metadata-compaction policy is also the source of truth for
-`write.metadata.delete-after-commit.enabled` and `write.metadata.previous-versions-max`. Table
-creation maps those values to PyIceberg or Trino syntax, while scheduled maintenance reconciles
-existing tables only when the persisted properties have drifted. Snapshot and orphan retention
-remain separate policies because they control data recovery and garbage collection rather than
-metadata-version history.
+1. Add `sources/<source>.yaml` with explicit schema field IDs and checkpoint rules.
+2. Implement only the source-specific client and parser.
+3. Add `curated/<product>.yaml` and transformation code when canonical data is
+   required.
+4. Reference the curated product from a domain when dbt marts consume it.
+5. Add a bounded optimization override only after file metrics justify one.
+6. Run `make validate` and idempotency tests before enabling a schedule.
 
-dbt cannot load the platform contract during Jinja parsing, so its project variables contain the
-engine-native analytics projection. A cross-layer contract test requires that projection to equal
-the analytics policy and fails CI on drift.
-
-Platform reconciliation safely creates or updates desired policy bodies and mappings. The `mlh-`
-prefix is reserved for this repository. Removing stale managed policies is a separate, explicit
-plan/apply operation; normal deployment never deletes them.
-
-## Adding a source and product
-
-1. Add `sources/<source>.yaml`; publish source-prefixed table names in the shared `landing`
-   namespace and retain transport/source hierarchy only in object prefixes.
-2. Add a source-owned package with client, parser, repository, and service as needed; consume the
-   YAML column contract instead of defining another in-code schema.
-3. Give every Iceberg field a permanent ID and lock it with a schema test.
-4. Choose a natural checkpoint/idempotency key and an atomic table commit strategy.
-5. Add `curated_products/<product>.yaml` and a source-conformance service under
-   `curated_products/<product>/`.
-6. Add convention-named EL and TL DAGs that co-locate their Prefect tasks; prefer explicit
-   schedules over cross-deployment event sensors when a fixed source SLA exists.
-7. Add `processors/<processor>.yaml` only when compute leaves the lakehouse runtime; pin every
-   output-affecting model/config and keep provider credentials in the environment. Bump
-   `adapter_version` whenever parsing or canonicalization code changes; ports, retries,
-   concurrency, memory allocation, eager execution, and resource packaging are operational and
-   must not invalidate successful outputs.
-8. Declare the curated product as a dbt source; keep dbt staging/intermediate models ephemeral.
-9. Reference the product from each consuming analytics domain contract.
-10. Attach the tier policy; change its name when changing targets so stale mappings are prunable.
-11. Add cross-layer, idempotent rerun, and failure-recovery tests before enabling a schedule.
+Adding a source must not require changes to catalog bootstrap, namespace
+reconciliation, table-location rules, or generic maintenance behavior.

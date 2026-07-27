@@ -4,12 +4,13 @@
 
 | Boundary | Source of truth | Owner | Runtime responsibility |
 |---|---|---|---|
-| Catalog roots and RBAC | `contracts/catalog.yaml` | Data Platform | Polaris reconciler |
+| Catalog roots | `contracts/platform.yaml` | Data Platform | Polaris reconciler |
+| Catalog access | `contracts/access.yaml` | Data Platform | Polaris reconciler |
 | Curated/analytics namespaces | Product and domain contracts | Declared owner | Polaris reconciler |
-| Source landing data | `contracts/sources/*.yaml` + source package | Declared source owner | Source service and repository |
-| Curated GitHub product | `contracts/curated_products/github.yaml` + curated product package | Data Platform | Trino curation service |
+| Landing tables | `contracts/sources/*.yaml` | Declared source owner | Platform reconciler; source repository writes rows |
+| Curated tables | `contracts/curated/*.yaml` | Declared product owner | Platform reconciler; curation repository merges rows |
 | Analytics domain models | `contracts/domains/*.yaml` + dbt metadata/tests | Declared domain owner | dbt/Trino |
-| Maintenance policy | `contracts/policies/*.yaml` | Declared policy owner | Polaris metadata + governance flow |
+| Maintenance policy | `contracts/maintenance.yaml` | Declared tier owner | Polaris metadata + governance flow |
 | Deployment lifecycle | Compose and `prefect.yaml` | Platform operators | Docker Compose and Prefect |
 
 Validate the complete non-secret registry and its runtime catalog settings before every apply:
@@ -24,24 +25,28 @@ Each lifecycle has one narrow responsibility:
 
 - `polaris-bootstrap` initializes the realm and root principal.
 - `object-store-provision` creates missing buckets derived from lifecycle URIs.
-- `platform-reconcile` creates or updates catalog, namespace, access, policy content and desired
-  mappings.
+- `platform-reconcile` creates or updates catalog, namespaces, access, landing/curated Iceberg
+  tables, policy content, and desired mappings.
 - `policy-prune-plan` is read-only; `policy-prune-apply` performs only deletion of the exact
   reviewed stale-policy plan identified by its SHA-256.
 
 The normal reconciler may:
 
-- Create a missing catalog, namespace, or policy and grant a declared missing catalog privilege.
+- Create a missing catalog, namespace, landing/curated table, or policy and grant a declared
+  missing catalog privilege.
 - Update mutable catalog properties/storage configuration with Polaris `entityVersion` optimistic
   concurrency, including removal of properties deleted from the reviewed catalog contract; reject
   immutable catalog name/type drift.
 - Update drifted namespace properties or policy content.
+- Reconcile managed Iceberg properties and reject location, schema, field-ID, requiredness, or
+  active partition-spec drift.
 - Idempotently attach every desired policy mapping.
 - Refuse catalog drift that cannot be updated safely in place.
 
-It never drops a catalog, namespace, table, object, policy, or team-owned resource. Catalog creation handles
-a concurrent creator by reading and validating the winning state. Catalog and policy updates use
-Polaris version checks and retry one concurrent update after re-reading server state.
+It never drops a catalog, namespace, table, object, policy, or team-owned resource. Catalog and
+table creation handle a concurrent creator by reading and validating the winning state. Catalog
+and policy updates use Polaris version checks and retry one concurrent update after re-reading
+server state.
 
 Run reconciliation through the core Compose module:
 
@@ -49,15 +54,14 @@ Run reconciliation through the core Compose module:
 make platform-reconcile
 ```
 
-The local `catalog_admin` role is explicitly granted `CATALOG_MANAGE_CONTENT`. Namespace
-locations are the physical source of truth; table creators do not provide another path,
-and Trino is configured to derive stable table directories without UUID suffixes. Normal dbt models
-use table replacement. These settings belong to reviewed platform configuration rather than a
-container startup script.
+The local `catalog_admin` role is explicitly granted `CATALOG_MANAGE_CONTENT`. The contract compiler
+derives one stable location for every landing and curated table; source and curation jobs never run
+DDL. Normal dbt models use table replacement in analytics. These settings belong to reviewed
+platform configuration rather than a container startup script.
 
-Running reconciliation again with unchanged contracts must produce no catalog, role-grant, namespace,
-or policy-content mutation. Mapping `PUT` requests remain safe and idempotent by Polaris API
-contract.
+Running reconciliation again with unchanged contracts must produce no catalog, role-grant,
+namespace, table-property, or policy-content mutation. Mapping `PUT` requests remain safe and
+idempotent by Polaris API contract.
 
 ## Changing policy targets
 

@@ -11,12 +11,19 @@ uv sync --frozen --all-extras --all-groups
 Configuration uses nested Pydantic settings with the `LAKEHOUSE_` prefix and `__` delimiter. For
 example, `LAKEHOUSE_STORAGE__LANDING_URI` maps to `settings.storage.landing_uri`. Secrets may be
 mounted under `/run/secrets` in a managed deployment. The local `.env` is ignored by Git.
+Storage declares independent
+`LAKEHOUSE_STORAGE__ENDPOINTS__EXTERNAL_URL` and
+`LAKEHOUSE_STORAGE__ENDPOINTS__INTERNAL_URL` values. Host processes select the external endpoint;
+container workloads select the internal endpoint through
+`LAKEHOUSE_STORAGE__NETWORK_SCOPE`. Native cloud S3 may leave both custom endpoints unset.
 dbt's profile reads the same `LAKEHOUSE_TRINO__*` keys as Python, so catalog and Trino endpoints
 do not have a second `DBT_CATALOG`/`TRINO_HOST` source of truth.
 Tracked container-only routing is split by ownership:
-`infra/config/platform.container.env` contains shared storage/Polaris routes, while
+`infra/config/platform.container.env` contains the container network scope and internal Polaris
+routes, while
 `infra/config/orchestration.container.env` contains Trino/dbt/Prefect routes. Secrets and
-lifecycle URIs remain in `.env` and are injected explicitly by Compose.
+lifecycle URIs, storage endpoints, and catalog names remain in `.env` and are injected explicitly
+by Compose.
 
 Stable desired state is separate from runtime settings and lives under `contracts/`. Validate both
 layers before starting services:
@@ -65,5 +72,7 @@ branch in this project.
 
 The local Polaris metastore is PostgreSQL-backed. `polaris-bootstrap` only initializes the realm
 and root principal. `object-store-provision` only ensures physical buckets exist.
-`platform-reconcile` then converges catalog `prod`, namespaces, access grants, and desired policy
-content. No package is installed dynamically when a container starts.
+`platform-reconcile` then converges the declared catalog (currently `prod`), namespaces, access
+grants, landing/curated Iceberg tables, and desired policy content. It is enabled only in its one-shot container and
+requires the tracked reconcile guard mounted read-only at runtime. No package is installed
+dynamically when a container starts.

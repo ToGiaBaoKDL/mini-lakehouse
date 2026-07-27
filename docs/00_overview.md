@@ -6,13 +6,13 @@ The lifecycle buckets are physical security and retention boundaries. Modeling l
 and do not create extra namespaces:
 
 ```text
-GitHub Archive
-  └─ EL ─▶ prod.landing.github_archive_events_raw
-             immutable raw object + replayable source-hour partition
-              └─ TL/Trino ─▶ prod."curated.github".{events,actors_current,repositories_current}
-                                canonical source-conformed GitHub product
-                                  └─ TL/dbt ─▶ prod."analytics.engineering".fct_*_daily
-                                                consumer-facing domain metrics
+External API / RDBMS / stream
+  └─ EL ─▶ <catalog>.landing.<source>_*_raw
+             immutable source objects + replayable checkpointed tables
+              └─ TL/Trino ─▶ <catalog>."curated.<product>".*
+                                canonical transport-free products
+                                  └─ TL/dbt ─▶ <catalog>."analytics.<domain>".*
+                                                consumer-facing domain models
 ```
 
 - `landing` is one logical namespace. Transport and source identity remain in physical object
@@ -22,8 +22,8 @@ GitHub Archive
 - `curated` drops transport identity and publishes reusable, validated source-conformed products.
 - `analytics` is organized by business domain and owns consumer semantics.
 
-For a future RDBMS source, use a unique landing table such as
-`prod.landing.warehouse_raw_orders`; retain a deterministic transport path such as
+For example, an RDBMS source can use a unique landing table such as
+`<catalog>.landing.warehouse_raw_orders`; retain a deterministic transport path such as
 `s3://landing/rdbms/warehouse_raw/raw/...` for immutable source objects and publish the table at
 `s3://landing/rdbms/warehouse_raw/tables/orders`. The contract derives that path from source type,
 source name, and table key; it is not copied into table YAML. Its curation package publishes to a
@@ -34,17 +34,19 @@ depending on their ingestion implementation.
 
 ```text
 contracts/
-├── catalog.yaml            catalog, lifecycle roots, storage tiers, grants
+├── platform.yaml           catalog and lifecycle roots
+├── access.yaml             catalog roles and grants
+├── maintenance.yaml        tier defaults and bounded table optimizations
 ├── sources/                landing ownership and checkpoints
-├── curated_products/       canonical curated products
+├── curated/                canonical curated products
 ├── domains/                analytics ownership and published marts
-└── policies/               typed Polaris maintenance policy desired state
+└── processors/             provider-neutral processing contracts
 
 src/mini_lakehouse/
 ├── config/                 secret/runtime settings
 ├── contracts/              strict Pydantic contract models and cross-file validation
 ├── sources/                source-owned acquisition, parsing, and landing writes
-├── curated_products/       curated product schemas and curation services
+├── curated/                curated product schemas and curation services
 ├── platform/               Polaris, Trino, namespace, RBAC, and maintenance adapters
 ├── processing/ocr/         provider-neutral protocol plus remote compute adapters
 └── storage/                S3-compatible object store and Iceberg catalog adapters
@@ -69,9 +71,9 @@ source or product business behavior. It is intentionally not a Python package an
 
 | Boundary | Technical owner | Responsibility |
 |---|---|---|
-| `landing` / `github_archive_*` | Data Platform | Immutable raw archive, parsing fidelity, source-hour idempotency |
-| `curated.github` | Data Platform | Canonical event/entity schema, deduplication, normalization, reusable source semantics |
-| `analytics.engineering` | Engineering Analytics | Metric definitions, grains, dbt tests/contracts, BI-facing tables |
+| `landing` / source-prefixed tables | Declared source owner | Immutable capture, parsing fidelity, checkpoint idempotency |
+| `curated.<product>` | Declared product owner | Canonical schema, deduplication, normalization, reusable source semantics |
+| `analytics.<domain>` | Declared domain owner | Metric definitions, grains, dbt tests/contracts, BI-facing tables |
 | Catalog and maintenance | Data Platform | Polaris desired state, access grants, policy reconciliation, Iceberg maintenance |
 
 The registry derives each curated-product and analytics-domain namespace from its owning contract,

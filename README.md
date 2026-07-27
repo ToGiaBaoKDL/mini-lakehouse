@@ -99,10 +99,17 @@ configuration.
 ## Repository boundaries
 
 ```text
-contracts/                  Non-secret desired state: catalog, sources, products, domains, policies
+contracts/
+  platform.yaml             Catalog identity and lifecycle roots
+  access.yaml               Catalog grants
+  maintenance.yaml          Tier retention and bounded optimization
+  sources/                  Landing schemas and checkpoints
+  curated/                  Canonical product schemas and keys
+  domains/                  Analytics ownership and upstream products
+  processors/               Stable external-processing semantics
 src/mini_lakehouse/
   sources/                  Acquisition, parsing, and landing writes
-  curated_products/         Product-owned curation and repositories
+  curated/                  Product-owned curation and repositories
   processing/               Provider-neutral processor protocols and execution adapters
   platform/                 Polaris, Trino, access, reconciliation, and maintenance
   storage/                  S3 and Iceberg boundaries
@@ -167,7 +174,7 @@ Operational commands and current deployments are documented in
 ```bash
 make help                  # list supported operations
 make check                 # lock, lint, type, unit, dbt parse, and Compose checks
-make platform-reconcile    # reconcile catalog, namespaces, access, and policies
+make platform-reconcile    # reconcile catalog, namespaces, tables, access, and policies
 make prefect-deploy        # register all Prefect deployments
 make policy-prune-plan     # inspect stale repository-managed Polaris policies
 ```
