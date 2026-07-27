@@ -445,6 +445,7 @@ def test_kaggle_runner_bundle_preserves_the_shared_package_namespace(
 
 def test_kaggle_private_resource_forbidden_is_treated_as_missing(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     class _Response:
         status_code = 403
@@ -456,15 +457,25 @@ def test_kaggle_private_resource_forbidden_is_treated_as_missing(
         KaggleSettings.model_validate({"username": "owner", "api_token": "secret"})
     )
 
-    def raise_forbidden() -> None:
+    def raise_forbidden(*_args: object, **_kwargs: object) -> None:
         raise _ForbiddenError("private resource is not visible")
 
     monkeypatch.setattr(gateway, "_api", raise_forbidden)
+    monkeypatch.setattr("kagglehub.dataset_download", raise_forbidden)
+    monkeypatch.setattr("kagglehub.model_download", raise_forbidden)
 
     with pytest.raises(KaggleResourceNotFoundError):
         gateway.dataset_version("owner/missing-dataset")
     with pytest.raises(KaggleResourceNotFoundError):
         gateway.model_version("owner/missing-model/transformers/default")
+    with pytest.raises(KaggleResourceNotFoundError):
+        gateway.download_dataset_file("owner/missing-dataset", "manifest.json", tmp_path)
+    with pytest.raises(KaggleResourceNotFoundError):
+        gateway.download_model_file(
+            "owner/missing-model/transformers/default",
+            "manifest.json",
+            tmp_path,
+        )
     assert gateway.current_kernel_run("owner/missing-kernel") is None
 
 

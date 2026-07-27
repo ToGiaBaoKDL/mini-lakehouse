@@ -369,9 +369,9 @@ class KaggleGateway:
                     output_dir=str(destination),
                 )
         except Exception as error:
-            if _is_not_found(error):
+            if _is_private_resource_missing(error):
                 raise KaggleResourceNotFoundError(
-                    f"Kaggle Dataset {dataset_slug!r} does not exist"
+                    f"Kaggle Dataset {dataset_slug!r} is not available yet"
                 ) from error
             raise KaggleCommandError(
                 f"Cannot download {relative_path!r} from Kaggle Dataset {dataset_slug!r}: {error}"
@@ -443,9 +443,9 @@ class KaggleGateway:
                     output_dir=str(destination),
                 )
         except Exception as error:
-            if _is_not_found(error):
+            if _is_private_resource_missing(error):
                 raise KaggleResourceNotFoundError(
-                    f"Kaggle model {model_slug!r} does not exist"
+                    f"Kaggle model {model_slug!r} is not available yet"
                 ) from error
             raise KaggleCommandError(
                 f"Cannot download {relative_path!r} from Kaggle model {model_slug!r}: {error}"
