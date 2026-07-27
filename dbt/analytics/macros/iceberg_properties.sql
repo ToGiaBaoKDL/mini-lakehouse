@@ -8,13 +8,7 @@
     {%- endif -%}
     {%- set properties = {
         'format': "'PARQUET'",
-        'format_version': '2',
-        'delete_after_commit_enabled': (
-            var('iceberg_metadata_retention')['delete_after_commit'] | string | lower
-        ),
-        'max_previous_versions': (
-            var('iceberg_metadata_retention')['previous_versions_max'] | string
-        )
+        'format_version': '2'
     } -%}
     {%- if partitioning is not none -%}
         {%- do properties.update({'partitioning': "ARRAY['" ~ partitioning ~ "']"}) -%}
