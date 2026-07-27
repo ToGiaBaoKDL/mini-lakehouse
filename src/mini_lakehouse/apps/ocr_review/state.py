@@ -1,7 +1,5 @@
 """Centralized, testable Streamlit session-state transitions."""
 
-from __future__ import annotations
-
 from collections.abc import Sequence
 from enum import StrEnum
 from typing import Any, Protocol

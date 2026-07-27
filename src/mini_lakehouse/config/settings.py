@@ -134,6 +134,34 @@ class KaggleSettings(BaseModel):
         return f"{self.username}/{model_name}/{framework}/{variation}"
 
 
+class ModalSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_prefix="MODAL_",
+        extra="ignore",
+    )
+
+    token_id: SecretStr | None = None
+    token_secret: SecretStr | None = None
+
+    @field_validator("token_id", "token_secret", mode="before")
+    @classmethod
+    def empty_credential_is_unset(cls, value: object) -> object:
+        return None if value == "" else value
+
+    @model_validator(mode="after")
+    def validate_credentials(self) -> Self:
+        values = (self.token_id, self.token_secret)
+        if any(value is None for value in values) and any(value is not None for value in values):
+            raise ValueError("Modal token_id and token_secret must be configured together")
+        return self
+
+    @property
+    def configured(self) -> bool:
+        return self.token_id is not None and self.token_secret is not None
+
+
 class NotificationSettings(BaseModel):
     prefect_ui_url: str = "http://localhost:4200"
     slack_bot_token: SecretStr | None = None
@@ -194,6 +222,7 @@ class Settings(BaseSettings):
     github_archive: GithubArchiveSettings = Field(default_factory=GithubArchiveSettings)
     arxiv: ArxivSettings = Field(default_factory=ArxivSettings)
     kaggle: KaggleSettings = Field(default_factory=KaggleSettings)
+    modal: ModalSettings = Field(default_factory=ModalSettings)
     notifications: NotificationSettings = Field(default_factory=NotificationSettings)
 
     @model_validator(mode="after")

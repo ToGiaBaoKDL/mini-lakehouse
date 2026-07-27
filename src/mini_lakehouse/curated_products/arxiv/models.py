@@ -12,6 +12,7 @@ from mini_lakehouse.processing.ocr.core.protocol import (
     OcrJob,
     OcrReuseReference,
 )
+from mini_lakehouse.processing.ocr.provider import OcrProviderName
 
 
 class ArxivProductModel(BaseModel):
@@ -54,6 +55,8 @@ class OcrBatchDocument(ArxivProductModel):
 class ActiveOcrBatch(ArxivProductModel):
     batch_id: str
     state: Literal["prepared", "submitted", "running"]
+    provider: OcrProviderName
+    provider_reference: str
     provider_run_id: str | None
     job: OcrJob
     documents: tuple[OcrBatchDocument, ...] = Field(min_length=1, max_length=10)

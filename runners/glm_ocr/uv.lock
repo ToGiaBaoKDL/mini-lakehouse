@@ -1194,12 +1194,10 @@ wheels = [
 
 [[package]]
 name = "mini-lakehouse-glm-ocr-runner"
-version = "1.0.0"
+version = "1.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "glmocr", extra = ["selfhosted"] },
-    { name = "huggingface-hub" },
-    { name = "kagglehub" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "requests" },
@@ -1208,11 +1206,19 @@ dependencies = [
     { name = "zstandard" },
 ]
 
+[package.optional-dependencies]
+kaggle = [
+    { name = "kagglehub" },
+]
+modal = [
+    { name = "huggingface-hub" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "glmocr", extras = ["selfhosted"], specifier = "==0.1.5" },
-    { name = "huggingface-hub", specifier = ">=1.7,<2" },
-    { name = "kagglehub", specifier = ">=1,<2" },
+    { name = "huggingface-hub", marker = "extra == 'modal'", specifier = ">=1.7,<2" },
+    { name = "kagglehub", marker = "extra == 'kaggle'", specifier = ">=1,<2" },
     { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "pyyaml", specifier = ">=6.0.3,<7" },
     { name = "requests", specifier = ">=2.32,<3" },
@@ -1220,6 +1226,7 @@ requires-dist = [
     { name = "wrapt", specifier = "==2.2.2" },
     { name = "zstandard", specifier = ">=0.23,<1" },
 ]
+provides-extras = ["kaggle", "modal"]
 
 [[package]]
 name = "mistral-common"

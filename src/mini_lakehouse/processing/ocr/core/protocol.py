@@ -1,10 +1,8 @@
 """Strict, provider-neutral JSON protocol shared with remote OCR runners."""
 
-from __future__ import annotations
-
 from datetime import UTC, date, datetime
 from pathlib import PurePosixPath
-from typing import Literal
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -87,7 +85,7 @@ class OcrJob(ProtocolModel):
     documents: tuple[OcrDocumentRequest, ...] = Field(min_length=1, max_length=10)
 
     @model_validator(mode="after")
-    def unique_documents(self) -> OcrJob:
+    def unique_documents(self) -> Self:
         request_ids = [document.request_id for document in self.documents]
         arxiv_ids = [document.arxiv_id for document in self.documents]
         if len(request_ids) != len(set(request_ids)):
@@ -155,7 +153,7 @@ class OcrPageMarkdownBundle(ProtocolModel):
     pages: tuple[OcrPageMarkdown, ...] = Field(min_length=1, max_length=2000)
 
     @model_validator(mode="after")
-    def consecutive_pages(self) -> OcrPageMarkdownBundle:
+    def consecutive_pages(self) -> Self:
         page_numbers = tuple(page.page_number for page in self.pages)
         expected = tuple(range(1, len(self.pages) + 1))
         if page_numbers != expected:
@@ -218,7 +216,7 @@ class OcrDocumentResult(ProtocolModel):
     files: tuple[ArtifactFile, ...] = ()
 
     @model_validator(mode="after")
-    def validate_outcome(self) -> OcrDocumentResult:
+    def validate_outcome(self) -> Self:
         if self.state in {"succeeded", "reused"}:
             required = (
                 self.pdf_sha256,
@@ -261,7 +259,7 @@ class OcrBatchManifest(ProtocolModel):
         return value.astimezone(UTC)
 
     @model_validator(mode="after")
-    def unique_results(self) -> OcrBatchManifest:
+    def unique_results(self) -> Self:
         request_ids = [document.request_id for document in self.documents]
         if len(request_ids) != len(set(request_ids)):
             raise ValueError("OCR result request IDs must be unique")

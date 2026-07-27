@@ -1,11 +1,9 @@
-"""Deterministic source bundle published as the Kaggle OCR runner Dataset."""
-
-from __future__ import annotations
+"""Deterministic source bundle shared by every OCR compute provider."""
 
 import shutil
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Literal
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -15,7 +13,6 @@ from mini_lakehouse.processing.ocr.core.identity import canonical_json_sha256
 RUNNER_MANIFEST_NAME = "resource_manifest.json"
 MODEL_MANIFEST_NAME = "mini_lakehouse_resource.json"
 RUNNER_FILES = (
-    "bootstrap.py",
     "progress.py",
     "runtime.py",
     "pyproject.toml",
@@ -60,7 +57,7 @@ class RunnerResourceManifest(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def validate_bundle_identity(self) -> RunnerResourceManifest:
+    def validate_bundle_identity(self) -> Self:
         if canonical_json_sha256({"files": self.files}) != self.bundle_sha256:
             raise ValueError("Runner resource bundle identity does not match its file manifest")
         return self
@@ -76,7 +73,7 @@ class ModelResourceManifest(BaseModel):
     identity_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
     @model_validator(mode="after")
-    def validate_identity(self) -> ModelResourceManifest:
+    def validate_identity(self) -> Self:
         identity = {
             "repository": self.repository,
             "resource_name": self.resource_name,
@@ -88,7 +85,7 @@ class ModelResourceManifest(BaseModel):
 
 
 @dataclass(frozen=True)
-class KaggleRunnerBundle:
+class OcrRunnerBundle:
     """A deterministic local view of every file executed by the remote runner."""
 
     files: tuple[tuple[str, Path], ...]
@@ -98,17 +95,23 @@ class KaggleRunnerBundle:
     def load(
         cls,
         *,
-        runner_source: Path = Path("runners/kaggle/glm_ocr"),
+        runner_source: Path = Path("runners/glm_ocr"),
+        kaggle_source: Path = Path("runners/kaggle/glm_ocr"),
         portable_source: Path | None = None,
-    ) -> KaggleRunnerBundle:
+        include_kaggle_bootstrap: bool = False,
+    ) -> Self:
         portable = portable_source or Path(__file__).resolve().parent / "core"
+        launch_files = (
+            [("bootstrap.py", kaggle_source / "bootstrap.py")] if include_kaggle_bootstrap else []
+        )
         files = tuple(
-            [(name, runner_source / name) for name in RUNNER_FILES]
+            launch_files
+            + [(name, runner_source / name) for name in RUNNER_FILES]
             + [((PORTABLE_PACKAGE / name).as_posix(), portable / name) for name in PORTABLE_FILES]
         )
         missing = [str(path) for _, path in files if not path.is_file()]
         if missing:
-            raise FileNotFoundError(f"Kaggle OCR runner files are missing: {', '.join(missing)}")
+            raise FileNotFoundError(f"OCR runner files are missing: {', '.join(missing)}")
         checksums = {name: file_sha256(path) for name, path in files}
         bundle_sha256 = canonical_json_sha256({"files": checksums})
         return cls(

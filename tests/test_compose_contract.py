@@ -183,6 +183,7 @@ def test_container_environment_files_follow_service_ownership() -> None:
     for setting in (
         "LAKEHOUSE_ARXIV__BASE_URL",
         "LAKEHOUSE_KAGGLE__API_TOKEN",
+        "MODAL_TOKEN_SECRET",
         "LAKEHOUSE_NOTIFICATIONS__SLACK_BOT_TOKEN",
         "LAKEHOUSE_NOTIFICATIONS__GMAIL_APP_PASSWORD",
         "DBT_THREADS",

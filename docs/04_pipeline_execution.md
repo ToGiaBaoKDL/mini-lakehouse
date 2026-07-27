@@ -9,8 +9,8 @@ Prefect has six independently retryable deployments:
 | `el_github_archive` | GitHub Archive → landing | `15 * * * *` UTC |
 | `tl_github_analytics` | landing → curated GitHub → phased dbt analytics | `30 * * * *` UTC |
 | `etl_arxiv_metadata` | ArXiv OAI `T-1` → landing → curated ArXiv | `0 6 * * *` UTC |
-| `etl_arxiv_ocr` | Reconcile Kaggle output → curated; submit next batch | `*/20 * * * *` UTC, paused by default |
-| `gov_arxiv_ocr_resources` | Reconcile private Kaggle runner and model resources | Manual only |
+| `etl_arxiv_ocr` | Reconcile remote OCR output → curated; submit next batch | `*/20 * * * *` UTC, paused by default |
+| `gov_arxiv_ocr_resources` | Reconcile the selected provider's model/runtime resources | Manual only |
 | `gov_iceberg_maintenance` | Policy-driven Iceberg maintenance | Weekly schedule |
 
 The two hourly deployments are deliberately schedule-driven. There are no Prefect event sensors,
@@ -60,10 +60,11 @@ Idempotency is enforced at the write that owns each boundary:
 Retrying a failed Prefect task preserves its resolved `archive_hour`. If the independent TL
 schedule starts before landing is available, it fails clearly and can be retried after EL succeeds.
 
-ArXiv OCR does not hold a Prefect task open while polling a remote notebook. Each scheduled run
-performs one bounded state transition: recover only a kernel version carrying the same `batch_id`,
-reconcile that exact version, import each successful document independently, and submit at most one
-next batch of two. It checks available Kaggle GPU quota before preparing durable batch state. The
+ArXiv OCR does not hold a Prefect task open while polling remote compute. Each scheduled run
+performs one bounded state transition: reconcile the exact persisted provider execution, import
+each successful document independently, and submit at most one next batch of two. Kaggle capacity
+checks its available GPU quota before durable preparation; Modal authenticates and resolves the
+deployed app. The
 runner downloads PDFs into ephemeral storage and fingerprints the complete batch before resolving
 model resources. A metadata mutation whose PDF content matches the latest compatible import creates
 new request lineage that references the existing processing artifact; when every PDF is unchanged,
@@ -74,24 +75,31 @@ across Prefect retries and code deployments. A prepared batch from an older proc
 is closed and reselected under the current configuration only when no matching remote run exists.
 Prefect remains the owner of orchestration task/run history.
 
-Runner code is a private Kaggle Dataset versioned by a deterministic SHA-256 manifest. The pinned
-GLM-OCR and layout-model Hugging Face revisions are independently reconciled into private Kaggle
-Models. An unchanged resource is a no-op; changed content creates a new version rather than
-overwriting history. Kernel metadata pins all three exact resource versions, while status, logs,
-and output downloads pin the exact kernel version. Run the manual resource deployment before the
-first OCR run and whenever runner code, its lockfile, or either model revision changes:
+One deterministic runner bundle and output protocol are shared by all providers. Kaggle publishes
+that bundle as a private, content-addressed Dataset and the pinned Hugging Face revisions as
+private Models. Modal builds the locked dependencies into its image, keeps pinned model snapshots
+in a Volume, and stores provider output in a separate Volume until Prefect validates and publishes
+it. Modal reuses a compatible vLLM process while its single GPU container remains warm; Kaggle
+starts and reaps one server per notebook. Run the manual resource deployment for the selected
+provider before its first OCR run:
 
-```bash
-prefect deployment run gov_arxiv_ocr_resources/gov_arxiv_ocr_resources
+```dotenv
+MODAL_TOKEN_ID=ak-...
+MODAL_TOKEN_SECRET=as-...
 ```
 
-The Kaggle script exits normally after the result archive and final manifest commit marker are
-written; Kaggle then releases the session. It does not depend on notebook JavaScript shutdown
-calls. A four-hour kernel timeout is the remote quota guardrail. The runner logs separate
-dependency-sync, model-startup, document, archive, and total timings so cold-start cost is visible
-before introducing a larger prebuilt dependency artifact. Failed documents cannot leak partial
-files into the archive, result files are atomically replaced, and the local vLLM process is
-terminated, killed if necessary, waited, and reaped on every exit path.
+```bash
+prefect deployment run gov_arxiv_ocr_resources/gov_arxiv_ocr_resources \
+  --param provider=kaggle
+make modal-deploy
+prefect deployment run gov_arxiv_ocr_resources/gov_arxiv_ocr_resources \
+  --param provider=modal
+```
+
+Both adapters commit the archive before the final manifest marker. The Kaggle script then exits
+normally and releases its session without notebook JavaScript; Modal retains only a bounded warm
+container. A four-hour execution timeout is the remote guardrail. Failed documents cannot leak
+partial files into the archive, and provider retries converge on the deterministic `batch_id`.
 
 OCR identities have separate grains: `request_id` identifies one paper/source-mutation/processor
 request and remains unchanged across retries; `batch_id` includes attempt ordinals, so a new retry
@@ -100,8 +108,8 @@ result. The content manifest excludes request identity, allowing a new metadata 
 unchanged PDF to reuse validated artifacts without an ID collision.
 
 The deployment and its 20-minute schedule are registered by `prefect-deploy`, but the schedule is
-paused by default because Kaggle GPU time is quota-bound. After configuring the username/token, provisioning
-all runner resources, and validating one private kernel run, resume it from Prefect UI or:
+paused by default because GPU time is quota/cost-bound. After configuring one provider,
+provisioning its resources, and validating one run, resume it from Prefect UI or:
 
 ```bash
 PREFECT_API_URL=http://localhost:4200/api \
@@ -119,6 +127,8 @@ prefect deployment run etl_arxiv_ocr/etl_arxiv_ocr \
   --param arxiv_ids='["2607.00001"]'
 prefect deployment run etl_arxiv_ocr/etl_arxiv_ocr \
   --param arxiv_ids='["2607.00001"]' --param verify_pdf=true
+prefect deployment run etl_arxiv_ocr/etl_arxiv_ocr \
+  --param arxiv_ids='["2607.00001"]' --param provider=modal
 ```
 
 The normal metadata retry reuses a complete landing checkpoint and preserves its Iceberg snapshot

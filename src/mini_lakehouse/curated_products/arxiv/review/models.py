@@ -1,9 +1,8 @@
 """Typed read models for the ArXiv OCR review surface."""
 
-from __future__ import annotations
-
 from datetime import date, datetime
 from enum import StrEnum
+from typing import Self
 from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
@@ -116,7 +115,7 @@ class PublishedOcrManifest(OcrReviewModel):
     processing_id: str = Field(pattern=r"^[0-9a-f]{64}$")
 
     @model_validator(mode="after")
-    def validate_artifact_set(self) -> PublishedOcrManifest:
+    def validate_artifact_set(self) -> Self:
         paths = [file.relative_path for file in self.files]
         validate_document_artifact_paths(paths, page_count=self.page_count)
         return self

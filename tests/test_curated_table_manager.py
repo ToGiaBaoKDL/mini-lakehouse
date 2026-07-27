@@ -46,7 +46,9 @@ class _SchemaExecutor:
         if statement.startswith("DESCRIBE"):
             return QueryResult(columns=("Column", "Type"), rows=tuple(self.columns))
         if statement.startswith("ALTER TABLE") and " ADD COLUMN " in statement:
-            self.columns.append(("job_json", "varchar"))
+            declaration = statement.partition(" ADD COLUMN ")[2]
+            name, data_type = declaration.split(" ", 1)
+            self.columns.append((name.strip('"'), data_type))
             return QueryResult(columns=(), rows=())
         if statement.startswith("SHOW CREATE TABLE"):
             retention = (
@@ -65,19 +67,25 @@ def test_curated_table_manager_adds_only_trailing_nullable_columns() -> None:
     contracts = load_contracts()
     table = contracts.curated_product("arxiv").table("ocr_batches")
     manager = _TestTableManager(Settings(), "arxiv", contracts)
-    existing = tuple(
-        (column.name, trino_type(column)) for column in table.columns if column.name != "job_json"
+    optional_column = ColumnContract(
+        field_id=15,
+        name="optional_later",
+        data_type="string",
+        required=False,
+        description="Safe nullable schema evolution.",
     )
+    changed = table.model_copy(update={"columns": (*table.columns, optional_column)})
+    existing = tuple((column.name, trino_type(column)) for column in table.columns)
     executor = _SchemaExecutor(
         existing,
         expected_location="s3://curated/arxiv/ocr_batches",
     )
 
-    manager.validate_table(executor, table)
+    manager.validate_table(executor, changed)
 
     alter = [statement for statement in executor.calls if statement.startswith("ALTER TABLE")]
     assert alter == [
-        'ALTER TABLE "prod"."curated.arxiv"."ocr_batches" ADD COLUMN "job_json" varchar'
+        'ALTER TABLE "prod"."curated.arxiv"."ocr_batches" ADD COLUMN "optional_later" varchar'
     ]
 
 
@@ -85,7 +93,7 @@ def test_curated_table_manager_rejects_a_required_additive_column() -> None:
     contracts = load_contracts()
     table = contracts.curated_product("arxiv").table("ocr_batches")
     required_column = ColumnContract(
-        field_id=14,
+        field_id=15,
         name="required_later",
         data_type="string",
         required=True,

@@ -57,22 +57,23 @@ tables:
 
   - key: ocr_batches
     name: ocr_batches
-    description: Durable state for one prepared or submitted Kaggle OCR execution.
+    description: Durable outbox state for one remote OCR execution.
     primary_key: [batch_id]
     columns:
       - {field_id: 1, name: batch_id, data_type: string, required: true, description: Deterministic batch execution identifier.}
-      - {field_id: 2, name: provider_run_id, data_type: string, required: false, description: "Exact Kaggle kernel version for status, logs, and output retrieval."}
-      - {field_id: 3, name: kernel_slug, data_type: string, required: true, description: Kaggle owner and kernel name.}
+      - {field_id: 2, name: provider_run_id, data_type: string, required: false, description: "Exact remote execution identifier for status, logs, and output retrieval."}
+      - {field_id: 3, name: provider_reference, data_type: string, required: true, description: Provider-owned application or job reference.}
       - {field_id: 4, name: request_count, data_type: long, required: true, description: Documents submitted in the batch.}
       - {field_id: 5, name: state, data_type: string, required: true, description: Canonical batch state.}
       - {field_id: 6, name: manifest_sha256, data_type: string, required: false, description: Validated terminal manifest hash.}
       - {field_id: 7, name: prepared_at, data_type: timestamptz, required: true, description: Durable outbox preparation timestamp.}
-      - {field_id: 8, name: submitted_at, data_type: timestamptz, required: false, description: First confirmed Kaggle submission timestamp.}
+      - {field_id: 8, name: submitted_at, data_type: timestamptz, required: false, description: First confirmed remote submission timestamp.}
       - {field_id: 9, name: completed_at, data_type: timestamptz, required: false, description: Terminal timestamp.}
       - {field_id: 10, name: error_code, data_type: string, required: false, description: Typed batch error code.}
       - {field_id: 11, name: error_message, data_type: string, required: false, description: Bounded diagnostic message.}
       - {field_id: 12, name: curated_at, data_type: timestamptz, required: true, description: Latest state publication timestamp.}
-      - {field_id: 13, name: job_json, data_type: string, required: false, description: Immutable validated runner request used to reconcile this durable outbox batch across retries and deployments.}
+      - {field_id: 13, name: job_json, data_type: string, required: true, description: Immutable validated runner request used to reconcile this durable outbox batch across retries and deployments.}
+      - {field_id: 14, name: provider, data_type: string, required: true, description: Remote execution provider selected when the batch was prepared.}
 
   - key: ocr_document_runs
     name: ocr_document_runs
@@ -84,7 +85,7 @@ tables:
       - {field_id: 3, name: arxiv_id, data_type: string, required: true, description: Source paper identifier.}
       - {field_id: 4, name: oai_datestamp, data_type: date, required: true, description: Selecting paper mutation date.}
       - {field_id: 5, name: source_record_sha256, data_type: string, required: true, description: Selecting canonical metadata mutation hash.}
-      - {field_id: 6, name: pdf_url, data_type: string, required: true, description: Download URL sent to Kaggle.}
+      - {field_id: 6, name: pdf_url, data_type: string, required: true, description: Source PDF URL sent to the selected provider.}
       - {field_id: 7, name: pdf_sha256, data_type: string, required: false, description: Observed source PDF hash.}
       - {field_id: 8, name: pdf_size_bytes, data_type: long, required: false, description: Observed source PDF size.}
       - {field_id: 9, name: page_count, data_type: long, required: false, description: Observed PDF page count.}
@@ -102,7 +103,7 @@ tables:
       - {field_id: 21, name: error_code, data_type: string, required: false, description: Typed document error code.}
       - {field_id: 22, name: error_message, data_type: string, required: false, description: Bounded diagnostic message.}
       - {field_id: 23, name: prepared_at, data_type: timestamptz, required: true, description: Durable attempt preparation timestamp.}
-      - {field_id: 24, name: submitted_at, data_type: timestamptz, required: false, description: First confirmed Kaggle submission timestamp.}
+      - {field_id: 24, name: submitted_at, data_type: timestamptz, required: false, description: First confirmed remote submission timestamp.}
       - {field_id: 25, name: completed_at, data_type: timestamptz, required: false, description: Terminal import timestamp.}
       - {field_id: 26, name: curated_at, data_type: timestamptz, required: true, description: Latest state publication timestamp.}
 

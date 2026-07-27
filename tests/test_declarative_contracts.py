@@ -31,12 +31,18 @@ def test_repository_contracts_form_a_valid_registry() -> None:
     assert arxiv_source.table_storage_prefix("oai_records_raw") == (
         "api/arxiv/tables/oai_records_raw"
     )
-    assert arxiv_processor.runner.runner_dataset_prefix == "mini-lakehouse-arxiv-glm-ocr-runner"
-    assert arxiv_processor.batch.max_documents == 2
-    assert arxiv_processor.runner.model_resources.model.name == "mini-lakehouse-glm-ocr"
     assert (
-        arxiv_processor.runner.model_resources.layout_model.name == "mini-lakehouse-pp-doclayout-v3"
+        arxiv_processor.runner.kaggle.runner_dataset_prefix == "mini-lakehouse-arxiv-glm-ocr-runner"
     )
+    assert arxiv_processor.batch.max_documents == 2
+    assert arxiv_processor.inference.max_workers == 8
+    assert arxiv_processor.runner.default_provider == "kaggle"
+    assert arxiv_processor.runner.kaggle.model_resources.model.name == "mini-lakehouse-glm-ocr"
+    assert (
+        arxiv_processor.runner.kaggle.model_resources.layout_model.name
+        == "mini-lakehouse-pp-doclayout-v3"
+    )
+    assert arxiv_processor.runner.modal.gpu == "A100-40GB"
     assert contracts.curated_product("github").table_identifier("events").iceberg == (
         "curated",
         "github",
@@ -45,6 +51,14 @@ def test_repository_contracts_form_a_valid_registry() -> None:
     assert contracts.curated_product("arxiv").table("ocr_document_runs").primary_key == (
         "batch_id",
         "request_id",
+    )
+    ocr_batch_columns = {
+        column.name: column
+        for column in contracts.curated_product("arxiv").table("ocr_batches").columns
+    }
+    assert "kernel_slug" not in ocr_batch_columns
+    assert all(
+        ocr_batch_columns[name].required for name in ("job_json", "provider", "provider_reference")
     )
     assert (
         contracts.domain("engineering").table_identifier("repository_activity_daily").trino("prod")

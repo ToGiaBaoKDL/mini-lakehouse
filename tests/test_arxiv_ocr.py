@@ -5,7 +5,7 @@ import tarfile
 from collections.abc import Iterator, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import pytest
 import zstandard
@@ -56,25 +56,25 @@ from mini_lakehouse.processing.ocr.core.text import (
     build_page_markdown_bundle,
     serialize_plain_text,
 )
-from mini_lakehouse.processing.ocr.kaggle_bundle import (
-    MODEL_MANIFEST_NAME,
-    KaggleRunnerBundle,
-    ModelResourceManifest,
-    RunnerResourceManifest,
-)
 from mini_lakehouse.processing.ocr.kaggle_gateway import KaggleGateway
 from mini_lakehouse.processing.ocr.kaggle_provider import KaggleProvider, render_launcher
 from mini_lakehouse.processing.ocr.kaggle_resources import KaggleOcrResourceManager
 from mini_lakehouse.processing.ocr.kaggle_types import (
     KaggleCurrentRun,
-    KaggleGpuQuota,
     KaggleKernelState,
     KaggleResourceNotFoundError,
     KaggleRunStatus,
 )
+from mini_lakehouse.processing.ocr.provider import OcrProviderCapacity
+from mini_lakehouse.processing.ocr.runner_bundle import (
+    MODEL_MANIFEST_NAME,
+    ModelResourceManifest,
+    OcrRunnerBundle,
+    RunnerResourceManifest,
+)
 
 SOURCE_RECORD_SHA256 = "a" * 64
-RUNNER_BUNDLE = KaggleRunnerBundle.load()
+RUNNER_BUNDLE = OcrRunnerBundle.load(include_kaggle_bootstrap=True)
 RUNNER_DATASET_SLUG = f"owner/mini-lakehouse-arxiv-glm-ocr-runner-{RUNNER_BUNDLE.sha256[:12]}"
 
 
@@ -275,13 +275,11 @@ def test_ocr_identity_and_paths_are_deterministic_and_paper_readable() -> None:
     processor = load_contracts().processor("arxiv_glm_ocr")
     assert processor.inference.enforce_eager is True
     assert processor.inference.max_num_seqs == 4
-    assert processor.inference.max_workers == 4
+    assert processor.inference.max_workers == 8
     assert processor.inference.request_timeout_seconds == 600
     assert processor.inference.layout_device == "cpu"
     assert processor.output_schema_version == "1.1.0"
-    assert '"wrapt==2.2.2"' in (
-        Path("runners/kaggle/glm_ocr/pyproject.toml").read_text(encoding="utf-8")
-    )
+    assert '"wrapt==2.2.2"' in (Path("runners/glm_ocr/pyproject.toml").read_text(encoding="utf-8"))
     first_hash = config_hash(processor)
     operationally_tuned = processor.model_copy(
         update={
@@ -961,6 +959,23 @@ def test_kaggle_recovery_adopts_only_the_latest_matching_batch_version() -> None
 class _PinnedResourceGateway:
     def __init__(self) -> None:
         self.output_calls: list[tuple[str, str]] = []
+        self.launcher = ""
+        self.metadata: dict[str, Any] = {}
+
+    def push_kernel(
+        self,
+        submission_directory: Path,
+        *,
+        timeout_seconds: int,
+        accelerator: str,
+    ) -> int:
+        assert timeout_seconds > 0
+        assert accelerator in {"NvidiaTeslaP100", "NvidiaTeslaT4"}
+        self.launcher = (submission_directory / "launcher.py").read_text(encoding="utf-8")
+        self.metadata = json.loads(
+            (submission_directory / "kernel-metadata.json").read_text(encoding="utf-8")
+        )
+        return 17
 
     def download_dataset_file(
         self,
@@ -1040,27 +1055,20 @@ def test_kaggle_submission_and_output_pin_resource_and_run_versions(tmp_path: Pa
         gateway=cast(Any, gateway),
         bundle=RUNNER_BUNDLE,
     )
-    submission = tmp_path / "submission"
-
-    provider.prepare_submission(submission, _job())
-    metadata = json.loads((submission / "kernel-metadata.json").read_text(encoding="utf-8"))
+    provider_run_id = provider.submit(_job())
     provider.download_output(
-        "owner/mini-lakehouse-arxiv-glm-ocr/17",
+        provider_run_id,
         tmp_path / "output",
     )
 
-    assert sorted(path.name for path in submission.iterdir()) == [
-        "kernel-metadata.json",
-        "launcher.py",
-    ]
-    assert metadata["dataset_sources"] == [RUNNER_DATASET_SLUG]
-    assert metadata["model_sources"] == [
+    assert provider_run_id == "owner/mini-lakehouse-arxiv-glm-ocr/17"
+    assert gateway.metadata["dataset_sources"] == [RUNNER_DATASET_SLUG]
+    assert gateway.metadata["model_sources"] == [
         "owner/mini-lakehouse-glm-ocr/transformers/safetensors/2",
         "owner/mini-lakehouse-pp-doclayout-v3/transformers/safetensors/3",
     ]
-    launcher = (submission / "launcher.py").read_text(encoding="utf-8")
-    assert metadata["model_sources"][0] in launcher
-    assert metadata["model_sources"][1] in launcher
+    assert gateway.metadata["model_sources"][0] in gateway.launcher
+    assert gateway.metadata["model_sources"][1] in gateway.launcher
     assert gateway.output_calls == [
         ("owner/mini-lakehouse-arxiv-glm-ocr/17", "result_manifest.json"),
         ("owner/mini-lakehouse-arxiv-glm-ocr/17", "result.tar.zst"),
@@ -1095,16 +1103,20 @@ def test_ocr_repository_publishes_the_batch_commit_marker_last() -> None:
         executor,
         job=job,
         documents=documents,
-        kernel_slug="owner/kernel",
+        provider="kaggle",
+        provider_reference="owner/kernel",
     )
 
     assert len(executor.calls) == 2
     assert '"ocr_document_runs"' in executor.calls[0][0]
     assert "target.batch_id = source.batch_id" in executor.calls[0][0]
+    assert "WHEN MATCHED" not in executor.calls[0][0]
     assert '"ocr_batches"' in executor.calls[-1][0]
     assert "job_json" in executor.calls[-1][0]
+    assert "WHEN MATCHED" not in executor.calls[-1][0]
     assert executor.calls[-1][1] is not None
-    assert executor.calls[-1][1][-1] == job.model_dump_json()
+    assert executor.calls[-1][1][-2] == job.model_dump_json()
+    assert executor.calls[-1][1][-1] == "kaggle"
     assert all(
         statement.count("?") == len(parameters or ()) for statement, parameters in executor.calls
     )
@@ -1118,6 +1130,8 @@ class _ActiveBatchExecutor:
                 job.batch_id,
                 "running",
                 "owner/kernel/7",
+                "kaggle",
+                "owner/kernel",
                 1,
                 raw_job or job.model_dump_json(),
                 request.request_id,
@@ -1179,7 +1193,7 @@ def test_ocr_candidates_use_config_identity_and_ignore_orphan_attempts() -> None
     assert 'JOIN "prod"."curated.arxiv"."ocr_batches"' in statement
     assert "row_number() OVER" in statement
     assert "document.source_record_sha256 = paper.source_record_sha256" in statement
-    assert "compatible_success" in statement
+    assert "matching_success" in statement
     assert "document.state = ?" in statement
     assert "document.config_hash = ?" in statement
     assert "json_extract_scalar" not in statement
@@ -1265,20 +1279,17 @@ class _NoopObjectStore:
 
 
 class _SubmissionProvider:
-    kernel_slug = "owner/mini-lakehouse-arxiv-glm-ocr"
+    name: Literal["kaggle"] = "kaggle"
+    reference = "owner/mini-lakehouse-arxiv-glm-ocr"
     runner_bundle_sha256 = RUNNER_BUNDLE.sha256
 
     def __init__(self) -> None:
         self.submitted_job: OcrJob | None = None
         self.status_run_ids: list[str] = []
 
-    def prepare_submission(self, destination: Path, job: OcrJob) -> None:
-        destination.mkdir()
+    def submit(self, job: OcrJob) -> str:
         self.submitted_job = job
-
-    def submit(self, submission_directory: Path) -> str:
-        del submission_directory
-        return f"{self.kernel_slug}/1"
+        return f"{self.reference}/1"
 
     def latest_run(self, batch_id: str) -> None:
         del batch_id
@@ -1295,16 +1306,15 @@ class _SubmissionProvider:
         del provider_run_id
         return ""
 
-    def stream_logs(self, provider_run_id: str) -> Iterator[str]:
-        del provider_run_id
-        return iter(())
-
-    def gpu_quota(self) -> KaggleGpuQuota:
-        return KaggleGpuQuota(remaining_minutes=120)
+    def capacity(self) -> OcrProviderCapacity:
+        return OcrProviderCapacity(ready=True, remaining_minutes=120)
 
     def download_output(self, provider_run_id: str, destination: Path) -> None:
         del provider_run_id, destination
         raise AssertionError("No output should be downloaded while submitting")
+
+    def reconcile_resources(self) -> dict[str, object]:
+        return {}
 
 
 class _SubmissionRepository:
@@ -1334,10 +1344,12 @@ class _SubmissionRepository:
         *,
         job: OcrJob,
         documents: tuple[OcrBatchDocument, ...],
-        kernel_slug: str,
+        provider: str,
+        provider_reference: str,
     ) -> None:
         assert len(documents) == 1
-        assert kernel_slug == _SubmissionProvider.kernel_slug
+        assert provider == _SubmissionProvider.name
+        assert provider_reference == _SubmissionProvider.reference
         self.prepared_job = job
 
     def mark_batch_submitted(
@@ -1474,12 +1486,13 @@ def test_ocr_cycle_prepares_durable_state_before_remote_submission() -> None:
 
     assert result.action == "submitted"
     assert repository.prepared_job == provider.submitted_job
-    assert repository.submitted_run_id == f"{provider.kernel_slug}/1"
+    assert repository.submitted_run_id == f"{provider.reference}/1"
 
 
 class _QuotaExhaustedProvider(_SubmissionProvider):
-    def gpu_quota(self) -> KaggleGpuQuota:
-        return KaggleGpuQuota(
+    def capacity(self) -> OcrProviderCapacity:
+        return OcrProviderCapacity(
+            ready=False,
             remaining_minutes=15,
             refresh_at=datetime(2026, 7, 27, tzinfo=UTC),
         )
@@ -1556,6 +1569,8 @@ def test_exhausted_remote_failure_becomes_terminal_without_resubmission() -> Non
     active = ActiveOcrBatch(
         batch_id=job.batch_id,
         state="running",
+        provider="kaggle",
+        provider_reference=_SubmissionProvider.reference,
         provider_run_id="owner/mini-lakehouse-arxiv-glm-ocr/1",
         job=job,
         documents=(OcrBatchDocument(request=job.documents[0], attempt_count=3),),
@@ -1585,6 +1600,8 @@ def test_invalid_remote_output_becomes_a_typed_retryable_attempt() -> None:
     active = ActiveOcrBatch(
         batch_id=job.batch_id,
         state="running",
+        provider="kaggle",
+        provider_reference=_SubmissionProvider.reference,
         provider_run_id="owner/mini-lakehouse-arxiv-glm-ocr/1",
         job=job,
         documents=(OcrBatchDocument(request=job.documents[0], attempt_count=1),),
@@ -1612,6 +1629,8 @@ def test_remote_batch_failure_never_downgrades_an_imported_document() -> None:
     active = ActiveOcrBatch(
         batch_id=job.batch_id,
         state="running",
+        provider="kaggle",
+        provider_reference=_SubmissionProvider.reference,
         provider_run_id="owner/mini-lakehouse-arxiv-glm-ocr/1",
         job=job,
         documents=(
@@ -1669,6 +1688,8 @@ def test_prepared_batch_from_an_old_configuration_is_released_for_a_new_batch() 
     active = ActiveOcrBatch(
         batch_id=old_job.batch_id,
         state="prepared",
+        provider="kaggle",
+        provider_reference=_SubmissionProvider.reference,
         provider_run_id=None,
         job=old_job,
         documents=(OcrBatchDocument(request=old_job.documents[0], attempt_count=1),),

@@ -1,7 +1,5 @@
 """Bounded SQL mutations for ArXiv OCR state and canonical elements."""
 
-from __future__ import annotations
-
 from collections.abc import Sequence
 from typing import Any, Literal
 
@@ -43,6 +41,8 @@ class ArxivOcrRepository:
                 batch.batch_id,
                 batch.state,
                 batch.provider_run_id,
+                batch.provider,
+                batch.provider_reference,
                 batch.request_count,
                 batch.job_json,
                 document.request_id,
@@ -65,14 +65,18 @@ class ArxivOcrRepository:
         if not result.rows:
             return None
         first = result.rows[0]
-        request_count = int(first[3])
-        present_documents = sum(row[5] is not None for row in result.rows)
+        if first[3] is None or first[4] is None:
+            raise RuntimeError(
+                f"Active ArXiv OCR batch {first[0]} has no execution provider identity"
+            )
+        request_count = int(first[5])
+        present_documents = sum(row[7] is not None for row in result.rows)
         if request_count != present_documents:
             raise RuntimeError(
                 f"ArXiv OCR batch {first[0]} expects {request_count} documents, "
                 f"found {present_documents}"
             )
-        raw_job = first[4]
+        raw_job = first[6]
         if raw_job is None:
             raise RuntimeError(f"Active ArXiv OCR batch {first[0]} has no immutable job payload")
         try:
@@ -81,7 +85,7 @@ class ArxivOcrRepository:
             raise RuntimeError(
                 f"Active ArXiv OCR batch {first[0]} has an invalid immutable job payload"
             ) from error
-        document_rows = {str(row[5]): row for row in result.rows if row[5] is not None}
+        document_rows = {str(row[7]): row for row in result.rows if row[7] is not None}
         requests = {request.request_id: request for request in job.documents}
         if document_rows.keys() != requests.keys():
             raise RuntimeError(
@@ -90,10 +94,10 @@ class ArxivOcrRepository:
         for request_id, request in requests.items():
             row = document_rows[request_id]
             persisted_request = (
-                str(row[6]),
-                row[7],
                 str(row[8]),
-                str(row[9]),
+                row[9],
+                str(row[10]),
+                str(row[11]),
             )
             job_request = (
                 request.arxiv_id,
@@ -109,13 +113,15 @@ class ArxivOcrRepository:
             {
                 "batch_id": str(first[0]),
                 "state": str(first[1]),
+                "provider": first[3],
+                "provider_reference": str(first[4]),
                 "provider_run_id": str(first[2]) if first[2] is not None else None,
                 "job": job,
                 "documents": tuple(
                     OcrBatchDocument(
                         request=request,
-                        attempt_count=int(document_rows[request.request_id][10]),
-                        state=OcrRunState(str(document_rows[request.request_id][11])),
+                        attempt_count=int(document_rows[request.request_id][12]),
+                        state=OcrRunState(str(document_rows[request.request_id][13])),
                     )
                     for request in job.documents
                 ),
@@ -187,7 +193,7 @@ class ArxivOcrRepository:
                 )
                 WHERE attempt_rank = 1
             ),
-            compatible_success AS (
+            matching_success AS (
                 SELECT DISTINCT
                     document.arxiv_id,
                     document.source_record_sha256
@@ -245,7 +251,7 @@ class ArxivOcrRepository:
             LEFT JOIN latest_document AS document
               ON document.arxiv_id = paper.arxiv_id
              AND document.source_record_sha256 = paper.source_record_sha256
-            LEFT JOIN compatible_success AS success
+            LEFT JOIN matching_success AS success
               ON success.arxiv_id = paper.arxiv_id
              AND success.source_record_sha256 = paper.source_record_sha256
             LEFT JOIN reusable_success AS reusable
@@ -299,7 +305,8 @@ class ArxivOcrRepository:
         *,
         job: OcrJob,
         documents: tuple[OcrBatchDocument, ...],
-        kernel_slug: str,
+        provider: str,
+        provider_reference: str,
     ) -> None:
         attempts = {document.request.request_id: document.attempt_count for document in documents}
         for request in job.documents:
@@ -324,13 +331,6 @@ class ArxivOcrRepository:
                 )
                 ON target.batch_id = source.batch_id
                AND target.request_id = source.request_id
-                WHEN MATCHED AND target.state = '{OcrRunState.PREPARED.value}' THEN UPDATE SET
-                    pdf_url = source.pdf_url,
-                    attempt_count = ?,
-                    error_code = NULL,
-                    error_message = NULL,
-                    completed_at = NULL,
-                    curated_at = current_timestamp
                 WHEN NOT MATCHED THEN INSERT (
                     request_id,
                     batch_id,
@@ -401,7 +401,6 @@ class ArxivOcrRepository:
                     job.adapter_version,
                     job.config_hash,
                     attempts[request.request_id],
-                    attempts[request.request_id],
                 ),
             )
         # The batch row is the durable commit marker. Publishing it last prevents
@@ -411,18 +410,13 @@ class ArxivOcrRepository:
             f"""
             MERGE INTO {self._relation("ocr_batches")} AS target
             USING (
-                VALUES (?, ?, ?, ?)
-            ) AS source(batch_id, kernel_slug, request_count, job_json)
+                VALUES (?, ?, ?, ?, ?)
+            ) AS source(batch_id, provider_reference, request_count, job_json, provider)
             ON target.batch_id = source.batch_id
-            WHEN MATCHED AND target.state = 'prepared' THEN UPDATE SET
-                kernel_slug = source.kernel_slug,
-                request_count = source.request_count,
-                job_json = source.job_json,
-                curated_at = current_timestamp
             WHEN NOT MATCHED THEN INSERT (
                 batch_id,
                 provider_run_id,
-                kernel_slug,
+                provider_reference,
                 request_count,
                 state,
                 manifest_sha256,
@@ -432,11 +426,12 @@ class ArxivOcrRepository:
                 error_code,
                 error_message,
                 curated_at,
-                job_json
+                job_json,
+                provider
             ) VALUES (
                 source.batch_id,
                 NULL,
-                source.kernel_slug,
+                source.provider_reference,
                 source.request_count,
                 'prepared',
                 NULL,
@@ -446,10 +441,11 @@ class ArxivOcrRepository:
                 NULL,
                 NULL,
                 current_timestamp,
-                source.job_json
+                source.job_json,
+                source.provider
             )
             """,
-            (job.batch_id, kernel_slug, len(documents), job_json),
+            (job.batch_id, provider_reference, len(documents), job_json, provider),
         )
 
     def mark_batch_submitted(

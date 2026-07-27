@@ -46,7 +46,7 @@ src/mini_lakehouse/
 ├── sources/                source-owned acquisition, parsing, and landing writes
 ├── curated_products/       curated product schemas and curation services
 ├── platform/               Polaris, Trino, namespace, RBAC, and maintenance adapters
-├── processing/ocr/         provider-neutral protocol plus Kaggle resource/run adapter
+├── processing/ocr/         provider-neutral protocol plus remote compute adapters
 └── storage/                S3-compatible object store and Iceberg catalog adapters
 
 dbt/analytics/

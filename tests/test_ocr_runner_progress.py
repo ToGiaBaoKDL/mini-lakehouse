@@ -5,7 +5,7 @@ from typing import Any
 
 
 def _progress_module() -> ModuleType:
-    path = Path("runners/kaggle/glm_ocr/progress.py")
+    path = Path("runners/glm_ocr/progress.py")
     spec = importlib.util.spec_from_file_location("glm_ocr_runner_progress", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

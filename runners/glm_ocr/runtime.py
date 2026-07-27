@@ -1,6 +1,4 @@
-"""Execute one bounded GLM-OCR batch and emit the canonical output protocol."""
-
-from __future__ import annotations
+"""Execute one provider-neutral GLM-OCR batch and emit the canonical output protocol."""
 
 import argparse
 import gzip
@@ -16,20 +14,21 @@ import tarfile
 import tempfile
 import time
 from collections.abc import Iterable
-from contextlib import suppress
+from contextlib import ExitStack, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 import fitz
-import kagglehub
 import requests
 import yaml
 import zstandard
 from glmocr import GlmOcr
 from glmocr.config import GlmOcrConfig
 from progress import GlmOcrPageProgress
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from mini_lakehouse.processing.ocr.core.files import file_sha256
 from mini_lakehouse.processing.ocr.core.identity import (
@@ -75,6 +74,24 @@ MEDIA_TYPES = {
 }
 
 
+def _create_pdf_session() -> requests.Session:
+    retry = Retry(
+        total=4,
+        backoff_factor=1,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset({"GET"}),
+        respect_retry_after_header=True,
+        raise_on_status=False,
+    )
+    session = requests.Session()
+    session.headers["User-Agent"] = "mini-lakehouse-arxiv-ocr/1.0"
+    session.mount("https://", HTTPAdapter(max_retries=retry))
+    return session
+
+
+_PDF_SESSION = _create_pdf_session()
+
+
 class DocumentError(RuntimeError):
     def __init__(self, code: str, message: str, *, retryable: bool) -> None:
         super().__init__(message)
@@ -96,7 +113,7 @@ class PreparedDocument:
 
 
 def log_stage(event: str, started_at: float, **fields: object) -> None:
-    """Emit one machine-readable timing event to the Kaggle kernel log."""
+    """Emit one machine-readable timing event to the provider log."""
     with suppress(OSError):
         print(
             json.dumps(
@@ -114,9 +131,8 @@ def log_stage(event: str, started_at: float, **fields: object) -> None:
 
 def download_pdf(request: OcrDocumentRequest, destination: Path, max_bytes: int) -> tuple[str, int]:
     try:
-        with requests.get(
+        with _PDF_SESSION.get(
             request.pdf_url,
-            headers={"User-Agent": "mini-lakehouse-arxiv-ocr/1.0"},
             stream=True,
             timeout=(30, 180),
         ) as response:
@@ -669,11 +685,19 @@ def resolve_model_source(
     repository: str,
     revision: str,
 ) -> Path:
-    path = Path(kagglehub.model_download(source))
+    candidate = Path(source)
+    if candidate.is_absolute():
+        if not candidate.is_dir():
+            raise RuntimeError(f"Provisioned OCR model path does not exist: {candidate}")
+        path = candidate
+    else:
+        import kagglehub
+
+        path = Path(kagglehub.model_download(source))
     try:
         manifest = json.loads((path / MODEL_MANIFEST_NAME).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
-        raise RuntimeError(f"Kaggle model {source!r} has an invalid resource manifest") from error
+        raise RuntimeError(f"OCR model {source!r} has an invalid resource manifest") from error
     expected = {
         "resource_name": resource_name,
         "repository": repository,
@@ -684,7 +708,7 @@ def resolve_model_source(
         any(manifest.get(name) != value for name, value in expected.items())
         or manifest.get("identity_sha256") != expected_identity
     ):
-        raise RuntimeError(f"Kaggle model {source!r} does not match the OCR job")
+        raise RuntimeError(f"OCR model {source!r} does not match the OCR job")
     return path
 
 
@@ -766,6 +790,68 @@ def stop_process(process: subprocess.Popen[bytes], log_file: Any) -> None:
         log_file.close()
 
 
+class InferenceEngine:
+    """Reuse one compatible vLLM server and parser across bounded batches."""
+
+    def __init__(self, root: Path) -> None:
+        self._root = root
+        self._signature: str | None = None
+        self._process: subprocess.Popen[bytes] | None = None
+        self._stack: ExitStack | None = None
+        self._parser: GlmOcr | None = None
+        self._log_path = root / "vllm.log"
+
+    def acquire(
+        self,
+        job: OcrJob,
+        *,
+        model_path: Path,
+        layout_model_path: Path,
+    ) -> tuple[GlmOcr, Path]:
+        signature = canonical_json_sha256(
+            {
+                "inference": job.inference.model_dump(mode="json"),
+                "layout_model_path": str(layout_model_path),
+                "max_pages_per_document": job.limits.max_pages_per_document,
+                "model_path": str(model_path),
+            }
+        )
+        process_failed = self._process is not None and self._process.poll() is not None
+        if self._signature != signature or process_failed:
+            self.close()
+            self._root.mkdir(parents=True, exist_ok=True)
+            config_path = self._root / "glmocr.yaml"
+            write_config(config_path, job, str(layout_model_path))
+            process, log_file = start_vllm(job, model_path, self._log_path)
+            stack = ExitStack()
+            stack.callback(stop_process, process, log_file)
+            try:
+                parser = stack.enter_context(
+                    GlmOcr(
+                        config_path=str(config_path),
+                        layout_device=job.inference.layout_device,
+                    )
+                )
+            except Exception:
+                stack.close()
+                raise
+            self._signature = signature
+            self._process = process
+            self._stack = stack
+            self._parser = parser
+        if self._parser is None:
+            raise RuntimeError("GLM-OCR inference engine did not initialize")
+        return self._parser, self._log_path
+
+    def close(self) -> None:
+        self._parser = None
+        self._process = None
+        stack, self._stack = self._stack, None
+        self._signature = None
+        if stack is not None:
+            stack.close()
+
+
 def create_archive(source: Path, destination: Path) -> None:
     temporary = destination.with_name(f".{destination.name}.{os.getpid()}.partial")
     temporary.unlink(missing_ok=True)
@@ -829,7 +915,7 @@ def persist_vllm_diagnostic(
     error: BaseException,
     request: OcrDocumentRequest | None,
 ) -> None:
-    """Persist bounded server evidence and mirror a useful tail to the kernel log."""
+    """Persist bounded server evidence and mirror a useful tail to the provider log."""
     log_tail = _vllm_log_tail(log_path)
     payload = {
         "batch_id": job.batch_id,
@@ -874,6 +960,7 @@ def run(
     *,
     model_source: str,
     layout_model_source: str,
+    engine: InferenceEngine | None = None,
 ) -> None:
     batch_started_at = time.perf_counter()
     log_stage(
@@ -960,65 +1047,63 @@ def run(
                 revision=job.layout_model.revision,
             )
             log_stage("models_resolved", model_started_at, batch_id=job.batch_id)
-            config_path = temp / "glmocr.yaml"
-            write_config(config_path, job, str(layout_path))
             server_started_at = time.perf_counter()
-            vllm_log_path = temp / "vllm.log"
-            vllm, log_file = start_vllm(job, model_path, vllm_log_path)
+            inference_engine = engine or InferenceEngine(temp / "engine")
+            parser, vllm_log_path = inference_engine.acquire(
+                job,
+                model_path=model_path,
+                layout_model_path=layout_path,
+            )
             log_stage("vllm_ready", server_started_at, batch_id=job.batch_id)
             try:
-                with GlmOcr(
-                    config_path=str(config_path),
-                    layout_device=job.inference.layout_device,
-                ) as parser:
-                    for prepared in prepared_documents:
-                        request = prepared.request
-                        try:
-                            result = successful_result(
-                                job,
-                                prepared,
-                                parser,
-                                extracted,
-                            )
-                        except DocumentError as error:
-                            persist_vllm_diagnostic(
-                                output_directory,
-                                vllm_log_path,
-                                job,
-                                error=error,
-                                request=request,
-                            )
-                            result = failed_result(request, error)
-                            log_document_failure(
-                                request,
-                                error,
-                                document_count=prepared.document_count,
-                                document_index=prepared.document_index,
-                                started_at=prepared.started_at,
-                            )
-                        except Exception as error:
-                            document_error = DocumentError(
-                                "unexpected_runner_error",
-                                str(error),
-                                retryable=True,
-                            )
-                            persist_vllm_diagnostic(
-                                output_directory,
-                                vllm_log_path,
-                                job,
-                                error=document_error,
-                                request=request,
-                            )
-                            result = failed_result(request, document_error)
-                            log_document_failure(
-                                request,
-                                document_error,
-                                document_count=prepared.document_count,
-                                document_index=prepared.document_index,
-                                started_at=prepared.started_at,
-                            )
-                        results[request.request_id] = result
-                        log_batch_progress(job, results, batch_started_at)
+                for prepared in prepared_documents:
+                    request = prepared.request
+                    try:
+                        result = successful_result(
+                            job,
+                            prepared,
+                            parser,
+                            extracted,
+                        )
+                    except DocumentError as error:
+                        persist_vllm_diagnostic(
+                            output_directory,
+                            vllm_log_path,
+                            job,
+                            error=error,
+                            request=request,
+                        )
+                        result = failed_result(request, error)
+                        log_document_failure(
+                            request,
+                            error,
+                            document_count=prepared.document_count,
+                            document_index=prepared.document_index,
+                            started_at=prepared.started_at,
+                        )
+                    except Exception as error:
+                        document_error = DocumentError(
+                            "unexpected_runner_error",
+                            str(error),
+                            retryable=True,
+                        )
+                        persist_vllm_diagnostic(
+                            output_directory,
+                            vllm_log_path,
+                            job,
+                            error=document_error,
+                            request=request,
+                        )
+                        result = failed_result(request, document_error)
+                        log_document_failure(
+                            request,
+                            document_error,
+                            document_count=prepared.document_count,
+                            document_index=prepared.document_index,
+                            started_at=prepared.started_at,
+                        )
+                    results[request.request_id] = result
+                    log_batch_progress(job, results, batch_started_at)
             except Exception as error:
                 persist_vllm_diagnostic(
                     output_directory,
@@ -1027,9 +1112,12 @@ def run(
                     error=error,
                     request=None,
                 )
+                if engine is not None:
+                    engine.close()
                 raise
             finally:
-                stop_process(vllm, log_file)
+                if engine is None:
+                    inference_engine.close()
         else:
             log_stage(
                 "inference_skipped",

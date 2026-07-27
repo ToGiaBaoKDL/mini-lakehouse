@@ -15,7 +15,7 @@ THIRD_PARTY_SERVICES := postgres object-store object-store-provision polaris-boo
 	build-orchestration build-ocr-review start-core start-ocr-review start up-core \
 	up-ocr-review up down restart clean reset ps ps-all logs logs-follow smoke-core \
 	smoke-prefect smoke-ocr-review smoke wait-prefect-deploy prefect-deployments \
-	prefect-deploy platform-reconcile policy-prune-plan policy-prune-apply
+	prefect-deploy modal-deploy platform-reconcile policy-prune-plan policy-prune-apply
 
 help: ## Show the available project commands.
 	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -46,7 +46,7 @@ test: ## Run unit tests only.
 
 check: ## Run the same non-integration quality gate as CI.
 	uv lock --check
-	uv lock --check --directory runners/kaggle/glm_ocr
+	uv lock --check --directory runners/glm_ocr
 	$(MAKE) lint
 	$(MAKE) test
 	uv run dbt parse --project-dir dbt/analytics --profiles-dir dbt/analytics
@@ -158,3 +158,7 @@ policy-prune-apply: preflight ## Apply the exact reviewed plan (requires PLAN_SH
 
 prefect-deploy: preflight ## Register all Prefect flow deployments.
 	$(COMPOSE) run --rm --no-deps prefect-deploy
+
+modal-deploy: ## Deploy the pinned Modal OCR app (requires Modal credentials).
+	@test -s .env || { printf '%s\n' "Missing .env; run 'make setup' first."; exit 1; }
+	uv run --env-file .env --extra orchestration modal deploy runners/modal/glm_ocr/app.py

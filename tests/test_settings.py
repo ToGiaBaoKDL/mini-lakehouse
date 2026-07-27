@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from mini_lakehouse.config.settings import (
+    ModalSettings,
     NotificationSettings,
     PolarisSettings,
     Settings,
@@ -68,6 +69,11 @@ def test_gmail_notification_channel_requires_complete_delivery_config() -> None:
 def test_slack_credentials_must_be_configured_as_a_pair() -> None:
     with pytest.raises(ValidationError, match="bot_token and channel_id"):
         NotificationSettings(slack_channel_id="C0123456789")
+
+
+def test_modal_credentials_must_be_configured_as_a_pair() -> None:
+    with pytest.raises(ValidationError, match="token_id and token_secret"):
+        ModalSettings.model_validate({"token_id": "ak-incomplete"})
 
 
 def test_empty_notification_environment_values_are_disabled() -> None:

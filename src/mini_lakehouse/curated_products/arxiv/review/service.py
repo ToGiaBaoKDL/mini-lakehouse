@@ -1,7 +1,5 @@
 """Application service for read-only ArXiv OCR review."""
 
-from __future__ import annotations
-
 from mini_lakehouse.config.settings import Settings
 from mini_lakehouse.curated_products.arxiv.review.artifacts import (
     OcrArtifactContent,

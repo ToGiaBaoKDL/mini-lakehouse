@@ -74,12 +74,21 @@ def test_prefect_deployments_reuse_declared_work_pool_and_concurrency_contracts(
     arxiv_metadata = next(
         deployment for deployment in deployments if deployment["name"] == "etl_arxiv_metadata"
     )
+    arxiv_ocr = next(
+        deployment for deployment in deployments if deployment["name"] == "etl_arxiv_ocr"
+    )
     assert ingestion["parameters"] == {"archive_hour": None}
     assert transformation["parameters"] == {"archive_hour": None}
     assert arxiv_metadata["parameters"] == {"datestamp_date": None, "refresh": False}
+    assert arxiv_ocr["parameters"] == {
+        "arxiv_ids": None,
+        "verify_pdf": False,
+        "provider": None,
+    }
     arxiv_resources = next(
         deployment for deployment in deployments if deployment["name"] == "gov_arxiv_ocr_resources"
     )
+    assert arxiv_resources["parameters"] == {"provider": None}
     assert arxiv_resources["schedules"] == []
     assert all("triggers" not in deployment for deployment in deployments)
     assert ingestion["schedules"] == [{"cron": "15 * * * *", "timezone": "UTC", "active": True}]

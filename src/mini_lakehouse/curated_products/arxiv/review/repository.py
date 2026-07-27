@@ -1,7 +1,5 @@
 """Bounded read queries for the ArXiv OCR review surface."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from mini_lakehouse.config.settings import Settings

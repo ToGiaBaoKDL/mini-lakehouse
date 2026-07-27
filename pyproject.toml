@@ -30,6 +30,7 @@ orchestration = [
     "huggingface-hub>=1.7,<2",
     "kaggle>=2,<3",
     "kagglehub>=1,<2",
+    "modal>=1.5.3,<1.6",
 ]
 ocr-review = [
     "streamlit>=1.60,<1.61",

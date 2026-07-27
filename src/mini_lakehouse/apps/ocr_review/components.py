@@ -1,7 +1,5 @@
 """Reusable presentation components without storage or SQL knowledge."""
 
-from __future__ import annotations
-
 from datetime import datetime
 from html import escape
 

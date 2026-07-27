@@ -1,7 +1,5 @@
 """Reconcile one remote OCR run and submit the next bounded ArXiv batch."""
 
-from __future__ import annotations
-
 from contextlib import nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -38,15 +36,15 @@ from mini_lakehouse.processing.ocr.core.protocol import (
     OcrLimits,
     OcrModel,
 )
-from mini_lakehouse.processing.ocr.kaggle_bundle import KaggleRunnerBundle
-from mini_lakehouse.processing.ocr.kaggle_provider import KaggleProvider
-from mini_lakehouse.processing.ocr.kaggle_types import (
-    KaggleClient,
-    KaggleCommandError,
-    KaggleKernelNotFoundError,
-    KaggleKernelState,
-    KaggleRunStatus,
+from mini_lakehouse.processing.ocr.provider import (
+    OcrProvider,
+    OcrProviderError,
+    OcrProviderName,
+    OcrProviderState,
+    OcrRunNotFoundError,
+    OcrRunStatus,
 )
+from mini_lakehouse.processing.ocr.providers import create_ocr_provider
 from mini_lakehouse.storage.object_store import ObjectStore, create_object_store
 
 
@@ -59,7 +57,7 @@ class ArxivOcrService:
         contracts: PlatformContracts | None = None,
         table_manager: CuratedTableManager | None = None,
         repository: ArxivOcrRepository | None = None,
-        provider: KaggleClient | None = None,
+        provider: OcrProvider | None = None,
         object_store: ObjectStore | None = None,
     ) -> None:
         self._settings = settings
@@ -71,9 +69,6 @@ class ArxivOcrService:
             raise ValueError(
                 f"This runtime implements OCR output schema {OCR_OUTPUT_SCHEMA_VERSION}"
             )
-        self._runner_bundle = KaggleRunnerBundle.load()
-        if provider is not None and provider.runner_bundle_sha256 != self._runner_bundle.sha256:
-            raise ValueError("Injected Kaggle provider uses a different runner bundle")
         self._configuration_hash = config_hash(self._processor)
         self._executor = executor
         self._table_manager = table_manager or CuratedTableManager(
@@ -95,6 +90,7 @@ class ArxivOcrService:
         *,
         arxiv_ids: tuple[str, ...] = (),
         verify_pdf: bool = False,
+        provider: OcrProviderName | None = None,
     ) -> OcrCycleResult:
         identifiers = tuple(dict.fromkeys(arxiv_ids))
         limit = self._processor.batch.max_documents
@@ -109,17 +105,26 @@ class ArxivOcrService:
                 raise RuntimeError("A SQL executor is required")
             self._table_manager.ensure_tables(executor)
             active = self._repository.active_batch(executor)
-            provider = self._provider_client() if active is not None else None
+            requested_provider = provider or self._processor.runner.default_provider
+            active_provider = self._provider_client(active.provider) if active is not None else None
             reconciliation: OcrCycleResult | None = None
             if active is not None:
-                assert provider is not None
-                reconciliation = self._reconcile(executor, provider, active)
+                assert active_provider is not None
+                if active.provider_reference != active_provider.reference:
+                    raise RuntimeError(
+                        f"Active OCR batch {active.batch_id} belongs to "
+                        f"{active.provider_reference!r}, but {active.provider!r} is configured as "
+                        f"{active_provider.reference!r}; drain the persisted execution before "
+                        "renaming its provider resource"
+                    )
+                reconciliation = self._reconcile(executor, active_provider, active)
                 if reconciliation.action in {"waiting", "submitted"}:
                     return reconciliation
 
             submitted = self._submit_next(
                 executor,
-                provider,
+                None,
+                provider_name=requested_provider,
                 limit=limit,
                 arxiv_ids=identifiers,
                 verify_pdf=verify_pdf,
@@ -138,17 +143,20 @@ class ArxivOcrService:
                 )
             return reconciliation or OcrCycleResult(action="idle")
 
-    def _provider_client(self) -> KaggleClient:
-        return self._provider or KaggleProvider(
-            self._settings.kaggle,
-            self._processor,
-            bundle=self._runner_bundle,
-        )
+    def _provider_client(self, name: OcrProviderName) -> OcrProvider:
+        if self._provider is not None:
+            if self._provider.name != name:
+                raise ValueError(
+                    f"Injected provider {self._provider.name!r} cannot execute {name!r}"
+                )
+            return self._provider
+        return create_ocr_provider(self._settings, self._processor, name)
 
     def _job(
         self,
         batch_key: str,
         documents: tuple[OcrBatchDocument, ...],
+        runner_bundle_sha256: str,
     ) -> OcrJob:
         processor = self._processor
         request_ids = [document.request.request_id for document in documents]
@@ -158,7 +166,7 @@ class ArxivOcrService:
         return OcrJob(
             schema_version="1.0.0",
             batch_id=batch_key,
-            runner_bundle_sha256=self._runner_bundle.sha256,
+            runner_bundle_sha256=runner_bundle_sha256,
             model=OcrModel.model_validate(processor.model.model_dump()),
             layout_model=OcrModel.model_validate(processor.layout_model.model_dump()),
             adapter_version=processor.adapter_version,
@@ -199,8 +207,9 @@ class ArxivOcrService:
     def _submit_next(
         self,
         executor: SqlExecutor,
-        provider: KaggleClient | None,
+        provider: OcrProvider | None,
         *,
+        provider_name: OcrProviderName,
         limit: int,
         arxiv_ids: tuple[str, ...],
         verify_pdf: bool,
@@ -215,13 +224,13 @@ class ArxivOcrService:
         )
         if not candidates:
             return None
-        provider = provider or self._provider_client()
-        quota = provider.gpu_quota()
-        if quota.remaining_minutes < self._processor.runner.minimum_gpu_quota_minutes:
+        provider = provider or self._provider_client(provider_name)
+        capacity = provider.capacity()
+        if not capacity.ready:
             return OcrCycleResult(
                 action="deferred_quota",
-                remaining_gpu_quota_minutes=quota.remaining_minutes,
-                quota_refresh_at=quota.refresh_at,
+                remaining_gpu_quota_minutes=capacity.remaining_minutes,
+                quota_refresh_at=capacity.refresh_at,
             )
         documents = self._documents(candidates)
         request_keys = [document.request.request_id for document in documents]
@@ -230,12 +239,13 @@ class ArxivOcrService:
             request_keys,
             attempts=attempts,
         )
-        job = self._job(batch_key, documents)
+        job = self._job(batch_key, documents, provider.runner_bundle_sha256)
         self._repository.prepare_batch(
             executor,
             job=job,
             documents=documents,
-            kernel_slug=provider.kernel_slug,
+            provider=provider.name,
+            provider_reference=provider.reference,
         )
         self._submit_prepared(executor, provider, job)
         return OcrCycleResult(action="submitted", batch_id=batch_key)
@@ -243,13 +253,10 @@ class ArxivOcrService:
     def _submit_prepared(
         self,
         executor: SqlExecutor,
-        provider: KaggleClient,
+        provider: OcrProvider,
         job: OcrJob,
     ) -> None:
-        with TemporaryDirectory(prefix="arxiv-ocr-submit-") as temporary_directory:
-            submission = Path(temporary_directory) / "submission"
-            provider.prepare_submission(submission, job)
-            provider_run_id = provider.submit(submission)
+        provider_run_id = provider.submit(job)
         self._repository.mark_batch_submitted(
             executor,
             batch_id=job.batch_id,
@@ -259,22 +266,32 @@ class ArxivOcrService:
     def _reconcile(
         self,
         executor: SqlExecutor,
-        provider: KaggleClient,
+        provider: OcrProvider,
         active: ActiveOcrBatch,
     ) -> OcrCycleResult:
         job = active.job
         provider_run_id = active.provider_run_id
         if active.state == "prepared" and provider_run_id is None:
             run = provider.latest_run(active.batch_id)
-            if run is None or run.state == KaggleKernelState.FAILED:
-                if job.config_hash != self._configuration_hash:
+            if run is None or run.state == OcrProviderState.FAILED:
+                stale_configuration = job.config_hash != self._configuration_hash
+                stale_runner = job.runner_bundle_sha256 != provider.runner_bundle_sha256
+                if stale_configuration or stale_runner:
+                    stale_parts = [
+                        name
+                        for name, stale in (
+                            ("processor configuration", stale_configuration),
+                            ("runner bundle", stale_runner),
+                        )
+                        if stale
+                    ]
                     return self._failed_cycle(
                         executor,
                         active,
-                        error_code="stale_prepared_configuration",
+                        error_code="stale_prepared_execution",
                         error_message=(
-                            "The prepared batch uses an older processor configuration and "
-                            "has no recoverable remote run; a new batch may be submitted"
+                            f"The prepared batch uses an older {' and '.join(stale_parts)} "
+                            "and has no recoverable remote run; a new batch may be submitted"
                         ),
                     )
                 self._submit_prepared(executor, provider, job)
@@ -285,7 +302,7 @@ class ArxivOcrService:
                 batch_id=active.batch_id,
                 provider_run_id=provider_run_id,
             )
-            if run.state == KaggleKernelState.COMPLETE:
+            if run.state == OcrProviderState.COMPLETE:
                 try:
                     return self._import_completed(
                         executor,
@@ -301,7 +318,7 @@ class ArxivOcrService:
                     return self._failed_cycle(
                         executor,
                         active,
-                        error_code="invalid_kaggle_output",
+                        error_code="invalid_provider_output",
                         error_message=str(error),
                     )
         else:
@@ -309,23 +326,25 @@ class ArxivOcrService:
                 raise RuntimeError(f"Submitted OCR batch {active.batch_id} has no provider run ID")
             try:
                 run = provider.status(provider_run_id)
-            except KaggleKernelNotFoundError:
+            except OcrRunNotFoundError:
                 return self._failed_cycle(
                     executor,
                     active,
-                    error_code="kaggle_run_missing",
-                    error_message="The submitted Kaggle kernel is no longer available",
+                    error_code="provider_run_missing",
+                    error_message=(
+                        f"The submitted {provider.name} execution is no longer available"
+                    ),
                 )
 
         if run.state.active:
-            if run.state == KaggleKernelState.RUNNING:
+            if run.state == OcrProviderState.RUNNING:
                 self._repository.mark_batch_running(executor, active.batch_id)
             return OcrCycleResult(action="waiting", batch_id=active.batch_id)
-        if run.state == KaggleKernelState.FAILED:
+        if run.state == OcrProviderState.FAILED:
             return self._failed_cycle(
                 executor,
                 active,
-                error_code="kaggle_run_failed",
+                error_code="provider_run_failed",
                 error_message=self._failure_diagnostic(provider, run),
             )
         try:
@@ -340,29 +359,29 @@ class ArxivOcrService:
             return self._failed_cycle(
                 executor,
                 active,
-                error_code="kaggle_output_mismatch",
-                error_message="The exact Kaggle run output does not belong to this batch",
+                error_code="provider_output_mismatch",
+                error_message="The exact remote output does not belong to this batch",
             )
         except InvalidOcrOutputError as error:
             return self._failed_cycle(
                 executor,
                 active,
-                error_code="invalid_kaggle_output",
+                error_code="invalid_provider_output",
                 error_message=str(error),
             )
 
     @staticmethod
     def _failure_diagnostic(
-        provider: KaggleClient,
-        run: KaggleRunStatus,
+        provider: OcrProvider,
+        run: OcrRunStatus,
     ) -> str:
-        message = run.failure_message or "Kaggle reported a failed terminal kernel state"
+        message = run.failure_message or f"{provider.name} reported a failed terminal state"
         try:
             log_tail = provider.logs(run.provider_run_id).strip()[-1500:]
-        except KaggleCommandError:
+        except OcrProviderError:
             log_tail = ""
         if log_tail:
-            message = f"{message}\n\nKaggle log tail:\n{log_tail}"
+            message = f"{message}\n\n{provider.name} log tail:\n{log_tail}"
         return message[:2000]
 
     def _failed_cycle(
@@ -428,7 +447,7 @@ class ArxivOcrService:
     def _import_completed(
         self,
         executor: SqlExecutor,
-        provider: KaggleClient,
+        provider: OcrProvider,
         active: ActiveOcrBatch,
         job: OcrJob,
         provider_run_id: str,

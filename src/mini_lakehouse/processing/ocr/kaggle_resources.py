@@ -1,7 +1,5 @@
 """Desired-state reconciliation for versioned Kaggle OCR resources."""
 
-from __future__ import annotations
-
 import json
 import time
 from collections.abc import Callable
@@ -16,13 +14,6 @@ from mini_lakehouse.contracts.processors import (
     ProcessorModelContract,
 )
 from mini_lakehouse.processing.ocr.core.identity import canonical_json_sha256
-from mini_lakehouse.processing.ocr.kaggle_bundle import (
-    MODEL_MANIFEST_NAME,
-    RUNNER_MANIFEST_NAME,
-    KaggleRunnerBundle,
-    ModelResourceManifest,
-    RunnerResourceManifest,
-)
 from mini_lakehouse.processing.ocr.kaggle_types import (
     KaggleOcrResourceReferences,
     KaggleResourceAction,
@@ -34,6 +25,13 @@ from mini_lakehouse.processing.ocr.kaggle_types import (
     KaggleResourceResult,
     ManagedKaggleResource,
     ModelSnapshotClient,
+)
+from mini_lakehouse.processing.ocr.runner_bundle import (
+    MODEL_MANIFEST_NAME,
+    RUNNER_MANIFEST_NAME,
+    ModelResourceManifest,
+    OcrRunnerBundle,
+    RunnerResourceManifest,
 )
 
 
@@ -158,7 +156,7 @@ class KaggleRunnerDatasetResource:
     def __init__(
         self,
         dataset_slug: str,
-        bundle: KaggleRunnerBundle,
+        bundle: OcrRunnerBundle,
         client: KaggleResourceClient,
     ) -> None:
         self.unversioned_source = dataset_slug
@@ -299,7 +297,7 @@ class KaggleOcrResourceManager:
         processor: ProcessorContract,
         client: KaggleResourceClient,
         *,
-        bundle: KaggleRunnerBundle | None = None,
+        bundle: OcrRunnerBundle | None = None,
         snapshots: ModelSnapshotClient | None = None,
         readiness_attempts: int = 36,
         readiness_delay_seconds: float = 5,
@@ -310,12 +308,11 @@ class KaggleOcrResourceManager:
                 "Kaggle resources require LAKEHOUSE_KAGGLE__USERNAME and "
                 "LAKEHOUSE_KAGGLE__API_TOKEN"
             )
-        runner_bundle = bundle or KaggleRunnerBundle.load()
-        model_targets = processor.runner.model_resources
+        runner_bundle = bundle or OcrRunnerBundle.load(include_kaggle_bootstrap=True)
+        runner = processor.runner.kaggle
+        model_targets = runner.model_resources
         snapshot_client = snapshots or HuggingFaceSnapshotClient()
-        runner_dataset_name = (
-            f"{processor.runner.runner_dataset_prefix}-{runner_bundle.sha256[:12]}"
-        )
+        runner_dataset_name = f"{runner.runner_dataset_prefix}-{runner_bundle.sha256[:12]}"
         self.runner_dataset_slug = settings.dataset_slug(runner_dataset_name)
         self._resources: dict[KaggleResourceName, ManagedKaggleResource] = {
             "runner": KaggleRunnerDatasetResource(
@@ -349,6 +346,12 @@ class KaggleOcrResourceManager:
 
     def reconcile(self, name: KaggleResourceName) -> KaggleResourceResult:
         return self._reconciler.reconcile(self._resources[name])
+
+    def reconcile_all(self) -> dict[str, object]:
+        return {
+            name: self.reconcile(name).model_dump(mode="json")
+            for name in ("runner", "model", "layout_model")
+        }
 
     def resolve_all(self) -> KaggleOcrResourceReferences:
         return KaggleOcrResourceReferences(

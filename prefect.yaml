@@ -85,23 +85,26 @@ deployments:
     work_pool: *ingestion_work_pool
 
   - name: etl_arxiv_ocr
-    description: Reconcile the exact Kaggle GLM-OCR run and submit the next bounded ArXiv batch.
+    description: Reconcile the exact remote GLM-OCR run and submit the next bounded ArXiv batch.
     entrypoint: orchestration/flows/arxiv/etl_arxiv_ocr.py:etl_arxiv_ocr
     parameters:
       arxiv_ids: null
       verify_pdf: false
+      provider: null
     schedules:
       - cron: "*/20 * * * *"
         timezone: UTC
-        # Kaggle GPU time is quota-bound. Resume only after credentials and the
-        # runner Dataset, models, and private kernel have been validated.
+        # GPU execution is cost/quota bound. Enable only after the selected
+        # provider and its immutable model resources have been validated.
         active: false
     concurrency_limit: *singleton
     work_pool: *processing_work_pool
 
   - name: gov_arxiv_ocr_resources
-    description: Manually reconcile the private, versioned Kaggle OCR runner and models.
+    description: Manually reconcile immutable resources for one OCR provider.
     entrypoint: orchestration/flows/arxiv/gov_arxiv_ocr_resources.py:gov_arxiv_ocr_resources
+    parameters:
+      provider: null
     schedules: []
     concurrency_limit: *singleton
     work_pool: *maintenance_work_pool

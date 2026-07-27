@@ -1,7 +1,5 @@
 """Validated read access to immutable OCR artifacts."""
 
-from __future__ import annotations
-
 import hashlib
 from dataclasses import dataclass
 from io import BytesIO

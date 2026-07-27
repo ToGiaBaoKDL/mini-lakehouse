@@ -134,6 +134,8 @@ def main(
                 str(project),
                 "--frozen",
                 "--no-dev",
+                "--extra",
+                "kaggle",
                 "--no-build",
                 "--link-mode",
                 "hardlink",

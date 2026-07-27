@@ -24,7 +24,7 @@ from mini_lakehouse.processing.ocr.core.protocol import (
     OcrModel,
     OcrReuseReference,
 )
-from mini_lakehouse.processing.ocr.kaggle_bundle import KaggleRunnerBundle
+from mini_lakehouse.processing.ocr.runner_bundle import OcrRunnerBundle
 
 
 def _runtime_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
@@ -41,7 +41,7 @@ def _runtime_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     monkeypatch.setitem(sys.modules, "progress", progress)
 
     name = "mini_lakehouse_test_glm_ocr_runtime"
-    path = Path("runners/kaggle/glm_ocr/runtime.py")
+    path = Path("runners/glm_ocr/runtime.py")
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -82,7 +82,7 @@ def _job() -> OcrJob:
     return OcrJob(
         schema_version="1.0.0",
         batch_id=batch_id((request.request_id,), attempts=request_attempts),
-        runner_bundle_sha256=KaggleRunnerBundle.load().sha256,
+        runner_bundle_sha256=OcrRunnerBundle.load().sha256,
         model=OcrModel.model_validate(processor.model.model_dump()),
         layout_model=OcrModel.model_validate(processor.layout_model.model_dump()),
         adapter_version=processor.adapter_version,
@@ -167,3 +167,65 @@ def test_changed_pdf_is_prepared_for_inference(
     assert isinstance(prepared, runtime.PreparedDocument)
     assert prepared.pdf_sha256 == "f" * 64
     assert prepared.page_count == 4
+
+
+def test_compatible_inference_engine_reuses_one_vllm_server(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_module(monkeypatch)
+    starts: list[object] = []
+    stops: list[object] = []
+
+    class _Process:
+        def poll(self) -> None:
+            return None
+
+    class _Parser:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def __enter__(self) -> "_Parser":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            pass
+
+    process = _Process()
+    log_file = object()
+    monkeypatch.setattr(runtime, "GlmOcr", _Parser)
+
+    def write_config(*_args: object, **_kwargs: object) -> None:
+        pass
+
+    monkeypatch.setattr(runtime, "write_config", write_config)
+
+    def start(*_args: object, **_kwargs: object) -> tuple[object, object]:
+        starts.append(process)
+        return process, log_file
+
+    def stop(*_args: object, **_kwargs: object) -> None:
+        stops.append(process)
+
+    monkeypatch.setattr(runtime, "start_vllm", start)
+    monkeypatch.setattr(runtime, "stop_process", stop)
+    engine = runtime.InferenceEngine(tmp_path / "engine")
+    job = _job()
+    model_path = tmp_path / "model"
+    layout_path = tmp_path / "layout"
+
+    first, _ = engine.acquire(
+        job,
+        model_path=model_path,
+        layout_model_path=layout_path,
+    )
+    second, _ = engine.acquire(
+        job,
+        model_path=model_path,
+        layout_model_path=layout_path,
+    )
+    engine.close()
+
+    assert first is second
+    assert starts == [process]
+    assert stops == [process]

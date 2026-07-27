@@ -1,7 +1,5 @@
 """Authenticated Kaggle SDK and KaggleHub boundary."""
 
-from __future__ import annotations
-
 import os
 import threading
 import time

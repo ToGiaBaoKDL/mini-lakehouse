@@ -1,11 +1,9 @@
-"""Structured page progress for the pinned GLM-OCR self-hosted pipeline."""
-
-from __future__ import annotations
+"""Structured page progress for the provider-neutral GLM-OCR pipeline."""
 
 import threading
 from collections.abc import Callable
 from types import TracebackType
-from typing import Any
+from typing import Any, Self
 
 ProgressEmitter = Callable[..., None]
 
@@ -47,7 +45,7 @@ class GlmOcrPageProgress:
             daemon=True,
         )
 
-    def __enter__(self) -> GlmOcrPageProgress:
+    def __enter__(self) -> Self:
         self._thread.start()
         return self
 

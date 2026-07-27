@@ -1,7 +1,5 @@
 """Read-only Streamlit application for reviewing ArXiv OCR results."""
 
-from __future__ import annotations
-
 import logging
 
 import streamlit as st

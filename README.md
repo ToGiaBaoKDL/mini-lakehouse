@@ -55,7 +55,7 @@ logical ownership; dbt layers remain a modeling concern inside the analytics pro
 | Trino | SQL execution for curation, dbt, maintenance, and review queries |
 | dbt-trino | Ephemeral staging/intermediate logic and physical analytics marts |
 | Prefect | Domain-scoped scheduling, retries, observability, and notifications |
-| Kaggle | Optional adapter for quota-bound accelerator workloads |
+| Kaggle / Modal | Selectable adapters for quota- or cost-bound accelerator workloads |
 | Streamlit | Optional read-only data-product review surfaces |
 | uv + Pydantic | Reproducible Python environments and strict YAML contracts |
 

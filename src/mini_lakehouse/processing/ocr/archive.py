@@ -1,7 +1,5 @@
 """Validation and safe extraction of a completed OCR runner output."""
 
-from __future__ import annotations
-
 import gzip
 import tarfile
 from collections.abc import Iterable
@@ -36,7 +34,7 @@ class InvalidOcrOutputError(ValueError):
 
 
 class OcrBatchMismatchError(InvalidOcrOutputError):
-    """The downloaded latest Kaggle output belongs to a different batch."""
+    """The downloaded remote output belongs to a different batch."""
 
 
 def document_manifest_payload(result: OcrDocumentResult) -> dict[str, object]:

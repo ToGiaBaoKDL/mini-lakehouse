@@ -1,14 +1,11 @@
 """Deterministic OCR identities derived only from business inputs."""
 
-from __future__ import annotations
-
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from mini_lakehouse.contracts.processors import ProcessorContract
+from mini_lakehouse.contracts.processors import ProcessorContract
 
 
 def canonical_json_bytes(value: Any) -> bytes:

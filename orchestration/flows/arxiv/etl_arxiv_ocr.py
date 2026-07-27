@@ -4,6 +4,7 @@ from prefect import flow, task
 
 from mini_lakehouse.config import get_settings
 from mini_lakehouse.curated_products.arxiv.ocr_service import ArxivOcrService
+from mini_lakehouse.processing.ocr.provider import OcrProviderName
 from orchestration.plugins.notifications import (
     notify_flow_failure,
     notify_flow_running,
@@ -22,10 +23,12 @@ from orchestration.plugins.notifications import (
 def reconcile_and_submit_ocr(
     arxiv_ids: tuple[str, ...],
     verify_pdf: bool,
+    provider: OcrProviderName | None,
 ) -> dict[str, Any]:
     result = ArxivOcrService(get_settings()).run_once(
         arxiv_ids=arxiv_ids,
         verify_pdf=verify_pdf,
+        provider=provider,
     )
     return result.model_dump(mode="json")
 
@@ -42,9 +45,10 @@ def reconcile_and_submit_ocr(
 def etl_arxiv_ocr(
     arxiv_ids: list[str] | None = None,
     verify_pdf: bool = False,
+    provider: OcrProviderName | None = None,
 ) -> dict[str, Any]:
     identifiers = tuple(dict.fromkeys(arxiv_ids or ()))
-    return reconcile_and_submit_ocr(identifiers, verify_pdf)
+    return reconcile_and_submit_ocr(identifiers, verify_pdf, provider)
 
 
 if __name__ == "__main__":

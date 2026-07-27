@@ -1,38 +1,28 @@
-"""Shared types and ports for the Kaggle OCR adapter."""
+"""Types and ports private to the Kaggle OCR adapter."""
 
-from __future__ import annotations
-
-from collections.abc import Iterator
 from datetime import datetime
-from enum import StrEnum
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from mini_lakehouse.processing.ocr.core.protocol import OcrJob
+from mini_lakehouse.processing.ocr.provider import (
+    OcrProviderError,
+    OcrProviderState,
+    OcrRunNotFoundError,
+    OcrRunStatus,
+)
 
 KaggleResourceName = Literal["runner", "model", "layout_model"]
 KaggleResourceKind = Literal["dataset", "model"]
 KaggleResourceAction = Literal["created", "updated", "unchanged"]
 
 
-class KaggleKernelState(StrEnum):
-    QUEUED = "queued"
-    RUNNING = "running"
-    COMPLETE = "complete"
-    FAILED = "failed"
-
-    @property
-    def active(self) -> bool:
-        return self in {self.QUEUED, self.RUNNING}
-
-
-class KaggleCommandError(RuntimeError):
+class KaggleCommandError(OcrProviderError):
     pass
 
 
-class KaggleKernelNotFoundError(KaggleCommandError):
+class KaggleKernelNotFoundError(KaggleCommandError, OcrRunNotFoundError):
     pass
 
 
@@ -44,18 +34,10 @@ class KaggleResourceDriftError(RuntimeError):
     pass
 
 
-class KaggleRunStatus(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    provider_run_id: str
-    state: KaggleKernelState
-    failure_message: str | None = None
-
-
 class KaggleCurrentRun(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    status: KaggleRunStatus
+    status: OcrRunStatus
     source: str
 
 
@@ -64,27 +46,6 @@ class KaggleGpuQuota(BaseModel):
 
     remaining_minutes: int = Field(ge=0)
     refresh_at: datetime | None = None
-
-
-class KaggleClient(Protocol):
-    kernel_slug: str
-    runner_bundle_sha256: str
-
-    def prepare_submission(self, destination: Path, job: OcrJob) -> None: ...
-
-    def submit(self, submission_directory: Path) -> str: ...
-
-    def latest_run(self, batch_id: str) -> KaggleRunStatus | None: ...
-
-    def status(self, provider_run_id: str) -> KaggleRunStatus: ...
-
-    def logs(self, provider_run_id: str) -> str: ...
-
-    def stream_logs(self, provider_run_id: str) -> Iterator[str]: ...
-
-    def gpu_quota(self) -> KaggleGpuQuota: ...
-
-    def download_output(self, provider_run_id: str, destination: Path) -> None: ...
 
 
 class KaggleResourceClient(Protocol):
@@ -154,7 +115,7 @@ class KaggleOcrResourceReferences(BaseModel):
     layout_model: KaggleResourceReference
 
     @model_validator(mode="after")
-    def validate_roles(self) -> KaggleOcrResourceReferences:
+    def validate_roles(self) -> Self:
         if (
             self.runner.name != "runner"
             or self.runner.kind != "dataset"
@@ -204,3 +165,9 @@ def parse_provider_run_id(provider_run_id: str) -> tuple[str, str, int]:
     if version < 1:
         raise ValueError(f"Invalid Kaggle provider run ID {provider_run_id!r}")
     return parts[0], parts[1], version
+
+
+# Provider-neutral aliases retain precise Kaggle terminology at the gateway
+# boundary without duplicating the state model.
+KaggleKernelState = OcrProviderState
+KaggleRunStatus = OcrRunStatus

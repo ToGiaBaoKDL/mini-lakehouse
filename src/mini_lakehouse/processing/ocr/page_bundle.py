@@ -1,7 +1,5 @@
 """Bounded decoding for the canonical OCR page Markdown bundle."""
 
-from __future__ import annotations
-
 import gzip
 from typing import BinaryIO
 

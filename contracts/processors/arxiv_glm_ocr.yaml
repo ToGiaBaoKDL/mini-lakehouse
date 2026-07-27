@@ -4,7 +4,7 @@ owner: data-platform
 contact:
   name: Data Platform
   email: bao.to@timo.vn
-description: GLM-OCR processing of ArXiv PDFs on a private Kaggle Script.
+description: GLM-OCR processing of ArXiv PDFs on an explicitly selected GPU provider.
 source: arxiv
 curated_product: arxiv
 adapter: glm_ocr
@@ -34,28 +34,40 @@ inference:
   speculative_tokens: 3
   enforce_eager: true
   max_num_seqs: 4
-  max_workers: 4
+  max_workers: 8
   request_timeout_seconds: 600
   layout_device: cpu
 
 runner:
-  provider: kaggle
-  kernel_name: mini-lakehouse-arxiv-glm-ocr
-  runner_dataset_prefix: mini-lakehouse-arxiv-glm-ocr-runner
-  model_resources:
-    model:
-      name: mini-lakehouse-glm-ocr
-      framework: transformers
-      variation: safetensors
-      license_name: MIT
-    layout_model:
-      name: mini-lakehouse-pp-doclayout-v3
-      framework: transformers
-      variation: safetensors
-      license_name: Apache 2.0
-  accelerator: NvidiaTeslaT4
-  timeout_seconds: 14400
-  minimum_gpu_quota_minutes: 60
+  default_provider: kaggle
+  kaggle:
+    kernel_name: mini-lakehouse-arxiv-glm-ocr
+    runner_dataset_prefix: mini-lakehouse-arxiv-glm-ocr-runner
+    model_resources:
+      model:
+        name: mini-lakehouse-glm-ocr
+        framework: transformers
+        variation: safetensors
+        license_name: MIT
+      layout_model:
+        name: mini-lakehouse-pp-doclayout-v3
+        framework: transformers
+        variation: safetensors
+        license_name: Apache 2.0
+    accelerator: NvidiaTeslaT4
+    timeout_seconds: 14400
+    minimum_gpu_quota_minutes: 60
+  modal:
+    app_name: mini-lakehouse-arxiv-glm-ocr
+    function_name: run_ocr
+    resource_function_name: provision_models
+    model_volume: mini-lakehouse-ocr-models
+    output_volume: mini-lakehouse-ocr-outputs
+    environment: null
+    gpu: A100-40GB
+    timeout_seconds: 14400
+    max_containers: 1
+    scaledown_window_seconds: 300
 
 retry:
   max_document_attempts: 3
