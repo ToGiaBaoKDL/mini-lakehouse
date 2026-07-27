@@ -19,7 +19,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 FROM base AS runtime-dependencies
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project
+    uv sync --frozen --no-dev --extra platform --no-install-project
 
 FROM runtime-dependencies AS runtime
 COPY --from=project-wheel /dist /dist
@@ -45,7 +45,7 @@ CMD ["streamlit", "run", "apps/ocr_review/app.py"]
 
 FROM base AS orchestration-dependencies
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra orchestration --no-install-project
+    uv sync --frozen --no-dev --extra orchestration --extra platform --no-install-project
 
 FROM orchestration-dependencies AS orchestration
 COPY --from=project-wheel /dist /dist

@@ -112,8 +112,9 @@ services:
       timeout: 5s
       retries: 24
 
-  platform-reconcile:
+  platform-admin:
     image: mini-lakehouse:local
+    profiles: ["operations"]
     build:
       context: .
       target: runtime
@@ -144,16 +145,16 @@ services:
       LAKEHOUSE_POLARIS__CREDENTIAL: "${POLARIS_ROOT_CLIENT_ID:?Set POLARIS_ROOT_CLIENT_ID in .env}:${POLARIS_ROOT_CLIENT_SECRET:?Set POLARIS_ROOT_CLIENT_SECRET in .env}"
       LAKEHOUSE_POLARIS__SCOPE: ${LAKEHOUSE_POLARIS__SCOPE:-PRINCIPAL_ROLE:ALL}
     volumes:
-      - ./infra/config/platform-reconcile.guard:/run/secrets/platform_reconcile_guard:ro
-    command: python -m mini_lakehouse.platform.reconcile
+      - ./infra/config/platform-admin.guard:/run/secrets/platform_admin_guard:ro
+    command: python -m mini_lakehouse.platform.catalog.admin validate
     restart: "no"
 
   trino:
     image: trinodb/trino:483
     restart: unless-stopped
     depends_on:
-      platform-reconcile:
-        condition: service_completed_successfully
+      polaris:
+        condition: service_healthy
     environment:
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}

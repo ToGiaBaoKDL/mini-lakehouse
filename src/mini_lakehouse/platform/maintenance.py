@@ -1,7 +1,6 @@
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pyiceberg.catalog import Catalog
 from pyiceberg.table import Table
 from pyiceberg.transforms import (
@@ -15,10 +14,17 @@ from pyiceberg.types import DateType, TimestamptzType
 
 from mini_lakehouse.contracts import PlatformContracts, TableIdentifier
 from mini_lakehouse.contracts.maintenance import (
-    POLARIS_POLICY_CONTENT_VERSION,
+    DataCompactionPolicyContent,
     MaintenancePolicy,
+    OrphanFileRemovalPolicyContent,
+    SnapshotExpiryPolicyContent,
+    parse_policy_content,
 )
-from mini_lakehouse.platform.polaris import PolarisPolicy, PolarisPolicyClient
+from mini_lakehouse.platform.catalog.polaris import (
+    PolarisPolicy,
+    PolarisPolicyClient,
+    policy_content_object,
+)
 from mini_lakehouse.storage.iceberg import (
     discover_tables,
     metadata_retention_is_current,
@@ -31,46 +37,6 @@ MAINTENANCE_POLICY_TYPES = (
     "system.snapshot-expiry",
     "system.orphan-file-removal",
 )
-
-
-class _PolicyContent(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    version: str
-    enable: bool
-
-    @field_validator("version")
-    @classmethod
-    def validate_version(cls, value: str) -> str:
-        if value != POLARIS_POLICY_CONTENT_VERSION:
-            raise ValueError(
-                f"Expected Polaris policy content version {POLARIS_POLICY_CONTENT_VERSION!r}"
-            )
-        return value
-
-
-class _DataCompactionConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    target_file_size_bytes: int = Field(ge=1024 * 1024)
-
-
-class _DataCompactionContent(_PolicyContent):
-    config: _DataCompactionConfig
-
-
-class _SnapshotExpiryConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    max_snapshot_age_days: int = Field(ge=7)
-
-
-class _SnapshotExpiryContent(_PolicyContent):
-    config: _SnapshotExpiryConfig
-
-
-class _OrphanFileRemovalContent(_PolicyContent):
-    max_orphan_file_age_in_days: int = Field(ge=7)
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,7 +112,9 @@ def maintenance_statements(
     statements: list[str] = []
     metadata_policy = applicable.get("system.metadata-compaction")
     if metadata_policy is not None:
-        contract = (policy_contracts or {}).get((metadata_policy.namespace, metadata_policy.name))
+        contract = (policy_contracts or {}).get(
+            (tuple(metadata_policy.namespace), metadata_policy.name)
+        )
         if (
             contract is None
             or contract.policy_type != "system.metadata-compaction"
@@ -167,11 +135,12 @@ def maintenance_statements(
         policy = applicable.get(policy_type)
         if policy is None:
             continue
-        content = policy.content_object()
+        content = parse_policy_content(policy_type, policy_content_object(policy))
         if policy_type == "system.data-compaction":
-            parsed = _DataCompactionContent.model_validate(content)
-            if parsed.enable:
-                contract = (policy_contracts or {}).get((policy.namespace, policy.name))
+            if not isinstance(content, DataCompactionPolicyContent):
+                raise AssertionError("Unexpected data compaction policy content")
+            if content.enable:
+                contract = (policy_contracts or {}).get((tuple(policy.namespace), policy.name))
                 if (
                     contract is None
                     or contract.policy_type != "system.data-compaction"
@@ -187,25 +156,27 @@ def maintenance_statements(
                 )
                 statements.append(
                     f"ALTER TABLE {relation} EXECUTE optimize(file_size_threshold => "
-                    f"'{_data_size(parsed.config.target_file_size_bytes)}') WHERE "
+                    f"'{_data_size(content.config.target_file_size_bytes)}') WHERE "
                     f'"{contract.execution.partition_field}" >= {boundary}'
                 )
         elif policy_type == "system.metadata-compaction":
-            if _PolicyContent.model_validate(content).enable:
+            if content.enable:
                 statements.append(f"ALTER TABLE {relation} EXECUTE optimize_manifests")
         elif policy_type == "system.snapshot-expiry":
-            parsed = _SnapshotExpiryContent.model_validate(content)
-            if parsed.enable:
+            if not isinstance(content, SnapshotExpiryPolicyContent):
+                raise AssertionError("Unexpected snapshot expiry policy content")
+            if content.enable:
                 statements.append(
                     f"ALTER TABLE {relation} EXECUTE expire_snapshots("
-                    f"retention_threshold => '{parsed.config.max_snapshot_age_days}d')"
+                    f"retention_threshold => '{content.config.max_snapshot_age_days}d')"
                 )
         elif policy_type == "system.orphan-file-removal":
-            parsed = _OrphanFileRemovalContent.model_validate(content)
-            if parsed.enable:
+            if not isinstance(content, OrphanFileRemovalPolicyContent):
+                raise AssertionError("Unexpected orphan removal policy content")
+            if content.enable:
                 statements.append(
                     f"ALTER TABLE {relation} EXECUTE remove_orphan_files("
-                    f"retention_threshold => '{parsed.max_orphan_file_age_in_days}d')"
+                    f"retention_threshold => '{content.max_orphan_file_age_in_days}d')"
                 )
     return tuple(statements)
 

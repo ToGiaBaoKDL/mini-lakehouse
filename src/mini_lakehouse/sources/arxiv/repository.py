@@ -66,8 +66,7 @@ class ArxivLandingRepository:
         identifier = self._source.table_identifier(key)
         if not self._catalog.table_exists(identifier.iceberg):
             raise RuntimeError(
-                f"ArXiv landing table {identifier.name!r} is missing; "
-                "run platform reconciliation first"
+                f"ArXiv landing table {identifier.name!r} is missing; run platform bootstrap first"
             )
         return self._catalog.load_table(identifier.iceberg)
 

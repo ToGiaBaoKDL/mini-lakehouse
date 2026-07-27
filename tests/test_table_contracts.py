@@ -43,12 +43,12 @@ def test_github_archive_partition_spec_uses_hour_transform() -> None:
     assert isinstance(field.transform, HourTransform)
 
 
-def test_landing_repository_requires_platform_reconciliation() -> None:
+def test_landing_repository_requires_platform_bootstrap() -> None:
     catalog = create_autospec(Catalog, instance=True)
     catalog.table_exists.return_value = False
     repository = GithubArchiveRepository(Settings(), catalog=catalog)
 
-    with pytest.raises(RuntimeError, match="run platform reconciliation first"):
+    with pytest.raises(RuntimeError, match="run platform bootstrap first"):
         repository.hour_state(datetime(2025, 1, 2, 3, tzinfo=UTC))
 
     catalog.create_table.assert_not_called()

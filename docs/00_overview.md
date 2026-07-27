@@ -47,7 +47,11 @@ src/mini_lakehouse/
 ├── contracts/              strict Pydantic contract models and cross-file validation
 ├── sources/                source-owned acquisition, parsing, and landing writes
 ├── curated/                curated product schemas and curation services
-├── platform/               Polaris, Trino, namespace, RBAC, and maintenance adapters
+├── platform/
+│   ├── catalog/            Polaris SDK, bootstrap, physical layout, and policy administration
+│   ├── maintenance.py      Iceberg maintenance planning
+│   ├── trino.py            shared Trino execution boundary
+│   └── validate.py         runtime readiness checks
 ├── processing/ocr/         provider-neutral protocol plus remote compute adapters
 └── storage/                S3-compatible object store and Iceberg catalog adapters
 
@@ -74,7 +78,7 @@ source or product business behavior. It is intentionally not a Python package an
 | `landing` / source-prefixed tables | Declared source owner | Immutable capture, parsing fidelity, checkpoint idempotency |
 | `curated.<product>` | Declared product owner | Canonical schema, deduplication, normalization, reusable source semantics |
 | `analytics.<domain>` | Declared domain owner | Metric definitions, grains, dbt tests/contracts, BI-facing tables |
-| Catalog and maintenance | Data Platform | Polaris desired state, access grants, policy reconciliation, Iceberg maintenance |
+| Catalog and maintenance | Data Platform | Idempotent bootstrap, drift validation, access grants, policies, Iceberg maintenance |
 
 The registry derives each curated-product and analytics-domain namespace from its owning contract,
 then validates source → curated product → analytics domain references. dbt source metadata,

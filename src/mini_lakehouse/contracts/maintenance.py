@@ -47,6 +47,52 @@ class OptimizationContract(ContractModel):
     target_file_size_bytes: int = Field(ge=1024 * 1024)
 
 
+class MaintenancePolicyContent(ContractModel):
+    version: Literal["2025-02-03"] = POLARIS_POLICY_CONTENT_VERSION
+    enable: bool = True
+
+
+class DataCompactionConfig(ContractModel):
+    target_file_size_bytes: int = Field(ge=1024 * 1024)
+
+
+class DataCompactionPolicyContent(MaintenancePolicyContent):
+    config: DataCompactionConfig
+
+
+class SnapshotExpiryConfig(ContractModel):
+    max_snapshot_age_days: int = Field(ge=7)
+
+
+class SnapshotExpiryPolicyContent(MaintenancePolicyContent):
+    config: SnapshotExpiryConfig
+
+
+class OrphanFileRemovalPolicyContent(MaintenancePolicyContent):
+    max_orphan_file_age_in_days: int = Field(ge=7)
+
+
+type TypedMaintenancePolicyContent = (
+    MaintenancePolicyContent
+    | DataCompactionPolicyContent
+    | SnapshotExpiryPolicyContent
+    | OrphanFileRemovalPolicyContent
+)
+
+
+def parse_policy_content(
+    policy_type: PolicyType,
+    content: object,
+) -> TypedMaintenancePolicyContent:
+    if policy_type == "system.data-compaction":
+        return DataCompactionPolicyContent.model_validate(content)
+    if policy_type == "system.snapshot-expiry":
+        return SnapshotExpiryPolicyContent.model_validate(content)
+    if policy_type == "system.orphan-file-removal":
+        return OrphanFileRemovalPolicyContent.model_validate(content)
+    return MaintenancePolicyContent.model_validate(content)
+
+
 @dataclass(frozen=True, slots=True)
 class MaintenancePolicy:
     name: str
@@ -54,14 +100,18 @@ class MaintenancePolicy:
     owner: str
     policy_type: PolicyType
     description: str
-    content: dict[str, object]
+    content: TypedMaintenancePolicyContent
     targets: tuple[PolicyTargetContract, ...]
     retention: MetadataRetentionContract | None = None
     execution: OptimizationContract | None = None
 
 
 def policy_content_json(policy: MaintenancePolicy) -> str:
-    return json.dumps(policy.content, sort_keys=True, separators=(",", ":"))
+    return json.dumps(
+        policy.content.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 class TierMaintenanceContract(ContractModel):
@@ -94,7 +144,7 @@ class TierMaintenanceContract(ContractModel):
                 owner=self.owner,
                 policy_type="system.metadata-compaction",
                 description=f"Compact Iceberg metadata in the {self.tier} tier.",
-                content={"version": POLARIS_POLICY_CONTENT_VERSION, "enable": True},
+                content=MaintenancePolicyContent(),
                 retention=self.metadata_retention,
                 targets=(tier_target,),
             ),
@@ -104,11 +154,9 @@ class TierMaintenanceContract(ContractModel):
                 owner=self.owner,
                 policy_type="system.snapshot-expiry",
                 description=f"Expire old Iceberg snapshots in the {self.tier} tier.",
-                content={
-                    "version": POLARIS_POLICY_CONTENT_VERSION,
-                    "enable": True,
-                    "config": {"max_snapshot_age_days": self.snapshot_max_age_days},
-                },
+                content=SnapshotExpiryPolicyContent(
+                    config=SnapshotExpiryConfig(max_snapshot_age_days=self.snapshot_max_age_days)
+                ),
                 targets=(tier_target,),
             ),
             MaintenancePolicy(
@@ -117,11 +165,9 @@ class TierMaintenanceContract(ContractModel):
                 owner=self.owner,
                 policy_type="system.orphan-file-removal",
                 description=f"Remove aged orphan files from the {self.tier} tier.",
-                content={
-                    "version": POLARIS_POLICY_CONTENT_VERSION,
-                    "enable": True,
-                    "max_orphan_file_age_in_days": self.orphan_file_max_age_days,
-                },
+                content=OrphanFileRemovalPolicyContent(
+                    max_orphan_file_age_in_days=self.orphan_file_max_age_days
+                ),
                 targets=(tier_target,),
             ),
         ]
@@ -134,13 +180,11 @@ class TierMaintenanceContract(ContractModel):
                 description=(
                     f"Compact recent {optimization.name} partitions in the {self.tier} tier."
                 ),
-                content={
-                    "version": POLARIS_POLICY_CONTENT_VERSION,
-                    "enable": True,
-                    "config": {
-                        "target_file_size_bytes": optimization.target_file_size_bytes,
-                    },
-                },
+                content=DataCompactionPolicyContent(
+                    config=DataCompactionConfig(
+                        target_file_size_bytes=optimization.target_file_size_bytes
+                    )
+                ),
                 execution=optimization,
                 targets=(optimization.target,),
             )

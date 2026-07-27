@@ -25,8 +25,8 @@ routes, while
 lifecycle URIs, storage endpoints, and catalog names remain in `.env` and are injected explicitly
 by Compose.
 
-Stable desired state is separate from runtime settings and lives under `contracts/`. Validate both
-layers before starting services:
+Stable non-secret platform definitions live under `contracts/`. Validate contracts and settings
+before starting services:
 
 ```bash
 make validate
@@ -36,6 +36,7 @@ Start the core data plane:
 
 ```bash
 make up-core
+make platform-validate
 make ps
 make smoke-core
 ```
@@ -63,16 +64,26 @@ tiers with prefixes in one bucket. The license remains local runtime configurati
 committed to the repository.
 
 `make down` and `make restart` preserve the named `object-store-data`, `postgres-data`,
-`trino-data`, and `redis-data` volumes. `make clean` destroys that state, while `make reset`
-performs the destructive cleanup and then deploys a fresh stack. PostgreSQL major upgrades
-additionally require a planned database migration when a volume is retained.
+`trino-data`, and `redis-data` volumes. `make clean` destroys that state. `make reset` performs the
+destructive cleanup, builds all local images, starts the clean core plane, and runs the idempotent
+platform bootstrap. PostgreSQL major upgrades additionally require an explicit database migration
+when a volume is retained.
 
 Only S3 dependencies are installed. There is no GCS compatibility package or inactive runtime
 branch in this project.
 
 The local Polaris metastore is PostgreSQL-backed. `polaris-bootstrap` only initializes the realm
 and root principal. `object-store-provision` only ensures physical buckets exist.
-`platform-reconcile` then converges the declared catalog (currently `prod`), namespaces, access
-grants, landing/curated Iceberg tables, and desired policy content. It is enabled only in its one-shot container and
-requires the tracked reconcile guard mounted read-only at runtime. No package is installed
-dynamically when a container starts.
+The operations-profile `platform-admin` container owns catalog administration. Normal startup runs
+the bootstrap after core services become healthy, then live validation verifies catalog
+configuration, namespaces, grants, landing/curated Iceberg tables, policies, and mappings:
+
+```bash
+make platform-bootstrap
+make platform-validate
+```
+
+Both commands require the tracked admin guard mounted read-only in the one-shot container. The
+bootstrap creates missing resources and updates only safe mutable metadata; incompatible schema,
+partition, location, format, or policy-type drift fails and requires an explicit migration. No
+package is installed dynamically when a container starts.

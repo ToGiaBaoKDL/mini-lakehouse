@@ -50,7 +50,7 @@ logical ownership; dbt layers remain a modeling concern inside the analytics pro
 | Component | Role |
 |---|---|
 | AIStor | S3-compatible storage for landing, curated, and analytics buckets |
-| Apache Polaris | Iceberg REST catalog, namespaces, RBAC, and policy desired state |
+| Apache Polaris | Iceberg REST catalog, namespaces, RBAC, and maintenance policies |
 | Apache Iceberg | Atomic tables, schema evolution, partition evolution, and maintenance |
 | Trino | SQL execution for curation, dbt, maintenance, and review queries |
 | dbt-trino | Ephemeral staging/intermediate logic and physical analytics marts |
@@ -92,9 +92,10 @@ The platform grows through small, owned extension points:
 5. An analytics domain owns dbt marts and their public tests.
 6. A domain-scoped Prefect flow composes these capabilities without duplicating their logic.
 
-Catalog namespaces, storage locations, tables, access grants, and maintenance policies are
-reconciled from declarative desired state. Runtime endpoints and secrets remain environment
-configuration.
+The idempotent platform bootstrap compiles catalog namespaces, storage locations, tables, access
+grants, and maintenance policies directly from contracts. Read-only validation reports drift;
+schema, partition, location, and destructive changes require an explicit migration. Runtime
+endpoints and secrets remain environment configuration.
 
 ## Repository boundaries
 
@@ -111,7 +112,11 @@ src/mini_lakehouse/
   sources/                  Acquisition, parsing, and landing writes
   curated/                  Product-owned curation and repositories
   processing/               Provider-neutral processor protocols and execution adapters
-  platform/                 Polaris, Trino, access, reconciliation, and maintenance
+  platform/
+    catalog/                Polaris SDK, bootstrap, layout, and policy administration
+    maintenance.py          Iceberg maintenance planning
+    trino.py                Shared Trino execution boundary
+    validate.py             Runtime readiness checks
   storage/                  S3 and Iceberg boundaries
   apps/                     Read-only operational and data-product applications
 dbt/analytics/              staging → intermediate → marts
@@ -136,6 +141,7 @@ make setup
 uv sync --frozen --all-extras --all-groups
 make validate
 make up
+make platform-validate
 make smoke
 ```
 
@@ -161,7 +167,7 @@ Flow names communicate the kind of work without embedding infrastructure details
 | `rpt` | Publish reports or consumer deliveries |
 | `mon` | Observe data and platform health |
 | `bk` | Back up recoverable state |
-| `gov` | Reconcile governance, resources, and maintenance |
+| `gov` | Operate governance, provider resources, and maintenance |
 | `test` | Run isolated experiments or functional checks |
 
 Schedules, parameters, and retries live with deployment definitions. A flow composes domain
@@ -174,7 +180,8 @@ Operational commands and current deployments are documented in
 ```bash
 make help                  # list supported operations
 make check                 # lock, lint, type, unit, dbt parse, and Compose checks
-make platform-reconcile    # reconcile catalog, namespaces, tables, access, and policies
+make platform-bootstrap    # idempotently create missing or safely mutable resources
+make platform-validate     # read live state and fail on managed drift
 make prefect-deploy        # register all Prefect deployments
 make policy-prune-plan     # inspect stale repository-managed Polaris policies
 ```
@@ -189,11 +196,11 @@ uv run pytest -m integration
 
 These tests run against a disposable AIStor, Polaris, and Trino data plane and verify:
 
-- contract-managed namespaces and tables converge to the declared desired state;
+- repeated platform bootstrap is idempotent and live validation reports no managed drift;
 - representative source mutations converge through landing and curated products without duplicate
   business keys;
 - dbt freshness, tests, and analytics marts consume only declared curated interfaces;
-- repeated curation and reconciliation do not create unnecessary Iceberg snapshots.
+- repeated curation and bootstrap do not create unnecessary Iceberg snapshots.
 
 They deliberately do not call external source/provider APIs, Prefect schedules, notification
 channels, or optional review applications.

@@ -10,12 +10,8 @@ from dataclasses import dataclass
 from mini_lakehouse.config import get_settings
 from mini_lakehouse.contracts import PlatformContracts, load_contracts
 from mini_lakehouse.logging import configure_logging
-from mini_lakehouse.platform.polaris import (
-    PolarisPolicyClient,
-    create_retry_session,
-    request_oauth_token,
-)
-from mini_lakehouse.platform.runtime import validate_runtime_contract
+from mini_lakehouse.platform.catalog.layout import validate_runtime_contract
+from mini_lakehouse.platform.catalog.polaris import PolarisClients, PolarisPolicyClient
 
 logger = logging.getLogger(__name__)
 MANAGED_POLICY_PREFIX = "mlh-"
@@ -35,7 +31,7 @@ def build_policy_prune_plan(
     stale: set[PolicyPruneItem] = set()
     for namespace in (item.path for item in contracts.managed_namespaces()):
         for identifier in client.list_policies(namespace):
-            key = (identifier.namespace, identifier.name)
+            key = (tuple(identifier.namespace), identifier.name)
             if identifier.name.startswith(MANAGED_POLICY_PREFIX) and key not in desired:
                 stale.add(PolicyPruneItem(*key))
     return tuple(sorted(stale, key=lambda item: (item.namespace, item.name)))
@@ -75,13 +71,11 @@ def main(arguments: Sequence[str] | None = None) -> None:
 
     settings = get_settings()
     configure_logging(settings.log_level)
-    settings.platform_admin.require_reconciliation_capability()
+    settings.platform_admin.require_capability()
     contracts = load_contracts(settings.contracts_dir)
     validate_runtime_contract(settings, contracts)
-    with create_retry_session() as session:
-        token = request_oauth_token(session, settings)
-        client = PolarisPolicyClient(session, settings, token)
-        plan = build_policy_prune_plan(client, contracts)
+    with PolarisClients(settings) as clients:
+        plan = build_policy_prune_plan(clients.policies, contracts)
         payload = plan_payload(plan)
         print(json.dumps(payload, indent=2))
         expected_sha256 = parsed.apply_plan_sha256
@@ -91,7 +85,7 @@ def main(arguments: Sequence[str] | None = None) -> None:
                     "Polaris policy prune plan changed after review; generate and review a new plan"
                 )
             if plan:
-                apply_policy_prune_plan(client, plan)
+                apply_policy_prune_plan(clients.policies, plan)
                 logger.info("Pruned %d stale managed Polaris policies", len(plan))
             else:
                 logger.info("The reviewed Polaris policy prune plan is empty")

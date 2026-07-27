@@ -104,20 +104,20 @@ def test_production_rejects_local_root_credentials() -> None:
         Settings(environment="production")
 
 
-def test_platform_reconciliation_requires_the_container_capability(tmp_path: Path) -> None:
+def test_platform_administration_requires_the_container_capability(tmp_path: Path) -> None:
     marker = tmp_path / "container"
     guard = tmp_path / "guard"
     marker.write_text("", encoding="utf-8")
-    guard.write_text("platform-reconcile\n", encoding="utf-8")
+    guard.write_text("platform-admin\n", encoding="utf-8")
 
     PlatformAdminSettings(
         enabled=True,
         container_marker=marker,
         guard_file=guard,
-    ).require_reconciliation_capability()
+    ).require_capability()
 
     with pytest.raises(RuntimeError, match="disabled"):
-        PlatformAdminSettings().require_reconciliation_capability()
+        PlatformAdminSettings().require_capability()
 
 
 def test_gmail_notification_channel_requires_complete_delivery_config() -> None:

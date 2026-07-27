@@ -3,6 +3,7 @@
 from mini_lakehouse.contracts.loader import load_contracts
 from mini_lakehouse.contracts.registry import PlatformContracts
 from mini_lakehouse.contracts.tables import (
+    ManagedIcebergTableContract,
     TableIdentifier,
     arrow_schema,
     iceberg_schema,
@@ -10,6 +11,7 @@ from mini_lakehouse.contracts.tables import (
 )
 
 __all__ = [
+    "ManagedIcebergTableContract",
     "PlatformContracts",
     "TableIdentifier",
     "arrow_schema",

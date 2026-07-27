@@ -73,12 +73,7 @@ class FsspecObjectStore:
         return digest.hexdigest()
 
     def upload(self, source: Path, destination_uri: str) -> None:
-        with (
-            source.open("rb") as source_file,
-            self._filesystem.open(self._path(destination_uri), "wb") as raw_destination_file,
-        ):
-            destination_file = cast(BinaryIO, raw_destination_file)
-            shutil.copyfileobj(source_file, destination_file, length=1024 * 1024)
+        self._filesystem.put_file(str(source), self._path(destination_uri))
 
     def upload_if_absent(self, source: Path, destination_uri: str) -> bool:
         try:
@@ -100,12 +95,7 @@ class FsspecObjectStore:
         return True
 
     def download(self, source_uri: str, destination: Path) -> None:
-        with (
-            self._filesystem.open(self._path(source_uri), "rb") as raw_input_file,
-            destination.open("wb") as output_file,
-        ):
-            input_file = cast(BinaryIO, raw_input_file)
-            shutil.copyfileobj(input_file, output_file, length=1024 * 1024)
+        self._filesystem.get_file(self._path(source_uri), str(destination))
 
 
 def create_object_store(settings: StorageSettings) -> ObjectStore:

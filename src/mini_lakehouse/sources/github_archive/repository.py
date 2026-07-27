@@ -52,7 +52,7 @@ class GithubArchiveRepository:
     def _table(self) -> Table:
         if not self._catalog.table_exists(self._identifier.iceberg):
             raise RuntimeError(
-                "GitHub Archive landing table is missing; run platform reconciliation first"
+                "GitHub Archive landing table is missing; run platform bootstrap first"
             )
         return self._catalog.load_table(self._identifier.iceberg)
 

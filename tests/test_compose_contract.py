@@ -115,7 +115,7 @@ def test_each_local_image_has_one_compose_build_owner() -> None:
                 build_owners.setdefault(image, []).append(f"{path.name}:{service_name}")
 
     assert build_owners == {
-        "mini-lakehouse:local": ["compose.core.yaml:platform-reconcile"],
+        "mini-lakehouse:local": ["compose.core.yaml:platform-admin"],
         "mini-lakehouse-ocr-review:local": ["compose.ocr-review.yaml:ocr-review"],
         "mini-lakehouse-orchestration:local": ["compose.prefect.yaml:prefect-worker"],
     }
@@ -141,7 +141,7 @@ def test_restart_policies_match_service_lifecycle() -> None:
     one_shot = {
         "object-store-provision",
         "polaris-bootstrap",
-        "platform-reconcile",
+        "platform-admin",
         "prefect-reconcile",
         "prefect-deploy",
     }
@@ -173,17 +173,22 @@ def test_container_environment_files_follow_service_ownership() -> None:
     prefect = yaml.safe_load(Path("compose.prefect.yaml").read_text(encoding="utf-8"))
     review = yaml.safe_load(Path("compose.ocr-review.yaml").read_text(encoding="utf-8"))
 
-    assert core["services"]["platform-reconcile"]["env_file"] == [
+    assert core["services"]["platform-admin"]["env_file"] == [
         "./infra/config/platform.container.env"
     ]
     assert (
-        core["services"]["platform-reconcile"]["environment"]["LAKEHOUSE_PLATFORM_ADMIN__ENABLED"]
+        core["services"]["platform-admin"]["environment"]["LAKEHOUSE_PLATFORM_ADMIN__ENABLED"]
         == "true"
     )
     assert (
-        "./infra/config/platform-reconcile.guard:/run/secrets/platform_reconcile_guard:ro"
-        in core["services"]["platform-reconcile"]["volumes"]
+        "./infra/config/platform-admin.guard:/run/secrets/platform_admin_guard:ro"
+        in core["services"]["platform-admin"]["volumes"]
     )
+    assert core["services"]["platform-admin"]["profiles"] == ["operations"]
+    assert core["services"]["platform-admin"]["command"] == (
+        "python -m mini_lakehouse.platform.catalog.admin validate"
+    )
+    assert core["services"]["trino"]["depends_on"] == {"polaris": {"condition": "service_healthy"}}
     assert prefect["x-lakehouse-runtime"]["env_file"] == [
         "./infra/config/platform.container.env",
         "./infra/config/orchestration.container.env",
@@ -308,7 +313,8 @@ def test_makefile_is_the_local_operations_entrypoint() -> None:
         "wait-prefect-deploy:",
         "prefect-deployments:",
         "prefect-deploy:",
-        "platform-reconcile:",
+        "platform-bootstrap:",
+        "platform-validate:",
         "policy-prune-plan:",
         "policy-prune-apply:",
     ):
@@ -326,6 +332,14 @@ def test_makefile_is_the_local_operations_entrypoint() -> None:
     assert "up -d --no-build --remove-orphans --wait" in makefile
     assert 'exit_code="$$(docker wait "$$container_id")"' in makefile
     assert "down --volumes --remove-orphans" in makefile
+    assert "python -m mini_lakehouse.platform.catalog.admin bootstrap" in makefile
+    assert "python -m mini_lakehouse.platform.catalog.admin validate" in makefile
+    assert "platform-plan:" not in makefile
+    assert "platform-apply:" not in makefile
+    reset_recipe = makefile.split("reset:", maxsplit=1)[1].split("\n\n", maxsplit=1)[0]
+    assert "$(MAKE) start-core" in reset_recipe
+    assert "$(MAKE) platform-plan" not in reset_recipe
+    assert "$(MAKE) up" not in reset_recipe
 
 
 def test_prefect_background_processes_expose_only_owned_health_signals() -> None:

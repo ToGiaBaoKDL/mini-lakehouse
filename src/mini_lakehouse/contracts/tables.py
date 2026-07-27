@@ -167,7 +167,11 @@ def arrow_schema(columns: Sequence[ColumnContract]) -> pa.Schema:
     )
 
 
-def iceberg_schema(columns: Sequence[ColumnContract]) -> Schema:
+def iceberg_schema(
+    columns: Sequence[ColumnContract],
+    primary_key: Sequence[str],
+) -> Schema:
+    field_ids = {column.name: column.field_id for column in columns}
     return Schema(
         *[
             NestedField(
@@ -177,7 +181,8 @@ def iceberg_schema(columns: Sequence[ColumnContract]) -> Schema:
                 required=column.required,
             )
             for column in columns
-        ]
+        ],
+        identifier_field_ids=[field_ids[name] for name in primary_key],
     )
 
 

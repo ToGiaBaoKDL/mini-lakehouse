@@ -85,29 +85,32 @@ class StorageSettings(BaseModel):
 class PlatformAdminSettings(BaseModel):
     enabled: bool = False
     container_marker: Path = Path("/.dockerenv")
-    guard_file: Path = Path("/run/secrets/platform_reconcile_guard")
+    guard_file: Path = Path("/run/secrets/platform_admin_guard")
 
-    def require_reconciliation_capability(self) -> None:
+    def require_capability(self) -> None:
         if not self.enabled:
-            raise RuntimeError("Platform reconciliation is disabled outside its admin container")
+            raise RuntimeError("Platform administration is disabled outside its admin container")
         if not self.container_marker.is_file():
-            raise RuntimeError("Platform reconciliation requires a container runtime marker")
+            raise RuntimeError("Platform administration requires a container runtime marker")
         try:
             guard = self.guard_file.read_text(encoding="utf-8").strip()
         except OSError as error:
             raise RuntimeError("Platform reconciliation guard is not mounted") from error
-        if guard != "platform-reconcile":
-            raise RuntimeError("Platform reconciliation guard is invalid")
+        if guard != "platform-admin":
+            raise RuntimeError("Platform administration guard is invalid")
 
 
 class PolarisSettings(BaseModel):
     catalog_name: str = Field(default="prod", pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
     uri: str = "http://localhost:8181/api/catalog"
     management_uri: str = "http://localhost:8181/api/management/v1"
-    oauth2_server_uri: str = "http://localhost:8181/api/catalog/v1/oauth/tokens"
     realm: str = "POLARIS"
     credential: SecretStr = SecretStr("root:secretpassword")
     scope: str = "PRINCIPAL_ROLE:ALL"
+
+    @property
+    def oauth2_server_uri(self) -> str:
+        return f"{self.uri.rstrip('/')}/v1/oauth/tokens"
 
     @model_validator(mode="after")
     def validate_credential(self) -> Self:

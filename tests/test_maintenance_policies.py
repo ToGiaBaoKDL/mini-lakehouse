@@ -11,13 +11,13 @@ from pyiceberg.types import DateType, IcebergType, NestedField, TimestamptzType
 
 from mini_lakehouse.contracts import TableIdentifier, load_contracts
 from mini_lakehouse.contracts.maintenance import MaintenancePolicy, policy_content_json
+from mini_lakehouse.platform.catalog.polaris import (
+    PolarisPolicy,
+    PolarisPolicyClient,
+)
 from mini_lakehouse.platform.maintenance import (
     build_maintenance_plan,
     maintenance_statements,
-)
-from mini_lakehouse.platform.polaris import (
-    PolarisPolicy,
-    PolarisPolicyClient,
 )
 from mini_lakehouse.storage.iceberg import iceberg_metadata_retention_properties
 
@@ -33,12 +33,13 @@ def _policies(table: TableIdentifier) -> list[PolarisPolicy]:
         PolarisPolicy.model_validate(
             {
                 "name": spec.name,
-                "type": spec.policy_type,
+                "policy-type": spec.policy_type,
                 "description": spec.description,
                 "content": policy_content_json(spec),
                 "version": 1,
                 "inheritable": True,
-                "namespace": spec.namespace,
+                "inherited": False,
+                "namespace": list(spec.namespace),
             }
         )
         for spec in load_contracts().policies

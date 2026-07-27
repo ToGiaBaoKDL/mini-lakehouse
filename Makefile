@@ -15,7 +15,8 @@ THIRD_PARTY_SERVICES := postgres object-store object-store-provision polaris-boo
 	build-orchestration build-ocr-review start-core start-ocr-review start up-core \
 	up-ocr-review up down restart clean reset ps ps-all logs logs-follow smoke-core \
 	smoke-prefect smoke-ocr-review smoke wait-prefect-deploy prefect-deployments \
-	prefect-deploy modal-deploy platform-reconcile policy-prune-plan policy-prune-apply
+	prefect-deploy modal-deploy platform-bootstrap platform-validate policy-prune-plan \
+	policy-prune-apply
 
 help: ## Show the available project commands.
 	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -61,7 +62,7 @@ build: ## Build local images sequentially to keep peak resource usage bounded.
 	$(MAKE) build-ocr-review
 
 build-core: preflight ## Build only the local core runtime image.
-	$(CORE_COMPOSE) build platform-reconcile
+	$(CORE_COMPOSE) build platform-admin
 
 build-orchestration: preflight ## Build only the local orchestration image.
 	$(COMPOSE) build prefect-worker
@@ -71,11 +72,14 @@ build-ocr-review: preflight ## Build only the read-only OCR review image.
 
 start-core: preflight ## Start core services from existing images without building.
 	$(CORE_COMPOSE) up -d --no-build --wait --wait-timeout 300
+	$(MAKE) platform-bootstrap
 
 start-ocr-review: preflight ## Start core services and OCR Review from existing images.
+	$(MAKE) start-core
 	$(OCR_REVIEW_RUN) up -d --no-build --wait --wait-timeout 300
 
 start: preflight ## Start all services from existing images without building.
+	$(MAKE) start-core
 	$(COMPOSE) up -d --no-build --remove-orphans --wait --wait-timeout 300
 	$(MAKE) wait-prefect-deploy
 
@@ -102,10 +106,11 @@ restart: ## Recreate the complete stack while preserving named volumes.
 clean: ## Destroy the complete local stack, including all named volumes.
 	$(COMPOSE) down --volumes --remove-orphans
 
-reset: ## Destroy all local state, pull pinned images, and deploy a clean stack.
+reset: ## Destroy local state and bootstrap a clean core platform.
 	$(MAKE) clean
 	$(MAKE) pull
-	$(MAKE) up
+	$(MAKE) build
+	$(MAKE) start-core
 
 ps: ## Show the complete stack status.
 	$(COMPOSE) ps
@@ -144,17 +149,22 @@ wait-prefect-deploy: preflight ## Wait for Prefect deployment registration.
 prefect-deployments: preflight ## List registered Prefect deployments.
 	$(COMPOSE) exec -T prefect-worker prefect deployment ls
 
-platform-reconcile: preflight ## Reconcile catalog, namespaces, tables, access, and policies.
-	$(CORE_RUN) run --rm --no-deps platform-reconcile
+platform-bootstrap: preflight ## Idempotently create and validate contract-managed platform resources.
+	$(CORE_RUN) run --rm --no-deps platform-admin \
+		python -m mini_lakehouse.platform.catalog.admin bootstrap
+
+platform-validate: preflight ## Read live platform state and fail on managed drift.
+	$(CORE_RUN) run --rm --no-deps platform-admin \
+		python -m mini_lakehouse.platform.catalog.admin validate
 
 policy-prune-plan: preflight ## Print stale repository-managed Polaris policies.
-	$(CORE_RUN) run --rm --no-deps platform-reconcile \
-		python -m mini_lakehouse.platform.policy_prune
+	$(CORE_RUN) run --rm --no-deps platform-admin \
+		python -m mini_lakehouse.platform.catalog.policy_prune
 
 policy-prune-apply: preflight ## Apply the exact reviewed plan (requires PLAN_SHA256).
 	@test -n "$(PLAN_SHA256)" || { printf '%s\n' "PLAN_SHA256 is required."; exit 1; }
-	$(CORE_RUN) run --rm --no-deps platform-reconcile \
-		python -m mini_lakehouse.platform.policy_prune --apply-plan-sha256 "$(PLAN_SHA256)"
+	$(CORE_RUN) run --rm --no-deps platform-admin \
+		python -m mini_lakehouse.platform.catalog.policy_prune --apply-plan-sha256 "$(PLAN_SHA256)"
 
 prefect-deploy: preflight ## Register all Prefect flow deployments.
 	$(COMPOSE) run --rm --no-deps prefect-deploy

@@ -169,7 +169,7 @@ def test_contract_loader_rejects_secret_like_keys(tmp_path: Path) -> None:
 
 def test_github_archive_iceberg_field_ids_are_stable() -> None:
     events_contract = load_contracts().source("github_archive").table("events_raw")
-    events_schema = iceberg_schema(events_contract.columns)
+    events_schema = iceberg_schema(events_contract.columns, events_contract.primary_key)
 
     assert [(field.field_id, field.name, field.required) for field in events_schema.fields] == [
         (1, "event_id", True),
@@ -190,9 +190,12 @@ def test_github_archive_iceberg_field_ids_are_stable() -> None:
 
 def test_arxiv_lineage_field_ids_are_stable() -> None:
     contracts = load_contracts()
-    landing = iceberg_schema(contracts.source("arxiv").table("oai_records_raw").columns)
+    landing_contract = contracts.source("arxiv").table("oai_records_raw")
+    document_runs_contract = contracts.curated_product("arxiv").table("ocr_document_runs")
+    landing = iceberg_schema(landing_contract.columns, landing_contract.primary_key)
     document_runs = iceberg_schema(
-        contracts.curated_product("arxiv").table("ocr_document_runs").columns
+        document_runs_contract.columns,
+        document_runs_contract.primary_key,
     )
 
     assert landing.find_field("raw_object_key").field_id == 18
