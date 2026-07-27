@@ -1,11 +1,11 @@
 """Read-only ArXiv OCR review boundary."""
 
+from mini_lakehouse.curated_products.arxiv.models import OcrRunState
 from mini_lakehouse.curated_products.arxiv.review.models import (
     OcrDocumentFilter,
     OcrDocumentRun,
     OcrDocumentSummary,
     OcrPageElement,
-    OcrRunState,
     OcrStateFilter,
     PublishedOcrManifest,
 )

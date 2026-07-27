@@ -8,29 +8,21 @@ from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
+from mini_lakehouse.curated_products.arxiv.models import OcrRunState
 from mini_lakehouse.processing.ocr.core.protocol import (
     ArtifactFile,
     validate_document_artifact_paths,
 )
 
 
-class OcrRunState(StrEnum):
-    PREPARED = "prepared"
-    SUBMITTED = "submitted"
-    RUNNING = "running"
-    IMPORTED = "imported"
-    RETRYABLE_FAILED = "retryable_failed"
-    TERMINAL_FAILED = "terminal_failed"
-
-
 class OcrStateFilter(StrEnum):
     ALL = "all"
-    IMPORTED = OcrRunState.IMPORTED
-    RUNNING = OcrRunState.RUNNING
-    SUBMITTED = OcrRunState.SUBMITTED
-    PREPARED = OcrRunState.PREPARED
-    RETRYABLE_FAILED = OcrRunState.RETRYABLE_FAILED
-    TERMINAL_FAILED = OcrRunState.TERMINAL_FAILED
+    IMPORTED = OcrRunState.IMPORTED.value
+    RUNNING = OcrRunState.RUNNING.value
+    SUBMITTED = OcrRunState.SUBMITTED.value
+    PREPARED = OcrRunState.PREPARED.value
+    RETRYABLE_FAILED = OcrRunState.RETRYABLE_FAILED.value
+    TERMINAL_FAILED = OcrRunState.TERMINAL_FAILED.value
 
 
 class OcrReviewModel(BaseModel):

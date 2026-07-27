@@ -22,6 +22,7 @@ from mini_lakehouse.curated_products.arxiv.review import (
     OcrDocumentRun,
     OcrDocumentSummary,
     OcrPageElement,
+    OcrRunState,
     OcrStateFilter,
     PublishedOcrManifest,
 )
@@ -265,7 +266,7 @@ def main() -> None:
         render_artifacts(run)
     else:
         message = run.error_message or "This run has not published OCR artifacts."
-        if run.state in {"retryable_failed", "terminal_failed"}:
+        if run.state in {OcrRunState.RETRYABLE_FAILED, OcrRunState.TERMINAL_FAILED}:
             st.error(f"{run.error_code or 'ocr_failed'}: {message}")
         else:
             st.info(message)

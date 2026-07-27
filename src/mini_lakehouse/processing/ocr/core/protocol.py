@@ -45,10 +45,7 @@ class OcrModel(ProtocolModel):
 
 class OcrInference(ProtocolModel):
     api_port: int = Field(ge=1024, le=65535)
-    # ``half`` is retained only for immutable schema-v1 jobs already persisted
-    # before the canonical spelling was changed to ``float16``. vLLM treats the
-    # two values as the same dtype; new processor contracts emit ``float16``.
-    dtype: Literal["half", "float16"]
+    dtype: Literal["float16"]
     max_model_len: int = Field(ge=4096)
     gpu_memory_utilization: float = Field(gt=0, le=0.9)
     speculative_tokens: int = Field(ge=0, le=8)

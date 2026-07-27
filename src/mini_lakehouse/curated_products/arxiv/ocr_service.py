@@ -13,6 +13,7 @@ from mini_lakehouse.curated_products.arxiv.models import (
     OcrBatchDocument,
     OcrCandidate,
     OcrCycleResult,
+    OcrRunState,
 )
 from mini_lakehouse.curated_products.arxiv.ocr_publisher import ArxivOcrPublisher
 from mini_lakehouse.curated_products.arxiv.ocr_repository import ArxivOcrRepository
@@ -390,10 +391,10 @@ class ArxivOcrService:
         retryable = 0
         terminal = 0
         for document in active.documents:
-            if document.state == "imported":
+            if document.state == OcrRunState.IMPORTED:
                 continue
             exhausted = (
-                document.state == "terminal_failed"
+                document.state == OcrRunState.TERMINAL_FAILED
                 or document.attempt_count >= self._processor.retry.max_document_attempts
             )
             if exhausted:
@@ -404,7 +405,7 @@ class ArxivOcrService:
                 executor,
                 batch_id=active.batch_id,
                 request_id=document.request.request_id,
-                state="terminal_failed" if exhausted else "retryable_failed",
+                state=(OcrRunState.TERMINAL_FAILED if exhausted else OcrRunState.RETRYABLE_FAILED),
                 error_code=error_code,
                 error_message=diagnostic,
             )
@@ -455,7 +456,11 @@ class ArxivOcrService:
                     executor,
                     batch_id=active.batch_id,
                     request_id=result.request_id,
-                    state="terminal_failed" if terminal_result else "retryable_failed",
+                    state=(
+                        OcrRunState.TERMINAL_FAILED
+                        if terminal_result
+                        else OcrRunState.RETRYABLE_FAILED
+                    ),
                     error_code=result.error_code or "unknown_runner_error",
                     error_message=result.error_message or "Runner returned no error detail",
                 )

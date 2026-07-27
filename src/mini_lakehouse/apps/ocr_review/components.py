@@ -11,6 +11,7 @@ from mini_lakehouse.curated_products.arxiv.review import (
     OcrDocumentRun,
     OcrDocumentSummary,
     OcrPageElement,
+    OcrRunState,
 )
 
 
@@ -57,7 +58,7 @@ def render_run_header(run: OcrDocumentRun) -> None:
         f"OAI {run.oai_datestamp.isoformat()}",
         f"PDF {_display_bytes(run.pdf_size_bytes)}",
     ]
-    if run.state == "imported" and run.page_count is not None:
+    if run.state == OcrRunState.IMPORTED and run.page_count is not None:
         metadata.append(f"Pages {run.page_count}")
     st.caption(" · ".join(metadata))
 

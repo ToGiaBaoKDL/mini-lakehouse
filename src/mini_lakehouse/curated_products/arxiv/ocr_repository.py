@@ -12,6 +12,7 @@ from mini_lakehouse.curated_products.arxiv.models import (
     ActiveOcrBatch,
     OcrBatchDocument,
     OcrCandidate,
+    OcrRunState,
 )
 from mini_lakehouse.platform.trino import SqlExecutor
 from mini_lakehouse.processing.ocr.core.protocol import (
@@ -119,16 +120,9 @@ class ArxivOcrRepository:
         identifiers = ""
         parameters: list[Any] = [
             configuration_hash,
-            processor.model.repository,
-            processor.model.revision,
-            processor.layout_model.repository,
-            processor.layout_model.revision,
-            processor.adapter_version,
-            processor.output_schema_version,
-            processor.inference.dtype,
-            processor.inference.max_model_len,
-            processor.inference.speculative_tokens,
-            processor.inference.layout_device,
+            OcrRunState.IMPORTED.value,
+            configuration_hash,
+            OcrRunState.RETRYABLE_FAILED.value,
             processor.retry.max_document_attempts,
         ]
         if arxiv_ids:
@@ -176,34 +170,8 @@ class ArxivOcrRepository:
                     document.arxiv_id,
                     document.source_record_sha256
                 FROM {self._relation("ocr_document_runs")} AS document
-                JOIN {self._relation("ocr_batches")} AS batch
-                  ON batch.batch_id = document.batch_id
-                WHERE document.state = 'succeeded'
-                  AND document.model_repository = ?
-                  AND document.model_revision = ?
-                  AND document.layout_model_repository = ?
-                  AND document.layout_model_revision = ?
-                  AND document.adapter_version = ?
-                  AND json_extract_scalar(
-                        batch.job_json,
-                        '$.output_schema_version'
-                      ) = ?
-                  AND CASE json_extract_scalar(batch.job_json, '$.inference.dtype')
-                        WHEN 'half' THEN 'float16'
-                        ELSE json_extract_scalar(batch.job_json, '$.inference.dtype')
-                      END = ?
-                  AND CAST(
-                        json_extract_scalar(batch.job_json, '$.inference.max_model_len')
-                        AS bigint
-                      ) = ?
-                  AND CAST(
-                        json_extract_scalar(batch.job_json, '$.inference.speculative_tokens')
-                        AS integer
-                      ) = ?
-                  AND json_extract_scalar(
-                        batch.job_json,
-                        '$.inference.layout_device'
-                      ) = ?
+                WHERE document.state = ?
+                  AND document.config_hash = ?
             )
             SELECT
                 paper.arxiv_id,
@@ -224,7 +192,7 @@ class ArxivOcrRepository:
               AND (
                     document.request_id IS NULL
                     OR (
-                        document.state = 'retryable_failed'
+                        document.state = ?
                         AND document.attempt_count < ?
                     )
               )
@@ -276,7 +244,7 @@ class ArxivOcrRepository:
                 )
                 ON target.batch_id = source.batch_id
                AND target.request_id = source.request_id
-                WHEN MATCHED AND target.state = 'prepared' THEN UPDATE SET
+                WHEN MATCHED AND target.state = '{OcrRunState.PREPARED.value}' THEN UPDATE SET
                     pdf_url = source.pdf_url,
                     attempt_count = ?,
                     error_code = NULL,
@@ -329,7 +297,7 @@ class ArxivOcrRepository:
                     source.config_hash,
                     NULL,
                     NULL,
-                    'prepared',
+                    '{OcrRunState.PREPARED.value}',
                     ?,
                     NULL,
                     NULL,
@@ -414,13 +382,18 @@ class ArxivOcrRepository:
         executor.execute(
             f"""
             UPDATE {self._relation("ocr_document_runs")}
-            SET state = 'submitted',
+            SET state = ?,
                 submitted_at = coalesce(submitted_at, current_timestamp),
                 curated_at = current_timestamp
             WHERE batch_id = ?
-              AND state IN ('prepared', 'submitted')
+              AND state IN (?, ?)
             """,
-            (batch_id,),
+            (
+                OcrRunState.SUBMITTED.value,
+                batch_id,
+                OcrRunState.PREPARED.value,
+                OcrRunState.SUBMITTED.value,
+            ),
         )
         executor.execute(
             f"""
@@ -439,12 +412,18 @@ class ArxivOcrRepository:
         executor.execute(
             f"""
             UPDATE {self._relation("ocr_document_runs")}
-            SET state = 'running',
+            SET state = ?,
                 curated_at = current_timestamp
             WHERE batch_id = ?
-              AND state IN ('prepared', 'submitted', 'running')
+              AND state IN (?, ?, ?)
             """,
-            (batch_id,),
+            (
+                OcrRunState.RUNNING.value,
+                batch_id,
+                OcrRunState.PREPARED.value,
+                OcrRunState.SUBMITTED.value,
+                OcrRunState.RUNNING.value,
+            ),
         )
         executor.execute(
             f"""
@@ -487,10 +466,12 @@ class ArxivOcrRepository:
         *,
         batch_id: str,
         request_id: str,
-        state: Literal["retryable_failed", "terminal_failed"],
+        state: OcrRunState,
         error_code: str,
         error_message: str,
     ) -> None:
+        if state not in {OcrRunState.RETRYABLE_FAILED, OcrRunState.TERMINAL_FAILED}:
+            raise ValueError(f"Invalid OCR failure state: {state}")
         executor.execute(
             f"""
             UPDATE {self._relation("ocr_document_runs")}
@@ -503,7 +484,7 @@ class ArxivOcrRepository:
               AND batch_id = ?
               AND state <> 'imported'
             """,
-            (state, error_code, error_message[:2000], request_id, batch_id),
+            (state.value, error_code, error_message[:2000], request_id, batch_id),
         )
 
     def processing_manifest(
@@ -516,9 +497,9 @@ class ArxivOcrRepository:
             SELECT DISTINCT manifest_sha256, artifact_uri
             FROM {self._relation("ocr_document_runs")}
             WHERE processing_id = ?
-              AND state = 'imported'
+              AND state = ?
             """,
-            (processing_id,),
+            (processing_id, OcrRunState.IMPORTED.value),
         )
         values = {(str(row[0]), str(row[1])) for row in result.rows}
         if len(values) > 1:
@@ -599,7 +580,7 @@ class ArxivOcrRepository:
                 processing_id = ?,
                 artifact_uri = ?,
                 manifest_sha256 = ?,
-                state = 'imported',
+                state = ?,
                 error_code = NULL,
                 error_message = NULL,
                 completed_at = current_timestamp,
@@ -614,6 +595,7 @@ class ArxivOcrRepository:
                 result.processing_id,
                 artifact_uri,
                 result.manifest_sha256,
+                OcrRunState.IMPORTED.value,
                 result.request_id,
                 batch_id,
             ),

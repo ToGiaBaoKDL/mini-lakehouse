@@ -269,18 +269,23 @@ def test_makefile_is_the_local_operations_entrypoint() -> None:
     assert "$(MAKE) build-core" in makefile
     assert "$(MAKE) build-orchestration" in makefile
     assert "$(MAKE) build-ocr-review" in makefile
+    start_core_recipe = makefile.split("start-core:", maxsplit=1)[1].split("\n\n", maxsplit=1)[0]
+    assert "--remove-orphans" not in start_core_recipe
     assert "up -d --no-build --remove-orphans --wait" in makefile
     assert 'exit_code="$$(docker wait "$$container_id")"' in makefile
     assert "down --volumes --remove-orphans" in makefile
 
 
-def test_prefect_background_processes_have_meaningful_healthchecks() -> None:
+def test_prefect_background_processes_expose_only_owned_health_signals() -> None:
     payload = yaml.safe_load(Path("compose.prefect.yaml").read_text(encoding="utf-8"))
     services = payload["services"]
     background = services["prefect-services"]
     worker = services["prefect-worker"]
 
-    assert "prefect-server:4200/api/health" in background["healthcheck"]["test"][-1]
+    # Prefect's background services do not expose their own health endpoint.
+    # Container process state is more truthful than proxying the server's health.
+    assert "healthcheck" not in background
+    assert background["restart"] == "unless-stopped"
     assert worker["command"] == "python -m mini_lakehouse.platform.prefect_runtime worker"
     assert "localhost:8080/health" in worker["healthcheck"]["test"][-1]
 

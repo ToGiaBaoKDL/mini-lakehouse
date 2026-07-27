@@ -98,12 +98,6 @@ services:
       <<: *prefect-server-environment
     command: prefect server services start
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://prefect-server:4200/api/health', timeout=2)"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
 
   prefect-reconcile:
     <<: [*orchestration-image, *lakehouse-runtime]

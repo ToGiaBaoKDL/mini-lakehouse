@@ -70,7 +70,7 @@ build-ocr-review: preflight ## Build only the read-only OCR review image.
 	$(OCR_REVIEW_COMPOSE) build ocr-review
 
 start-core: preflight ## Start core services from existing images without building.
-	$(CORE_COMPOSE) up -d --no-build --remove-orphans --wait --wait-timeout 300
+	$(CORE_COMPOSE) up -d --no-build --wait --wait-timeout 300
 
 start-ocr-review: preflight ## Start core services and OCR Review from existing images.
 	$(OCR_REVIEW_RUN) up -d --no-build --wait --wait-timeout 300

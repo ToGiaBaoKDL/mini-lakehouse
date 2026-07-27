@@ -3,29 +3,37 @@
 A local-first, production-shaped data lakehouse built with Apache Iceberg, Apache Polaris,
 Trino, dbt, Prefect, and Python managed by uv.
 
-It ingests GitHub Archive and ArXiv data, publishes source-conformed curated products, and builds
-consumer-facing analytics marts with explicit ownership and replay-safe pipelines.
+The project separates acquisition, conformed data products, analytics modeling, and platform
+governance into explicit ownership boundaries. New sources and processors extend those boundaries
+through contracts and adapters instead of introducing source-specific infrastructure.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    GH["GitHub Archive API"]
-    AX["ArXiv OAI-PMH"]
-    KG["Kaggle GLM-OCR"]
+    S["Source systems<br/>APIs · databases · streams"]
+    I["Ingestion<br/>extract · validate · checkpoint"]
+    C["Curation and processing<br/>normalize · deduplicate · enrich"]
+    M["Analytics modeling<br/>staging · intermediate · marts"]
+    U["Consumers<br/>BI · ML · applications"]
+    O["Orchestration<br/>schedules · retries · observability"]
 
-    subgraph PROD["Apache Polaris catalog: prod"]
-        L["landing<br/>Replayable source captures"]
-        C["curated.github · curated.arxiv<br/>Conformed data products"]
-        A["analytics.engineering<br/>Domain-owned marts"]
+    subgraph D["Lakehouse data plane"]
+        L["Landing<br/>Replayable source captures"]
+        P["Curated<br/>Conformed data products"]
+        A["Analytics<br/>Domain-owned marts"]
     end
 
-    GH -->|hourly EL| L
-    AX -->|daily metadata ETL| L
-    L -->|Trino validation, deduplication, MERGE| C
-    C -->|dbt staging → intermediate → marts| A
-    C -->|bounded OCR requests| KG
-    KG -->|validated artifacts and elements| C
+    S --> I --> L --> C --> P --> M --> A --> U
+    O -. controls .-> I
+    O -. controls .-> C
+    O -. controls .-> M
+
+    OS["Object storage<br/>physical lifecycle boundaries"] -. stores .-> D
+    TF["Iceberg<br/>table format and atomic state"] -. structures .-> D
+    CAT["Polaris<br/>catalog · namespaces · governance"] -. catalogs .-> TF
+    Q["Trino<br/>query and execution"] -. executes .-> C
+    Q -. executes .-> M
 ```
 
 Physical buckets define lifecycle, security, and retention boundaries. Polaris namespaces define
@@ -33,7 +41,7 @@ logical ownership; dbt layers remain a modeling concern inside the analytics pro
 
 | Tier | Physical layout | Polaris namespace | Responsibility |
 |---|---|---|---|
-| Landing | `s3://landing/<transport>/<source>/` | `prod.landing` | Immutable source responses and checkpointed raw Iceberg tables |
+| Landing | `s3://landing/<transport>/<source>/` | `prod.landing` | Replayable source captures and checkpointed raw Iceberg tables |
 | Curated | `s3://curated/<product>/` | `prod."curated.<product>"` | Validated, deduplicated, source-conformed products |
 | Analytics | `s3://analytics/<domain>/` | `prod."analytics.<domain>"` | Consumer semantics, documented grains, and tested marts |
 
@@ -47,71 +55,46 @@ logical ownership; dbt layers remain a modeling concern inside the analytics pro
 | Trino | SQL execution for curation, dbt, maintenance, and review queries |
 | dbt-trino | Ephemeral staging/intermediate logic and physical analytics marts |
 | Prefect | Domain-scoped scheduling, retries, observability, and notifications |
-| Kaggle | Quota-bound GPU execution for GLM-OCR |
-| Streamlit | Read-only OCR result review |
+| Kaggle | Optional adapter for quota-bound accelerator workloads |
+| Streamlit | Optional read-only data-product review surfaces |
 | uv + Pydantic | Reproducible Python environments and strict YAML contracts |
 
-## Source-to-product flows
-
-GitHub Archive follows the complete path:
+## Data lifecycle
 
 ```text
-prod.landing.github_archive_events_raw
-  → prod."curated.github".{events, actors_current, repositories_current}
-  → prod."analytics.engineering".{fct_repository_activity_daily,
-                                   fct_contributor_activity_daily}
+source system
+  → replayable landing capture
+  → source-conformed curated product
+  → domain-owned analytics mart
+  → consumer
 ```
 
-ArXiv metadata follows a separate source-owned path:
+- Landing owns acquisition fidelity, source checkpoints, and replay boundaries. It does not expose
+  consumer semantics.
+- Curated products own validation, normalization, deduplication, and the current canonical source
+  state. A product may also publish immutable processing artifacts when tabular data is not enough.
+- Analytics domains own business grain, measures, dimensions, tests, and downstream compatibility.
+  dbt reads curated products rather than raw landing tables.
+- Staging and intermediate dbt models are implementation details. Only intentional marts are
+  materialized in analytics namespaces.
+- Retries preserve deterministic business identities. Iceberg commits and object manifests act as
+  durable publication boundaries rather than relying on orchestration state.
 
-```text
-ArXiv OAI-PMH
-  → s3://landing/api/arxiv/raw/oai/datestamp=<date>/responses.tar.zst
-  → prod.landing.{arxiv_oai_records_raw, arxiv_oai_checkpoints}
-  → prod."curated.arxiv".{papers, paper_authors, paper_categories}
-  → bounded Kaggle OCR
-  → prod."curated.arxiv".{ocr_batches, ocr_document_runs,
-                           ocr_document_elements}
-    + s3://curated/arxiv/ocr/papers/<arxiv-id>/<processing-id>/
-```
+## Extension model
 
-Landing preserves replayable OAI responses and parsed source mutations. Curated keeps the current
-paper state and OCR results. ArXiv does not currently publish an analytics mart. dbt reads curated
-products - not landing tables; its `staging` and `intermediate` models are ephemeral, and only
-domain marts are materialized in analytics.
+The platform grows through small, owned extension points:
 
-## OCR pipeline
+1. A source contract defines acquisition metadata, landing tables, partitioning, and checkpoints.
+2. A source package implements transport and parsing without owning curated business state.
+3. A curated-product contract and package own canonical schemas, merge invariants, and artifacts.
+4. An optional processor contract pins output semantics; a provider adapter only owns remote
+   execution and delivery.
+5. An analytics domain owns dbt marts and their public tests.
+6. A domain-scoped Prefect flow composes these capabilities without duplicating their logic.
 
-```mermaid
-flowchart LR
-    P["curated.arxiv.papers"]
-    S["Select missing or retryable<br/>paper mutations"]
-    R["ocr_batches<br/>ocr_document_runs"]
-    K["Private Kaggle Script<br/>GLM-OCR + layout model"]
-    V["Validate protocol, manifest,<br/>checksums, and limits"]
-    O["Curated object artifacts<br/>one immutable root per processing_id"]
-    E["ocr_document_elements<br/>canonical page blocks"]
-    UI["OCR Review"]
-
-    P --> S --> R --> K --> V
-    V --> O
-    V --> E
-    O --> UI
-    E --> UI
-```
-
-Each request is identified by the paper, source mutation, and processor configuration. Successful
-content is identified independently by PDF hash, pinned model revisions, adapter version, and
-configuration. This separates retry identity from reusable processing identity.
-
-- Kaggle downloads source PDFs inside the job; PDFs are not persisted in the lakehouse.
-- A batch contains at most two documents. Typed retryable failures are attempted up to three times.
-- Validated outputs contain per-page Markdown, canonical elements, layout visualizations, and a
-  content manifest below
-  `s3://curated/arxiv/ocr/papers/<arxiv-id>/<processing-id>/`.
-- The manifest is the object-store commit marker. Iceberg lineage and elements are published only
-  after validation, and repeated imports converge on the same processing identity.
-- OCR Review reads Iceberg lineage plus verified immutable artifacts; it does not infer bucket keys.
+Catalog namespaces, storage locations, tables, access grants, and maintenance policies are
+reconciled from declarative desired state. Runtime endpoints and secrets remain environment
+configuration.
 
 ## Repository boundaries
 
@@ -120,9 +103,10 @@ contracts/                  Non-secret desired state: catalog, sources, products
 src/mini_lakehouse/
   sources/                  Acquisition, parsing, and landing writes
   curated_products/         Product-owned curation and repositories
-  processing/ocr/           Provider-neutral OCR protocol and Kaggle adapter
+  processing/               Provider-neutral processor protocols and execution adapters
   platform/                 Polaris, Trino, access, reconciliation, and maintenance
   storage/                  S3 and Iceberg boundaries
+  apps/                     Read-only operational and data-product applications
 dbt/analytics/              staging → intermediate → marts
 orchestration/flows/        Deployable Prefect flows grouped by domain
 orchestration/plugins/      Slack and Gmail lifecycle notifications
@@ -156,29 +140,27 @@ Use `make up-core` for only AIStor, Polaris, and Trino. The full stack exposes:
 | Polaris API / Health | `localhost:8181` / `localhost:8182` |
 | Trino | `localhost:8080` |
 | Prefect | `localhost:4200` |
-| OCR Review | `localhost:8501` |
+| Optional review application | `localhost:8501` |
 
-## Pipelines
+## Orchestration
 
-| Deployment | Schedule (UTC) | Purpose |
+Flow names communicate the kind of work without embedding infrastructure details:
+
+| Prefix | Responsibility |
 |---|---|---|
-| `el_github_archive` | Hourly at `:15` | Land one complete GitHub Archive hour |
-| `tl_github_analytics` | Hourly at `:30` | Curate the hour, validate freshness, and build dbt marts |
-| `etl_arxiv_metadata` | Daily at `06:00` | Harvest and curate the closed ArXiv datestamp day |
-| `etl_arxiv_ocr` | Every 20 minutes, paused | Reconcile one bounded GPU OCR batch |
-| `gov_iceberg_maintenance` | Sunday at `03:00` | Apply tier-specific Iceberg maintenance policies |
+| `el` | Extract and land source data |
+| `etl` | Extract, transform, and load one owned data product |
+| `tl` | Curate existing captures or build terminal analytics outputs |
+| `rpt` | Publish reports or consumer deliveries |
+| `mon` | Observe data and platform health |
+| `bk` | Back up recoverable state |
+| `gov` | Reconcile governance, resources, and maintenance |
+| `test` | Run isolated experiments or functional checks |
 
-Before OCR, configure `LAKEHOUSE_KAGGLE__USERNAME` and
-`LAKEHOUSE_KAGGLE__API_TOKEN`, then run:
-
-```bash
-uv run prefect deployment run \
-  gov_arxiv_ocr_resources/gov_arxiv_ocr_resources
-```
-
-Runner datasets are private and content-addressed. The same runner content reconciles without
-uploading again; a changed bundle publishes a new immutable dataset. Model resources are pinned by
-revision and independently reconciled.
+Schedules, parameters, and retries live with deployment definitions. A flow composes domain
+services; it does not reimplement acquisition, curation, dbt, storage, or provider behavior.
+Operational commands and current deployments are documented in
+[pipeline operations](docs/04_pipeline_execution.md).
 
 ## Development and operations
 
@@ -200,14 +182,14 @@ uv run pytest -m integration
 
 These tests run against a disposable AIStor, Polaris, and Trino data plane and verify:
 
-- all contract-managed Polaris namespaces are readable;
-- synthetic GitHub events converge through landing, curation, dbt freshness/tests, and analytics
-  marts without duplicate merge keys;
-- a synthetic ArXiv landing mutation expands into current papers, ordered authors, and categories,
-  and a repeated curation creates no new Iceberg snapshots.
+- contract-managed namespaces and tables converge to the declared desired state;
+- representative source mutations converge through landing and curated products without duplicate
+  business keys;
+- dbt freshness, tests, and analytics marts consume only declared curated interfaces;
+- repeated curation and reconciliation do not create unnecessary Iceberg snapshots.
 
-They deliberately do not call GitHub Archive, ArXiv OAI-PMH, Kaggle, Prefect schedules,
-notifications, or the OCR Review UI.
+They deliberately do not call external source/provider APIs, Prefect schedules, notification
+channels, or optional review applications.
 
 See [architecture and ownership](docs/00_overview.md),
 [pipeline operations](docs/04_pipeline_execution.md), and

@@ -17,6 +17,7 @@ from mini_lakehouse.curated_products.arxiv.models import (
     ActiveOcrBatch,
     OcrBatchDocument,
     OcrCandidate,
+    OcrRunState,
 )
 from mini_lakehouse.curated_products.arxiv.ocr_repository import ArxivOcrRepository
 from mini_lakehouse.curated_products.arxiv.ocr_service import ArxivOcrService
@@ -984,19 +985,15 @@ def test_active_ocr_batch_restores_its_immutable_job_payload() -> None:
     assert active.documents[0].request == job.documents[0]
 
 
-def test_active_ocr_batch_restores_schema_v1_inference_defaults() -> None:
+def test_active_ocr_batch_rejects_noncanonical_dtype() -> None:
     current_job = _job()
-    legacy_payload = current_job.model_dump(mode="json")
-    legacy_payload["inference"]["dtype"] = "half"
-    del legacy_payload["inference"]["enforce_eager"]
+    invalid_payload = current_job.model_dump(mode="json")
+    invalid_payload["inference"]["dtype"] = "half"
 
-    active = ArxivOcrRepository(Settings()).active_batch(
-        _ActiveBatchExecutor(current_job, raw_job=json.dumps(legacy_payload))
-    )
-
-    assert active is not None
-    assert active.job.inference.dtype == "half"
-    assert active.job.inference.enforce_eager is False
+    with pytest.raises(RuntimeError, match="invalid immutable job payload"):
+        ArxivOcrRepository(Settings()).active_batch(
+            _ActiveBatchExecutor(current_job, raw_job=json.dumps(invalid_payload))
+        )
 
 
 def test_ocr_candidates_use_config_identity_and_ignore_orphan_attempts() -> None:
@@ -1019,20 +1016,15 @@ def test_ocr_candidates_use_config_identity_and_ignore_orphan_attempts() -> None
     assert "row_number() OVER" in statement
     assert "document.source_record_sha256 = paper.source_record_sha256" in statement
     assert "compatible_success" in statement
-    assert "document.model_revision = ?" in statement
+    assert "document.state = ?" in statement
+    assert "document.config_hash = ?" in statement
+    assert "json_extract_scalar" not in statement
     assert "success.arxiv_id IS NULL" in statement
     assert parameters == (
         _configuration_hash(),
-        processor.model.repository,
-        processor.model.revision,
-        processor.layout_model.repository,
-        processor.layout_model.revision,
-        processor.adapter_version,
-        processor.output_schema_version,
-        processor.inference.dtype,
-        processor.inference.max_model_len,
-        processor.inference.speculative_tokens,
-        processor.inference.layout_device,
+        "imported",
+        _configuration_hash(),
+        "retryable_failed",
         processor.retry.max_document_attempts,
     )
     assert parameters is not None
@@ -1395,7 +1387,7 @@ def test_remote_batch_failure_never_downgrades_an_imported_document() -> None:
             OcrBatchDocument(
                 request=job.documents[0],
                 attempt_count=1,
-                state="imported",
+                state=OcrRunState.IMPORTED,
             ),
         ),
     )

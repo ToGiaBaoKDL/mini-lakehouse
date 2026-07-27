@@ -1,6 +1,7 @@
 """Application models owned by the curated ArXiv product."""
 
 from datetime import date, datetime
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -22,6 +23,15 @@ class ArxivCurationResult(ArxivProductModel):
     was_written: bool
 
 
+class OcrRunState(StrEnum):
+    PREPARED = "prepared"
+    SUBMITTED = "submitted"
+    RUNNING = "running"
+    IMPORTED = "imported"
+    RETRYABLE_FAILED = "retryable_failed"
+    TERMINAL_FAILED = "terminal_failed"
+
+
 class OcrCandidate(ArxivProductModel):
     arxiv_id: str
     oai_datestamp: date
@@ -33,14 +43,7 @@ class OcrCandidate(ArxivProductModel):
 class OcrBatchDocument(ArxivProductModel):
     request: OcrDocumentRequest
     attempt_count: int = Field(ge=1)
-    state: Literal[
-        "prepared",
-        "submitted",
-        "running",
-        "imported",
-        "retryable_failed",
-        "terminal_failed",
-    ] = "prepared"
+    state: OcrRunState = OcrRunState.PREPARED
 
 
 class ActiveOcrBatch(ArxivProductModel):
