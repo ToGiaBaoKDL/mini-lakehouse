@@ -313,9 +313,13 @@ class KaggleOcrResourceManager:
         runner_bundle = bundle or KaggleRunnerBundle.load()
         model_targets = processor.runner.model_resources
         snapshot_client = snapshots or HuggingFaceSnapshotClient()
+        runner_dataset_name = (
+            f"{processor.runner.runner_dataset_prefix}-{runner_bundle.sha256[:12]}"
+        )
+        self.runner_dataset_slug = settings.dataset_slug(runner_dataset_name)
         self._resources: dict[KaggleResourceName, ManagedKaggleResource] = {
             "runner": KaggleRunnerDatasetResource(
-                settings.dataset_slug(processor.runner.runner_dataset_name),
+                self.runner_dataset_slug,
                 runner_bundle,
                 client,
             ),

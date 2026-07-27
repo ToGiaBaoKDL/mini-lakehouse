@@ -50,7 +50,7 @@ class ProcessorInferenceContract(ContractModel):
 class KaggleRunnerContract(ContractModel):
     provider: Literal["kaggle"]
     kernel_name: str = Field(pattern=r"^[A-Za-z0-9_-]+$")
-    runner_dataset_name: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{2,49}$")
+    runner_dataset_prefix: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{2,36}$")
     model_resources: KaggleModelResourcesContract
     accelerator: Literal["NvidiaTeslaP100", "NvidiaTeslaT4"]
     timeout_seconds: int = Field(ge=300, le=12 * 60 * 60)

@@ -100,9 +100,7 @@ class KaggleProvider:
             "enable_gpu": True,
             "enable_internet": True,
             "docker_image_pinning_type": "original",
-            "dataset_sources": [
-                self._settings.dataset_slug(self._processor.runner.runner_dataset_name)
-            ],
+            "dataset_sources": [self._resources.runner_dataset_slug],
             "competition_sources": [],
             "kernel_sources": [],
             "model_sources": resources.model_sources,

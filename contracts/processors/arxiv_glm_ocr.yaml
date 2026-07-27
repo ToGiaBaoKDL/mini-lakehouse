@@ -41,7 +41,7 @@ inference:
 runner:
   provider: kaggle
   kernel_name: mini-lakehouse-arxiv-glm-ocr
-  runner_dataset_name: mini-lakehouse-arxiv-glm-ocr-runner
+  runner_dataset_prefix: mini-lakehouse-arxiv-glm-ocr-runner
   model_resources:
     model:
       name: mini-lakehouse-glm-ocr

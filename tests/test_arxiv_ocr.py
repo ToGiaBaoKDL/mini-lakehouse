@@ -72,6 +72,7 @@ from mini_lakehouse.processing.ocr.text import (
 
 SOURCE_RECORD_SHA256 = "a" * 64
 RUNNER_BUNDLE = KaggleRunnerBundle.load()
+RUNNER_DATASET_SLUG = f"owner/mini-lakehouse-arxiv-glm-ocr-runner-{RUNNER_BUNDLE.sha256[:12]}"
 
 
 def _configuration_hash() -> str:
@@ -466,72 +467,6 @@ def test_kaggle_private_resource_forbidden_is_treated_as_missing(
     assert gateway.current_kernel_run("owner/missing-kernel") is None
 
 
-def test_kaggle_existing_runner_dataset_publishes_a_version(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    gateway = KaggleGateway(
-        KaggleSettings.model_validate({"username": "owner", "api_token": "secret"})
-    )
-    published: list[tuple[str, Path, str]] = []
-
-    def current_version(_slug: str) -> int:
-        return 3
-
-    def publish_version(
-        slug: str,
-        source: Path,
-        *,
-        version_notes: str,
-    ) -> None:
-        published.append((slug, source, version_notes))
-
-    monkeypatch.setattr(gateway, "dataset_version", current_version)
-    monkeypatch.setattr(gateway, "_upload_dataset_version", publish_version)
-
-    gateway.upload_dataset(
-        "owner/runner",
-        tmp_path,
-        version_notes="runner bundle abc",
-    )
-
-    assert published == [("owner/runner", tmp_path, "runner bundle abc")]
-
-
-def test_kaggle_missing_runner_dataset_uses_kagglehub_create(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    import kagglehub
-
-    gateway = KaggleGateway(
-        KaggleSettings.model_validate({"username": "owner", "api_token": "secret"})
-    )
-    published: list[tuple[str, str, str]] = []
-
-    def missing(_slug: str) -> int:
-        raise KaggleResourceNotFoundError("missing")
-
-    def create_dataset(
-        slug: str,
-        source: str,
-        *,
-        version_notes: str,
-    ) -> None:
-        published.append((slug, source, version_notes))
-
-    monkeypatch.setattr(gateway, "dataset_version", missing)
-    monkeypatch.setattr(kagglehub, "dataset_upload", create_dataset)
-
-    gateway.upload_dataset(
-        "owner/runner",
-        tmp_path,
-        version_notes="initial runner bundle",
-    )
-
-    assert published == [("owner/runner", str(tmp_path), "initial runner bundle")]
-
-
 def test_kaggle_log_stream_uses_official_events_and_preserves_lines(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -614,7 +549,7 @@ class _ResourceClient:
         relative_path: str,
         destination: Path,
     ) -> Path:
-        assert dataset_slug == "owner/mini-lakehouse-arxiv-glm-ocr-runner"
+        assert dataset_slug == RUNNER_DATASET_SLUG
         if self.dataset_manifest is None:
             raise KaggleResourceNotFoundError("missing")
         path = destination / relative_path
@@ -628,7 +563,7 @@ class _ResourceClient:
         *,
         version_notes: str,
     ) -> None:
-        assert dataset_slug == "owner/mini-lakehouse-arxiv-glm-ocr-runner"
+        assert dataset_slug == RUNNER_DATASET_SLUG
         self.dataset_manifest = RunnerResourceManifest.model_validate_json(
             (source / "resource_manifest.json").read_text(encoding="utf-8")
         )
@@ -637,7 +572,7 @@ class _ResourceClient:
         self.dataset_uploads += 1
 
     def dataset_version(self, dataset_slug: str) -> int:
-        assert dataset_slug == "owner/mini-lakehouse-arxiv-glm-ocr-runner"
+        assert dataset_slug == RUNNER_DATASET_SLUG
         if self.dataset_version_number == 0:
             raise KaggleResourceNotFoundError("missing")
         return self.dataset_version_number
@@ -869,13 +804,13 @@ class _PinnedResourceGateway:
         relative_path: str,
         destination: Path,
     ) -> Path:
-        assert dataset_slug == "owner/mini-lakehouse-arxiv-glm-ocr-runner"
+        assert dataset_slug == RUNNER_DATASET_SLUG
         path = destination / relative_path
         path.write_text(RUNNER_BUNDLE.manifest.model_dump_json(), encoding="utf-8")
         return path
 
     def dataset_version(self, dataset_slug: str) -> int:
-        assert dataset_slug == "owner/mini-lakehouse-arxiv-glm-ocr-runner"
+        assert dataset_slug == RUNNER_DATASET_SLUG
         return 4
 
     def download_model_file(
@@ -954,7 +889,7 @@ def test_kaggle_submission_and_output_pin_resource_and_run_versions(tmp_path: Pa
         "kernel-metadata.json",
         "launcher.py",
     ]
-    assert metadata["dataset_sources"] == ["owner/mini-lakehouse-arxiv-glm-ocr-runner"]
+    assert metadata["dataset_sources"] == [RUNNER_DATASET_SLUG]
     assert metadata["model_sources"] == [
         "owner/mini-lakehouse-glm-ocr/transformers/safetensors/2",
         "owner/mini-lakehouse-pp-doclayout-v3/transformers/safetensors/3",

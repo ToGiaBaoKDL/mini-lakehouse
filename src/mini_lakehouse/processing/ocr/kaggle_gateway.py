@@ -391,65 +391,18 @@ class KaggleGateway:
         version_notes: str,
     ) -> None:
         try:
-            try:
-                self.dataset_version(dataset_slug)
-            except KaggleResourceNotFoundError:
-                with self._credentials():
-                    import kagglehub
+            with self._credentials():
+                import kagglehub
 
-                    kagglehub.dataset_upload(
-                        dataset_slug,
-                        str(source),
-                        version_notes=version_notes,
-                    )
-            else:
-                self._upload_dataset_version(
+                kagglehub.dataset_upload(
                     dataset_slug,
-                    source,
+                    str(source),
                     version_notes=version_notes,
                 )
         except Exception as error:
             raise KaggleCommandError(
                 f"Cannot publish Kaggle runner Dataset {dataset_slug!r}: {error}"
             ) from error
-
-    def _upload_dataset_version(
-        self,
-        dataset_slug: str,
-        source: Path,
-        *,
-        version_notes: str,
-    ) -> None:
-        """Publish an existing Dataset without KaggleHub's create-first ambiguity."""
-        owner, dataset = self._split_slug(dataset_slug)
-        with self._credentials():
-            from kagglehub.datasets import DEFAULT_IGNORE_PATTERNS
-            from kagglehub.gcs_upload import normalize_patterns, upload_files_and_directories
-            from kagglesdk.blobs.types.blob_api_service import ApiBlobType
-            from kagglesdk.datasets.types.dataset_api_service import (
-                ApiCreateDatasetVersionRequest,
-                ApiCreateDatasetVersionRequestBody,
-            )
-
-            upload = upload_files_and_directories(
-                str(source),
-                item_type=ApiBlobType.DATASET,
-                ignore_patterns=normalize_patterns(
-                    default=DEFAULT_IGNORE_PATTERNS,
-                    additional=None,
-                ),
-            ).to_proto()
-            body = ApiCreateDatasetVersionRequestBody()
-            body.version_notes = version_notes
-            body.files = upload.files
-            body.directories = upload.directories
-            request = ApiCreateDatasetVersionRequest()
-            request.owner_slug = owner
-            request.dataset_slug = dataset
-            request.body = body
-            api = self._api()
-            with api.build_kaggle_client() as client:
-                client.datasets.dataset_api_client.create_dataset_version(request)
 
     def dataset_version(self, dataset_slug: str) -> int:
         owner, dataset = self._split_slug(dataset_slug)
