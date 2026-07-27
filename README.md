@@ -62,7 +62,7 @@ prod.landing.github_archive_events_raw
                                    fct_contributor_activity_daily}
 ```
 
-dbt reads curated products—not landing tables. `staging` and `intermediate` models are ephemeral;
+dbt reads curated products - not landing tables. `staging` and `intermediate` models are ephemeral;
 only domain marts are materialized in analytics. ArXiv curation owns current paper metadata,
 authors, categories, OCR lineage, immutable artifacts, and canonical page elements.
 
