@@ -13,7 +13,7 @@ from mini_lakehouse.processing.ocr.core.protocol import (
     OcrElement,
     OcrJob,
 )
-from mini_lakehouse.processing.ocr.text import serialize_plain_text
+from mini_lakehouse.processing.ocr.core.text import serialize_plain_text
 
 __all__ = [
     "OcrBatchManifest",

@@ -49,7 +49,7 @@ from mini_lakehouse.processing.ocr.core.protocol import (
     OcrJob,
     OcrPageMarkdownBundle,
 )
-from mini_lakehouse.processing.ocr.text import build_page_markdown_bundle
+from mini_lakehouse.processing.ocr.core.text import build_page_markdown_bundle
 
 SOURCE_DIRECTORY = Path(__file__).resolve().parent
 MODEL_MANIFEST_NAME = "mini_lakehouse_resource.json"

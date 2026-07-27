@@ -10,11 +10,11 @@ from mini_lakehouse.processing.ocr.core.protocol import (
     OcrPageMarkdown,
     OcrPageMarkdownBundle,
 )
+from mini_lakehouse.processing.ocr.core.text import build_page_markdown_bundle
 from mini_lakehouse.processing.ocr.page_bundle import (
     InvalidPageMarkdownBundleError,
     read_page_markdown_bundle,
 )
-from mini_lakehouse.processing.ocr.text import build_page_markdown_bundle
 
 
 def _artifact(relative_path: str, marker: str) -> ArtifactFile:

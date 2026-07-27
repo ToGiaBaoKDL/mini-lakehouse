@@ -49,6 +49,10 @@ from mini_lakehouse.processing.ocr.core.protocol import (
     OcrLimits,
     OcrModel,
 )
+from mini_lakehouse.processing.ocr.core.text import (
+    build_page_markdown_bundle,
+    serialize_plain_text,
+)
 from mini_lakehouse.processing.ocr.kaggle_bundle import (
     MODEL_MANIFEST_NAME,
     KaggleRunnerBundle,
@@ -64,10 +68,6 @@ from mini_lakehouse.processing.ocr.kaggle_types import (
     KaggleKernelState,
     KaggleResourceNotFoundError,
     KaggleRunStatus,
-)
-from mini_lakehouse.processing.ocr.text import (
-    build_page_markdown_bundle,
-    serialize_plain_text,
 )
 
 SOURCE_RECORD_SHA256 = "a" * 64
@@ -437,7 +437,7 @@ def test_kaggle_runner_bundle_preserves_the_shared_package_namespace(
     assert (package / "identity.py").is_file()
     assert (package / "paths.py").is_file()
     assert (package / "protocol.py").is_file()
-    assert (package.parent / "text.py").is_file()
+    assert (package / "text.py").is_file()
     assert not (destination / "identity.py").exists()
     assert not (destination / "protocol.py").exists()
 
