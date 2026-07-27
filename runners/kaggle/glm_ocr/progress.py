@@ -104,17 +104,19 @@ class GlmOcrPageProgress:
         for page_index, regions in zip(page_indices, completed_regions, strict=True):
             expected = layout_results.get(page_index)
             if isinstance(expected, list) and len(regions) >= len(expected):
-                self._report_page(page_index)
+                self._report_page(page_index, region_count=len(expected))
 
-    def _report_page(self, page_index: int) -> None:
+    def _report_page(self, page_index: int, *, region_count: int | None = None) -> None:
         if page_index in self._completed:
             return
         self._completed.add(page_index)
         pages_completed = len(self._completed)
+        region_fields = {"region_count": region_count} if region_count is not None else {}
         self._emit(
             "page_completed",
             self._started_at,
             **self._fields,
+            **region_fields,
             page_number=page_index + 1,
             pages_completed=pages_completed,
             progress_percent=round(pages_completed * 100 / self._page_count, 1),

@@ -30,6 +30,7 @@ from mini_lakehouse.processing.ocr.core.identity import (
     request_id,
 )
 from mini_lakehouse.processing.ocr.core.protocol import (
+    OCR_OUTPUT_SCHEMA_VERSION,
     OcrDocumentRequest,
     OcrInference,
     OcrJob,
@@ -65,8 +66,10 @@ class ArxivOcrService:
         self._processor = self._contracts.processor("arxiv_glm_ocr")
         if self._processor.source != "arxiv" or self._processor.curated_product != "arxiv":
             raise ValueError("ArXiv OCR processor ownership is inconsistent")
-        if self._processor.output_schema_version != "1.0.0":
-            raise ValueError("This runtime implements OCR output schema 1.0.0")
+        if self._processor.output_schema_version != OCR_OUTPUT_SCHEMA_VERSION:
+            raise ValueError(
+                f"This runtime implements OCR output schema {OCR_OUTPUT_SCHEMA_VERSION}"
+            )
         self._runner_bundle = KaggleRunnerBundle.load()
         if provider is not None and provider.runner_bundle_sha256 != self._runner_bundle.sha256:
             raise ValueError("Injected Kaggle provider uses a different runner bundle")
@@ -154,7 +157,7 @@ class ArxivOcrService:
             model=OcrModel.model_validate(processor.model.model_dump()),
             layout_model=OcrModel.model_validate(processor.layout_model.model_dump()),
             adapter_version=processor.adapter_version,
-            output_schema_version=processor.output_schema_version,
+            output_schema_version=OCR_OUTPUT_SCHEMA_VERSION,
             config_hash=self._configuration_hash,
             limits=OcrLimits(
                 max_pdf_bytes=processor.batch.max_pdf_bytes,

@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import PurePosixPath
 
 from mini_lakehouse.curated_products.arxiv.review.models import (
     OcrDocumentRun,
     PublishedOcrManifest,
 )
-from mini_lakehouse.processing.ocr.core.protocol import ArtifactFile
+from mini_lakehouse.processing.ocr.core.paths import PAGE_MARKDOWN_BUNDLE_PATH
+from mini_lakehouse.processing.ocr.core.protocol import (
+    ArtifactFile,
+    OcrPageMarkdownBundle,
+)
+from mini_lakehouse.processing.ocr.page_bundle import read_page_markdown_bundle
 from mini_lakehouse.storage.object_store import ObjectStore
 
 MANIFEST_MAX_BYTES = 2 * 1024 * 1024
@@ -51,18 +57,6 @@ class OcrArtifactReader:
             raise RuntimeError("Published OCR manifest lineage does not match Iceberg state")
         return manifest
 
-    def markdown(
-        self,
-        run: OcrDocumentRun,
-        manifest: PublishedOcrManifest,
-    ) -> str:
-        content = self._read_declared(
-            run,
-            manifest.file("document.md"),
-            max_bytes=MARKDOWN_MAX_BYTES,
-        )
-        return content.data.decode("utf-8")
-
     def page_image(
         self,
         run: OcrDocumentRun,
@@ -84,6 +78,25 @@ class OcrArtifactReader:
                 f"Expected one annotated image for page {page_number}, found {len(candidates)}"
             )
         return self._read_declared(run, candidates[0], max_bytes=IMAGE_MAX_BYTES)
+
+    def page_markdowns(
+        self,
+        run: OcrDocumentRun,
+        manifest: PublishedOcrManifest,
+    ) -> OcrPageMarkdownBundle:
+        relative_path = PAGE_MARKDOWN_BUNDLE_PATH.as_posix()
+        content = self._read_declared(
+            run,
+            manifest.file(relative_path),
+            max_bytes=MARKDOWN_MAX_BYTES,
+        )
+        bundle = read_page_markdown_bundle(
+            BytesIO(content.data),
+            max_uncompressed_bytes=MARKDOWN_MAX_BYTES,
+        )
+        if len(bundle.pages) != manifest.page_count:
+            raise RuntimeError("OCR page Markdown count does not match its manifest")
+        return bundle
 
     def _validated_artifact_uri(self, run: OcrDocumentRun) -> str:
         if not run.artifacts_available or run.artifact_uri is None:

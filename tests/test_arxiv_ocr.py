@@ -38,6 +38,7 @@ from mini_lakehouse.processing.ocr.core.identity import (
 )
 from mini_lakehouse.processing.ocr.core.paths import runner_document_path
 from mini_lakehouse.processing.ocr.core.protocol import (
+    OCR_OUTPUT_SCHEMA_VERSION,
     ArtifactFile,
     OcrBatchManifest,
     OcrDocumentRequest,
@@ -64,7 +65,10 @@ from mini_lakehouse.processing.ocr.kaggle_types import (
     KaggleResourceNotFoundError,
     KaggleRunStatus,
 )
-from mini_lakehouse.processing.ocr.text import serialize_plain_text
+from mini_lakehouse.processing.ocr.text import (
+    build_page_markdown_bundle,
+    serialize_plain_text,
+)
 
 SOURCE_RECORD_SHA256 = "a" * 64
 RUNNER_BUNDLE = KaggleRunnerBundle.load()
@@ -99,7 +103,7 @@ def _job(attempt_count: int = 1) -> OcrJob:
         model=OcrModel.model_validate(processor.model.model_dump()),
         layout_model=OcrModel.model_validate(processor.layout_model.model_dump()),
         adapter_version=processor.adapter_version,
-        output_schema_version=processor.output_schema_version,
+        output_schema_version=OCR_OUTPUT_SCHEMA_VERSION,
         config_hash=configuration_hash,
         limits=OcrLimits(
             max_pdf_bytes=processor.batch.max_pdf_bytes,
@@ -137,8 +141,6 @@ def _successful_output(output: Path, job: OcrJob, *, include_untracked_file: boo
     root = output / "content"
     document = root.joinpath(*runner_document_path(request.arxiv_id, request.request_id).parts)
     document.mkdir(parents=True)
-    (document / "document.md").write_text("# Paper\n", encoding="utf-8")
-    _gzip(document / "layout.json.gz", b"[]")
     element = OcrElement(
         element_id="e" * 64,
         page_number=1,
@@ -147,7 +149,12 @@ def _successful_output(output: Path, job: OcrJob, *, include_untracked_file: boo
         text_content="Paper",
         markdown_content="Paper",
     )
+    page_bundle = build_page_markdown_bundle((element,), page_count=1)
+    _gzip(document / "pages.json.gz", page_bundle.model_dump_json().encode())
     _gzip(document / "elements.jsonl.gz", f"{element.model_dump_json()}\n".encode())
+    visualizations = document / "layout_vis"
+    visualizations.mkdir()
+    (visualizations / "page-0001.jpg").write_bytes(b"annotated")
     files = tuple(
         ArtifactFile(
             relative_path=path.relative_to(document).as_posix(),
@@ -202,10 +209,11 @@ def _successful_output(output: Path, job: OcrJob, *, include_untracked_file: boo
 def test_ocr_identity_and_paths_are_deterministic_and_paper_readable() -> None:
     processor = load_contracts().processor("arxiv_glm_ocr")
     assert processor.inference.enforce_eager is True
-    assert processor.inference.max_num_seqs == 2
-    assert processor.inference.max_workers == 2
+    assert processor.inference.max_num_seqs == 4
+    assert processor.inference.max_workers == 4
     assert processor.inference.request_timeout_seconds == 600
     assert processor.inference.layout_device == "cpu"
+    assert processor.output_schema_version == "1.1.0"
     assert '"wrapt==2.2.2"' in (
         Path("runners/kaggle/glm_ocr/pyproject.toml").read_text(encoding="utf-8")
     )
@@ -295,9 +303,9 @@ def test_content_manifest_is_independent_of_request_attempt_identity() -> None:
         )
         for index, (path, character) in enumerate(
             (
-                ("document.md", "1"),
-                ("elements.jsonl.gz", "2"),
-                ("layout.json.gz", "3"),
+                ("elements.jsonl.gz", "1"),
+                ("layout_vis/page-0001.jpg", "2"),
+                ("pages.json.gz", "3"),
             ),
             start=1,
         )
@@ -428,6 +436,7 @@ def test_kaggle_runner_bundle_preserves_the_shared_package_namespace(
     assert (package / "identity.py").is_file()
     assert (package / "paths.py").is_file()
     assert (package / "protocol.py").is_file()
+    assert (package.parent / "text.py").is_file()
     assert not (destination / "identity.py").exists()
     assert not (destination / "protocol.py").exists()
 

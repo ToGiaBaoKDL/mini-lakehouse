@@ -15,12 +15,19 @@ from mini_lakehouse.processing.ocr.core.identity import (
     processing_id,
     successful_document_manifest_payload,
 )
-from mini_lakehouse.processing.ocr.core.paths import runner_document_path
+from mini_lakehouse.processing.ocr.core.paths import (
+    PAGE_MARKDOWN_BUNDLE_PATH,
+    runner_document_path,
+)
 from mini_lakehouse.processing.ocr.core.protocol import (
     OcrBatchManifest,
     OcrDocumentResult,
     OcrElement,
     OcrJob,
+)
+from mini_lakehouse.processing.ocr.page_bundle import (
+    InvalidPageMarkdownBundleError,
+    read_page_markdown_bundle,
 )
 
 
@@ -180,11 +187,20 @@ def validate_runner_output(
     if actual_archive_paths != expected_archive_paths:
         raise InvalidOcrOutputError("OCR archive contains untracked or missing artifacts")
     for result in manifest.documents:
-        _validate_document(extraction_directory, result)
+        _validate_document(
+            extraction_directory,
+            result,
+            max_uncompressed_bytes=job.limits.max_output_bytes,
+        )
     return manifest
 
 
-def _validate_document(extraction_directory: Path, result: OcrDocumentResult) -> None:
+def _validate_document(
+    extraction_directory: Path,
+    result: OcrDocumentResult,
+    *,
+    max_uncompressed_bytes: int,
+) -> None:
     document_root = extraction_directory.joinpath(
         *runner_document_path(result.arxiv_id, result.request_id).parts
     )
@@ -213,6 +229,18 @@ def _validate_document(extraction_directory: Path, result: OcrDocumentResult) ->
                 f"Artifact checksum is invalid for request {result.request_id}: "
                 f"{artifact.relative_path}"
             )
+    try:
+        with document_root.joinpath(*PAGE_MARKDOWN_BUNDLE_PATH.parts).open("rb") as source:
+            page_bundle = read_page_markdown_bundle(
+                source,
+                max_uncompressed_bytes=max_uncompressed_bytes,
+            )
+    except (OSError, InvalidPageMarkdownBundleError) as error:
+        raise InvalidOcrOutputError(str(error)) from error
+    if len(page_bundle.pages) != result.page_count:
+        raise InvalidOcrOutputError(
+            f"OCR page Markdown count does not match request {result.request_id}"
+        )
 
 
 def artifact_paths(
@@ -226,7 +254,12 @@ def artifact_paths(
         yield root.joinpath(*PurePosixPath(artifact.relative_path).parts), artifact.relative_path
 
 
-def load_elements(path: Path, *, max_uncompressed_bytes: int) -> tuple[OcrElement, ...]:
+def load_elements(
+    path: Path,
+    *,
+    max_uncompressed_bytes: int,
+    expected_page_count: int,
+) -> tuple[OcrElement, ...]:
     elements: list[OcrElement] = []
     consumed = 0
     try:
@@ -251,4 +284,6 @@ def load_elements(path: Path, *, max_uncompressed_bytes: int) -> tuple[OcrElemen
         raise InvalidOcrOutputError("OCR page/reading-order positions must be unique")
     if not elements:
         raise InvalidOcrOutputError("Successful OCR output contains no elements")
+    if any(element.page_number > expected_page_count for element in elements):
+        raise InvalidOcrOutputError("OCR element page exceeds the document page count")
     return tuple(elements)

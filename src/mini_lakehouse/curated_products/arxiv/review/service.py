@@ -16,6 +16,7 @@ from mini_lakehouse.curated_products.arxiv.review.models import (
 )
 from mini_lakehouse.curated_products.arxiv.review.repository import ArxivOcrReviewRepository
 from mini_lakehouse.platform.trino import TrinoExecutor
+from mini_lakehouse.processing.ocr.core.protocol import OcrPageMarkdownBundle
 from mini_lakehouse.storage.object_store import create_object_store
 
 
@@ -54,13 +55,6 @@ class ArxivOcrReviewService:
     def manifest(self, run: OcrDocumentRun) -> PublishedOcrManifest:
         return self._artifacts.manifest(run)
 
-    def markdown(
-        self,
-        run: OcrDocumentRun,
-        manifest: PublishedOcrManifest,
-    ) -> str:
-        return self._artifacts.markdown(run, manifest)
-
     def page_image(
         self,
         run: OcrDocumentRun,
@@ -69,3 +63,10 @@ class ArxivOcrReviewService:
         page_number: int,
     ) -> OcrArtifactContent:
         return self._artifacts.page_image(run, manifest, page_number=page_number)
+
+    def page_markdowns(
+        self,
+        run: OcrDocumentRun,
+        manifest: PublishedOcrManifest,
+    ) -> OcrPageMarkdownBundle:
+        return self._artifacts.page_markdowns(run, manifest)

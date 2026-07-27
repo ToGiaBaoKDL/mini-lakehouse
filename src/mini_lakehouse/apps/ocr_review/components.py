@@ -40,16 +40,6 @@ def run_label(run: OcrDocumentRun) -> str:
     return f"{timestamp} · {run.state.replace('_', ' ')} · {revision} · attempt {run.attempt_count}"
 
 
-def page_markdown(elements: tuple[OcrPageElement, ...]) -> str:
-    """Rebuild one page from its canonical elements in reading order."""
-    blocks = []
-    for element in sorted(elements, key=lambda item: (item.reading_order, item.element_id)):
-        content = (element.markdown_content or element.text_content).strip()
-        if content:
-            blocks.append(content)
-    return "\n\n".join(blocks)
-
-
 def render_run_header(run: OcrDocumentRun) -> None:
     title = run.title or f"ArXiv {run.arxiv_id}"
     st.markdown(

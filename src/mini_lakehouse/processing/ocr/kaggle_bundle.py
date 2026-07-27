@@ -21,7 +21,8 @@ RUNNER_FILES = (
     "pyproject.toml",
     "uv.lock",
 )
-PORTABLE_PACKAGE = PurePosixPath("mini_lakehouse/processing/ocr/core")
+OCR_PACKAGE = PurePosixPath("mini_lakehouse/processing/ocr")
+PORTABLE_PACKAGE = OCR_PACKAGE / "core"
 PORTABLE_FILES = ("__init__.py", "files.py", "identity.py", "paths.py", "protocol.py")
 
 
@@ -97,6 +98,7 @@ class KaggleRunnerBundle:
         files = tuple(
             [(name, runner_source / name) for name in RUNNER_FILES]
             + [((PORTABLE_PACKAGE / name).as_posix(), portable / name) for name in PORTABLE_FILES]
+            + [((OCR_PACKAGE / "text.py").as_posix(), portable.parent / "text.py")]
         )
         missing = [str(path) for _, path in files if not path.is_file()]
         if missing:

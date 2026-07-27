@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -17,7 +18,7 @@ import time
 from collections.abc import Iterable
 from contextlib import suppress
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import fitz
@@ -35,7 +36,10 @@ from mini_lakehouse.processing.ocr.core.identity import (
     processing_id,
     successful_document_manifest_sha256,
 )
-from mini_lakehouse.processing.ocr.core.paths import runner_document_path
+from mini_lakehouse.processing.ocr.core.paths import (
+    PAGE_MARKDOWN_BUNDLE_PATH,
+    runner_document_path,
+)
 from mini_lakehouse.processing.ocr.core.protocol import (
     ArtifactFile,
     OcrBatchManifest,
@@ -43,13 +47,16 @@ from mini_lakehouse.processing.ocr.core.protocol import (
     OcrDocumentResult,
     OcrElement,
     OcrJob,
+    OcrPageMarkdownBundle,
 )
+from mini_lakehouse.processing.ocr.text import build_page_markdown_bundle
 
 SOURCE_DIRECTORY = Path(__file__).resolve().parent
 MODEL_MANIFEST_NAME = "mini_lakehouse_resource.json"
 VLLM_DIAGNOSTIC_CHARACTERS = 32_000
 VLLM_LOG_EVENT_CHARACTERS = 8_000
 VLLM_METRIC_CHARACTERS = 16_000
+ERROR_MESSAGE_CHARACTERS = 2_000
 VLLM_DIAGNOSTIC_METRICS = (
     "vllm:num_requests_running",
     "vllm:num_requests_waiting",
@@ -163,13 +170,13 @@ def pdf_page_count(path: Path, maximum: int) -> int:
     return pages
 
 
-def write_json_gzip(path: Path, value: Any) -> None:
+def write_page_markdown_bundle(path: Path, bundle: OcrPageMarkdownBundle) -> None:
     with (
         path.open("xb") as raw,
         gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed,
         io.TextIOWrapper(compressed, encoding="utf-8") as output,
     ):
-        json.dump(value, output, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        output.write(bundle.model_dump_json())
 
 
 def normalized_layout(
@@ -219,6 +226,7 @@ def canonical_elements(
     current_processing_id: str,
 ) -> tuple[OcrElement, ...]:
     elements: list[OcrElement] = []
+    image_counter = 0
     for page_index, page in enumerate(pages):
         for reading_order, raw_block in enumerate(page):
             content = raw_block.get("content", "")
@@ -246,6 +254,23 @@ def canonical_elements(
                 for key in sorted(raw_block)
                 if key not in {"content", "bbox_2d", "index", "label"}
             }
+            markdown_content = content or None
+            if label == "image":
+                markdown_content = None
+                image_path = raw_block.get("image_path")
+                if image_path is not None:
+                    try:
+                        path = validated_sdk_image_path(image_path)
+                    except ValueError as error:
+                        raise DocumentError(
+                            "invalid_model_output",
+                            str(error),
+                            retryable=True,
+                        ) from error
+                    markdown_content = (
+                        f"![Image {page_index}-{image_counter}](../{path.as_posix()})"
+                    )
+                    image_counter += 1
             element_key = canonical_json_sha256(
                 {
                     "page_number": page_index + 1,
@@ -261,7 +286,7 @@ def canonical_elements(
                     element_type=label,
                     bbox_json=bbox_json,
                     text_content=content,
-                    markdown_content=content or None,
+                    markdown_content=markdown_content,
                     raw_attributes_json=(
                         json.dumps(
                             raw_attributes,
@@ -283,6 +308,21 @@ def canonical_elements(
     return tuple(elements)
 
 
+def validated_sdk_image_path(value: Any) -> PurePosixPath:
+    if not isinstance(value, str):
+        raise ValueError("GLM-OCR image_path must be text")
+    path = PurePosixPath(value)
+    if (
+        path.is_absolute()
+        or value != path.as_posix()
+        or len(path.parts) != 2
+        or path.parts[0] != "imgs"
+        or path.name in {"", ".", ".."}
+    ):
+        raise ValueError(f"Unsafe GLM-OCR image path: {value!r}")
+    return path
+
+
 def write_elements(path: Path, elements: Iterable[OcrElement]) -> None:
     with (
         path.open("xb") as raw,
@@ -294,17 +334,53 @@ def write_elements(path: Path, elements: Iterable[OcrElement]) -> None:
             output.write("\n")
 
 
-def copy_sdk_images(saved_root: Path, destination: Path) -> None:
-    figures = saved_root / "imgs"
-    if figures.is_dir():
-        shutil.copytree(figures, destination / "figures")
+def copy_sdk_artifacts(
+    saved_root: Path,
+    destination: Path,
+    *,
+    expected_pages: int,
+) -> None:
+    images = saved_root / "imgs"
+    if images.is_dir():
+        shutil.copytree(images, destination / "imgs")
     visualizations = saved_root / "layout_vis"
-    if visualizations.is_dir():
-        target = destination / "layout_vis"
-        target.mkdir()
-        for page_number, source in enumerate(sorted(visualizations.iterdir()), start=1):
-            if source.is_file():
-                shutil.copy2(source, target / f"page-{page_number:04d}{source.suffix.lower()}")
+    sources = (
+        tuple(path for path in visualizations.iterdir() if path.is_file())
+        if visualizations.is_dir()
+        else ()
+    )
+    indexed: dict[int, Path] = {}
+    if expected_pages == 1 and len(sources) == 1:
+        indexed[1] = sources[0]
+    else:
+        for source in sources:
+            match = re.search(r"_page([0-9]+)$", source.stem)
+            if match is None:
+                raise DocumentError(
+                    "invalid_model_output",
+                    f"Cannot resolve SDK visualization page from {source.name}",
+                    retryable=True,
+                )
+            page_number = int(match.group(1)) + 1
+            if page_number in indexed:
+                raise DocumentError(
+                    "invalid_model_output",
+                    f"Duplicate SDK visualization for page {page_number}",
+                    retryable=True,
+                )
+            indexed[page_number] = source
+    expected = set(range(1, expected_pages + 1))
+    if set(indexed) != expected:
+        raise DocumentError(
+            "incomplete_model_output",
+            f"GLM-OCR produced visualizations for pages {sorted(indexed)}, "
+            f"expected {sorted(expected)}",
+            retryable=True,
+        )
+    target = destination / "layout_vis"
+    target.mkdir()
+    for page_number, source in sorted(indexed.items()):
+        shutil.copy2(source, target / f"page-{page_number:04d}{source.suffix.lower()}")
 
 
 def artifact_files(root: Path, maximum_bytes: int) -> tuple[ArtifactFile, ...]:
@@ -377,20 +453,24 @@ def successful_result(
 
     document_root = work_root / "committed-output"
     document_root.mkdir()
-    markdown = parsed.markdown_result or ""
     layout = normalized_layout(parsed.json_result, pages)
     elements = canonical_elements(layout, current_processing_id)
-    (document_root / "document.md").write_text(markdown, encoding="utf-8")
-    write_json_gzip(document_root / "layout.json.gz", layout)
+    page_bundle = build_page_markdown_bundle(elements, page_count=pages)
+    write_page_markdown_bundle(
+        document_root.joinpath(*PAGE_MARKDOWN_BUNDLE_PATH.parts),
+        page_bundle,
+    )
     write_elements(document_root / "elements.jsonl.gz", elements)
-    if parsed.raw_json_result is not None:
-        write_json_gzip(document_root / "raw_model.json.gz", parsed.raw_json_result)
 
     saved = work_root / "sdk-output"
     parsed.save(output_dir=saved, save_layout_visualization=True)
     saved_directories = [path for path in saved.iterdir() if path.is_dir()]
     if len(saved_directories) == 1:
-        copy_sdk_images(saved_directories[0], document_root)
+        copy_sdk_artifacts(
+            saved_directories[0],
+            document_root,
+            expected_pages=pages,
+        )
 
     files = artifact_files(document_root, job.limits.max_output_bytes)
     payload: dict[str, Any] = {
@@ -438,7 +518,29 @@ def failed_result(request: OcrDocumentRequest, error: DocumentError) -> OcrDocum
         arxiv_id=request.arxiv_id,
         state="retryable_failed" if error.retryable else "terminal_failed",
         error_code=error.code,
-        error_message=str(error)[:2000],
+        error_message=str(error)[:ERROR_MESSAGE_CHARACTERS],
+    )
+
+
+def log_document_failure(
+    request: OcrDocumentRequest,
+    error: DocumentError,
+    *,
+    document_count: int,
+    document_index: int,
+    started_at: float,
+) -> None:
+    """Emit the durable failure detail without allowing unbounded provider logs."""
+    log_stage(
+        "document_failed",
+        started_at,
+        arxiv_id=request.arxiv_id,
+        document_count=document_count,
+        document_index=document_index,
+        error_code=error.code,
+        error_message=str(error)[:ERROR_MESSAGE_CHARACTERS],
+        request_id=request.request_id,
+        retryable=error.retryable,
     )
 
 
@@ -759,14 +861,12 @@ def run(
                             request=request,
                         )
                         result = failed_result(request, error)
-                        log_stage(
-                            "document_failed",
-                            document_started_at,
-                            arxiv_id=request.arxiv_id,
+                        log_document_failure(
+                            request,
+                            error,
                             document_count=document_count,
                             document_index=document_index,
-                            error_code=error.code,
-                            request_id=request.request_id,
+                            started_at=document_started_at,
                         )
                     except Exception as error:
                         document_error = DocumentError(
@@ -782,14 +882,12 @@ def run(
                             request=request,
                         )
                         result = failed_result(request, document_error)
-                        log_stage(
-                            "document_failed",
-                            document_started_at,
-                            arxiv_id=request.arxiv_id,
+                        log_document_failure(
+                            request,
+                            document_error,
                             document_count=document_count,
                             document_index=document_index,
-                            error_code="unexpected_runner_error",
-                            request_id=request.request_id,
+                            started_at=document_started_at,
                         )
                     results.append(result)
                     log_stage(

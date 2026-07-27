@@ -65,6 +65,7 @@ def test_page_progress_emits_each_completed_page_once() -> None:
             "document_index": 1,
             "page_count": 3,
             "request_id": "a" * 64,
+            "region_count": 1,
             "page_number": 2,
             "pages_completed": 3,
             "progress_percent": 100.0,

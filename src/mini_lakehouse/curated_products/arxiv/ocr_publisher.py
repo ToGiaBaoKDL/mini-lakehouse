@@ -44,8 +44,9 @@ class ArxivOcrPublisher:
     ) -> None:
         processing_key = result.processing_id
         manifest_hash = result.manifest_sha256
-        if processing_key is None or manifest_hash is None:
-            raise RuntimeError("Successful OCR result lacks a processing identity")
+        page_count = result.page_count
+        if processing_key is None or manifest_hash is None or page_count is None:
+            raise RuntimeError("Successful OCR result lacks complete content lineage")
         artifact_uri = artifact_root_uri(
             self._settings,
             self._processor,
@@ -72,6 +73,7 @@ class ArxivOcrPublisher:
         elements = load_elements(
             document_directory / "elements.jsonl.gz",
             max_uncompressed_bytes=job.limits.max_output_bytes,
+            expected_page_count=page_count,
         )
         for source, relative_path in artifact_paths(extraction_directory, result):
             self._publish_immutable(

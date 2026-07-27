@@ -9,8 +9,10 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from mini_lakehouse.processing.ocr.core.identity import request_id
+from mini_lakehouse.processing.ocr.core.paths import PAGE_MARKDOWN_BUNDLE_PATH
 
 Sha256 = str
+OCR_OUTPUT_SCHEMA_VERSION = "1.1.0"
 DocumentState = Literal[
     "succeeded",
     "retryable_failed",
@@ -64,7 +66,7 @@ class OcrJob(ProtocolModel):
     model: OcrModel
     layout_model: OcrModel
     adapter_version: str = Field(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")
-    output_schema_version: str = Field(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")
+    output_schema_version: Literal["1.1.0"]
     config_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     limits: OcrLimits
     inference: OcrInference
@@ -118,6 +120,65 @@ class OcrElement(ProtocolModel):
     raw_attributes_json: str | None = None
 
 
+class OcrPageMarkdown(ProtocolModel):
+    page_number: int = Field(ge=1)
+    markdown: str
+
+
+class OcrPageMarkdownBundle(ProtocolModel):
+    schema_version: Literal["1.0.0"]
+    pages: tuple[OcrPageMarkdown, ...] = Field(min_length=1, max_length=2000)
+
+    @model_validator(mode="after")
+    def consecutive_pages(self) -> OcrPageMarkdownBundle:
+        page_numbers = tuple(page.page_number for page in self.pages)
+        expected = tuple(range(1, len(self.pages) + 1))
+        if page_numbers != expected:
+            raise ValueError("OCR page Markdown numbers must be consecutive and ordered")
+        return self
+
+    def markdown(self, page_number: int) -> str:
+        if page_number < 1 or page_number > len(self.pages):
+            raise ValueError(f"Page {page_number} is outside this document")
+        return self.pages[page_number - 1].markdown
+
+
+def validate_document_artifact_paths(paths: list[str], *, page_count: int) -> None:
+    if len(paths) != len(set(paths)):
+        raise ValueError("OCR result artifact paths must be unique")
+    required = {PAGE_MARKDOWN_BUNDLE_PATH.as_posix(), "elements.jsonl.gz"}
+    if not required.issubset(paths):
+        raise ValueError("Successful OCR results require pages.json.gz and elements.jsonl.gz")
+
+    expected_visualizations = {
+        f"layout_vis/page-{page_number:04d}" for page_number in range(1, page_count + 1)
+    }
+    actual_visualizations: list[str] = []
+    for value in paths:
+        path = PurePosixPath(value)
+        if value in required:
+            continue
+        if (
+            len(path.parts) == 2
+            and path.parts[0] == "layout_vis"
+            and path.suffix.lower() in {".jpg", ".jpeg", ".png"}
+        ):
+            actual_visualizations.append(path.with_suffix("").as_posix())
+            continue
+        if (
+            len(path.parts) == 2
+            and path.parts[0] == "imgs"
+            and path.suffix.lower() in {".jpg", ".jpeg", ".png"}
+        ):
+            continue
+        raise ValueError(f"Unsupported OCR document artifact path: {value}")
+    if (
+        len(actual_visualizations) != page_count
+        or set(actual_visualizations) != expected_visualizations
+    ):
+        raise ValueError("Successful OCR results require exactly one visualization per page")
+
+
 class OcrDocumentResult(ProtocolModel):
     request_id: str = Field(pattern=r"^[0-9a-f]{64}$")
     arxiv_id: str = Field(min_length=1, max_length=255)
@@ -143,17 +204,11 @@ class OcrDocumentResult(ProtocolModel):
             )
             if any(value is None for value in required):
                 raise ValueError("Successful OCR results require complete content lineage")
+            assert self.page_count is not None
             if self.error_code is not None or self.error_message is not None:
                 raise ValueError("Successful OCR results cannot contain an error")
             paths = [file.relative_path for file in self.files]
-            if len(paths) != len(set(paths)):
-                raise ValueError("OCR result artifact paths must be unique")
-            required_paths = {"document.md", "layout.json.gz", "elements.jsonl.gz"}
-            if not required_paths.issubset(paths):
-                raise ValueError(
-                    "Successful OCR results require document.md, layout.json.gz, "
-                    "and elements.jsonl.gz"
-                )
+            validate_document_artifact_paths(paths, page_count=self.page_count)
         else:
             if self.error_code is None or self.error_message is None:
                 raise ValueError("Failed OCR results require a typed error")

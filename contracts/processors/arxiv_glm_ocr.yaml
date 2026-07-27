@@ -9,7 +9,7 @@ source: arxiv
 curated_product: arxiv
 adapter: glm_ocr
 adapter_version: 1.0.0
-output_schema_version: 1.0.0
+output_schema_version: 1.1.0
 artifact_prefix: arxiv/ocr/papers
 
 model:
@@ -33,8 +33,8 @@ inference:
   gpu_memory_utilization: 0.80
   speculative_tokens: 3
   enforce_eager: true
-  max_num_seqs: 2
-  max_workers: 2
+  max_num_seqs: 4
+  max_workers: 4
   request_timeout_seconds: 600
   layout_device: cpu
 

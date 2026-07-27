@@ -45,6 +45,29 @@ div[data-testid="stMarkdownContainer"] h2.ocr-paper-title > a:hover {
     color: var(--primary-color) !important;
     text-decoration-color: var(--primary-color);
 }
+div[data-testid="stHorizontalBlock"]:has(.st-key-ocr-markdown-panel) {
+    align-items: stretch;
+}
+div[data-testid="stColumn"]:has(.st-key-ocr-markdown-panel) {
+    min-height: 0;
+}
+div[data-testid="stColumn"]:has(.st-key-ocr-markdown-panel)
+    > div[data-testid="stVerticalBlock"] {
+    height: 100%;
+    min-height: 0;
+}
+div[data-testid="stLayoutWrapper"]:has(> .st-key-ocr-markdown-panel) {
+    flex: 1 1 0;
+    height: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+.st-key-ocr-markdown-panel {
+    flex: 1 1 0;
+    height: 100%;
+    min-height: 0;
+    overflow: auto;
+}
 .ocr-status {
     background: color-mix(in srgb, currentColor 10%, transparent);
     border: 1px solid color-mix(in srgb, currentColor 24%, transparent);

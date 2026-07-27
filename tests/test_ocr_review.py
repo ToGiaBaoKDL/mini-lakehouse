@@ -1,3 +1,4 @@
+import gzip
 import hashlib
 from collections.abc import Sequence
 from datetime import UTC, date, datetime
@@ -11,14 +12,17 @@ from mini_lakehouse.curated_products.arxiv.review.artifacts import OcrArtifactRe
 from mini_lakehouse.curated_products.arxiv.review.models import (
     OcrDocumentFilter,
     OcrDocumentRun,
-    OcrPageElement,
     OcrRunState,
     OcrStateFilter,
 )
 from mini_lakehouse.curated_products.arxiv.review.repository import ArxivOcrReviewRepository
 from mini_lakehouse.platform.trino import QueryResult
 from mini_lakehouse.processing.ocr.core.identity import canonical_json_bytes
-from mini_lakehouse.processing.ocr.core.protocol import ArtifactFile
+from mini_lakehouse.processing.ocr.core.protocol import (
+    ArtifactFile,
+    OcrPageMarkdown,
+    OcrPageMarkdownBundle,
+)
 
 
 class _SqlExecutor:
@@ -122,12 +126,26 @@ def test_review_repository_keeps_search_and_state_parameterized() -> None:
 
 def test_artifact_reader_uses_verified_manifest_and_declared_page_path() -> None:
     image = b"annotated-page"
-    markdown = b"# Paper\n"
+    page_markdown = gzip.compress(
+        OcrPageMarkdownBundle(
+            schema_version="1.0.0",
+            pages=(OcrPageMarkdown(page_number=1, markdown="# Page one\n"),),
+        )
+        .model_dump_json()
+        .encode(),
+        mtime=0,
+    )
     files = (
         ArtifactFile(
-            relative_path="document.md",
-            sha256=hashlib.sha256(markdown).hexdigest(),
-            size_bytes=len(markdown),
+            relative_path="elements.jsonl.gz",
+            sha256="1" * 64,
+            size_bytes=1,
+            media_type="application/gzip",
+        ),
+        ArtifactFile(
+            relative_path="pages.json.gz",
+            sha256=hashlib.sha256(page_markdown).hexdigest(),
+            size_bytes=len(page_markdown),
             media_type="text/markdown; charset=utf-8",
         ),
         ArtifactFile(
@@ -151,7 +169,7 @@ def test_artifact_reader_uses_verified_manifest_and_declared_page_path() -> None
     store = _ObjectStore(
         {
             f"{root}/manifest.json": manifest_payload,
-            f"{root}/document.md": markdown,
+            f"{root}/pages.json.gz": page_markdown,
             f"{root}/layout_vis/page-0001.jpg": image,
         }
     )
@@ -163,7 +181,7 @@ def test_artifact_reader_uses_verified_manifest_and_declared_page_path() -> None
 
     assert page.data == image
     assert page.media_type == "image/jpeg"
-    assert reader.markdown(run, manifest) == "# Paper\n"
+    assert reader.page_markdowns(run, manifest).markdown(1) == "# Page one\n"
 
 
 def test_artifact_reader_rejects_manifest_checksum_drift() -> None:
@@ -202,28 +220,6 @@ def test_run_header_shows_page_count_only_for_imported_output(
     failed = _run("9" * 64).model_copy(update={"state": OcrRunState.RETRYABLE_FAILED})
     components.render_run_header(failed)
     assert captions == ["arXiv:2607.20571 · OAI 2026-07-25 · PDF 100.0 B"]
-
-
-def test_page_markdown_uses_page_elements_in_reading_order() -> None:
-    elements = (
-        OcrPageElement(
-            element_id="second",
-            page_number=2,
-            reading_order=1,
-            element_type="text",
-            text_content="Plain-text fallback",
-        ),
-        OcrPageElement(
-            element_id="first",
-            page_number=2,
-            reading_order=0,
-            element_type="text",
-            text_content="Ignored text",
-            markdown_content="# Page two",
-        ),
-    )
-
-    assert components.page_markdown(elements) == "# Page two\n\nPlain-text fallback"
 
 
 def test_review_session_resets_dependent_selection_consistently() -> None:

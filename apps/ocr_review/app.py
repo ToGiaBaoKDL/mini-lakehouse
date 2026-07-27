@@ -9,7 +9,6 @@ import streamlit as st
 from mini_lakehouse.apps.ocr_review import state
 from mini_lakehouse.apps.ocr_review.components import (
     document_label,
-    page_markdown,
     render_elements,
     render_hero,
     render_run_header,
@@ -27,6 +26,7 @@ from mini_lakehouse.curated_products.arxiv.review import (
     PublishedOcrManifest,
 )
 from mini_lakehouse.curated_products.arxiv.review.artifacts import OcrArtifactContent
+from mini_lakehouse.processing.ocr.core.protocol import OcrPageMarkdownBundle
 
 LOGGER = logging.getLogger(__name__)
 STATE_OPTIONS = tuple(item.value for item in OcrStateFilter)
@@ -68,6 +68,14 @@ def load_page_image(
     page_number: int,
 ) -> OcrArtifactContent:
     return review_service().page_image(run, manifest, page_number=page_number)
+
+
+@st.cache_data(ttl=300, max_entries=256, show_spinner=False)
+def load_page_markdowns(
+    run: OcrDocumentRun,
+    manifest: PublishedOcrManifest,
+) -> OcrPageMarkdownBundle:
+    return review_service().page_markdowns(run, manifest)
 
 
 @st.cache_data(ttl=300, max_entries=256, show_spinner=False)
@@ -194,21 +202,21 @@ def render_artifacts(run: OcrDocumentRun) -> None:
 
     try:
         image = load_page_image(run, manifest, page_number)
+        markdown = load_page_markdowns(run, manifest).markdown(page_number)
         elements = load_page_elements(run.processing_id, page_number)
 
         page_column, markdown_column = st.columns(2, gap="large")
         with page_column:
             st.markdown("#### Annotated page")
-            with st.container(height=760, border=True):
-                st.image(
-                    image.data,
-                    caption=f"Page {page_number} of {run.page_count}",
-                    width="stretch",
-                )
+            st.image(
+                image.data,
+                caption=f"Page {page_number} of {run.page_count}",
+                width="stretch",
+            )
         with markdown_column:
             st.markdown("#### Markdown")
-            with st.container(height=760, border=True):
-                st.markdown(page_markdown(elements))
+            with st.container(border=True, key="ocr-markdown-panel"):
+                st.markdown(markdown)
 
         st.markdown("#### Elements")
         render_elements(elements)

@@ -8,7 +8,10 @@ from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
-from mini_lakehouse.processing.ocr.core.protocol import ArtifactFile
+from mini_lakehouse.processing.ocr.core.protocol import (
+    ArtifactFile,
+    validate_document_artifact_paths,
+)
 
 
 class OcrRunState(StrEnum):
@@ -123,10 +126,7 @@ class PublishedOcrManifest(OcrReviewModel):
     @model_validator(mode="after")
     def validate_artifact_set(self) -> PublishedOcrManifest:
         paths = [file.relative_path for file in self.files]
-        if len(paths) != len(set(paths)):
-            raise ValueError("Published OCR manifest contains duplicate artifact paths")
-        if "document.md" not in paths:
-            raise ValueError("Published OCR manifest is missing document.md")
+        validate_document_artifact_paths(paths, page_count=self.page_count)
         return self
 
     def file(self, relative_path: str) -> ArtifactFile:
