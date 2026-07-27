@@ -52,8 +52,11 @@ def test_tracked_container_environment_contains_routing_but_no_secrets() -> None
     environment = f"{platform}\n{orchestration}\n{review}"
 
     assert "LAKEHOUSE_POLARIS__URI=http://polaris:8181/api/catalog" in platform
+    assert "LAKEHOUSE_STORAGE__NETWORK_SCOPE=internal" in platform
+    assert "LAKEHOUSE_STORAGE__ENDPOINTS__" not in platform
     assert "LAKEHOUSE_TRINO__HOST=trino" not in platform
     assert "LAKEHOUSE_TRINO__HOST=trino" in orchestration
+    assert "LAKEHOUSE_TRINO__CATALOG" not in orchestration
     assert "LAKEHOUSE_TRINO__HOST=trino" in review
     assert "LAKEHOUSE_TRINO__USER=ocr-review" in review
     assert "LAKEHOUSE_POLARIS__URI" not in orchestration
@@ -67,7 +70,9 @@ def test_local_env_template_contains_complete_storage_runtime_defaults() -> None
 
     for expected in (
         "LAKEHOUSE_STORAGE__BACKEND=s3",
-        "LAKEHOUSE_STORAGE__ENDPOINT_URL=http://localhost:9000",
+        "LAKEHOUSE_STORAGE__NETWORK_SCOPE=external",
+        "LAKEHOUSE_STORAGE__ENDPOINTS__EXTERNAL_URL=http://localhost:9000",
+        "LAKEHOUSE_STORAGE__ENDPOINTS__INTERNAL_URL=http://object-store:9000",
         "LAKEHOUSE_STORAGE__PATH_STYLE_ACCESS=true",
         "LAKEHOUSE_STORAGE__ICEBERG_ACCESS_DELEGATION=none",
         "LAKEHOUSE_STORAGE__STS_UNAVAILABLE=true",
@@ -171,6 +176,14 @@ def test_container_environment_files_follow_service_ownership() -> None:
     assert core["services"]["platform-reconcile"]["env_file"] == [
         "./infra/config/platform.container.env"
     ]
+    assert (
+        core["services"]["platform-reconcile"]["environment"]["LAKEHOUSE_PLATFORM_ADMIN__ENABLED"]
+        == "true"
+    )
+    assert (
+        "./infra/config/platform-reconcile.guard:/run/secrets/platform_reconcile_guard:ro"
+        in core["services"]["platform-reconcile"]["volumes"]
+    )
     assert prefect["x-lakehouse-runtime"]["env_file"] == [
         "./infra/config/platform.container.env",
         "./infra/config/orchestration.container.env",
@@ -181,6 +194,9 @@ def test_container_environment_files_follow_service_ownership() -> None:
     ]
     runtime_environment = prefect["x-lakehouse-runtime"]["environment"]
     for setting in (
+        "LAKEHOUSE_STORAGE__ENDPOINTS__EXTERNAL_URL",
+        "LAKEHOUSE_STORAGE__ENDPOINTS__INTERNAL_URL",
+        "LAKEHOUSE_TRINO__CATALOG",
         "LAKEHOUSE_ARXIV__BASE_URL",
         "LAKEHOUSE_KAGGLE__API_TOKEN",
         "MODAL_TOKEN_SECRET",
@@ -189,6 +205,41 @@ def test_container_environment_files_follow_service_ownership() -> None:
         "DBT_THREADS",
     ):
         assert setting in runtime_environment
+
+
+def test_compose_uses_env_owned_routes_and_has_no_secret_fallbacks() -> None:
+    core = Path("compose.core.yaml").read_text(encoding="utf-8")
+    prefect = Path("compose.prefect.yaml").read_text(encoding="utf-8")
+    review = Path("compose.ocr-review.yaml").read_text(encoding="utf-8")
+    rendered_sources = f"{core}\n{prefect}\n{review}"
+
+    assert ":-minioadmin" not in rendered_sources
+    assert ":-secretpassword" not in rendered_sources
+    assert "POSTGRES_PASSWORD:-lakehouse" not in rendered_sources
+    assert (
+        "OBJECT_STORE_ENDPOINT: "
+        "${LAKEHOUSE_STORAGE__ENDPOINTS__INTERNAL_URL:-http://object-store:9000}"
+    ) in core
+    assert (
+        "AWS_ENDPOINT_URL_S3: "
+        "${LAKEHOUSE_STORAGE__ENDPOINTS__INTERNAL_URL:-http://object-store:9000}"
+    ) in core
+    assert (
+        "S3_ENDPOINT: ${LAKEHOUSE_STORAGE__ENDPOINTS__INTERNAL_URL:-http://object-store:9000}"
+    ) in core
+
+
+def test_polaris_bootstrap_wraps_only_the_pinned_official_tool() -> None:
+    payload = yaml.safe_load(Path("compose.core.yaml").read_text(encoding="utf-8"))
+    bootstrap = payload["services"]["polaris-bootstrap"]
+
+    assert bootstrap["image"] == "apache/polaris-admin-tool:1.6.0"
+    assert bootstrap["command"][0] == "bootstrap"
+    assert bootstrap["entrypoint"] == ["/bin/sh", "/opt/polaris-bootstrap.sh"]
+    assert "./infra/polaris/bootstrap.sh:/opt/polaris-bootstrap.sh:ro" in bootstrap["volumes"]
+    wrapper = Path("infra/polaris/bootstrap.sh").read_text(encoding="utf-8")
+    assert 'java -jar /deployments/polaris-admin-tool.jar "$@"' in wrapper
+    assert '"$status" -eq 3' in wrapper
 
 
 def test_trino_identity_and_catalog_are_runtime_parameters() -> None:

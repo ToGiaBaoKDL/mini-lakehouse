@@ -10,7 +10,7 @@ case "$action" in
     ;;
 esac
 
-mc alias set local http://object-store:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
+mc alias set local "$OBJECT_STORE_ENDPOINT" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null
 mc license info local >/dev/null
 
 seen_buckets=" "

@@ -144,7 +144,7 @@ wait-prefect-deploy: preflight ## Wait for Prefect deployment registration.
 prefect-deployments: preflight ## List registered Prefect deployments.
 	$(COMPOSE) exec -T prefect-worker prefect deployment ls
 
-platform-reconcile: preflight ## Reconcile catalog, namespaces, access, and policies.
+platform-reconcile: preflight ## Reconcile catalog, namespaces, tables, access, and policies.
 	$(CORE_RUN) run --rm --no-deps platform-reconcile
 
 policy-prune-plan: preflight ## Print stale repository-managed Polaris policies.

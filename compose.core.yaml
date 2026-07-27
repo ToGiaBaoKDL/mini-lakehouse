@@ -2,7 +2,7 @@
 x-polaris-database: &polaris-database
   POLARIS_PERSISTENCE_TYPE: relational-jdbc
   QUARKUS_DATASOURCE_USERNAME: ${POSTGRES_USER:-lakehouse}
-  QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-lakehouse}
+  QUARKUS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
   QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/polaris
 
 services:
@@ -11,7 +11,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-lakehouse}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lakehouse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: postgres
     volumes:
       - postgres-data:/var/lib/postgresql
@@ -34,8 +34,8 @@ services:
       - --license
       - /minio.license
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
     ports:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
@@ -54,8 +54,9 @@ services:
       object-store:
         condition: service_healthy
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+      OBJECT_STORE_ENDPOINT: ${LAKEHOUSE_STORAGE__ENDPOINTS__INTERNAL_URL:-http://object-store:9000}
       LANDING_URI: ${LAKEHOUSE_STORAGE__LANDING_URI:-s3://landing}
       CURATED_URI: ${LAKEHOUSE_STORAGE__CURATED_URI:-s3://curated}
       ANALYTICS_URI: ${LAKEHOUSE_STORAGE__ANALYTICS_URI:-s3://analytics}
@@ -80,7 +81,7 @@ services:
       - -r
       - ${POLARIS_REALM:-POLARIS}
       - -c
-      - ${POLARIS_REALM:-POLARIS},${POLARIS_ROOT_CLIENT_ID:-root},${POLARIS_ROOT_CLIENT_SECRET:-secretpassword}
+      - ${POLARIS_REALM:-POLARIS},${POLARIS_ROOT_CLIENT_ID:?Set POLARIS_ROOT_CLIENT_ID in .env},${POLARIS_ROOT_CLIENT_SECRET:?Set POLARIS_ROOT_CLIENT_SECRET in .env}
     restart: "no"
 
   polaris:
@@ -95,11 +96,11 @@ services:
       <<: *polaris-database
       POLARIS_REALM_CONTEXT_REALMS: ${POLARIS_REALM:-POLARIS}
       AWS_REGION: ${LAKEHOUSE_STORAGE__REGION:-us-east-1}
-      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
-      AWS_ENDPOINT_URL_S3: http://object-store:9000
-      POLARIS_STORAGE_AWS_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
-      POLARIS_STORAGE_AWS_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+      AWS_ENDPOINT_URL_S3: ${LAKEHOUSE_STORAGE__ENDPOINTS__INTERNAL_URL:-http://object-store:9000}
+      POLARIS_STORAGE_AWS_ACCESS_KEY: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      POLARIS_STORAGE_AWS_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
       JAVA_OPTS: >-
         -Dpolaris.behavior-changes."ALLOW_NAMESPACE_CUSTOM_LOCATION"=true
     ports:
@@ -122,11 +123,14 @@ services:
     env_file:
       - ./infra/config/platform.container.env
     environment:
+      LAKEHOUSE_PLATFORM_ADMIN__ENABLED: "true"
       LAKEHOUSE_ENVIRONMENT: ${LAKEHOUSE_ENVIRONMENT:-local}
       LAKEHOUSE_LOG_LEVEL: ${LAKEHOUSE_LOG_LEVEL:-INFO}
       LAKEHOUSE_STORAGE__BACKEND: ${LAKEHOUSE_STORAGE__BACKEND:-s3}
-      LAKEHOUSE_STORAGE__ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
-      LAKEHOUSE_STORAGE__SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      LAKEHOUSE_STORAGE__ENDPOINTS__EXTERNAL_URL: ${LAKEHOUSE_STORAGE__ENDPOINTS__EXTERNAL_URL:-http://localhost:9000}
+      LAKEHOUSE_STORAGE__ENDPOINTS__INTERNAL_URL: ${LAKEHOUSE_STORAGE__ENDPOINTS__INTERNAL_URL:-http://object-store:9000}
+      LAKEHOUSE_STORAGE__ACCESS_KEY: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      LAKEHOUSE_STORAGE__SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
       LAKEHOUSE_STORAGE__REGION: ${LAKEHOUSE_STORAGE__REGION:-us-east-1}
       LAKEHOUSE_STORAGE__PATH_STYLE_ACCESS: "${LAKEHOUSE_STORAGE__PATH_STYLE_ACCESS:-true}"
       LAKEHOUSE_STORAGE__ICEBERG_ACCESS_DELEGATION: ${LAKEHOUSE_STORAGE__ICEBERG_ACCESS_DELEGATION:-none}
@@ -137,8 +141,10 @@ services:
       LAKEHOUSE_STORAGE__ANALYTICS_URI: ${LAKEHOUSE_STORAGE__ANALYTICS_URI:-s3://analytics}
       LAKEHOUSE_POLARIS__CATALOG_NAME: ${LAKEHOUSE_POLARIS__CATALOG_NAME:-prod}
       LAKEHOUSE_POLARIS__REALM: ${POLARIS_REALM:-POLARIS}
-      LAKEHOUSE_POLARIS__CREDENTIAL: ${POLARIS_ROOT_CLIENT_ID:-root}:${POLARIS_ROOT_CLIENT_SECRET:-secretpassword}
+      LAKEHOUSE_POLARIS__CREDENTIAL: "${POLARIS_ROOT_CLIENT_ID:?Set POLARIS_ROOT_CLIENT_ID in .env}:${POLARIS_ROOT_CLIENT_SECRET:?Set POLARIS_ROOT_CLIENT_SECRET in .env}"
       LAKEHOUSE_POLARIS__SCOPE: ${LAKEHOUSE_POLARIS__SCOPE:-PRINCIPAL_ROLE:ALL}
+    volumes:
+      - ./infra/config/platform-reconcile.guard:/run/secrets/platform_reconcile_guard:ro
     command: python -m mini_lakehouse.platform.reconcile
     restart: "no"
 
@@ -149,13 +155,13 @@ services:
       platform-reconcile:
         condition: service_completed_successfully
     environment:
-      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
-      S3_ENDPOINT: http://object-store:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env}
+      S3_ENDPOINT: ${LAKEHOUSE_STORAGE__ENDPOINTS__INTERNAL_URL:-http://object-store:9000}
       S3_REGION: ${LAKEHOUSE_STORAGE__REGION:-us-east-1}
       S3_PATH_STYLE_ACCESS: ${LAKEHOUSE_STORAGE__PATH_STYLE_ACCESS:-true}
       ICEBERG_VENDED_CREDENTIALS_ENABLED: "false"
-      POLARIS_CREDENTIAL: ${POLARIS_ROOT_CLIENT_ID:-root}:${POLARIS_ROOT_CLIENT_SECRET:-secretpassword}
+      POLARIS_CREDENTIAL: "${POLARIS_ROOT_CLIENT_ID:?Set POLARIS_ROOT_CLIENT_ID in .env}:${POLARIS_ROOT_CLIENT_SECRET:?Set POLARIS_ROOT_CLIENT_SECRET in .env}"
       POLARIS_CATALOG: ${LAKEHOUSE_POLARIS__CATALOG_NAME:-prod}
       TRINO_NODE_ENVIRONMENT: local
       TRINO_NODE_ID: mini-lakehouse-coordinator
