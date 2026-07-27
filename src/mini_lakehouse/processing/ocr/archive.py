@@ -153,9 +153,10 @@ def validate_runner_output(
     if results.keys() != requests.keys():
         raise InvalidOcrOutputError("OCR result request set does not match the submitted job")
     for request_key, result in results.items():
-        if result.arxiv_id != requests[request_key].arxiv_id:
+        request = requests[request_key]
+        if result.arxiv_id != request.arxiv_id:
             raise InvalidOcrOutputError(f"OCR result paper does not match request {request_key}")
-        if result.state == "succeeded":
+        if result.state in {"succeeded", "reused"}:
             assert result.pdf_sha256 is not None
             expected_processing_id = processing_id(
                 arxiv_id=result.arxiv_id,
@@ -166,6 +167,38 @@ def validate_runner_output(
                 raise InvalidOcrOutputError(
                     f"OCR processing identity does not match request {request_key}"
                 )
+        if result.state == "reused":
+            reuse = request.reuse
+            if reuse is None:
+                raise InvalidOcrOutputError(
+                    f"OCR result unexpectedly reuses content for request {request_key}"
+                )
+            returned_lineage = (
+                result.pdf_sha256,
+                result.pdf_size_bytes,
+                result.page_count,
+                result.processing_id,
+                result.manifest_sha256,
+            )
+            expected_lineage = (
+                reuse.pdf_sha256,
+                reuse.pdf_size_bytes,
+                reuse.page_count,
+                reuse.processing_id,
+                reuse.manifest_sha256,
+            )
+            if returned_lineage != expected_lineage:
+                raise InvalidOcrOutputError(
+                    f"Reused OCR lineage does not match request {request_key}"
+                )
+        elif (
+            result.state == "succeeded"
+            and request.reuse is not None
+            and result.pdf_sha256 == request.reuse.pdf_sha256
+        ):
+            raise InvalidOcrOutputError(
+                f"OCR result reran unchanged content for request {request_key}"
+            )
 
     extract_archive(
         archive_path,

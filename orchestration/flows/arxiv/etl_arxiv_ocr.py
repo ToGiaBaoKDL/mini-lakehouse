@@ -21,9 +21,11 @@ from orchestration.plugins.notifications import (
 )
 def reconcile_and_submit_ocr(
     arxiv_ids: tuple[str, ...],
+    verify_pdf: bool,
 ) -> dict[str, Any]:
     result = ArxivOcrService(get_settings()).run_once(
         arxiv_ids=arxiv_ids,
+        verify_pdf=verify_pdf,
     )
     return result.model_dump(mode="json")
 
@@ -39,9 +41,10 @@ def reconcile_and_submit_ocr(
 )
 def etl_arxiv_ocr(
     arxiv_ids: list[str] | None = None,
+    verify_pdf: bool = False,
 ) -> dict[str, Any]:
     identifiers = tuple(dict.fromkeys(arxiv_ids or ()))
-    return reconcile_and_submit_ocr(identifiers)
+    return reconcile_and_submit_ocr(identifiers, verify_pdf)
 
 
 if __name__ == "__main__":

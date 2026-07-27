@@ -94,11 +94,14 @@ class ArxivOcrService:
         self,
         *,
         arxiv_ids: tuple[str, ...] = (),
+        verify_pdf: bool = False,
     ) -> OcrCycleResult:
         identifiers = tuple(dict.fromkeys(arxiv_ids))
         limit = self._processor.batch.max_documents
         if len(identifiers) > limit:
             raise ValueError(f"An explicit OCR run accepts at most {limit} unique arxiv_ids")
+        if verify_pdf and not identifiers:
+            raise ValueError("PDF verification requires at least one explicit ArXiv ID")
         owned_executor = TrinoExecutor(self._settings.trino) if self._executor is None else None
         context = owned_executor if owned_executor is not None else nullcontext(self._executor)
         with context as executor:
@@ -119,6 +122,7 @@ class ArxivOcrService:
                 provider,
                 limit=limit,
                 arxiv_ids=identifiers,
+                verify_pdf=verify_pdf,
             )
             if submitted is not None:
                 if reconciliation is None:
@@ -185,6 +189,7 @@ class ArxivOcrService:
                     oai_datestamp=candidate.oai_datestamp,
                     source_record_sha256=candidate.source_record_sha256,
                     pdf_url=candidate.pdf_url,
+                    reuse=candidate.reuse,
                 ),
                 attempt_count=candidate.attempt_count + 1,
             )
@@ -198,6 +203,7 @@ class ArxivOcrService:
         *,
         limit: int,
         arxiv_ids: tuple[str, ...],
+        verify_pdf: bool,
     ) -> OcrCycleResult | None:
         candidates = self._repository.candidates(
             executor,
@@ -205,6 +211,7 @@ class ArxivOcrService:
             configuration_hash=self._configuration_hash,
             limit=limit,
             arxiv_ids=arxiv_ids,
+            verify_pdf=verify_pdf,
         )
         if not candidates:
             return None
@@ -440,7 +447,7 @@ class ArxivOcrService:
             retryable = 0
             terminal = 0
             for result in manifest.documents:
-                if result.state == "succeeded":
+                if result.state in {"succeeded", "reused"}:
                     self._publisher.publish(executor, job, result, extracted, temporary)
                     imported += 1
                     continue

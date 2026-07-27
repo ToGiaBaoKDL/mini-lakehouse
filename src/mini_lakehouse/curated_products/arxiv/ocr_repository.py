@@ -16,10 +16,10 @@ from mini_lakehouse.curated_products.arxiv.models import (
 )
 from mini_lakehouse.platform.trino import SqlExecutor
 from mini_lakehouse.processing.ocr.core.protocol import (
-    OcrDocumentRequest,
     OcrDocumentResult,
     OcrElement,
     OcrJob,
+    OcrReuseReference,
 )
 
 
@@ -81,6 +81,30 @@ class ArxivOcrRepository:
             raise RuntimeError(
                 f"Active ArXiv OCR batch {first[0]} has an invalid immutable job payload"
             ) from error
+        document_rows = {str(row[5]): row for row in result.rows if row[5] is not None}
+        requests = {request.request_id: request for request in job.documents}
+        if document_rows.keys() != requests.keys():
+            raise RuntimeError(
+                f"ArXiv OCR batch {first[0]} persisted documents differ from its immutable job"
+            )
+        for request_id, request in requests.items():
+            row = document_rows[request_id]
+            persisted_request = (
+                str(row[6]),
+                row[7],
+                str(row[8]),
+                str(row[9]),
+            )
+            job_request = (
+                request.arxiv_id,
+                request.oai_datestamp,
+                request.source_record_sha256,
+                request.pdf_url,
+            )
+            if persisted_request != job_request:
+                raise RuntimeError(
+                    f"ArXiv OCR request {request_id} differs from its immutable job payload"
+                )
         return ActiveOcrBatch.model_validate(
             {
                 "batch_id": str(first[0]),
@@ -88,20 +112,12 @@ class ArxivOcrRepository:
                 "provider_run_id": str(first[2]) if first[2] is not None else None,
                 "job": job,
                 "documents": tuple(
-                    OcrBatchDocument.model_validate(
-                        {
-                            "request": OcrDocumentRequest(
-                                request_id=str(row[5]),
-                                arxiv_id=str(row[6]),
-                                oai_datestamp=row[7],
-                                source_record_sha256=str(row[8]),
-                                pdf_url=str(row[9]),
-                            ),
-                            "attempt_count": int(row[10]),
-                            "state": str(row[11]),
-                        }
+                    OcrBatchDocument(
+                        request=request,
+                        attempt_count=int(document_rows[request.request_id][10]),
+                        state=OcrRunState(str(document_rows[request.request_id][11])),
                     )
-                    for row in result.rows
+                    for request in job.documents
                 ),
             }
         )
@@ -114,14 +130,20 @@ class ArxivOcrRepository:
         configuration_hash: str,
         limit: int,
         arxiv_ids: tuple[str, ...] = (),
+        verify_pdf: bool = False,
     ) -> tuple[OcrCandidate, ...]:
         if limit < 1 or limit > processor.batch.max_documents:
             raise ValueError("OCR candidate limit exceeds the processor batch contract")
+        if verify_pdf and not arxiv_ids:
+            raise ValueError("A forced PDF verification requires explicit ArXiv IDs")
         identifiers = ""
         parameters: list[Any] = [
             configuration_hash,
             OcrRunState.IMPORTED.value,
             configuration_hash,
+            OcrRunState.IMPORTED.value,
+            configuration_hash,
+            verify_pdf,
             OcrRunState.RETRYABLE_FAILED.value,
             processor.retry.max_document_attempts,
         ]
@@ -172,13 +194,53 @@ class ArxivOcrRepository:
                 FROM {self._relation("ocr_document_runs")} AS document
                 WHERE document.state = ?
                   AND document.config_hash = ?
+            ),
+            reusable_success AS (
+                SELECT
+                    arxiv_id,
+                    pdf_sha256,
+                    pdf_size_bytes,
+                    page_count,
+                    processing_id,
+                    manifest_sha256
+                FROM (
+                    SELECT
+                        document.arxiv_id,
+                        document.pdf_sha256,
+                        document.pdf_size_bytes,
+                        document.page_count,
+                        document.processing_id,
+                        document.manifest_sha256,
+                        row_number() OVER (
+                            PARTITION BY document.arxiv_id
+                            ORDER BY
+                                document.completed_at DESC,
+                                document.curated_at DESC,
+                                document.batch_id DESC
+                        ) AS reuse_rank
+                    FROM {self._relation("ocr_document_runs")} AS document
+                    WHERE document.state = ?
+                      AND document.config_hash = ?
+                      AND document.pdf_sha256 IS NOT NULL
+                      AND document.pdf_size_bytes IS NOT NULL
+                      AND document.page_count IS NOT NULL
+                      AND document.processing_id IS NOT NULL
+                      AND document.artifact_uri IS NOT NULL
+                      AND document.manifest_sha256 IS NOT NULL
+                )
+                WHERE reuse_rank = 1
             )
             SELECT
                 paper.arxiv_id,
                 paper.oai_datestamp,
                 paper.source_record_sha256,
                 paper.pdf_url,
-                coalesce(document.attempt_count, 0) AS attempt_count
+                coalesce(document.attempt_count, 0) AS attempt_count,
+                reusable.pdf_sha256,
+                reusable.pdf_size_bytes,
+                reusable.page_count,
+                reusable.processing_id,
+                reusable.manifest_sha256
             FROM {self._relation("papers")} AS paper
             LEFT JOIN latest_document AS document
               ON document.arxiv_id = paper.arxiv_id
@@ -186,14 +248,21 @@ class ArxivOcrRepository:
             LEFT JOIN compatible_success AS success
               ON success.arxiv_id = paper.arxiv_id
              AND success.source_record_sha256 = paper.source_record_sha256
+            LEFT JOIN reusable_success AS reusable
+              ON reusable.arxiv_id = paper.arxiv_id
             WHERE NOT paper.is_deleted
               AND paper.pdf_url IS NOT NULL
-              AND success.arxiv_id IS NULL
               AND (
-                    document.request_id IS NULL
+                    ?
                     OR (
-                        document.state = ?
-                        AND document.attempt_count < ?
+                        success.arxiv_id IS NULL
+                        AND (
+                            document.request_id IS NULL
+                            OR (
+                                document.state = ?
+                                AND document.attempt_count < ?
+                            )
+                        )
                     )
               )
               {identifiers}
@@ -209,6 +278,17 @@ class ArxivOcrRepository:
                 source_record_sha256=str(row[2]),
                 pdf_url=str(row[3]),
                 attempt_count=int(row[4]),
+                reuse=(
+                    OcrReuseReference(
+                        pdf_sha256=str(row[5]),
+                        pdf_size_bytes=int(row[6]),
+                        page_count=int(row[7]),
+                        processing_id=str(row[8]),
+                        manifest_sha256=str(row[9]),
+                    )
+                    if row[5] is not None
+                    else None
+                ),
             )
             for row in result.rows
         )

@@ -17,6 +17,7 @@ import tempfile
 import time
 from collections.abc import Iterable
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -79,6 +80,19 @@ class DocumentError(RuntimeError):
         super().__init__(message)
         self.code = code
         self.retryable = retryable
+
+
+@dataclass(frozen=True)
+class PreparedDocument:
+    request: OcrDocumentRequest
+    work_root: Path
+    pdf_path: Path
+    pdf_sha256: str
+    pdf_size_bytes: int
+    page_count: int
+    document_count: int
+    document_index: int
+    started_at: float
 
 
 def log_stage(event: str, started_at: float, **fields: object) -> None:
@@ -407,17 +421,15 @@ def artifact_files(root: Path, maximum_bytes: int) -> tuple[ArtifactFile, ...]:
     return tuple(files)
 
 
-def successful_result(
+def prepare_document(
     job: OcrJob,
     request: OcrDocumentRequest,
-    parser: GlmOcr,
     work_root: Path,
-    output_root: Path,
     *,
     document_count: int,
     document_index: int,
     started_at: float,
-) -> OcrDocumentResult:
+) -> PreparedDocument | OcrDocumentResult:
     pdf = work_root / "source.pdf"
     pdf_hash, pdf_size = download_pdf(request, pdf, job.limits.max_pdf_bytes)
     pages = pdf_page_count(pdf, job.limits.max_pages_per_document)
@@ -431,6 +443,62 @@ def successful_result(
         pdf_size_bytes=pdf_size,
         request_id=request.request_id,
     )
+    reuse = request.reuse
+    if reuse is not None and reuse.pdf_sha256 == pdf_hash:
+        if not reuse.matches(
+            pdf_sha256=pdf_hash,
+            pdf_size_bytes=pdf_size,
+            page_count=pages,
+        ):
+            raise DocumentError(
+                "reuse_lineage_mismatch",
+                "Previously imported OCR lineage disagrees with unchanged PDF content",
+                retryable=False,
+            )
+        log_stage(
+            "document_reused",
+            started_at,
+            arxiv_id=request.arxiv_id,
+            document_count=document_count,
+            document_index=document_index,
+            page_count=pages,
+            request_id=request.request_id,
+        )
+        return OcrDocumentResult(
+            request_id=request.request_id,
+            arxiv_id=request.arxiv_id,
+            state="reused",
+            pdf_sha256=pdf_hash,
+            pdf_size_bytes=pdf_size,
+            page_count=pages,
+            processing_id=reuse.processing_id,
+            manifest_sha256=reuse.manifest_sha256,
+        )
+    return PreparedDocument(
+        request=request,
+        work_root=work_root,
+        pdf_path=pdf,
+        pdf_sha256=pdf_hash,
+        pdf_size_bytes=pdf_size,
+        page_count=pages,
+        document_count=document_count,
+        document_index=document_index,
+        started_at=started_at,
+    )
+
+
+def successful_result(
+    job: OcrJob,
+    prepared: PreparedDocument,
+    parser: GlmOcr,
+    output_root: Path,
+) -> OcrDocumentResult:
+    request = prepared.request
+    pdf = prepared.pdf_path
+    pdf_hash = prepared.pdf_sha256
+    pdf_size = prepared.pdf_size_bytes
+    pages = prepared.page_count
+    work_root = prepared.work_root
     current_processing_id = processing_id(
         arxiv_id=request.arxiv_id,
         pdf_sha256=pdf_hash,
@@ -440,11 +508,11 @@ def successful_result(
         with GlmOcrPageProgress(
             parser,
             arxiv_id=request.arxiv_id,
-            document_count=document_count,
-            document_index=document_index,
+            document_count=prepared.document_count,
+            document_index=prepared.document_index,
             page_count=pages,
             request_id=request.request_id,
-            started_at=started_at,
+            started_at=prepared.started_at,
             emit=log_stage,
         ):
             parsed = parser.parse(pdf, save_layout_visualization=True)
@@ -502,14 +570,34 @@ def successful_result(
     document_root.replace(destination)
     log_stage(
         "document_succeeded",
-        started_at,
+        prepared.started_at,
         arxiv_id=request.arxiv_id,
-        document_count=document_count,
-        document_index=document_index,
+        document_count=prepared.document_count,
+        document_index=prepared.document_index,
         page_count=pages,
         request_id=request.request_id,
     )
     return result
+
+
+def log_batch_progress(
+    job: OcrJob,
+    results: dict[str, OcrDocumentResult],
+    started_at: float,
+) -> None:
+    values = tuple(results.values())
+    log_stage(
+        "batch_progress",
+        started_at,
+        batch_id=job.batch_id,
+        completed_documents=len(values),
+        document_count=len(job.documents),
+        failed_documents=sum(
+            item.state in {"retryable_failed", "terminal_failed"} for item in values
+        ),
+        reused_documents=sum(item.state == "reused" for item in values),
+        succeeded_documents=sum(item.state == "succeeded" for item in values),
+    )
 
 
 def failed_result(request: OcrDocumentRequest, error: DocumentError) -> OcrDocumentResult:
@@ -803,113 +891,152 @@ def run(
         temp = Path(raw_temp)
         extracted = temp / "result"
         extracted.mkdir()
-        model_started_at = time.perf_counter()
-        model_path = resolve_model_source(
-            model_source,
-            resource_name="model",
-            repository=job.model.repository,
-            revision=job.model.revision,
-        )
-        layout_path = resolve_model_source(
-            layout_model_source,
-            resource_name="layout_model",
-            repository=job.layout_model.repository,
-            revision=job.layout_model.revision,
-        )
-        log_stage("models_resolved", model_started_at, batch_id=job.batch_id)
-        config_path = temp / "glmocr.yaml"
-        write_config(config_path, job, str(layout_path))
-        server_started_at = time.perf_counter()
-        vllm_log_path = temp / "vllm.log"
-        vllm, log_file = start_vllm(job, model_path, vllm_log_path)
-        log_stage("vllm_ready", server_started_at, batch_id=job.batch_id)
-        results: list[OcrDocumentResult] = []
-        try:
-            with GlmOcr(
-                config_path=str(config_path), layout_device=job.inference.layout_device
-            ) as parser:
-                document_count = len(job.documents)
-                for document_index, request in enumerate(job.documents, start=1):
-                    document_started_at = time.perf_counter()
-                    document_work = temp / "work" / request.request_id
-                    document_work.mkdir(parents=True)
-                    log_stage(
-                        "document_started",
-                        document_started_at,
-                        arxiv_id=request.arxiv_id,
-                        document_count=document_count,
-                        document_index=document_index,
-                        request_id=request.request_id,
-                    )
-                    try:
-                        result = successful_result(
-                            job,
-                            request,
-                            parser,
-                            document_work,
-                            extracted,
-                            document_count=document_count,
-                            document_index=document_index,
-                            started_at=document_started_at,
-                        )
-                    except DocumentError as error:
-                        persist_vllm_diagnostic(
-                            output_directory,
-                            vllm_log_path,
-                            job,
-                            error=error,
-                            request=request,
-                        )
-                        result = failed_result(request, error)
-                        log_document_failure(
-                            request,
-                            error,
-                            document_count=document_count,
-                            document_index=document_index,
-                            started_at=document_started_at,
-                        )
-                    except Exception as error:
-                        document_error = DocumentError(
-                            "unexpected_runner_error",
-                            str(error),
-                            retryable=True,
-                        )
-                        persist_vllm_diagnostic(
-                            output_directory,
-                            vllm_log_path,
-                            job,
-                            error=document_error,
-                            request=request,
-                        )
-                        result = failed_result(request, document_error)
-                        log_document_failure(
-                            request,
-                            document_error,
-                            document_count=document_count,
-                            document_index=document_index,
-                            started_at=document_started_at,
-                        )
-                    results.append(result)
-                    log_stage(
-                        "batch_progress",
-                        batch_started_at,
-                        batch_id=job.batch_id,
-                        completed_documents=len(results),
-                        document_count=document_count,
-                        failed_documents=sum(item.state != "succeeded" for item in results),
-                        succeeded_documents=sum(item.state == "succeeded" for item in results),
-                    )
-        except Exception as error:
-            persist_vllm_diagnostic(
-                output_directory,
-                vllm_log_path,
-                job,
-                error=error,
-                request=None,
+        document_count = len(job.documents)
+        prepared_documents: list[PreparedDocument] = []
+        results: dict[str, OcrDocumentResult] = {}
+        for document_index, request in enumerate(job.documents, start=1):
+            document_started_at = time.perf_counter()
+            document_work = temp / "work" / request.request_id
+            document_work.mkdir(parents=True)
+            log_stage(
+                "document_started",
+                document_started_at,
+                arxiv_id=request.arxiv_id,
+                document_count=document_count,
+                document_index=document_index,
+                request_id=request.request_id,
             )
-            raise
-        finally:
-            stop_process(vllm, log_file)
+            try:
+                prepared = prepare_document(
+                    job,
+                    request,
+                    document_work,
+                    document_count=document_count,
+                    document_index=document_index,
+                    started_at=document_started_at,
+                )
+                if isinstance(prepared, OcrDocumentResult):
+                    results[request.request_id] = prepared
+                else:
+                    prepared_documents.append(prepared)
+            except DocumentError as error:
+                results[request.request_id] = failed_result(request, error)
+                log_document_failure(
+                    request,
+                    error,
+                    document_count=document_count,
+                    document_index=document_index,
+                    started_at=document_started_at,
+                )
+            except Exception as error:
+                document_error = DocumentError(
+                    "unexpected_runner_error",
+                    str(error),
+                    retryable=True,
+                )
+                results[request.request_id] = failed_result(request, document_error)
+                log_document_failure(
+                    request,
+                    document_error,
+                    document_count=document_count,
+                    document_index=document_index,
+                    started_at=document_started_at,
+                )
+            if request.request_id in results:
+                log_batch_progress(job, results, batch_started_at)
+
+        if prepared_documents:
+            model_started_at = time.perf_counter()
+            model_path = resolve_model_source(
+                model_source,
+                resource_name="model",
+                repository=job.model.repository,
+                revision=job.model.revision,
+            )
+            layout_path = resolve_model_source(
+                layout_model_source,
+                resource_name="layout_model",
+                repository=job.layout_model.repository,
+                revision=job.layout_model.revision,
+            )
+            log_stage("models_resolved", model_started_at, batch_id=job.batch_id)
+            config_path = temp / "glmocr.yaml"
+            write_config(config_path, job, str(layout_path))
+            server_started_at = time.perf_counter()
+            vllm_log_path = temp / "vllm.log"
+            vllm, log_file = start_vllm(job, model_path, vllm_log_path)
+            log_stage("vllm_ready", server_started_at, batch_id=job.batch_id)
+            try:
+                with GlmOcr(
+                    config_path=str(config_path),
+                    layout_device=job.inference.layout_device,
+                ) as parser:
+                    for prepared in prepared_documents:
+                        request = prepared.request
+                        try:
+                            result = successful_result(
+                                job,
+                                prepared,
+                                parser,
+                                extracted,
+                            )
+                        except DocumentError as error:
+                            persist_vllm_diagnostic(
+                                output_directory,
+                                vllm_log_path,
+                                job,
+                                error=error,
+                                request=request,
+                            )
+                            result = failed_result(request, error)
+                            log_document_failure(
+                                request,
+                                error,
+                                document_count=prepared.document_count,
+                                document_index=prepared.document_index,
+                                started_at=prepared.started_at,
+                            )
+                        except Exception as error:
+                            document_error = DocumentError(
+                                "unexpected_runner_error",
+                                str(error),
+                                retryable=True,
+                            )
+                            persist_vllm_diagnostic(
+                                output_directory,
+                                vllm_log_path,
+                                job,
+                                error=document_error,
+                                request=request,
+                            )
+                            result = failed_result(request, document_error)
+                            log_document_failure(
+                                request,
+                                document_error,
+                                document_count=prepared.document_count,
+                                document_index=prepared.document_index,
+                                started_at=prepared.started_at,
+                            )
+                        results[request.request_id] = result
+                        log_batch_progress(job, results, batch_started_at)
+            except Exception as error:
+                persist_vllm_diagnostic(
+                    output_directory,
+                    vllm_log_path,
+                    job,
+                    error=error,
+                    request=None,
+                )
+                raise
+            finally:
+                stop_process(vllm, log_file)
+        else:
+            log_stage(
+                "inference_skipped",
+                batch_started_at,
+                batch_id=job.batch_id,
+                reused_documents=sum(item.state == "reused" for item in results.values()),
+            )
 
         manifest_path = output_directory / "result_manifest.json"
         manifest_path.unlink(missing_ok=True)
@@ -923,7 +1050,7 @@ def run(
             created_at=datetime.now(UTC),
             archive_sha256=file_sha256(archive),
             archive_size_bytes=archive.stat().st_size,
-            documents=tuple(results),
+            documents=tuple(results[request.request_id] for request in job.documents),
         )
         write_text_atomic(
             manifest_path,
@@ -933,7 +1060,7 @@ def run(
             "batch_committed",
             batch_started_at,
             batch_id=job.batch_id,
-            document_count=len(results),
+            document_count=len(job.documents),
         )
 
 

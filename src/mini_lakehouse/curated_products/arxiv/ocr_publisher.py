@@ -66,6 +66,12 @@ class ArxivOcrPublisher:
                 artifact_uri=artifact_uri,
             )
             return
+        if result.state == "reused":
+            raise RuntimeError(
+                f"Reused OCR processing {processing_key} has no imported artifact lineage"
+            )
+        if result.state != "succeeded":
+            raise RuntimeError(f"Cannot publish OCR result in state {result.state!r}")
 
         document_directory = extraction_directory.joinpath(
             *runner_document_path(result.arxiv_id, result.request_id).parts

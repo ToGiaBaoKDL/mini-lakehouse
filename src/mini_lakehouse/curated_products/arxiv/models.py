@@ -7,7 +7,11 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from mini_lakehouse.processing.ocr.core.identity import batch_id
-from mini_lakehouse.processing.ocr.core.protocol import OcrDocumentRequest, OcrJob
+from mini_lakehouse.processing.ocr.core.protocol import (
+    OcrDocumentRequest,
+    OcrJob,
+    OcrReuseReference,
+)
 
 
 class ArxivProductModel(BaseModel):
@@ -38,6 +42,7 @@ class OcrCandidate(ArxivProductModel):
     source_record_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     pdf_url: str
     attempt_count: int = Field(ge=0)
+    reuse: OcrReuseReference | None = None
 
 
 class OcrBatchDocument(ArxivProductModel):

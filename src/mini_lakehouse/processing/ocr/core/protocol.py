@@ -8,13 +8,14 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from mini_lakehouse.processing.ocr.core.identity import request_id
+from mini_lakehouse.processing.ocr.core.identity import processing_id, request_id
 from mini_lakehouse.processing.ocr.core.paths import PAGE_MARKDOWN_BUNDLE_PATH
 
 Sha256 = str
 OCR_OUTPUT_SCHEMA_VERSION = "1.1.0"
 DocumentState = Literal[
     "succeeded",
+    "reused",
     "retryable_failed",
     "terminal_failed",
 ]
@@ -24,12 +25,28 @@ class ProtocolModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+class OcrReuseReference(ProtocolModel):
+    pdf_sha256: Sha256 = Field(pattern=r"^[0-9a-f]{64}$")
+    pdf_size_bytes: int = Field(ge=1)
+    page_count: int = Field(ge=1)
+    processing_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    manifest_sha256: Sha256 = Field(pattern=r"^[0-9a-f]{64}$")
+
+    def matches(self, *, pdf_sha256: str, pdf_size_bytes: int, page_count: int) -> bool:
+        return (
+            self.pdf_sha256 == pdf_sha256
+            and self.pdf_size_bytes == pdf_size_bytes
+            and self.page_count == page_count
+        )
+
+
 class OcrDocumentRequest(ProtocolModel):
     request_id: str = Field(pattern=r"^[0-9a-f]{64}$")
     arxiv_id: str = Field(min_length=1, max_length=255)
     oai_datestamp: date
     source_record_sha256: Sha256 = Field(pattern=r"^[0-9a-f]{64}$")
     pdf_url: str = Field(pattern=r"^https://arxiv\.org/pdf/")
+    reuse: OcrReuseReference | None = None
 
 
 class OcrLimits(ProtocolModel):
@@ -87,6 +104,17 @@ class OcrJob(ProtocolModel):
                 raise ValueError(
                     f"OCR request identity does not match job configuration for {document.arxiv_id}"
                 )
+            if document.reuse is not None:
+                expected_processing_id = processing_id(
+                    arxiv_id=document.arxiv_id,
+                    pdf_sha256=document.reuse.pdf_sha256,
+                    configuration_hash=self.config_hash,
+                )
+                if document.reuse.processing_id != expected_processing_id:
+                    raise ValueError(
+                        f"OCR reuse identity does not match job configuration for "
+                        f"{document.arxiv_id}"
+                    )
         return self
 
 
@@ -191,7 +219,7 @@ class OcrDocumentResult(ProtocolModel):
 
     @model_validator(mode="after")
     def validate_outcome(self) -> OcrDocumentResult:
-        if self.state == "succeeded":
+        if self.state in {"succeeded", "reused"}:
             required = (
                 self.pdf_sha256,
                 self.pdf_size_bytes,
@@ -200,12 +228,15 @@ class OcrDocumentResult(ProtocolModel):
                 self.manifest_sha256,
             )
             if any(value is None for value in required):
-                raise ValueError("Successful OCR results require complete content lineage")
+                raise ValueError("Imported OCR results require complete content lineage")
             assert self.page_count is not None
             if self.error_code is not None or self.error_message is not None:
-                raise ValueError("Successful OCR results cannot contain an error")
+                raise ValueError("Imported OCR results cannot contain an error")
             paths = [file.relative_path for file in self.files]
-            validate_document_artifact_paths(paths, page_count=self.page_count)
+            if self.state == "succeeded":
+                validate_document_artifact_paths(paths, page_count=self.page_count)
+            elif paths:
+                raise ValueError("Reused OCR results cannot republish artifact files")
         else:
             if self.error_code is None or self.error_message is None:
                 raise ValueError("Failed OCR results require a typed error")

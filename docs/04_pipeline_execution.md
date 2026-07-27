@@ -63,9 +63,12 @@ schedule starts before landing is available, it fails clearly and can be retried
 ArXiv OCR does not hold a Prefect task open while polling a remote notebook. Each scheduled run
 performs one bounded state transition: recover only a kernel version carrying the same `batch_id`,
 reconcile that exact version, import each successful document independently, and submit at most one
-next batch of ten. It checks available Kaggle GPU quota before preparing durable batch state. The
-runner downloads PDFs into ephemeral storage, loads pinned layout/OCR models once, and emits no
-source PDF. `ocr_batches` is the durable outbox and `ocr_document_runs` preserves attempt history;
+next batch of two. It checks available Kaggle GPU quota before preparing durable batch state. The
+runner downloads PDFs into ephemeral storage and fingerprints the complete batch before resolving
+model resources. A metadata mutation whose PDF content matches the latest compatible import creates
+new request lineage that references the existing processing artifact; when every PDF is unchanged,
+the runner never starts vLLM. Changed PDFs share one pinned model startup, and no source PDF is
+published. `ocr_batches` is the durable outbox and `ocr_document_runs` preserves attempt history;
 the outbox stores the immutable validated runner request used to reconcile an in-flight batch
 across Prefect retries and code deployments. A prepared batch from an older processor configuration
 is closed and reselected under the current configuration only when no matching remote run exists.
@@ -114,11 +117,15 @@ prefect deployment run etl_arxiv_metadata/etl_arxiv_metadata \
   --param datestamp_date=2026-07-22 --param refresh=true
 prefect deployment run etl_arxiv_ocr/etl_arxiv_ocr \
   --param arxiv_ids='["2607.00001"]'
+prefect deployment run etl_arxiv_ocr/etl_arxiv_ocr \
+  --param arxiv_ids='["2607.00001"]' --param verify_pdf=true
 ```
 
 The normal metadata retry reuses a complete landing checkpoint and preserves its Iceberg snapshot
 IDs. Use `refresh=true` only for an intentional re-harvest of a closed ArXiv datestamp; that path
 replaces the exact daily raw archive and its identity-partitioned landing rows.
+`verify_pdf=true` is intentionally valid only with explicit IDs: it checks for a source PDF change
+even when OAI metadata has not changed, while avoiding an unbounded polling scan of ArXiv.
 
 ## Notifications
 

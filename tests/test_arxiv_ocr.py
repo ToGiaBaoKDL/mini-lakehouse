@@ -19,6 +19,7 @@ from mini_lakehouse.curated_products.arxiv.models import (
     OcrCandidate,
     OcrRunState,
 )
+from mini_lakehouse.curated_products.arxiv.ocr_publisher import ArxivOcrPublisher
 from mini_lakehouse.curated_products.arxiv.ocr_repository import ArxivOcrRepository
 from mini_lakehouse.curated_products.arxiv.ocr_service import ArxivOcrService
 from mini_lakehouse.platform.trino import QueryResult
@@ -49,6 +50,7 @@ from mini_lakehouse.processing.ocr.core.protocol import (
     OcrJob,
     OcrLimits,
     OcrModel,
+    OcrReuseReference,
 )
 from mini_lakehouse.processing.ocr.core.text import (
     build_page_markdown_bundle,
@@ -80,7 +82,30 @@ def _configuration_hash() -> str:
     return config_hash(load_contracts().processor("arxiv_glm_ocr"))
 
 
-def _job(attempt_count: int = 1) -> OcrJob:
+def _reuse_reference(
+    *,
+    arxiv_id: str = "hep-th/9901001",
+    configuration_hash: str | None = None,
+) -> OcrReuseReference:
+    current_hash = configuration_hash or _configuration_hash()
+    return OcrReuseReference(
+        pdf_sha256="d" * 64,
+        pdf_size_bytes=100,
+        page_count=1,
+        processing_id=processing_id(
+            arxiv_id=arxiv_id,
+            pdf_sha256="d" * 64,
+            configuration_hash=current_hash,
+        ),
+        manifest_sha256="e" * 64,
+    )
+
+
+def _job(
+    attempt_count: int = 1,
+    *,
+    reuse: OcrReuseReference | None = None,
+) -> OcrJob:
     processor = load_contracts().processor("arxiv_glm_ocr")
     configuration_hash = _configuration_hash()
     request = OcrDocumentRequest(
@@ -93,6 +118,7 @@ def _job(attempt_count: int = 1) -> OcrJob:
         oai_datestamp=date(2026, 7, 22),
         source_record_sha256=SOURCE_RECORD_SHA256,
         pdf_url="https://arxiv.org/pdf/hep-th/9901001",
+        reuse=reuse,
     )
     batch_key = batch_id(
         (request.request_id,),
@@ -194,6 +220,43 @@ def _successful_output(output: Path, job: OcrJob, *, include_untracked_file: boo
         (root / "untracked.txt").write_text("not declared by the manifest", encoding="utf-8")
     archive = output / "result.tar.zst"
     _archive(root, archive)
+    manifest = OcrBatchManifest(
+        schema_version="1.0.0",
+        batch_id=job.batch_id,
+        created_at=datetime.now(UTC),
+        archive_sha256=file_sha256(archive),
+        archive_size_bytes=archive.stat().st_size,
+        documents=(result,),
+    )
+    (output / "result_manifest.json").write_text(
+        manifest.model_dump_json(),
+        encoding="utf-8",
+    )
+
+
+def _reused_output(
+    output: Path,
+    job: OcrJob,
+    *,
+    manifest_sha256: str | None = None,
+) -> None:
+    request = job.documents[0]
+    assert request.reuse is not None
+    content = output / "content"
+    content.mkdir()
+    archive = output / "result.tar.zst"
+    _archive(content, archive)
+    reuse = request.reuse
+    result = OcrDocumentResult(
+        request_id=request.request_id,
+        arxiv_id=request.arxiv_id,
+        state="reused",
+        pdf_sha256=reuse.pdf_sha256,
+        pdf_size_bytes=reuse.pdf_size_bytes,
+        page_count=reuse.page_count,
+        processing_id=reuse.processing_id,
+        manifest_sha256=manifest_sha256 or reuse.manifest_sha256,
+    )
     manifest = OcrBatchManifest(
         schema_version="1.0.0",
         batch_id=job.batch_id,
@@ -371,6 +434,95 @@ def test_completed_runner_output_is_validated_and_safely_extracted(tmp_path: Pat
 
     assert manifest.batch_id == job.batch_id
     assert manifest.documents[0].state == "succeeded"
+
+
+def test_unchanged_pdf_reuses_validated_content_without_republishing_files(
+    tmp_path: Path,
+) -> None:
+    reuse = _reuse_reference()
+    job = _job(reuse=reuse)
+    output = tmp_path / "output"
+    output.mkdir()
+    _reused_output(output, job)
+
+    manifest = validate_runner_output(output, tmp_path / "extracted", job=job)
+
+    assert manifest.documents[0].state == "reused"
+    assert manifest.documents[0].processing_id == reuse.processing_id
+    assert not any((tmp_path / "extracted").rglob("*"))
+
+
+def test_reused_output_must_match_requested_content_lineage(tmp_path: Path) -> None:
+    job = _job(reuse=_reuse_reference())
+    output = tmp_path / "output"
+    output.mkdir()
+    _reused_output(output, job, manifest_sha256="f" * 64)
+
+    with pytest.raises(InvalidOcrOutputError, match="lineage does not match"):
+        validate_runner_output(output, tmp_path / "extracted", job=job)
+
+
+class _ExistingProcessingRepository:
+    def __init__(self, manifest_sha256: str, artifact_uri: str) -> None:
+        self.existing = (manifest_sha256, artifact_uri)
+        self.imported: tuple[str, OcrDocumentResult, str] | None = None
+
+    def processing_manifest(
+        self,
+        _executor: object,
+        _processing_id: str,
+    ) -> tuple[str, str]:
+        return self.existing
+
+    def mark_document_imported(
+        self,
+        _executor: object,
+        *,
+        batch_id: str,
+        result: OcrDocumentResult,
+        artifact_uri: str,
+    ) -> None:
+        self.imported = (batch_id, result, artifact_uri)
+
+
+def test_reused_result_links_existing_artifacts_without_object_writes(tmp_path: Path) -> None:
+    processor = load_contracts().processor("arxiv_glm_ocr")
+    reuse = _reuse_reference()
+    job = _job(reuse=reuse)
+    request = job.documents[0]
+    result = OcrDocumentResult(
+        request_id=request.request_id,
+        arxiv_id=request.arxiv_id,
+        state="reused",
+        pdf_sha256=reuse.pdf_sha256,
+        pdf_size_bytes=reuse.pdf_size_bytes,
+        page_count=reuse.page_count,
+        processing_id=reuse.processing_id,
+        manifest_sha256=reuse.manifest_sha256,
+    )
+    uri = artifact_root_uri(
+        Settings(),
+        processor,
+        arxiv_id=request.arxiv_id,
+        processing_id=reuse.processing_id,
+    )
+    repository = _ExistingProcessingRepository(reuse.manifest_sha256, uri)
+    publisher = ArxivOcrPublisher(
+        Settings(),
+        processor,
+        cast(Any, repository),
+        cast(Any, _NoopObjectStore()),
+    )
+
+    publisher.publish(
+        cast(Any, _NoopExecutor()),
+        job,
+        result,
+        tmp_path / "missing-extracted",
+        tmp_path,
+    )
+
+    assert repository.imported == (job.batch_id, result, uri)
 
 
 def test_runner_output_rejects_files_not_declared_by_the_manifest(tmp_path: Path) -> None:
@@ -920,8 +1072,9 @@ class _NoopExecutor:
 
 
 class _SqlCapture:
-    def __init__(self) -> None:
+    def __init__(self, rows: tuple[tuple[Any, ...], ...] = ()) -> None:
         self.calls: list[tuple[str, tuple[Any, ...] | None]] = []
+        self.rows = rows
 
     def execute(
         self,
@@ -929,7 +1082,7 @@ class _SqlCapture:
         parameters: Sequence[Any] | None = None,
     ) -> QueryResult:
         self.calls.append((statement, tuple(parameters) if parameters is not None else None))
-        return QueryResult(columns=(), rows=())
+        return QueryResult(columns=(), rows=self.rows)
 
 
 def test_ocr_repository_publishes_the_batch_commit_marker_last() -> None:
@@ -987,7 +1140,7 @@ class _ActiveBatchExecutor:
 
 
 def test_active_ocr_batch_restores_its_immutable_job_payload() -> None:
-    job = _job()
+    job = _job(reuse=_reuse_reference())
 
     active = ArxivOcrRepository(Settings()).active_batch(_ActiveBatchExecutor(job))
 
@@ -1031,15 +1184,50 @@ def test_ocr_candidates_use_config_identity_and_ignore_orphan_attempts() -> None
     assert "document.config_hash = ?" in statement
     assert "json_extract_scalar" not in statement
     assert "success.arxiv_id IS NULL" in statement
+    assert "reusable_success" in statement
+    assert "document.artifact_uri IS NOT NULL" in statement
     assert parameters == (
         _configuration_hash(),
         "imported",
         _configuration_hash(),
+        "imported",
+        _configuration_hash(),
+        False,
         "retryable_failed",
         processor.retry.max_document_attempts,
     )
     assert parameters is not None
     assert statement.count("?") == len(parameters)
+
+
+def test_ocr_candidates_attach_latest_reusable_content_lineage() -> None:
+    reusable = _reuse_reference(arxiv_id="2607.00001")
+    executor = _SqlCapture(
+        rows=(
+            (
+                "2607.00001",
+                date(2026, 7, 27),
+                "f" * 64,
+                "https://arxiv.org/pdf/2607.00001",
+                0,
+                reusable.pdf_sha256,
+                reusable.pdf_size_bytes,
+                reusable.page_count,
+                reusable.processing_id,
+                reusable.manifest_sha256,
+            ),
+        )
+    )
+
+    candidates = ArxivOcrRepository(Settings()).candidates(
+        executor,
+        load_contracts().processor("arxiv_glm_ocr"),
+        configuration_hash=_configuration_hash(),
+        limit=1,
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].reuse == reusable
 
 
 def test_document_state_is_committed_before_batch_state() -> None:
@@ -1176,10 +1364,12 @@ class _LimitCaptureRepository(_IdleRepository):
     def __init__(self) -> None:
         self.limit: int | None = None
         self.arxiv_ids: tuple[str, ...] | None = None
+        self.verify_pdf: bool | None = None
 
     def candidates(self, *_args: object, **kwargs: object) -> tuple[OcrCandidate, ...]:
         self.limit = cast(int, kwargs["limit"])
         self.arxiv_ids = cast(tuple[str, ...], kwargs["arxiv_ids"])
+        self.verify_pdf = cast(bool, kwargs["verify_pdf"])
         return ()
 
 
@@ -1208,6 +1398,7 @@ def test_ocr_cycle_uses_the_declared_hard_batch_limit() -> None:
     assert service.run_once().action == "idle"
     assert repository.limit == 2
     assert repository.arxiv_ids == ()
+    assert repository.verify_pdf is False
 
 
 def test_ocr_cycle_passes_every_explicit_identifier_without_truncating() -> None:
@@ -1223,6 +1414,35 @@ def test_ocr_cycle_passes_every_explicit_identifier_without_truncating() -> None
     assert service.run_once(arxiv_ids=("2607.00001", "2607.00002")).action == "idle"
     assert repository.limit == 2
     assert repository.arxiv_ids == ("2607.00001", "2607.00002")
+    assert repository.verify_pdf is False
+
+
+def test_ocr_cycle_forces_a_bounded_pdf_verification() -> None:
+    repository = _LimitCaptureRepository()
+    service = ArxivOcrService(
+        Settings(),
+        executor=cast(Any, _NoopExecutor()),
+        table_manager=cast(Any, _NoopTableManager()),
+        repository=cast(Any, repository),
+        object_store=cast(Any, _NoopObjectStore()),
+    )
+
+    assert service.run_once(arxiv_ids=("2607.00001",), verify_pdf=True).action == "idle"
+    assert repository.arxiv_ids == ("2607.00001",)
+    assert repository.verify_pdf is True
+
+
+def test_ocr_cycle_rejects_unbounded_pdf_verification() -> None:
+    service = ArxivOcrService(
+        Settings(),
+        executor=cast(Any, _NoopExecutor()),
+        table_manager=cast(Any, _NoopTableManager()),
+        repository=cast(Any, _IdleRepository()),
+        object_store=cast(Any, _NoopObjectStore()),
+    )
+
+    with pytest.raises(ValueError, match="at least one explicit ArXiv ID"):
+        service.run_once(verify_pdf=True)
 
 
 def test_ocr_cycle_rejects_more_explicit_ids_than_one_complete_batch() -> None:
