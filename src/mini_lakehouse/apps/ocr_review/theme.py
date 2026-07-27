@@ -29,20 +29,20 @@ _CSS = """
     margin: .75rem 0 0;
     max-width: 48rem;
 }
-.ocr-paper-title {
-    font-size: clamp(1.35rem, 2.5vw, 1.75rem);
+div[data-testid="stMarkdownContainer"] h2.ocr-paper-title {
+    font-size: clamp(1.05rem, 1.7vw, 1.3rem) !important;
     letter-spacing: -.025em;
     line-height: 1.25;
     margin: 0 0 .65rem;
 }
-.ocr-paper-title a {
-    color: var(--text-color);
-    text-decoration-color: color-mix(in srgb, var(--primary-color) 45%, transparent);
+div[data-testid="stMarkdownContainer"] h2.ocr-paper-title > a {
+    color: var(--primary-color) !important;
+    text-decoration-color: color-mix(in srgb, var(--primary-color) 55%, transparent);
     text-decoration-thickness: .08em;
     text-underline-offset: .16em;
 }
-.ocr-paper-title a:hover {
-    color: var(--primary-color);
+div[data-testid="stMarkdownContainer"] h2.ocr-paper-title > a:hover {
+    color: var(--primary-color) !important;
     text-decoration-color: var(--primary-color);
 }
 .ocr-status {

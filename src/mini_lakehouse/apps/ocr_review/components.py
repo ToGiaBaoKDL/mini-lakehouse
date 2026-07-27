@@ -40,6 +40,16 @@ def run_label(run: OcrDocumentRun) -> str:
     return f"{timestamp} · {run.state.replace('_', ' ')} · {revision} · attempt {run.attempt_count}"
 
 
+def page_markdown(elements: tuple[OcrPageElement, ...]) -> str:
+    """Rebuild one page from its canonical elements in reading order."""
+    blocks = []
+    for element in sorted(elements, key=lambda item: (item.reading_order, item.element_id)):
+        content = (element.markdown_content or element.text_content).strip()
+        if content:
+            blocks.append(content)
+    return "\n\n".join(blocks)
+
+
 def render_run_header(run: OcrDocumentRun) -> None:
     title = run.title or f"ArXiv {run.arxiv_id}"
     st.markdown(
@@ -52,10 +62,14 @@ def render_run_header(run: OcrDocumentRun) -> None:
         f"{escape(run.state.replace('_', ' ').upper())}</span>",
         unsafe_allow_html=True,
     )
-    st.caption(
-        f"arXiv:{run.arxiv_id} · OAI {run.oai_datestamp.isoformat()} "
-        f"· PDF {_display_bytes(run.pdf_size_bytes)}"
-    )
+    metadata = [
+        f"arXiv:{run.arxiv_id}",
+        f"OAI {run.oai_datestamp.isoformat()}",
+        f"PDF {_display_bytes(run.pdf_size_bytes)}",
+    ]
+    if run.state == "imported" and run.page_count is not None:
+        metadata.append(f"Pages {run.page_count}")
+    st.caption(" · ".join(metadata))
 
 
 def render_elements(elements: tuple[OcrPageElement, ...]) -> None:

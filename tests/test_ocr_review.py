@@ -5,12 +5,13 @@ from typing import Any
 
 import pytest
 
-from mini_lakehouse.apps.ocr_review import state
+from mini_lakehouse.apps.ocr_review import components, state
 from mini_lakehouse.config.settings import Settings
 from mini_lakehouse.curated_products.arxiv.review.artifacts import OcrArtifactReader
 from mini_lakehouse.curated_products.arxiv.review.models import (
     OcrDocumentFilter,
     OcrDocumentRun,
+    OcrPageElement,
     OcrRunState,
     OcrStateFilter,
 )
@@ -184,11 +185,51 @@ def test_review_run_exposes_the_canonical_arxiv_paper_url() -> None:
     )
 
 
+def test_run_header_shows_page_count_only_for_imported_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def ignore_markdown(*args: object, **kwargs: object) -> None:
+        pass
+
+    captions: list[str] = []
+    monkeypatch.setattr(components.st, "markdown", ignore_markdown)
+    monkeypatch.setattr(components.st, "caption", captions.append)
+
+    components.render_run_header(_run("9" * 64))
+    assert captions == ["arXiv:2607.20571 · OAI 2026-07-25 · PDF 100.0 B · Pages 1"]
+
+    captions.clear()
+    failed = _run("9" * 64).model_copy(update={"state": OcrRunState.RETRYABLE_FAILED})
+    components.render_run_header(failed)
+    assert captions == ["arXiv:2607.20571 · OAI 2026-07-25 · PDF 100.0 B"]
+
+
+def test_page_markdown_uses_page_elements_in_reading_order() -> None:
+    elements = (
+        OcrPageElement(
+            element_id="second",
+            page_number=2,
+            reading_order=1,
+            element_type="text",
+            text_content="Plain-text fallback",
+        ),
+        OcrPageElement(
+            element_id="first",
+            page_number=2,
+            reading_order=0,
+            element_type="text",
+            text_content="Ignored text",
+            markdown_content="# Page two",
+        ),
+    )
+
+    assert components.page_markdown(elements) == "# Page two\n\nPlain-text fallback"
+
+
 def test_review_session_resets_dependent_selection_consistently() -> None:
     session: dict[str, object] = {}
     state.initialize(session)
 
-    assert session[state.SessionKey.VIEW] == state.ReviewView.PAGE.value
     assert state.reconcile_document(session, ("paper-a", "paper-b")) == "paper-a"
     session[state.SessionKey.RUN_KEY] = "old-run"
     session[state.SessionKey.PAGE_NUMBER] = 7

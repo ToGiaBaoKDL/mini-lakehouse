@@ -14,14 +14,6 @@ class SessionKey(StrEnum):
     DOCUMENT_ID = "ocr_review.document_id"
     RUN_KEY = "ocr_review.run_key"
     PAGE_NUMBER = "ocr_review.page_number"
-    VIEW = "ocr_review.view"
-
-
-class ReviewView(StrEnum):
-    PAGE = "Page"
-    MARKDOWN = "Markdown"
-    ELEMENTS = "Elements"
-    MANIFEST = "Manifest"
 
 
 DEFAULTS: dict[SessionKey, object] = {
@@ -31,7 +23,6 @@ DEFAULTS: dict[SessionKey, object] = {
     SessionKey.DOCUMENT_ID: "",
     SessionKey.RUN_KEY: "",
     SessionKey.PAGE_NUMBER: 1,
-    SessionKey.VIEW: ReviewView.PAGE.value,
 }
 
 
@@ -52,12 +43,10 @@ def initialize(state: SessionState) -> None:
 def reset_run(state: SessionState) -> None:
     state[SessionKey.RUN_KEY] = ""
     state[SessionKey.PAGE_NUMBER] = 1
-    state[SessionKey.VIEW] = ReviewView.PAGE.value
 
 
 def reset_page(state: SessionState) -> None:
     state[SessionKey.PAGE_NUMBER] = 1
-    state[SessionKey.VIEW] = ReviewView.PAGE.value
 
 
 def _get(state: SessionState, key: SessionKey, default: object) -> Any:

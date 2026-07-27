@@ -9,6 +9,7 @@ import streamlit as st
 from mini_lakehouse.apps.ocr_review import state
 from mini_lakehouse.apps.ocr_review.components import (
     document_label,
+    page_markdown,
     render_elements,
     render_hero,
     render_run_header,
@@ -29,7 +30,6 @@ from mini_lakehouse.curated_products.arxiv.review.artifacts import OcrArtifactCo
 
 LOGGER = logging.getLogger(__name__)
 STATE_OPTIONS = tuple(item.value for item in OcrStateFilter)
-VIEW_OPTIONS = tuple(item.value for item in state.ReviewView)
 
 st.set_page_config(
     page_title="OCR Review · Mini Lakehouse",
@@ -76,14 +76,6 @@ def load_page_elements(processing_id: str, page_number: int) -> tuple[OcrPageEle
         processing_id=processing_id,
         page_number=page_number,
     )
-
-
-@st.cache_data(ttl=300, max_entries=128, show_spinner=False)
-def load_markdown(
-    run: OcrDocumentRun,
-    manifest: PublishedOcrManifest,
-) -> str:
-    return review_service().markdown(run, manifest)
 
 
 def on_document_change() -> None:
@@ -196,52 +188,30 @@ def render_artifacts(run: OcrDocumentRun) -> None:
         st.error(f"Cannot validate this OCR artifact manifest: {error}")
         return
 
-    selected_view = st.segmented_control(
-        "Review view",
-        VIEW_OPTIONS,
-        key=state.SessionKey.VIEW,
-        selection_mode="single",
-        label_visibility="collapsed",
-        width="stretch",
-    )
-    page_number = 1
+    _, selector_column = st.columns((2.2, 1), gap="large")
+    with selector_column:
+        page_number = select_page(run.page_count)
 
     try:
-        if selected_view == state.ReviewView.PAGE:
-            image_column, summary_column = st.columns((2.2, 1), gap="large")
-            with summary_column:
-                page_number = select_page(run.page_count)
-            image = load_page_image(run, manifest, page_number)
-            elements = load_page_elements(run.processing_id, page_number)
-            with image_column:
+        image = load_page_image(run, manifest, page_number)
+        elements = load_page_elements(run.processing_id, page_number)
+
+        page_column, markdown_column = st.columns(2, gap="large")
+        with page_column:
+            st.markdown("#### Annotated page")
+            with st.container(height=760, border=True):
                 st.image(
                     image.data,
-                    caption=f"Annotated page {page_number} · {image.relative_path}",
+                    caption=f"Page {page_number} of {run.page_count}",
                     width="stretch",
                 )
-            with summary_column:
-                type_counts: dict[str, int] = {}
-                for element in elements:
-                    type_counts[element.element_type] = type_counts.get(element.element_type, 0) + 1
-                st.dataframe(
-                    [
-                        {"Element type": element_type, "Count": count}
-                        for element_type, count in sorted(type_counts.items())
-                    ],
-                    hide_index=True,
-                    width="stretch",
-                )
-        elif selected_view == state.ReviewView.MARKDOWN:
-            markdown = load_markdown(run, manifest)
+        with markdown_column:
+            st.markdown("#### Markdown")
             with st.container(height=760, border=True):
-                st.markdown(markdown)
-        elif selected_view == state.ReviewView.ELEMENTS:
-            _, selector_column = st.columns((2.2, 1), gap="large")
-            with selector_column:
-                page_number = select_page(run.page_count)
-            render_elements(load_page_elements(run.processing_id, page_number))
-        elif selected_view == state.ReviewView.MANIFEST:
-            st.json(manifest.model_dump(mode="json"), expanded=2)
+                st.markdown(page_markdown(elements))
+
+        st.markdown("#### Elements")
+        render_elements(elements)
     except Exception as error:
         LOGGER.exception(
             "Cannot render OCR artifact for %s page %s",
