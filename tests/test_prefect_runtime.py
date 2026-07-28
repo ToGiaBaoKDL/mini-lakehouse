@@ -64,7 +64,7 @@ def test_prefect_runtime_bootstrap_uses_pool_upsert_and_skips_unchanged_queues(
     current_queues = {
         queue.name: SimpleNamespace(
             id=uuid4(),
-            description=queue.description,
+            description="Server-managed description",
             is_paused=queue.is_paused,
             concurrency_limit=queue.concurrency_limit,
             priority=queue.priority,

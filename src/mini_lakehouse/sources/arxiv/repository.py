@@ -16,7 +16,6 @@ from mini_lakehouse.contracts import (
     arrow_schema,
     load_contracts,
 )
-from mini_lakehouse.contracts.sources import SourceTableContract
 from mini_lakehouse.storage.iceberg import load_iceberg_catalog
 
 
@@ -186,6 +185,3 @@ class ArxivLandingRepository:
             records_snapshot_id=records_snapshot_id,
             checkpoint_snapshot_id=checkpoint_snapshot_id,
         )
-
-    def table_contract(self, key: str) -> SourceTableContract:
-        return self._source.table(key)

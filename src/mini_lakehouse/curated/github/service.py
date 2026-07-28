@@ -1,6 +1,5 @@
 """GitHub curation use case boundary."""
 
-from contextlib import nullcontext
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
@@ -41,12 +40,14 @@ class GithubCurationService:
         self._repository = repository or GithubCurationRepository(settings, registry)
 
     def curate(self, source_hour: ArchiveHour) -> GithubCurationResult:
-        owned_executor = TrinoExecutor(self._settings.trino) if self._executor is None else None
-        context = owned_executor if owned_executor is not None else nullcontext(self._executor)
-        with context as executor:
-            if executor is None:
-                raise RuntimeError("A SQL executor is required")
-            source_rows, counts = self._repository.curate_hour(executor, source_hour)
+        if self._executor is not None:
+            source_rows, counts = self._repository.curate_hour(
+                self._executor,
+                source_hour,
+            )
+        else:
+            with TrinoExecutor(self._settings.trino) as executor:
+                source_rows, counts = self._repository.curate_hour(executor, source_hour)
         return GithubCurationResult(
             source_hour=source_hour.value,
             source_rows=source_rows,

@@ -80,7 +80,7 @@ async def _configure_queue(
             ("concurrency_limit", desired.concurrency_limit),
             ("priority", desired.priority),
         )
-        if getattr(current, field) != value
+        if field in desired.model_fields_set and getattr(current, field) != value
     }
     if updates:
         await client.update_work_queue(current.id, **updates)

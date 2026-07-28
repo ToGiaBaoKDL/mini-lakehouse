@@ -1,6 +1,5 @@
 """ArXiv current-state curation use case."""
 
-from contextlib import nullcontext
 from datetime import date
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -41,12 +40,11 @@ class ArxivCurationService:
         self._repository = repository or ArxivCurationRepository(settings, registry)
 
     def curate_day(self, day: date) -> ArxivCurationResult:
-        owned_executor = TrinoExecutor(self._settings.trino) if self._executor is None else None
-        context = owned_executor if owned_executor is not None else nullcontext(self._executor)
-        with context as executor:
-            if executor is None:
-                raise RuntimeError("A SQL executor is required")
-            counts = self._repository.curate_day(executor, day)
+        if self._executor is not None:
+            counts = self._repository.curate_day(self._executor, day)
+        else:
+            with TrinoExecutor(self._settings.trino) as executor:
+                counts = self._repository.curate_day(executor, day)
         return ArxivCurationResult(
             datestamp_date=day,
             source_rows=counts["source"],

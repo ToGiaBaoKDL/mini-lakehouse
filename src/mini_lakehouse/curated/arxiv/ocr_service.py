@@ -1,6 +1,5 @@
 """Reconcile one remote OCR run and submit the next bounded ArXiv batch."""
 
-from contextlib import nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -91,49 +90,70 @@ class ArxivOcrService:
             raise ValueError(f"An explicit OCR run accepts at most {limit} unique arxiv_ids")
         if verify_pdf and not identifiers:
             raise ValueError("PDF verification requires at least one explicit ArXiv ID")
-        owned_executor = TrinoExecutor(self._settings.trino) if self._executor is None else None
-        context = owned_executor if owned_executor is not None else nullcontext(self._executor)
-        with context as executor:
-            if executor is None:
-                raise RuntimeError("A SQL executor is required")
-            active = self._repository.active_batch(executor)
-            requested_provider = provider or self._processor.runner.default_provider
-            active_provider = self._provider_client(active.provider) if active is not None else None
-            reconciliation: OcrCycleResult | None = None
-            if active is not None:
-                assert active_provider is not None
-                if active.provider_reference != active_provider.reference:
-                    raise RuntimeError(
-                        f"Active OCR batch {active.batch_id} belongs to "
-                        f"{active.provider_reference!r}, but {active.provider!r} is configured as "
-                        f"{active_provider.reference!r}; drain the persisted execution before "
-                        "renaming its provider resource"
-                    )
-                reconciliation = self._reconcile(executor, active_provider, active)
-                if reconciliation.action in {"waiting", "submitted"}:
-                    return reconciliation
-
-            submitted = self._submit_next(
-                executor,
-                None,
-                provider_name=requested_provider,
+        if self._executor is not None:
+            return self._run_with_executor(
+                self._executor,
+                identifiers=identifiers,
                 limit=limit,
-                arxiv_ids=identifiers,
+                provider=provider,
                 verify_pdf=verify_pdf,
             )
-            if submitted is not None:
-                if reconciliation is None:
-                    return submitted
-                return submitted.model_copy(
-                    update={
-                        "action": "reconciled_and_submitted",
-                        "reconciled_batch_id": reconciliation.batch_id,
-                        "imported_documents": reconciliation.imported_documents,
-                        "retryable_failures": reconciliation.retryable_failures,
-                        "terminal_failures": reconciliation.terminal_failures,
-                    }
+        with TrinoExecutor(self._settings.trino) as executor:
+            return self._run_with_executor(
+                executor,
+                identifiers=identifiers,
+                limit=limit,
+                provider=provider,
+                verify_pdf=verify_pdf,
+            )
+
+    def _run_with_executor(
+        self,
+        executor: SqlExecutor,
+        *,
+        identifiers: tuple[str, ...],
+        limit: int,
+        provider: OcrProviderName | None,
+        verify_pdf: bool,
+    ) -> OcrCycleResult:
+        active = self._repository.active_batch(executor)
+        requested_provider = provider or self._processor.runner.default_provider
+        active_provider = self._provider_client(active.provider) if active is not None else None
+        reconciliation: OcrCycleResult | None = None
+        if active is not None:
+            assert active_provider is not None
+            if active.provider_reference != active_provider.reference:
+                raise RuntimeError(
+                    f"Active OCR batch {active.batch_id} belongs to "
+                    f"{active.provider_reference!r}, but {active.provider!r} is configured as "
+                    f"{active_provider.reference!r}; drain the persisted execution before "
+                    "renaming its provider resource"
                 )
-            return reconciliation or OcrCycleResult(action="idle")
+            reconciliation = self._reconcile(executor, active_provider, active)
+            if reconciliation.action in {"waiting", "submitted"}:
+                return reconciliation
+
+        submitted = self._submit_next(
+            executor,
+            None,
+            provider_name=requested_provider,
+            limit=limit,
+            arxiv_ids=identifiers,
+            verify_pdf=verify_pdf,
+        )
+        if submitted is not None:
+            if reconciliation is None:
+                return submitted
+            return submitted.model_copy(
+                update={
+                    "action": "reconciled_and_submitted",
+                    "reconciled_batch_id": reconciliation.batch_id,
+                    "imported_documents": reconciliation.imported_documents,
+                    "retryable_failures": reconciliation.retryable_failures,
+                    "terminal_failures": reconciliation.terminal_failures,
+                }
+            )
+        return reconciliation or OcrCycleResult(action="idle")
 
     def _provider_client(self, name: OcrProviderName) -> OcrProvider:
         if self._provider is not None:

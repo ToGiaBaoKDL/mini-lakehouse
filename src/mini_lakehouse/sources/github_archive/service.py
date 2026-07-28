@@ -1,7 +1,6 @@
 """GitHub Archive ingestion use case."""
 
 import logging
-from contextlib import nullcontext
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -34,14 +33,13 @@ class GithubArchiveIngestionService:
         self._repository = repository
 
     def ingest(self, archive_hour: ArchiveHour) -> IngestionResult:
-        owned = (
-            GithubArchiveRepository(self._settings, contracts=self._contracts)
-            if self._repository is None
-            else None
-        )
-        context = owned if owned is not None else nullcontext(self._repository)
-        with context as repository:
-            return self._ingest(repository, archive_hour)  # type: ignore[arg-type]
+        if self._repository is not None:
+            return self._ingest(self._repository, archive_hour)
+        with GithubArchiveRepository(
+            self._settings,
+            contracts=self._contracts,
+        ) as repository:
+            return self._ingest(repository, archive_hour)
 
     def _ingest(
         self,

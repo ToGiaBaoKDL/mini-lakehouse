@@ -1,10 +1,8 @@
 """Source-owned Iceberg repository and idempotent partition commit."""
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from types import TracebackType
-from typing import Any
 
 import pyarrow as pa
 from pyiceberg.catalog import Catalog
@@ -109,6 +107,3 @@ class GithubArchiveRepository:
             snapshot_id=snapshot.snapshot_id if snapshot is not None else None,
             was_written=True,
         )
-
-    def properties(self) -> Mapping[str, Any]:
-        return self._table().properties
