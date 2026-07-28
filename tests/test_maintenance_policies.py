@@ -2,6 +2,7 @@ from typing import Any, cast
 from unittest.mock import create_autospec
 
 import pytest
+from apache_polaris.sdk.catalog.models import ApplicablePolicy
 from pyiceberg.catalog import Catalog
 from pyiceberg.partitioning import PartitionField, PartitionSpec
 from pyiceberg.schema import Schema
@@ -11,10 +12,7 @@ from pyiceberg.types import DateType, IcebergType, NestedField, TimestamptzType
 
 from mini_lakehouse.contracts import TableIdentifier, load_contracts
 from mini_lakehouse.contracts.maintenance import MaintenancePolicy, policy_content_json
-from mini_lakehouse.platform.catalog.polaris import (
-    PolarisPolicy,
-    PolarisPolicyClient,
-)
+from mini_lakehouse.platform.catalog.policies import PolarisPolicyClient
 from mini_lakehouse.platform.catalog.tables import metadata_retention_properties
 from mini_lakehouse.platform.maintenance import (
     build_maintenance_plan,
@@ -28,9 +26,9 @@ def _target_applies(table: TableIdentifier, target_type: str, path: tuple[str, .
     return table.namespace[: len(path)] == path
 
 
-def _policies(table: TableIdentifier) -> list[PolarisPolicy]:
+def _policies(table: TableIdentifier) -> list[ApplicablePolicy]:
     return [
-        PolarisPolicy.model_validate(
+        ApplicablePolicy.model_validate(
             {
                 "name": spec.name,
                 "policy-type": spec.policy_type,
@@ -253,7 +251,7 @@ class _Catalog:
 
 
 class _PolicyClient:
-    def applicable_policies(self, table: TableIdentifier) -> list[PolarisPolicy]:
+    def applicable_policies(self, table: TableIdentifier) -> list[ApplicablePolicy]:
         return _policies(table)
 
 

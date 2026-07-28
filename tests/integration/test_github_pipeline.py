@@ -161,6 +161,13 @@ def test_landing_curation_merge_and_analytics_build_end_to_end() -> None:
     contracts = load_contracts(settings.contracts_dir)
     product = contracts.curated_product("github")
     domain = contracts.domain("engineering")
+    events_relation = product.table_identifier("events").trino(settings.polaris.catalog_name)
+    actors_relation = product.table_identifier("actors_current").trino(
+        settings.polaris.catalog_name
+    )
+    repositories_relation = product.table_identifier("repositories_current").trino(
+        settings.polaris.catalog_name
+    )
     with TrinoExecutor(settings.trino) as executor:
         curation = GithubCurationService(settings, executor=executor, contracts=contracts)
         curation.curate(first_hour)
@@ -173,7 +180,7 @@ def test_landing_curation_merge_and_analytics_build_end_to_end() -> None:
         events = executor.execute(
             f"""
             SELECT event_date_utc, source_hour, repository_name, actor_login
-            FROM {product.table_identifier("events").trino(settings.trino.catalog)}
+            FROM {events_relation}
             WHERE event_id = ?
             """,
             (_EVENT_ID,),
@@ -181,7 +188,7 @@ def test_landing_curation_merge_and_analytics_build_end_to_end() -> None:
         actors = executor.execute(
             f"""
             SELECT actor_login, last_observed_at
-            FROM {product.table_identifier("actors_current").trino(settings.trino.catalog)}
+            FROM {actors_relation}
             WHERE actor_id = ?
             """,
             (_ACTOR_ID,),
@@ -189,7 +196,7 @@ def test_landing_curation_merge_and_analytics_build_end_to_end() -> None:
         repositories = executor.execute(
             f"""
             SELECT repository_name, last_observed_at
-            FROM {product.table_identifier("repositories_current").trino(settings.trino.catalog)}
+            FROM {repositories_relation}
             WHERE repository_id = ?
             """,
             (_REPOSITORY_ID,),
@@ -218,11 +225,11 @@ def test_landing_curation_merge_and_analytics_build_end_to_end() -> None:
     repository_mart_relation = TableIdentifier(
         domain.analytics_namespace,
         "fct_repository_activity_daily",
-    ).trino(settings.trino.catalog)
+    ).trino(settings.polaris.catalog_name)
     contributor_mart_relation = TableIdentifier(
         domain.analytics_namespace,
         "fct_contributor_activity_daily",
-    ).trino(settings.trino.catalog)
+    ).trino(settings.polaris.catalog_name)
     with TrinoExecutor(settings.trino) as executor:
         first_build = _engineering_mart_rows(
             executor,
@@ -241,7 +248,7 @@ def test_landing_curation_merge_and_analytics_build_end_to_end() -> None:
         temporary_relations = executor.execute(
             f"""
             SELECT table_name
-            FROM "{settings.trino.catalog}".information_schema.tables
+            FROM "{settings.polaris.catalog_name}".information_schema.tables
             WHERE table_schema = ?
               AND (
                   table_name LIKE '%__dbt_tmp%'

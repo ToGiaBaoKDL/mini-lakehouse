@@ -3,11 +3,20 @@ from pathlib import Path
 from typing import Literal, Self
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
+from pydantic_settings import (
+    BaseSettings,
+    NestedSecretsSettingsSource,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 
 
-class StorageEndpointSettings(BaseModel):
+class _SettingsModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class StorageEndpointSettings(_SettingsModel):
     external_url: str | None = "http://localhost:9000"
     internal_url: str | None = "http://object-store:9000"
 
@@ -25,8 +34,7 @@ class StorageEndpointSettings(BaseModel):
         return endpoint
 
 
-class StorageSettings(BaseModel):
-    backend: Literal["s3"] = "s3"
+class StorageSettings(_SettingsModel):
     network_scope: Literal["external", "internal"] = "external"
     endpoints: StorageEndpointSettings = Field(default_factory=StorageEndpointSettings)
     access_key: SecretStr | None = SecretStr("minioadmin")
@@ -58,8 +66,8 @@ class StorageSettings(BaseModel):
         uris = (self.landing_uri, self.curated_uri, self.analytics_uri)
         for uri in uris:
             parsed = urlparse(uri)
-            if parsed.scheme != self.backend or not parsed.netloc:
-                raise ValueError(f"Expected a {self.backend} storage URI, got {uri!r}")
+            if parsed.scheme != "s3" or not parsed.netloc:
+                raise ValueError(f"Expected an S3 storage URI, got {uri!r}")
             if parsed.params or parsed.query or parsed.fragment:
                 raise ValueError(f"Storage URI cannot contain params, query, or fragment: {uri!r}")
             path_segments = parsed.path.removeprefix("/").split("/") if parsed.path else ()
@@ -82,14 +90,12 @@ class StorageSettings(BaseModel):
         return value.get_secret_value() if value is not None else None
 
 
-class PlatformAdminSettings(BaseModel):
-    enabled: bool = False
+class PlatformAdminSettings(_SettingsModel):
     container_marker: Path = Path("/.dockerenv")
     guard_file: Path = Path("/run/secrets/platform_admin_guard")
+    service_secrets: dict[str, SecretStr] = Field(default_factory=dict)
 
     def require_capability(self) -> None:
-        if not self.enabled:
-            raise RuntimeError("Platform administration is disabled outside its admin container")
         if not self.container_marker.is_file():
             raise RuntimeError("Platform administration requires a container runtime marker")
         try:
@@ -100,47 +106,40 @@ class PlatformAdminSettings(BaseModel):
             raise RuntimeError("Platform administration guard is invalid")
 
 
-class PolarisSettings(BaseModel):
+class PolarisSettings(_SettingsModel):
     catalog_name: str = Field(default="prod", pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
     uri: str = "http://localhost:8181/api/catalog"
     management_uri: str = "http://localhost:8181/api/management/v1"
     realm: str = "POLARIS"
-    credential: SecretStr = SecretStr("root:secretpassword")
+    client_id: str = Field(default="root", pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+    client_secret: SecretStr = Field(default=SecretStr("secretpassword"), min_length=1)
     scope: str = "PRINCIPAL_ROLE:ALL"
 
     @property
     def oauth2_server_uri(self) -> str:
         return f"{self.uri.rstrip('/')}/v1/oauth/tokens"
 
-    @model_validator(mode="after")
-    def validate_credential(self) -> Self:
-        client_id, separator, client_secret = self.credential.get_secret_value().partition(":")
-        if not separator or not client_id or not client_secret:
-            raise ValueError("Polaris credential must use a non-empty client_id:client_secret pair")
-        return self
 
-
-class TrinoSettings(BaseModel):
+class TrinoSettings(_SettingsModel):
     host: str = "localhost"
     port: int = Field(default=8080, ge=1, le=65535)
     user: str = "lakehouse"
-    catalog: str = Field(default="prod", pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
     http_scheme: Literal["http", "https"] = "http"
 
 
-class DbtSettings(BaseModel):
+class DbtSettings(_SettingsModel):
     project_dir: Path = Path("dbt/analytics")
     profiles_dir: Path = Path("dbt/analytics")
 
 
-class GithubArchiveSettings(BaseModel):
+class GithubArchiveSettings(_SettingsModel):
     base_url: str = "https://data.gharchive.org"
     request_timeout_seconds: float = Field(default=120.0, gt=0)
     max_parse_error_ratio: float = Field(default=0.001, ge=0, le=1)
     user_agent: str = "mini-lakehouse"
 
 
-class ArxivSettings(BaseModel):
+class ArxivSettings(_SettingsModel):
     base_url: str = "https://oaipmh.arxiv.org/oai"
     metadata_prefix: Literal["arXiv"] = "arXiv"
     request_timeout_seconds: float = Field(default=120.0, gt=0)
@@ -148,7 +147,7 @@ class ArxivSettings(BaseModel):
     user_agent: str = "mini-lakehouse"
 
 
-class KaggleSettings(BaseModel):
+class KaggleSettings(_SettingsModel):
     username: str | None = None
     api_token: SecretStr | None = None
 
@@ -210,7 +209,7 @@ class ModalSettings(BaseSettings):
         return self.token_id is not None and self.token_secret is not None
 
 
-class NotificationSettings(BaseModel):
+class NotificationSettings(_SettingsModel):
     prefect_ui_url: str = "http://localhost:4200"
     slack_bot_token: SecretStr | None = None
     slack_channel_id: str | None = None
@@ -256,7 +255,7 @@ class Settings(BaseSettings):
         env_prefix="LAKEHOUSE_",
         env_nested_delimiter="__",
         env_nested_max_split=2,
-        secrets_dir=Path("/run/secrets") if Path("/run/secrets").is_dir() else None,
+        secrets_dir=Path("/run/secrets"),
         extra="ignore",
     )
 
@@ -274,6 +273,28 @@ class Settings(BaseSettings):
     modal: ModalSettings = Field(default_factory=ModalSettings)
     notifications: NotificationSettings = Field(default_factory=NotificationSettings)
 
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        del settings_cls
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            NestedSecretsSettingsSource(
+                file_secret_settings,
+                secrets_dir_missing="ok",
+                secrets_prefix="LAKEHOUSE_",
+                secrets_nested_delimiter="__",
+            ),
+        )
+
     @model_validator(mode="after")
     def reject_local_credentials_in_production(self) -> Self:
         if self.environment != "production":
@@ -290,7 +311,10 @@ class Settings(BaseSettings):
             }
         ):
             raise ValueError("Production cannot use the local object-store endpoint")
-        if self.polaris.credential.get_secret_value() == "root:secretpassword":
+        if (
+            self.polaris.client_id == "root"
+            and self.polaris.client_secret.get_secret_value() == "secretpassword"
+        ):
             raise ValueError("Production cannot use the local Polaris root credential")
         return self
 

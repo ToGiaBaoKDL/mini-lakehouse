@@ -40,7 +40,7 @@ class ColumnContract(ContractModel):
 
 
 def validate_relative_prefix(value: str) -> str:
-    if value.startswith("/") or value.endswith("/") or ".." in value.split("/"):
+    if any(segment in {"", ".", ".."} for segment in value.split("/")):
         raise ValueError("Object prefixes must be normalized relative paths")
     if not _SAFE_PREFIX.fullmatch(value):
         raise ValueError(f"Unsafe object prefix: {value!r}")

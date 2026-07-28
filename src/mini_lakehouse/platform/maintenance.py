@@ -1,6 +1,7 @@
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
+from apache_polaris.sdk.catalog.models import ApplicablePolicy
 from pyiceberg.catalog import Catalog
 from pyiceberg.table import Table
 from pyiceberg.transforms import (
@@ -23,8 +24,7 @@ from mini_lakehouse.contracts.maintenance import (
     SnapshotExpiryPolicyContent,
     parse_policy_content,
 )
-from mini_lakehouse.platform.catalog.polaris import (
-    PolarisPolicy,
+from mini_lakehouse.platform.catalog.policies import (
     PolarisPolicyClient,
     policy_content_object,
 )
@@ -100,7 +100,7 @@ def maintenance_statements(
     table: TableIdentifier,
     iceberg_table: Table,
     catalog: str,
-    policies: list[PolarisPolicy],
+    policies: list[ApplicablePolicy],
     policy_contracts: Mapping[tuple[tuple[str, ...], str], MaintenancePolicy],
 ) -> tuple[str, ...]:
     applicable = {

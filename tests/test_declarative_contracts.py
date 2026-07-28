@@ -19,11 +19,35 @@ def test_repository_contracts_form_a_valid_registry() -> None:
     arxiv_processor = contracts.processor("arxiv_glm_ocr")
 
     assert contracts.platform.catalog.name == "prod"
-    assert {
-        namespace.storage_root
-        for namespace in contracts.platform.namespaces
-        if namespace.storage_root is not None
-    } == {"landing", "curated", "analytics"}
+    assert {identity.name for identity in contracts.access.service_identities} == {
+        "prefect_ingestion",
+        "trino_engine",
+    }
+    assert {role.name for role in contracts.access.catalog_roles} == {
+        "prefect_ingestion",
+        "trino_engine",
+    }
+    prefect_role = next(
+        role for role in contracts.access.catalog_roles if role.name == "prefect_ingestion"
+    )
+    namespace_grants = {
+        grant.namespace: {privilege.value for privilege in grant.privileges}
+        for grant in prefect_role.grants
+        if grant.type == "namespace"
+    }
+    assert set(namespace_grants) == {
+        ("landing",),
+        ("curated",),
+    }
+    assert all(
+        {"TABLE_WRITE_DATA", "TABLE_ADD_SNAPSHOT", "TABLE_SET_SNAPSHOT_REF"} <= privileges
+        for privileges in namespace_grants.values()
+    )
+    assert {namespace.path for namespace in contracts.platform.namespaces} == {
+        ("landing",),
+        ("curated",),
+        ("analytics",),
+    }
     assert contracts.source("github_archive").table_identifier("events_raw").iceberg == (
         "landing",
         "github_archive_events_raw",
@@ -295,6 +319,22 @@ def test_registry_rejects_managed_table_policy_partition_drift() -> None:
         PlatformContracts.model_validate(payload)
 
 
+def test_registry_rejects_access_to_an_unknown_namespace() -> None:
+    payload = _registry_payload()
+    role = payload["access"]["catalog_roles"][0]
+    role["grants"] = (
+        *role["grants"],
+        {
+            "type": "namespace",
+            "namespace": ("unknown",),
+            "privileges": ("TABLE_READ_DATA",),
+        },
+    )
+
+    with pytest.raises(ValidationError, match="references unknown namespace"):
+        PlatformContracts.model_validate(payload)
+
+
 def test_source_contract_rejects_duplicate_table_identifiers() -> None:
     payload = _registry_payload()["sources"][0]
     payload["tables"] = (*payload["tables"], payload["tables"][0])
@@ -309,13 +349,12 @@ def test_catalog_rejects_namespaces_outside_lifecycle_roots() -> None:
         *payload["namespaces"],
         {
             "path": ("sandbox",),
-            "storage_root": "landing",
             "owner": "data-platform",
             "description": "Invalid lifecycle root.",
         },
     )
 
-    with pytest.raises(ValidationError, match="lifecycle roots"):
+    with pytest.raises(ValidationError, match="landing, curated, and analytics roots"):
         PlatformContract.model_validate(payload)
 
 
@@ -339,9 +378,10 @@ def test_source_checkpoint_rejects_unknown_kinds() -> None:
         SourceContract.model_validate(payload)
 
 
-def test_source_contract_rejects_unsafe_raw_subpaths() -> None:
+@pytest.mark.parametrize("raw_subpath", ("../secrets", "pages//raw", "pages/./raw"))
+def test_source_contract_rejects_unsafe_raw_subpaths(raw_subpath: str) -> None:
     payload = load_contracts().source("arxiv").model_dump(mode="python")
-    payload["raw_subpath"] = "../secrets"
+    payload["raw_subpath"] = raw_subpath
 
     with pytest.raises(ValidationError, match="normalized relative paths"):
         SourceContract.model_validate(payload)
@@ -381,8 +421,8 @@ def test_managed_table_contracts_do_not_duplicate_physical_locations() -> None:
 def test_platform_and_storage_code_are_source_agnostic() -> None:
     source_names = {source.name for source in load_contracts().sources}
     modules = [
-        *Path("src/mini_lakehouse/platform").glob("*.py"),
-        *Path("src/mini_lakehouse/storage").glob("*.py"),
+        *Path("src/mini_lakehouse/platform").rglob("*.py"),
+        *Path("src/mini_lakehouse/storage").rglob("*.py"),
     ]
 
     for module in modules:

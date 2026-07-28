@@ -8,34 +8,45 @@ from apache_polaris.sdk.catalog.models import (
     GetApplicablePoliciesResponse,
     LoadPolicyResponse,
     Policy,
+    PolicyIdentifier,
 )
 from apache_polaris.sdk.management.api.polaris_default_api import PolarisDefaultApi
+from apache_polaris.sdk.management.exceptions import NotFoundException
 from apache_polaris.sdk.management.models import (
     AwsStorageConfigInfo,
+    CatalogGrant,
     CatalogProperties,
-)
-from apache_polaris.sdk.management.models import (
-    PolarisCatalog as SdkPolarisCatalog,
+    CatalogRole,
+    CatalogRoles,
+    GrantResource,
+    GrantResources,
+    NamespaceGrant,
+    PolarisCatalog,
+    Principal,
+    PrincipalRole,
+    PrincipalRoles,
+    Principals,
 )
 
 from mini_lakehouse.config.settings import Settings
 from mini_lakehouse.contracts import load_contracts
+from mini_lakehouse.contracts.access import AccessContract, CatalogRoleContract
 from mini_lakehouse.contracts.maintenance import policy_content_json
+from mini_lakehouse.platform.catalog.access import (
+    bootstrap_access,
+    rotate_credentials,
+    validate_access,
+)
 from mini_lakehouse.platform.catalog.admin import (
-    bootstrap_catalog,
     require_valid,
     validation_payload,
 )
+from mini_lakehouse.platform.catalog.catalogs import bootstrap_catalog
 from mini_lakehouse.platform.catalog.layout import (
     catalog_allowed_locations,
     catalog_properties,
 )
-from mini_lakehouse.platform.catalog.polaris import (
-    PolarisCatalog,
-    PolarisManagementClient,
-    PolarisPolicyClient,
-    PolicyIdentifier,
-)
+from mini_lakehouse.platform.catalog.policies import PolarisPolicyClient
 from mini_lakehouse.platform.catalog.policy_prune import (
     PolicyPruneItem,
     apply_policy_prune_plan,
@@ -44,14 +55,14 @@ from mini_lakehouse.platform.catalog.policy_prune import (
 )
 
 
-def _sdk_catalog(settings: Settings) -> SdkPolarisCatalog:
+def _sdk_catalog(settings: Settings) -> PolarisCatalog:
     contracts = load_contracts()
     properties = CatalogProperties.from_dict(catalog_properties(settings, contracts))
     assert properties is not None
     storage = AwsStorageConfigInfo.model_validate(
         {
             "storageType": "S3",
-            "allowedLocations": list(catalog_allowed_locations(settings, contracts)),
+            "allowedLocations": list(catalog_allowed_locations(settings)),
             "endpoint": settings.storage.endpoints.external_url,
             "endpointInternal": settings.storage.endpoints.internal_url,
             "pathStyleAccess": settings.storage.path_style_access,
@@ -60,7 +71,7 @@ def _sdk_catalog(settings: Settings) -> SdkPolarisCatalog:
             "kmsUnavailable": settings.storage.kms_unavailable,
         }
     )
-    return SdkPolarisCatalog.model_validate(
+    return PolarisCatalog.model_validate(
         {
             "type": "INTERNAL",
             "name": contracts.platform.catalog.name,
@@ -85,64 +96,84 @@ def _sdk_policy(spec_index: int = 0, *, description: str | None = None) -> Polic
     )
 
 
+def _sdk_grants(role: CatalogRoleContract) -> list[GrantResource]:
+    grants: list[GrantResource] = []
+    for grant in role.grants:
+        for privilege in grant.privileges:
+            if grant.type == "namespace":
+                grants.append(
+                    NamespaceGrant.model_validate(
+                        {
+                            "type": grant.type,
+                            "privilege": privilege.value,
+                            "namespace": list(grant.namespace),
+                        }
+                    )
+                )
+            else:
+                grants.append(
+                    CatalogGrant.model_validate(
+                        {
+                            "type": grant.type,
+                            "privilege": privilege.value,
+                        }
+                    )
+                )
+    return grants
+
+
 def test_bootstrap_catalog_is_a_noop_when_current_state_matches() -> None:
     settings = Settings()
     contracts = load_contracts()
-    client = create_autospec(PolarisManagementClient, instance=True)
-    client.load_catalog.return_value = _sdk_catalog(settings)
+    api = create_autospec(PolarisDefaultApi, instance=True)
+    api.get_catalog.return_value = _sdk_catalog(settings)
 
-    bootstrap_catalog(client, settings, contracts)
+    bootstrap_catalog(api, settings, contracts)
 
-    client.create_catalog.assert_not_called()
-    client.update_catalog.assert_not_called()
+    api.create_catalog.assert_not_called()
+    api.update_catalog.assert_not_called()
 
 
 def test_bootstrap_catalog_updates_safe_drift() -> None:
     settings = Settings()
     contracts = load_contracts()
-    client = create_autospec(PolarisManagementClient, instance=True)
+    api = create_autospec(PolarisDefaultApi, instance=True)
     current = _sdk_catalog(settings)
     current.properties.additional_properties["owner"] = "stale"
-    client.load_catalog.return_value = current
+    api.get_catalog.return_value = current
 
-    bootstrap_catalog(client, settings, contracts)
+    bootstrap_catalog(api, settings, contracts)
 
-    client.update_catalog.assert_called_once_with(
-        current,
-        catalog_properties(settings, contracts),
-        catalog_allowed_locations(settings, contracts),
-    )
+    api.update_catalog.assert_called_once()
+    request = api.update_catalog.call_args.args[1]
+    assert request.current_entity_version == current.entity_version
+    assert request.properties == catalog_properties(settings, contracts)
 
 
 def test_bootstrap_catalog_requires_explicit_migration_for_type_drift() -> None:
     settings = Settings()
-    client = create_autospec(PolarisManagementClient, instance=True)
+    api = create_autospec(PolarisDefaultApi, instance=True)
     current = create_autospec(PolarisCatalog, instance=True)
     current.name = "prod"
     current.type = "EXTERNAL"
     current.properties = _sdk_catalog(settings).properties
     current.storage_config_info = _sdk_catalog(settings).storage_config_info
-    client.load_catalog.return_value = current
+    api.get_catalog.return_value = current
 
     with pytest.raises(RuntimeError, match="explicit migration: type"):
-        bootstrap_catalog(client, settings, load_contracts())
+        bootstrap_catalog(api, settings, load_contracts())
 
-    client.update_catalog.assert_not_called()
+    api.update_catalog.assert_not_called()
 
 
 def test_management_sdk_boundary_builds_typed_catalog_requests() -> None:
     settings = Settings()
     contracts = load_contracts()
     api = create_autospec(PolarisDefaultApi, instance=True)
+    api.get_catalog.side_effect = NotFoundException()
     api.create_catalog.return_value = _sdk_catalog(settings)
-    client = PolarisManagementClient(api, settings.storage)
 
-    client.create_catalog(
-        contracts.platform.catalog.name,
-        contracts.platform.catalog.type,
-        catalog_properties(settings, contracts),
-        catalog_allowed_locations(settings, contracts),
-    )
+    bootstrap_catalog(api, settings, contracts)
 
     request = api.create_catalog.call_args.args[0]
     assert request.catalog.name == "prod"
@@ -153,13 +184,110 @@ def test_management_sdk_boundary_builds_typed_catalog_requests() -> None:
     assert storage.endpoint_internal == "http://object-store:9000"
 
 
+def test_access_validation_reports_unexpected_privileges() -> None:
+    contracts = load_contracts()
+    role = contracts.access.catalog_roles[0]
+    contracts = contracts.model_copy(
+        update={
+            "access": AccessContract(
+                version=1,
+                catalog_roles=(role,),
+            )
+        }
+    )
+    api = create_autospec(PolarisDefaultApi, instance=True)
+    api.list_catalog_roles.return_value = CatalogRoles(roles=[CatalogRole(name=role.name)])
+    grants = _sdk_grants(role)
+    grants.append(
+        CatalogGrant.model_validate({"type": "catalog", "privilege": "CATALOG_MANAGE_ACCESS"})
+    )
+    api.list_grants_for_catalog_role.return_value = GrantResources(grants=grants)
+
+    errors = validate_access(api, contracts)
+
+    assert errors == (f"grant:{role.name}:catalog::CATALOG_MANAGE_ACCESS:unexpected",)
+
+
+def test_access_bootstrap_provisions_a_missing_service_credential_once() -> None:
+    contracts = load_contracts()
+    identity = contracts.access.service_identities[0]
+    role = contracts.access.catalog_roles[0]
+    contracts = contracts.model_copy(
+        update={
+            "access": AccessContract(
+                version=1,
+                service_identities=(identity,),
+                catalog_roles=(role,),
+            )
+        }
+    )
+    api = create_autospec(PolarisDefaultApi, instance=True)
+    api.list_catalog_roles.return_value = CatalogRoles(roles=[CatalogRole(name=role.name)])
+    api.list_grants_for_catalog_role.return_value = GrantResources(grants=_sdk_grants(role))
+    api.list_principal_roles.return_value = PrincipalRoles(
+        roles=[PrincipalRole(name=identity.name)]
+    )
+    api.list_principals.return_value = Principals(principals=[])
+    api.list_principal_roles_assigned.return_value = PrincipalRoles(
+        roles=[PrincipalRole(name=identity.name)]
+    )
+    api.list_catalog_roles_for_principal_role.return_value = CatalogRoles(
+        roles=[CatalogRole(name=role.name)]
+    )
+    settings = Settings.model_validate(
+        {
+            "platform_admin": {
+                "service_secrets": {
+                    identity.name: "prefect-secret",
+                }
+            }
+        }
+    )
+
+    bootstrap_access(api, settings, contracts)
+
+    request = api.reset_credentials.call_args.args[1]
+    assert request.client_id == identity.name
+    assert request.client_secret == "prefect-secret"
+    api.update_principal.assert_not_called()
+
+
+def test_access_rotation_is_explicit() -> None:
+    contracts = load_contracts()
+    api = create_autospec(PolarisDefaultApi, instance=True)
+    identity = contracts.access.service_identities[1]
+    current = Principal.model_validate(
+        {
+            "name": identity.name,
+            "clientId": identity.name,
+        }
+    )
+    api.list_principals.return_value = Principals(principals=[current])
+    settings = Settings.model_validate(
+        {
+            "platform_admin": {
+                "service_secrets": {
+                    principal.name: f"{principal.name}-secret"
+                    for principal in contracts.access.service_identities
+                }
+            }
+        }
+    )
+
+    rotate_credentials(api, settings, contracts, (identity.name,))
+
+    request = api.reset_credentials.call_args.args[1]
+    assert request.client_id == identity.name
+    assert request.client_secret == f"{identity.name}-secret"
+
+
 def test_policy_sdk_boundary_does_not_update_unchanged_content() -> None:
     spec = load_contracts().policies[0]
     api = create_autospec(PolicyAPI, instance=True)
     api.load_policy.return_value = LoadPolicyResponse(policy=_sdk_policy())
     client = PolarisPolicyClient(api, "prod")
 
-    assert client.apply_policy(spec) == "unchanged"
+    client.apply_policy(spec)
     api.create_policy.assert_not_called()
     api.update_policy.assert_not_called()
 
@@ -170,7 +298,7 @@ def test_policy_sdk_boundary_updates_with_server_version() -> None:
     api.load_policy.return_value = LoadPolicyResponse(policy=_sdk_policy(description="stale"))
     client = PolarisPolicyClient(api, "prod")
 
-    assert client.apply_policy(spec) == "updated"
+    client.apply_policy(spec)
     request = api.update_policy.call_args.args[3]
     assert request.current_policy_version == 7
     assert request.description == spec.description

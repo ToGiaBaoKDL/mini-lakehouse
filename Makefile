@@ -16,7 +16,7 @@ THIRD_PARTY_SERVICES := postgres object-store object-store-provision polaris-boo
 	up-ocr-review up down restart clean reset ps ps-all logs logs-follow smoke-core \
 	smoke-prefect smoke-ocr-review smoke wait-prefect-deploy prefect-deployments \
 	prefect-deploy modal-deploy platform-bootstrap platform-validate policy-prune-plan \
-	policy-prune-apply
+	policy-prune-apply platform-rotate-credentials
 
 help: ## Show the available project commands.
 	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -129,8 +129,9 @@ smoke-core: preflight ## Read-only health and catalog verification for the core 
 	@curl --fail --silent http://localhost:8182/q/health/ready >/dev/null
 	@curl --fail --silent http://localhost:8080/v1/info >/dev/null
 	$(CORE_RUN) run --rm --no-deps --entrypoint /bin/sh object-store-provision \
-		/opt/object-store/lifecycle-buckets.sh verify
-	$(CORE_COMPOSE) exec -T trino trino --execute "SHOW SCHEMAS FROM prod"
+		/opt/object-store/provision.sh verify
+	$(CORE_COMPOSE) exec -T trino /bin/sh -c \
+		'trino --execute "SHOW SCHEMAS FROM \"$${POLARIS_CATALOG}\""'
 
 smoke-prefect: preflight ## Verify the optional Prefect control plane.
 	@curl --fail --silent http://localhost:4200/api/health >/dev/null
@@ -156,6 +157,10 @@ platform-bootstrap: preflight ## Idempotently create and validate contract-manag
 platform-validate: preflight ## Read live platform state and fail on managed drift.
 	$(CORE_RUN) run --rm --no-deps platform-admin \
 		python -m mini_lakehouse.platform.catalog.admin validate
+
+platform-rotate-credentials: preflight ## Explicitly rotate Polaris service credentials (use IDENTITIES="name ...").
+	$(CORE_RUN) run --rm --no-deps platform-admin \
+		python -m mini_lakehouse.platform.catalog.admin rotate-credentials $(IDENTITIES)
 
 policy-prune-plan: preflight ## Print stale repository-managed Polaris policies.
 	$(CORE_RUN) run --rm --no-deps platform-admin \

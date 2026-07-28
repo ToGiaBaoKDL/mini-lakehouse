@@ -21,10 +21,12 @@ class GithubCurationRepository:
         self._product = registry.curated_product("github")
 
     def _relation(self, table_key: str) -> str:
-        return self._product.table_identifier(table_key).trino(self._settings.trino.catalog)
+        return self._product.table_identifier(table_key).trino(self._settings.polaris.catalog_name)
 
     def _source_relation(self) -> str:
-        return self._source.table_identifier("events_raw").trino(self._settings.trino.catalog)
+        return self._source.table_identifier("events_raw").trino(
+            self._settings.polaris.catalog_name
+        )
 
     def curate_hour(
         self, executor: SqlExecutor, source_hour: ArchiveHour

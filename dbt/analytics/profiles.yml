@@ -7,7 +7,7 @@ mini_lakehouse:
       host: "{{ env_var('LAKEHOUSE_TRINO__HOST', 'localhost') }}"
       port: "{{ env_var('LAKEHOUSE_TRINO__PORT', '8080') | int }}"
       user: "{{ env_var('LAKEHOUSE_TRINO__USER', 'lakehouse') }}"
-      catalog: "{{ env_var('LAKEHOUSE_TRINO__CATALOG', 'prod') }}"
+      catalog: "{{ env_var('LAKEHOUSE_POLARIS__CATALOG_NAME', 'prod') }}"
       schema: analytics.engineering
       http_scheme: "{{ env_var('LAKEHOUSE_TRINO__HTTP_SCHEME', 'http') }}"
       cert: true

@@ -9,7 +9,9 @@ For a future managed-object-storage deployment:
 1. Keep bucket roots separate for lifecycle and IAM boundaries.
 2. Add the target provider deliberately, then configure Polaris storage credentials with workload
    identity/IAM roles and enable credential vending in Trino/PyIceberg clients.
-3. Create separate service principals and catalog roles for ingestion, dbt, and read-only BI.
+3. Preserve separate Polaris principals for direct ingestion and the Trino connector. Enforce
+   dbt and read-only application permissions inside authenticated Trino because one REST-catalog
+   connector has one Polaris OAuth identity.
 4. Require a Polaris realm header and external identity provider where appropriate.
 5. Put TLS and authentication in front of Trino, Polaris, Prefect, and future BI services.
 6. Move PostgreSQL and Redis to backed-up managed services.

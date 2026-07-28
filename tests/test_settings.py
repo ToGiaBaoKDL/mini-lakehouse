@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from pydantic import ValidationError
@@ -84,8 +85,8 @@ def test_storage_rejects_non_normalized_prefixes() -> None:
         StorageSettings(landing_uri="s3://shared/../landing")
 
 
-def test_storage_rejects_an_uninstalled_backend() -> None:
-    with pytest.raises(ValidationError, match="Input should be 's3'"):
+def test_storage_rejects_the_removed_backend_setting() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         StorageSettings.model_validate({"backend": "gcs"})
 
 
@@ -94,9 +95,9 @@ def test_storage_rejects_static_and_vended_iceberg_credentials_together() -> Non
         StorageSettings(iceberg_access_delegation="vended-credentials")
 
 
-def test_polaris_credential_requires_a_complete_pair() -> None:
-    with pytest.raises(ValidationError, match="client_id:client_secret"):
-        PolarisSettings.model_validate({"credential": "missing-secret"})
+def test_polaris_client_secret_cannot_be_empty() -> None:
+    with pytest.raises(ValidationError, match="at least 1"):
+        PolarisSettings.model_validate({"client_secret": ""})
 
 
 def test_production_rejects_local_root_credentials() -> None:
@@ -111,13 +112,34 @@ def test_platform_administration_requires_the_container_capability(tmp_path: Pat
     guard.write_text("platform-admin\n", encoding="utf-8")
 
     PlatformAdminSettings(
-        enabled=True,
         container_marker=marker,
         guard_file=guard,
     ).require_capability()
 
-    with pytest.raises(RuntimeError, match="disabled"):
-        PlatformAdminSettings().require_capability()
+    with pytest.raises(RuntimeError, match="runtime marker"):
+        PlatformAdminSettings(container_marker=tmp_path / "missing").require_capability()
+
+
+def test_nested_docker_secrets_load_without_custom_parsing(tmp_path: Path) -> None:
+    (tmp_path / "LAKEHOUSE_POLARIS__CLIENT_SECRET").write_text(
+        "runtime-secret\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "LAKEHOUSE_PLATFORM_ADMIN__SERVICE_SECRETS__prefect_ingestion").write_text(
+        "ingestion-secret\n",
+        encoding="utf-8",
+    )
+
+    settings: Settings = cast(Any, Settings)(
+        _env_file=None,
+        _secrets_dir=tmp_path,
+    )
+
+    assert settings.polaris.client_secret.get_secret_value() == "runtime-secret"
+    assert (
+        settings.platform_admin.service_secrets["prefect_ingestion"].get_secret_value()
+        == "ingestion-secret"
+    )
 
 
 def test_gmail_notification_channel_requires_complete_delivery_config() -> None:

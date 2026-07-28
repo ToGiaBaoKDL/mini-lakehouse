@@ -15,7 +15,8 @@ def main() -> None:
         json.dumps(
             {
                 "catalog": contracts.platform.catalog.name,
-                "catalog_role_grants": len(contracts.access.catalog_role_grants),
+                "service_identities": len(contracts.access.service_identities),
+                "catalog_roles": len(contracts.access.catalog_roles),
                 "managed_namespaces": len(contracts.managed_namespaces()),
                 "sources": len(contracts.sources),
                 "curated_products": len(contracts.curated),

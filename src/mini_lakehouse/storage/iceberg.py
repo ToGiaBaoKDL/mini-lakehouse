@@ -12,7 +12,9 @@ def iceberg_catalog_properties(settings: Settings) -> dict[str, str]:
         "type": "rest",
         "uri": settings.polaris.uri,
         "warehouse": settings.polaris.catalog_name,
-        "credential": settings.polaris.credential.get_secret_value(),
+        "credential": (
+            f"{settings.polaris.client_id}:{settings.polaris.client_secret.get_secret_value()}"
+        ),
         "scope": settings.polaris.scope,
         "oauth2-server-uri": settings.polaris.oauth2_server_uri,
         "s3.region": storage.region,
@@ -42,7 +44,7 @@ def load_iceberg_catalog(settings: Settings) -> Catalog:
     )
 
 
-def walk_namespaces(catalog: Catalog) -> Iterator[Identifier]:
+def _walk_namespaces(catalog: Catalog) -> Iterator[Identifier]:
     pending = list(catalog.list_namespaces())
     seen: set[Identifier] = set()
     while pending:
@@ -55,5 +57,5 @@ def walk_namespaces(catalog: Catalog) -> Iterator[Identifier]:
 
 
 def discover_table_identifiers(catalog: Catalog) -> Iterator[Identifier]:
-    for namespace in walk_namespaces(catalog):
+    for namespace in _walk_namespaces(catalog):
         yield from catalog.list_tables(namespace)

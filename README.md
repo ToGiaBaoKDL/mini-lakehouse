@@ -102,7 +102,7 @@ endpoints and secrets remain environment configuration.
 ```text
 contracts/
   platform.yaml             Catalog identity and lifecycle roots
-  access.yaml               Catalog grants
+  access.yaml               Polaris service identities and scoped RBAC grants
   maintenance.yaml          Tier retention and bounded optimization
   sources/                  Landing schemas and checkpoints
   curated/                  Canonical product schemas and keys
@@ -126,7 +126,9 @@ infra/                      Service-owned bootstrap and runtime configuration
 ```
 
 YAML contracts are the source of truth for non-secret platform and data-product configuration.
-Runtime endpoints and credentials belong in `.env` or a secret manager.
+Runtime endpoints belong to deployment configuration. Local credentials originate in the ignored
+`.env` and reach Python workloads through Compose Secrets; production credentials belong in a
+secret manager.
 
 ## Quick start
 
@@ -182,6 +184,7 @@ make help                  # list supported operations
 make check                 # lock, lint, type, unit, dbt parse, and Compose checks
 make platform-bootstrap    # idempotently create missing or safely mutable resources
 make platform-validate     # read live state and fail on managed drift
+make platform-rotate-credentials IDENTITIES="prefect_ingestion"  # explicit rotation
 make prefect-deploy        # register all Prefect deployments
 make policy-prune-plan     # inspect stale repository-managed Polaris policies
 ```

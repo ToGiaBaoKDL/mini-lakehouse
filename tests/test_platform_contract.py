@@ -6,7 +6,7 @@ from mini_lakehouse.platform.catalog.layout import (
     catalog_allowed_locations,
     catalog_properties,
     managed_tables,
-    namespace_storage_uri,
+    namespace_properties,
     source_table_storage_uri,
 )
 
@@ -15,9 +15,7 @@ def test_namespace_contract_separates_lifecycle_and_domain_ownership() -> None:
     settings = Settings()
     contracts = load_contracts()
     namespaces = {
-        namespace.path: namespace.iceberg_properties(
-            namespace_storage_uri(settings, namespace.path)
-        )
+        namespace.path: namespace_properties(settings, namespace)
         for namespace in contracts.managed_namespaces()
     }
 
@@ -39,8 +37,7 @@ def test_catalog_contract_enables_bucket_root_namespaces() -> None:
         catalog_properties(settings, contracts)["polaris.config.namespace-custom-location.enabled"]
         == "true"
     )
-    assert catalog_allowed_locations(settings, contracts) == (
-        "s3://landing/_catalog",
+    assert catalog_allowed_locations(settings) == (
         "s3://landing",
         "s3://curated",
         "s3://analytics",
@@ -74,10 +71,7 @@ def test_catalog_allowed_locations_are_deduplicated() -> None:
         }
     )
 
-    assert catalog_allowed_locations(settings, load_contracts()) == (
-        "s3://shared/_catalog",
-        "s3://shared",
-    )
+    assert catalog_allowed_locations(settings) == ("s3://shared",)
 
 
 def test_managed_tables_compile_once_without_a_desired_state_copy() -> None:

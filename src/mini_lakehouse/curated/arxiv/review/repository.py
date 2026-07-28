@@ -30,7 +30,7 @@ class ArxivOcrReviewRepository:
         self._product = registry.curated_product("arxiv")
 
     def _relation(self, key: str) -> str:
-        return self._product.table_identifier(key).trino(self._settings.trino.catalog)
+        return self._product.table_identifier(key).trino(self._settings.polaris.catalog_name)
 
     def documents(
         self,

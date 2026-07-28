@@ -19,13 +19,17 @@ class ArxivCurationRepository:
         self._product = registry.curated_product("arxiv")
 
     def _source_relation(self) -> str:
-        return self._source.table_identifier("oai_records_raw").trino(self._settings.trino.catalog)
+        return self._source.table_identifier("oai_records_raw").trino(
+            self._settings.polaris.catalog_name
+        )
 
     def _checkpoint_relation(self) -> str:
-        return self._source.table_identifier("oai_checkpoints").trino(self._settings.trino.catalog)
+        return self._source.table_identifier("oai_checkpoints").trino(
+            self._settings.polaris.catalog_name
+        )
 
     def _relation(self, key: str) -> str:
-        return self._product.table_identifier(key).trino(self._settings.trino.catalog)
+        return self._product.table_identifier(key).trino(self._settings.polaris.catalog_name)
 
     def _latest_source_sql(self) -> str:
         return f"""

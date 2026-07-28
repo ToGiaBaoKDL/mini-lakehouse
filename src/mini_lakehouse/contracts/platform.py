@@ -22,13 +22,9 @@ class CatalogSpec(ContractModel):
 
 class NamespaceContract(ContractModel):
     path: NamespacePath = Field(min_length=1)
-    storage_root: StorageTier | None = None
     owner: ContractName
     description: str = Field(min_length=1)
     properties: dict[str, str] = Field(default_factory=dict)
-
-    def iceberg_properties(self, storage_uri: str) -> dict[str, str]:
-        return {"owner": self.owner, **self.properties, "location": storage_uri}
 
 
 class PlatformContract(ContractModel):
@@ -41,12 +37,9 @@ class PlatformContract(ContractModel):
         paths = [namespace.path for namespace in self.namespaces]
         if len(paths) != len(set(paths)):
             raise ValueError("Namespace paths must be unique")
-        for namespace in self.namespaces:
-            if namespace.storage_root is None or namespace.path != (namespace.storage_root,):
-                raise ValueError(
-                    "Platform namespaces must be lifecycle roots; products and domains own "
-                    "their child namespaces"
-                )
-        if {namespace.storage_root for namespace in self.namespaces} != set(LIFECYCLE_TIERS):
-            raise ValueError("Platform contract must define all lifecycle storage roots")
+        expected_paths = {(tier,) for tier in LIFECYCLE_TIERS}
+        if set(paths) != expected_paths:
+            raise ValueError(
+                "Platform contract must define exactly the landing, curated, and analytics roots"
+            )
         return self

@@ -35,7 +35,7 @@ depending on their ingestion implementation.
 ```text
 contracts/
 ├── platform.yaml           catalog and lifecycle roots
-├── access.yaml             privileges for existing catalog roles
+├── access.yaml             Polaris service identities, roles, and scoped privileges
 ├── maintenance.yaml        tier defaults and bounded table optimizations
 ├── sources/                landing ownership and checkpoints
 ├── curated/                canonical curated products

@@ -56,7 +56,7 @@ def test_tracked_container_environment_contains_routing_but_no_secrets() -> None
     assert "LAKEHOUSE_STORAGE__ENDPOINTS__" not in platform
     assert "LAKEHOUSE_TRINO__HOST=trino" not in platform
     assert "LAKEHOUSE_TRINO__HOST=trino" in orchestration
-    assert "LAKEHOUSE_TRINO__CATALOG" not in orchestration
+    assert "LAKEHOUSE_POLARIS__CATALOG_NAME" not in orchestration
     assert "LAKEHOUSE_TRINO__HOST=trino" in review
     assert "LAKEHOUSE_TRINO__USER=ocr-review" in review
     assert "LAKEHOUSE_POLARIS__URI" not in orchestration
@@ -69,7 +69,6 @@ def test_local_env_template_contains_complete_storage_runtime_defaults() -> None
     environment = Path(".env.example").read_text(encoding="utf-8")
 
     for expected in (
-        "LAKEHOUSE_STORAGE__BACKEND=s3",
         "LAKEHOUSE_STORAGE__NETWORK_SCOPE=external",
         "LAKEHOUSE_STORAGE__ENDPOINTS__EXTERNAL_URL=http://localhost:9000",
         "LAKEHOUSE_STORAGE__ENDPOINTS__INTERNAL_URL=http://object-store:9000",
@@ -80,8 +79,82 @@ def test_local_env_template_contains_complete_storage_runtime_defaults() -> None
         "LAKEHOUSE_STORAGE__LANDING_URI=s3://landing",
         "LAKEHOUSE_STORAGE__CURATED_URI=s3://curated",
         "LAKEHOUSE_STORAGE__ANALYTICS_URI=s3://analytics",
+        "OBJECT_STORE_POLARIS_ACCESS_KEY=",
+        "OBJECT_STORE_PLATFORM_ADMIN_ACCESS_KEY=",
+        "OBJECT_STORE_PREFECT_INGESTION_ACCESS_KEY=",
+        "OBJECT_STORE_TRINO_ENGINE_ACCESS_KEY=",
+        "OBJECT_STORE_OCR_REVIEW_ACCESS_KEY=",
+        "POLARIS_PREFECT_INGESTION_CLIENT_SECRET=",
+        "POLARIS_TRINO_ENGINE_CLIENT_SECRET=",
+        "LAKEHOUSE_POLARIS__CLIENT_ID=prefect_ingestion",
+        "LAKEHOUSE_POLARIS__CLIENT_SECRET=${POLARIS_PREFECT_INGESTION_CLIENT_SECRET}",
     ):
         assert expected in environment
+
+
+def test_polaris_credentials_follow_service_boundaries() -> None:
+    core = yaml.safe_load(Path("compose.core.yaml").read_text(encoding="utf-8"))
+    prefect = yaml.safe_load(Path("compose.prefect.yaml").read_text(encoding="utf-8"))
+    review = yaml.safe_load(Path("compose.ocr-review.yaml").read_text(encoding="utf-8"))
+
+    admin = core["services"]["platform-admin"]["environment"]
+    assert "POLARIS_ROOT_CLIENT_ID" in admin["LAKEHOUSE_POLARIS__CLIENT_ID"]
+    assert "LAKEHOUSE_POLARIS__CLIENT_SECRET" not in admin
+    admin_secret_targets = {
+        secret["target"] for secret in core["services"]["platform-admin"]["secrets"]
+    }
+    assert {
+        "LAKEHOUSE_POLARIS__CLIENT_SECRET",
+        "LAKEHOUSE_PLATFORM_ADMIN__SERVICE_SECRETS__prefect_ingestion",
+        "LAKEHOUSE_PLATFORM_ADMIN__SERVICE_SECRETS__trino_engine",
+    }.issubset(admin_secret_targets)
+    assert (
+        prefect["x-lakehouse-runtime"]["environment"]["LAKEHOUSE_POLARIS__CLIENT_ID"]
+        == "prefect_ingestion"
+    )
+    assert "LAKEHOUSE_POLARIS__CLIENT_SECRET" not in prefect["x-lakehouse-runtime"]["environment"]
+    assert {secret["target"] for secret in prefect["x-lakehouse-runtime"]["secrets"]} >= {
+        "LAKEHOUSE_POLARIS__CLIENT_SECRET"
+    }
+    assert (
+        core["services"]["trino"]["environment"]["POLARIS_CREDENTIAL"]
+        == "trino_engine:${POLARIS_TRINO_ENGINE_CLIENT_SECRET:"
+        "?Set POLARIS_TRINO_ENGINE_CLIENT_SECRET in .env}"
+    )
+    review_environment = review["services"]["ocr-review"]["environment"]
+    assert review_environment["LAKEHOUSE_POLARIS__CATALOG_NAME"] == (
+        "${LAKEHOUSE_POLARIS__CATALOG_NAME:-prod}"
+    )
+    assert "LAKEHOUSE_POLARIS__CLIENT_ID" not in review_environment
+    assert "LAKEHOUSE_POLARIS__CLIENT_SECRET" not in review_environment
+
+
+def test_object_store_credentials_follow_service_boundaries() -> None:
+    core = yaml.safe_load(Path("compose.core.yaml").read_text(encoding="utf-8"))
+    prefect = yaml.safe_load(Path("compose.prefect.yaml").read_text(encoding="utf-8"))
+    review = yaml.safe_load(Path("compose.ocr-review.yaml").read_text(encoding="utf-8"))
+
+    assert core["services"]["polaris"]["environment"]["AWS_ACCESS_KEY_ID"].startswith(
+        "${OBJECT_STORE_POLARIS_ACCESS_KEY:"
+    )
+    assert core["services"]["platform-admin"]["environment"][
+        "LAKEHOUSE_STORAGE__ACCESS_KEY"
+    ].startswith("${OBJECT_STORE_PLATFORM_ADMIN_ACCESS_KEY:")
+    assert core["services"]["trino"]["environment"]["AWS_ACCESS_KEY_ID"].startswith(
+        "${OBJECT_STORE_TRINO_ENGINE_ACCESS_KEY:"
+    )
+    assert prefect["x-lakehouse-runtime"]["environment"][
+        "LAKEHOUSE_STORAGE__ACCESS_KEY"
+    ].startswith("${OBJECT_STORE_PREFECT_INGESTION_ACCESS_KEY:")
+    assert review["services"]["ocr-review"]["environment"][
+        "LAKEHOUSE_STORAGE__ACCESS_KEY"
+    ].startswith("${OBJECT_STORE_OCR_REVIEW_ACCESS_KEY:")
+
+    for service_name, service in core["services"].items():
+        environment = service.get("environment", {})
+        if service_name not in {"object-store", "object-store-provision"}:
+            assert "MINIO_ROOT_USER" not in environment
+            assert "MINIO_ROOT_PASSWORD" not in environment
 
 
 def test_docs_do_not_reference_removed_dashboard_stack() -> None:
@@ -177,8 +250,7 @@ def test_container_environment_files_follow_service_ownership() -> None:
         "./infra/config/platform.container.env"
     ]
     assert (
-        core["services"]["platform-admin"]["environment"]["LAKEHOUSE_PLATFORM_ADMIN__ENABLED"]
-        == "true"
+        "LAKEHOUSE_PLATFORM_ADMIN__ENABLED" not in core["services"]["platform-admin"]["environment"]
     )
     assert (
         "./infra/config/platform-admin.guard:/run/secrets/platform_admin_guard:ro"
@@ -201,7 +273,7 @@ def test_container_environment_files_follow_service_ownership() -> None:
     for setting in (
         "LAKEHOUSE_STORAGE__ENDPOINTS__EXTERNAL_URL",
         "LAKEHOUSE_STORAGE__ENDPOINTS__INTERNAL_URL",
-        "LAKEHOUSE_TRINO__CATALOG",
+        "LAKEHOUSE_POLARIS__CATALOG_NAME",
         "LAKEHOUSE_ARXIV__BASE_URL",
         "LAKEHOUSE_KAGGLE__API_TOKEN",
         "MODAL_TOKEN_SECRET",
@@ -272,12 +344,18 @@ def test_aistor_license_and_data_are_mounted_at_canonical_paths() -> None:
         "--license",
         "/minio.license",
     ]
-    assert provision["entrypoint"] == ["/bin/sh", "/opt/object-store/lifecycle-buckets.sh"]
+    assert provision["entrypoint"] == ["/bin/sh", "/opt/object-store/provision.sh"]
     assert provision["command"] == ["provision"]
     assert (
-        "./infra/object-store/lifecycle-buckets.sh:/opt/object-store/lifecycle-buckets.sh:ro"
+        "./infra/object-store/provision.sh:/opt/object-store/provision.sh:ro"
         in provision["volumes"]
     )
+    script = Path("infra/object-store/provision.sh").read_text(encoding="utf-8")
+    assert "mc admin policy create" in script
+    assert "mc admin user add" in script
+    assert "mc admin policy attach" in script
+    assert "lakehouse-orchestration" in script
+    assert "lakehouse-ingestion-readwrite" not in script
 
 
 def test_makefile_is_the_local_operations_entrypoint() -> None:

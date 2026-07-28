@@ -16,9 +16,8 @@ from mini_lakehouse.contracts import (
     load_contracts,
     partition_spec,
 )
-from mini_lakehouse.platform.catalog.admin import bootstrap_table
 from mini_lakehouse.platform.catalog.layout import managed_tables
-from mini_lakehouse.platform.catalog.tables import managed_table_properties
+from mini_lakehouse.platform.catalog.tables import bootstrap_table, managed_table_properties
 
 
 def _binding(

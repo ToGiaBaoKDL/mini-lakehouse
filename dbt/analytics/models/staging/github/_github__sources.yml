@@ -3,7 +3,7 @@ version: 2
 sources:
   - name: github
     description: Canonical validated GitHub entities and events for downstream data products.
-    database: "{{ env_var('LAKEHOUSE_TRINO__CATALOG', 'prod') }}"
+    database: "{{ env_var('LAKEHOUSE_POLARIS__CATALOG_NAME', 'prod') }}"
     schema: curated.github
     meta:
       owner: data-platform

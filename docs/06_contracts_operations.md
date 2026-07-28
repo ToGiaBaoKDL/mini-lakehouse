@@ -26,9 +26,11 @@ and checks runtime catalog consistency without contacting the data plane.
 
 The lifecycle intentionally has no generic desired-state planner:
 
-1. `polaris-bootstrap` initializes the Polaris realm and root principal.
-2. `object-store-provision` creates missing lifecycle buckets.
-3. `platform-bootstrap` compiles contracts directly into official Polaris SDK and PyIceberg calls.
+1. `polaris-bootstrap` initializes the Polaris realm and root administration principal.
+2. `object-store-provision` creates missing lifecycle buckets and applies workload-scoped AIStor
+   users and policies through the official `mc` client.
+3. `platform-bootstrap` creates service principals and their RBAC graph, then compiles the
+   remaining contracts directly into official Polaris SDK and PyIceberg calls.
 4. `platform-validate` reads live state and fails when managed resources drift.
 5. Explicit migrations handle incompatible schema, partition, location, format, or policy-type
    changes.
@@ -40,24 +42,37 @@ make platform-validate
 
 Bootstrap is safe to rerun. It may:
 
-- create missing catalog, grants, namespaces, landing/curated tables, policies, and mappings;
+- create missing service principals, roles, grants, namespaces, landing/curated tables, policies,
+  and mappings;
+- initialize the configured credential only for a newly created service principal;
 - update mutable catalog, namespace, policy, and managed Iceberg properties;
 - add identifier fields to an existing curated table when its declared primary key is already
   represented by required Iceberg columns;
-- retry one Polaris optimistic-concurrency conflict after reading the winning state.
 
 Bootstrap never drops a catalog, namespace, table, object, policy, or team-owned resource. It
 fails on incompatible table structure or immutable policy type instead of hiding a migration.
+Polaris version conflicts fail safely; rerun the serialized bootstrap after reviewing concurrent
+platform activity.
 Repositories and dbt do not create platform-owned landing/curated tables.
 
 Live validation is read-only. It checks:
 
 - catalog properties and external/internal S3 endpoints;
-- required catalog-role grants;
+- service principal client IDs, role assignments, and scoped grants;
 - namespace locations and ownership properties;
 - Iceberg locations, format version, field IDs, types, requiredness, identifier fields,
   partition specs, and managed retention properties;
 - Polaris policy content and applicable mappings.
+
+Changing a Polaris service secret does not rotate the live principal implicitly. After updating
+the secret manager or local `.env`, rotate the selected identity explicitly before restarting its
+consumer:
+
+```bash
+make platform-rotate-credentials IDENTITIES="prefect_ingestion"
+```
+
+Omit `IDENTITIES` only for a deliberate rotation of every contract identity.
 
 ## Explicit migrations and pruning
 

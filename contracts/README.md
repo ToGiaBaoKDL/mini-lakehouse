@@ -9,7 +9,7 @@ storage operation.
 | Contract | Owns |
 |---|---|
 | `platform.yaml` | Catalog identity and the three lifecycle root namespaces |
-| `access.yaml` | Privileges granted to existing catalog roles |
+| `access.yaml` | Polaris service identities, role graph, and scoped grants |
 | `maintenance.yaml` | Tier retention defaults and bounded optimization overrides |
 | `sources/*.yaml` | External source boundary, landing schemas, checkpoints, and partitions |
 | `curated/*.yaml` | Canonical product schemas, keys, partitions, and upstream sources |
@@ -20,6 +20,14 @@ Analytics model schemas, grains, tests, and materializations live only in dbt.
 Executable extraction and transformation logic lives only in Python or SQL.
 Endpoints, storage roots, and credentials are runtime settings rather than
 contract fields.
+
+`access.yaml` never contains a secret. Principal names are also their stable client IDs and
+principal-role names, removing three independently configurable identifiers. Local secret values
+come from the ignored `.env` and are mounted into application containers through Docker Compose
+Secrets. A production deployment supplies the same settings from its secret manager. Credential
+rotation is an explicit platform operation and is not part of normal contract reconciliation.
+Lifecycle-root namespace grants cover their child namespaces, so adding a curated product does
+not require duplicating the same workload privileges.
 
 The validated contract registry derives:
 

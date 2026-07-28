@@ -31,7 +31,7 @@ def discover_maintenance_plan() -> list[MaintenancePlanItem]:
         return build_maintenance_plan(
             catalog,
             clients.policies,
-            settings.trino.catalog,
+            settings.polaris.catalog_name,
             contracts,
         )
 

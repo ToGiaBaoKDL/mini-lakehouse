@@ -81,5 +81,5 @@ def test_object_checksum_streams_through_the_storage_adapter() -> None:
 def test_object_store_rejects_a_uri_owned_by_another_backend() -> None:
     store = _store(_Filesystem())
 
-    with pytest.raises(ValueError, match="Expected a s3 object URI"):
+    with pytest.raises(ValueError, match="Expected an S3 object URI"):
         store.exists("file:///tmp/artifact")

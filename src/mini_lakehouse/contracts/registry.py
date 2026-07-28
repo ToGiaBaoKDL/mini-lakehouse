@@ -1,6 +1,6 @@
 from pydantic import model_validator
 
-from mini_lakehouse.contracts.access import AccessContract
+from mini_lakehouse.contracts.access import AccessContract, NamespaceGrantContract
 from mini_lakehouse.contracts.base import ContractModel
 from mini_lakehouse.contracts.curated import CuratedProductContract
 from mini_lakehouse.contracts.domains import DomainContract
@@ -50,6 +50,16 @@ class PlatformContracts(ContractModel):
                 raise ValueError(
                     f"Namespace {'.'.join(namespace.path)!r} is missing its parent namespace"
                 )
+        for role in self.access.catalog_roles:
+            for grant in role.grants:
+                if (
+                    isinstance(grant, NamespaceGrantContract)
+                    and grant.namespace not in namespace_paths
+                ):
+                    raise ValueError(
+                        f"Catalog role {role.name!r} references unknown namespace "
+                        f"{'.'.join(grant.namespace)!r}"
+                    )
 
         source_table_identifiers = [
             source.table_identifier(table.key) for source in self.sources for table in source.tables

@@ -9,6 +9,8 @@ from fsspec.spec import AbstractFileSystem
 
 from mini_lakehouse.config.settings import StorageSettings
 
+_S3_PROTOCOL = "s3"
+
 
 class ObjectStore(Protocol):
     def exists(self, uri: str) -> bool: ...
@@ -30,7 +32,6 @@ class FsspecObjectStore:
         settings: StorageSettings,
         filesystem: AbstractFileSystem | None = None,
     ) -> None:
-        self._backend = settings.backend
         options: dict[str, Any] = {
             "client_kwargs": {"region_name": settings.region},
             "config_kwargs": {
@@ -43,12 +44,12 @@ class FsspecObjectStore:
         secret_key = settings.secret_value(settings.secret_key)
         if access_key is not None and secret_key is not None:
             options.update({"key": access_key, "secret": secret_key})
-        self._filesystem = filesystem or fsspec.filesystem(settings.backend, **options)
+        self._filesystem = filesystem or fsspec.filesystem(_S3_PROTOCOL, **options)
 
     def _path(self, uri: str) -> str:
         protocol, path = split_protocol(uri)
-        if protocol != self._backend or not path:
-            raise ValueError(f"Expected a {self._backend} object URI, got {uri!r}")
+        if protocol != _S3_PROTOCOL or not path:
+            raise ValueError(f"Expected an S3 object URI, got {uri!r}")
         return path
 
     def exists(self, uri: str) -> bool:

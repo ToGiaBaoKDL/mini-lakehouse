@@ -29,15 +29,15 @@ def _delete_test_rows(
     source = contracts.source("arxiv")
     product = contracts.curated_product("arxiv")
     for table_key in ("paper_authors", "paper_categories", "papers"):
+        relation = product.table_identifier(table_key).trino(settings.polaris.catalog_name)
         executor.execute(
-            f"DELETE FROM {product.table_identifier(table_key).trino(settings.trino.catalog)} "
-            "WHERE arxiv_id = ?",
+            f"DELETE FROM {relation} WHERE arxiv_id = ?",
             (_ARXIV_ID,),
         )
     for table_key in ("oai_records_raw", "oai_checkpoints"):
+        relation = source.table_identifier(table_key).trino(settings.polaris.catalog_name)
         executor.execute(
-            f"DELETE FROM {source.table_identifier(table_key).trino(settings.trino.catalog)} "
-            "WHERE datestamp_date = ?",
+            f"DELETE FROM {relation} WHERE datestamp_date = ?",
             (_TEST_DAY,),
         )
 
@@ -48,6 +48,12 @@ def _insert_landing_record(
 ) -> None:
     settings = get_settings()
     source = contracts.source("arxiv")
+    records_relation = source.table_identifier("oai_records_raw").trino(
+        settings.polaris.catalog_name
+    )
+    checkpoints_relation = source.table_identifier("oai_checkpoints").trino(
+        settings.polaris.catalog_name
+    )
     raw_hash = "a" * 64
     raw_object_key = "api/arxiv/raw/oai/datestamp=2099-12-31/integration-responses.tar.zst"
     authors_json = json.dumps(
@@ -71,7 +77,7 @@ def _insert_landing_record(
     )
     executor.execute(
         f"""
-        INSERT INTO {source.table_identifier("oai_records_raw").trino(settings.trino.catalog)} (
+        INSERT INTO {records_relation} (
             oai_identifier,
             arxiv_id,
             title,
@@ -124,7 +130,7 @@ def _insert_landing_record(
     )
     executor.execute(
         f"""
-        INSERT INTO {source.table_identifier("oai_checkpoints").trino(settings.trino.catalog)} (
+        INSERT INTO {checkpoints_relation} (
             datestamp_date,
             raw_object_key,
             raw_object_sha256,
@@ -157,7 +163,7 @@ def _curated_snapshot_ids(
     for table_key in ("papers", "paper_authors", "paper_categories"):
         identifier = product.table_identifier(table_key)
         namespace = ".".join(identifier.namespace)
-        relation = f'"{settings.trino.catalog}"."{namespace}"."{identifier.name}$snapshots"'
+        relation = f'"{settings.polaris.catalog_name}"."{namespace}"."{identifier.name}$snapshots"'
         result = executor.execute(f"SELECT max(snapshot_id) FROM {relation}")
         assert len(result.rows) == 1
         snapshot_ids.append(int(result.rows[0][0]))
@@ -168,6 +174,13 @@ def test_arxiv_curation_expands_authors_and_is_idempotent() -> None:
     settings = get_settings()
     contracts = load_contracts(settings.contracts_dir)
     product = contracts.curated_product("arxiv")
+    papers_relation = product.table_identifier("papers").trino(settings.polaris.catalog_name)
+    authors_relation = product.table_identifier("paper_authors").trino(
+        settings.polaris.catalog_name
+    )
+    categories_relation = product.table_identifier("paper_categories").trino(
+        settings.polaris.catalog_name
+    )
 
     try:
         with TrinoExecutor(settings.trino) as executor:
@@ -186,7 +199,7 @@ def test_arxiv_curation_expands_authors_and_is_idempotent() -> None:
             papers = executor.execute(
                 f"""
                 SELECT count(*)
-                FROM {product.table_identifier("papers").trino(settings.trino.catalog)}
+                FROM {papers_relation}
                 WHERE arxiv_id = ?
                 """,
                 (_ARXIV_ID,),
@@ -194,7 +207,7 @@ def test_arxiv_curation_expands_authors_and_is_idempotent() -> None:
             authors = executor.execute(
                 f"""
                 SELECT author_position, keyname, forenames, suffix, affiliation
-                FROM {product.table_identifier("paper_authors").trino(settings.trino.catalog)}
+                FROM {authors_relation}
                 WHERE arxiv_id = ?
                 ORDER BY author_position
                 """,
@@ -203,7 +216,7 @@ def test_arxiv_curation_expands_authors_and_is_idempotent() -> None:
             categories = executor.execute(
                 f"""
                 SELECT category, is_primary
-                FROM {product.table_identifier("paper_categories").trino(settings.trino.catalog)}
+                FROM {categories_relation}
                 WHERE arxiv_id = ?
                 ORDER BY category
                 """,

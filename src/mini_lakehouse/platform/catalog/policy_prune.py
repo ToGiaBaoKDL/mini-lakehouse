@@ -11,7 +11,8 @@ from mini_lakehouse.config import get_settings
 from mini_lakehouse.contracts import PlatformContracts, load_contracts
 from mini_lakehouse.logging import configure_logging
 from mini_lakehouse.platform.catalog.layout import validate_runtime_contract
-from mini_lakehouse.platform.catalog.polaris import PolarisClients, PolarisPolicyClient
+from mini_lakehouse.platform.catalog.polaris import PolarisClients
+from mini_lakehouse.platform.catalog.policies import PolarisPolicyClient
 
 logger = logging.getLogger(__name__)
 MANAGED_POLICY_PREFIX = "mlh-"
