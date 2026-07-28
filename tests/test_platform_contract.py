@@ -37,7 +37,8 @@ def test_catalog_contract_enables_bucket_root_namespaces() -> None:
         catalog_properties(settings, contracts)["polaris.config.namespace-custom-location.enabled"]
         == "true"
     )
-    assert catalog_allowed_locations(settings) == (
+    assert catalog_allowed_locations(settings, contracts) == (
+        "s3://landing/_catalog",
         "s3://landing",
         "s3://curated",
         "s3://analytics",
@@ -70,8 +71,12 @@ def test_catalog_allowed_locations_are_deduplicated() -> None:
             }
         }
     )
+    contracts = load_contracts()
 
-    assert catalog_allowed_locations(settings) == ("s3://shared",)
+    assert catalog_allowed_locations(settings, contracts) == (
+        "s3://shared/_catalog",
+        "s3://shared",
+    )
 
 
 def test_managed_tables_compile_once_without_a_desired_state_copy() -> None:

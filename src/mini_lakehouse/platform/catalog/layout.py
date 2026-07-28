@@ -60,20 +60,31 @@ def namespace_properties(
     }
 
 
+def _catalog_default_location(settings: Settings, contracts: PlatformContracts) -> str:
+    tier = contracts.platform.catalog.default_storage_root
+    return f"{_storage_uri(settings, tier).rstrip('/')}/_catalog"
+
+
 def catalog_properties(settings: Settings, contracts: PlatformContracts) -> dict[str, str]:
     spec = contracts.platform.catalog
-    default_location = f"{_storage_uri(settings, spec.default_storage_root).rstrip('/')}/_catalog"
     return {
         "owner": spec.owner,
-        "default-base-location": default_location,
+        "default-base-location": _catalog_default_location(settings, contracts),
         "polaris.config.namespace-custom-location.enabled": str(
             spec.namespace_custom_locations
         ).lower(),
     }
 
 
-def catalog_allowed_locations(settings: Settings) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(_storage_uri(settings, tier) for tier in LIFECYCLE_TIERS))
+def catalog_allowed_locations(
+    settings: Settings,
+    contracts: PlatformContracts,
+) -> tuple[str, ...]:
+    locations = (
+        _catalog_default_location(settings, contracts),
+        *(_storage_uri(settings, tier) for tier in LIFECYCLE_TIERS),
+    )
+    return tuple(dict.fromkeys(locations))
 
 
 type _ManagedTableBinding = tuple[

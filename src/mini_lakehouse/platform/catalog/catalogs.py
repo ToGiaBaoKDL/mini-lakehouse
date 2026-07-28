@@ -68,7 +68,7 @@ def catalog_drift(
     contracts: PlatformContracts,
 ) -> tuple[str, ...]:
     desired_properties = catalog_properties(settings, contracts)
-    desired_locations = catalog_allowed_locations(settings)
+    desired_locations = catalog_allowed_locations(settings, contracts)
     current_properties = current.properties.to_dict()
     current_storage = current.storage_config_info
     if not isinstance(current_storage, AwsStorageConfigInfo):
@@ -113,7 +113,7 @@ def bootstrap_catalog(
 ) -> None:
     name = contracts.platform.catalog.name
     properties = catalog_properties(settings, contracts)
-    locations = catalog_allowed_locations(settings)
+    locations = catalog_allowed_locations(settings, contracts)
     current = load_catalog(api, name)
     if current is None:
         api.create_catalog(

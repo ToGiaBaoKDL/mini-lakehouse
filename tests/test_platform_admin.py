@@ -62,7 +62,7 @@ def _sdk_catalog(settings: Settings) -> PolarisCatalog:
     storage = AwsStorageConfigInfo.model_validate(
         {
             "storageType": "S3",
-            "allowedLocations": list(catalog_allowed_locations(settings)),
+            "allowedLocations": list(catalog_allowed_locations(settings, contracts)),
             "endpoint": settings.storage.endpoints.external_url,
             "endpointInternal": settings.storage.endpoints.internal_url,
             "pathStyleAccess": settings.storage.path_style_access,
