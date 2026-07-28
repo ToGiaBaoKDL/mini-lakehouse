@@ -18,11 +18,7 @@ from mini_lakehouse.contracts import (
 )
 from mini_lakehouse.platform.catalog.admin import bootstrap_table
 from mini_lakehouse.platform.catalog.layout import managed_tables
-from mini_lakehouse.storage.iceberg import (
-    ICEBERG_DELETE_AFTER_COMMIT,
-    ICEBERG_PREVIOUS_VERSIONS_MAX,
-    managed_table_properties,
-)
+from mini_lakehouse.platform.catalog.tables import managed_table_properties
 
 
 def _binding(
@@ -119,8 +115,8 @@ def test_bootstrap_updates_only_managed_table_properties() -> None:
         {
             "write.format.default": "parquet",
             "write.parquet.compression-codec": "zstd",
-            ICEBERG_DELETE_AFTER_COMMIT: "true",
-            ICEBERG_PREVIOUS_VERSIONS_MAX: "30",
+            "write.metadata.delete-after-commit.enabled": "true",
+            "write.metadata.previous-versions-max": "30",
         }
     )
 

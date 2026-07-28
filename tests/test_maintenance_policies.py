@@ -15,11 +15,11 @@ from mini_lakehouse.platform.catalog.polaris import (
     PolarisPolicy,
     PolarisPolicyClient,
 )
+from mini_lakehouse.platform.catalog.tables import metadata_retention_properties
 from mini_lakehouse.platform.maintenance import (
     build_maintenance_plan,
     maintenance_statements,
 )
-from mini_lakehouse.storage.iceberg import iceberg_metadata_retention_properties
 
 
 def _target_applies(table: TableIdentifier, target_type: str, path: tuple[str, ...]) -> bool:
@@ -176,7 +176,7 @@ def test_current_metadata_retention_does_not_generate_a_redundant_commit() -> No
         "event_date_utc",
         DateType(),
         IdentityTransform(),
-        iceberg_metadata_retention_properties(policy.retention),
+        metadata_retention_properties(policy.retention),
     )
 
     statements = maintenance_statements(

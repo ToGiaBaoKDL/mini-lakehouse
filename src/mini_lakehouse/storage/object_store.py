@@ -65,12 +65,8 @@ class FsspecObjectStore:
         return content
 
     def sha256(self, uri: str) -> str:
-        digest = hashlib.sha256()
         with self._filesystem.open(self._path(uri), "rb") as raw_input_file:
-            input_file = cast(BinaryIO, raw_input_file)
-            for chunk in iter(lambda: input_file.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
+            return hashlib.file_digest(cast(Any, raw_input_file), "sha256").hexdigest()
 
     def upload(self, source: Path, destination_uri: str) -> None:
         self._filesystem.put_file(str(source), self._path(destination_uri))

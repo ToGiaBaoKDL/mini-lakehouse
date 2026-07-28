@@ -33,11 +33,11 @@ from mini_lakehouse.platform.catalog.polaris import (
     PolarisPolicyClient,
     canonical_policy_content,
 )
-from mini_lakehouse.storage.iceberg import (
+from mini_lakehouse.platform.catalog.tables import (
     MANAGED_ICEBERG_FORMAT_VERSION,
-    load_iceberg_catalog,
     managed_table_properties,
 )
+from mini_lakehouse.storage.iceberg import load_iceberg_catalog
 
 logger = logging.getLogger(__name__)
 

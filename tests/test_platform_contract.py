@@ -132,3 +132,12 @@ def test_catalog_and_table_lifecycle_mutations_stay_in_the_platform_boundary() -
     for path in business_modules:
         content = path.read_text(encoding="utf-8")
         assert all(token not in content for token in forbidden), path
+
+
+def test_storage_iceberg_adapter_does_not_own_platform_policy() -> None:
+    source = Path("src/mini_lakehouse/storage/iceberg.py").read_text(encoding="utf-8")
+
+    assert "mini_lakehouse.contracts" not in source
+    assert "MetadataRetentionContract" not in source
+    assert "managed_table_properties" not in source
+    assert "trino_metadata_retention_properties" not in source

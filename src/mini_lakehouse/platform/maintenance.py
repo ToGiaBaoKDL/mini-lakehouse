@@ -17,6 +17,7 @@ from mini_lakehouse.contracts.maintenance import (
     MAINTENANCE_POLICY_TYPES,
     DataCompactionPolicyContent,
     MaintenancePolicy,
+    MetadataRetentionContract,
     OrphanFileRemovalPolicyContent,
     PolicyType,
     SnapshotExpiryPolicyContent,
@@ -27,11 +28,11 @@ from mini_lakehouse.platform.catalog.polaris import (
     PolarisPolicyClient,
     policy_content_object,
 )
-from mini_lakehouse.storage.iceberg import (
-    discover_tables,
-    metadata_retention_is_current,
-    trino_metadata_retention_properties,
-)
+from mini_lakehouse.platform.catalog.tables import metadata_retention_is_current
+from mini_lakehouse.storage.iceberg import discover_table_identifiers
+
+_TRINO_DELETE_AFTER_COMMIT = "delete_after_commit_enabled"
+_TRINO_PREVIOUS_VERSIONS_MAX = "max_previous_versions"
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +46,15 @@ def _data_size(value: int) -> str:
     if value % mebibyte == 0:
         return f"{value // mebibyte}MB"
     return f"{value}B"
+
+
+def _trino_metadata_retention_properties(
+    retention: MetadataRetentionContract,
+) -> dict[str, str]:
+    return {
+        _TRINO_DELETE_AFTER_COMMIT: str(retention.delete_after_commit).lower(),
+        _TRINO_PREVIOUS_VERSIONS_MAX: str(retention.previous_versions_max),
+    }
 
 
 def _optimize_boundary(table: Table, partition_field: str, lookback_days: int) -> str:
@@ -136,7 +146,7 @@ def maintenance_statements(
         ):
             assignments = ", ".join(
                 f"{name} = {value}"
-                for name, value in trino_metadata_retention_properties(
+                for name, value in _trino_metadata_retention_properties(
                     metadata_contract.retention
                 ).items()
             )
@@ -211,7 +221,8 @@ def build_maintenance_plan(
 ) -> list[MaintenancePlanItem]:
     policy_contracts = {(policy.namespace, policy.name): policy for policy in contracts.policies}
     plan: list[MaintenancePlanItem] = []
-    for table in sorted(discover_tables(catalog), key=lambda item: item.iceberg):
+    for identifier in sorted(discover_table_identifiers(catalog)):
+        table = TableIdentifier.from_iceberg(identifier)
         iceberg_table = catalog.load_table(table.iceberg)
         statements = maintenance_statements(
             table,

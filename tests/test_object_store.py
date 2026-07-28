@@ -70,6 +70,14 @@ def test_bounded_object_read_rejects_oversized_content() -> None:
         store.read_bytes("s3://curated/artifact", max_bytes=7)
 
 
+def test_object_checksum_streams_through_the_storage_adapter() -> None:
+    store = _store(_Filesystem(content=b"artifact"))
+
+    assert store.sha256("s3://curated/artifact") == (
+        "c7c5c1d70c5dec4416ab6158afd0b223ef40c29b1dc1f97ed9428b94d4cadb1c"
+    )
+
+
 def test_object_store_rejects_a_uri_owned_by_another_backend() -> None:
     store = _store(_Filesystem())
 
