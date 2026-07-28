@@ -176,7 +176,7 @@ curl --fail http://localhost:4200/api/health
 uv run dbt debug --project-dir dbt/analytics --profiles-dir dbt/analytics
 ```
 
-The Compose overlay idempotently reconciles the local process work pool and deployments. Removing
+The Compose overlay idempotently bootstraps the local process work pool and deployments. Removing
 the local stack and named volumes is destructive:
 
 ```bash

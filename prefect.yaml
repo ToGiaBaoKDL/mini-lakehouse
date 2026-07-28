@@ -12,23 +12,26 @@ definitions:
       collision_strategy: ENQUEUE
 
   runtime:
-    worker:
-      concurrency_limit: 4
     work_pool:
       name: &lakehouse_work_pool lakehouse-process
       type: process
+      is_paused: false
       concurrency_limit: 4
     work_queues:
       - name: &ingestion_work_queue ingestion
+        is_paused: false
         priority: 2
         concurrency_limit: 2
       - name: &transformation_work_queue transformation
+        is_paused: false
         priority: 3
         concurrency_limit: 1
       - name: &processing_work_queue processing
+        is_paused: false
         priority: 4
         concurrency_limit: 1
       - name: &maintenance_work_queue maintenance
+        is_paused: false
         priority: 5
         concurrency_limit: 1
 

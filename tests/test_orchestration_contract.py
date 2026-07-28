@@ -17,10 +17,10 @@ def test_each_dag_lives_in_flows_and_uses_the_job_type_convention() -> None:
     dag_files = _dag_files()
 
     assert dag_files
-    assert not list(ORCHESTRATION_DIR.glob("*.py"))
     assert not list(FLOWS_DIR.rglob("_*.py"))
     assert not (ORCHESTRATION_DIR / "__init__.py").exists()
     assert not (ORCHESTRATION_DIR / "tasks.py").exists()
+    assert (ORCHESTRATION_DIR / "runtime.py").is_file()
 
     for dag_file in dag_files:
         job_type, separator, description = dag_file.stem.partition("_")

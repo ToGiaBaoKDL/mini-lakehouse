@@ -142,7 +142,7 @@ def test_restart_policies_match_service_lifecycle() -> None:
         "object-store-provision",
         "polaris-bootstrap",
         "platform-admin",
-        "prefect-reconcile",
+        "prefect-bootstrap",
         "prefect-deploy",
     }
 
@@ -352,7 +352,7 @@ def test_prefect_background_processes_expose_only_owned_health_signals() -> None
     # Container process state is more truthful than proxying the server's health.
     assert "healthcheck" not in background
     assert background["restart"] == "unless-stopped"
-    assert worker["command"] == "python -m mini_lakehouse.platform.prefect_runtime worker"
+    assert worker["command"] == "python -m orchestration.runtime worker"
     assert "localhost:8080/health" in worker["healthcheck"]["test"][-1]
 
     server_environment = background["environment"]
