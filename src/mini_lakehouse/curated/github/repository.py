@@ -101,7 +101,7 @@ class GithubCurationRepository:
                 ingested_at,
                 row_number() OVER (
                     PARTITION BY event_id
-                    ORDER BY ingested_at DESC, source_hour DESC, source_file DESC
+                    ORDER BY source_hour DESC, ingested_at DESC, source_file DESC
                 ) AS ingestion_rank
             FROM {self._source_relation()}
             WHERE source_hour = ?
@@ -133,12 +133,12 @@ class GithubCurationRepository:
             ) AS source
             ON {merge_key}
             WHEN MATCHED AND ROW(
-                source.ingested_at,
                 source.source_hour,
+                source.ingested_at,
                 source.source_file
             ) > ROW(
-                target.ingested_at,
                 target.source_hour,
+                target.ingested_at,
                 target.source_file
             ) THEN
                 UPDATE SET

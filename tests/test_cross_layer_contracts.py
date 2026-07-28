@@ -13,19 +13,43 @@ def _yaml(path: str) -> dict[str, object]:
     return cast(dict[str, object], payload)
 
 
-def test_dbt_curated_source_matches_the_product_contract() -> None:
-    product = load_contracts().curated_product("github")
-    dbt_source_file = _yaml("dbt/analytics/models/staging/github/_github__sources.yml")
-    dbt_sources = cast(list[dict[str, object]], dbt_source_file["sources"])
-    dbt_source = dbt_sources[0]
-    tables = cast(list[dict[str, object]], dbt_source["tables"])
+def test_dbt_curated_sources_match_product_contracts() -> None:
+    contracts = load_contracts()
+    source_paths = sorted(Path("dbt/analytics/models/staging").rglob("*_sources.yml"))
+    seen_sources: set[str] = set()
 
-    assert dbt_source["name"] == product.name
-    assert dbt_source["schema"] == ".".join(product.curated_namespace)
-    source_meta = cast(dict[str, object], dbt_source["meta"])
-    assert source_meta["owner"] == product.owner
-    assert source_meta["contact"] == product.contact.email
-    assert {table["name"] for table in tables} == {table.name for table in product.tables}
+    assert source_paths
+    for path in source_paths:
+        dbt_sources = cast(list[dict[str, object]], _yaml(str(path))["sources"])
+        for dbt_source in dbt_sources:
+            source_name = str(dbt_source["name"])
+            assert source_name not in seen_sources
+            seen_sources.add(source_name)
+            product = contracts.curated_product(source_name)
+            tables = cast(list[dict[str, object]], dbt_source["tables"])
+
+            assert dbt_source["description"] == product.description
+            assert dbt_source["schema"] == ".".join(product.curated_namespace)
+            source_meta = cast(dict[str, object], dbt_source["meta"])
+            assert source_meta == {
+                "owner": product.owner,
+                "contact": product.contact.email,
+            }
+            product_tables = {table.name: table for table in product.tables}
+            assert {str(table["name"]) for table in tables} <= set(product_tables)
+            for table in tables:
+                contract = product_tables[str(table["name"])]
+                assert table["description"] == contract.description
+                contract_columns = {column.name: column for column in contract.columns}
+                dbt_columns = cast(list[dict[str, object]], table.get("columns", []))
+                assert {str(column["name"]) for column in dbt_columns} <= set(contract_columns)
+                if len(contract.primary_key) == 1:
+                    key = contract.primary_key[0]
+                    dbt_key = next(column for column in dbt_columns if column["name"] == key)
+                    assert set(cast(list[str], dbt_key["data_tests"])) >= {
+                        "not_null",
+                        "unique",
+                    }
 
 
 def test_dbt_engineering_marts_match_the_domain_contract() -> None:

@@ -7,7 +7,11 @@ from tempfile import TemporaryDirectory
 
 from mini_lakehouse.config.settings import Settings
 from mini_lakehouse.contracts import PlatformContracts, load_contracts
-from mini_lakehouse.sources.arxiv.archive import write_response_archive
+from mini_lakehouse.sources.arxiv.archive import (
+    read_response_archive,
+    response_archive_sha256,
+    write_response_archive,
+)
 from mini_lakehouse.sources.arxiv.client import ArxivOaiClient
 from mini_lakehouse.sources.arxiv.models import ArxivMetadataResult, OaiDay
 from mini_lakehouse.sources.arxiv.parser import parse_oai_pages
@@ -60,12 +64,12 @@ class ArxivMetadataService:
                     f"ArXiv OAI day {day.iso} checkpoint drifted; run with refresh=true "
                     "after reviewing the source contract change"
                 )
-            raw_matches_checkpoint = (
-                not refresh
-                and existing is not None
-                and self._object_store.exists(raw_uri)
-                and self._object_store.sha256(raw_uri) == existing.raw_object_sha256
-            )
+            raw_exists = self._object_store.exists(raw_uri)
+            raw_matches_checkpoint = False
+            if not refresh and existing is not None and raw_exists:
+                raw_matches_checkpoint = (
+                    self._object_store.sha256(raw_uri) == existing.raw_object_sha256
+                )
             if raw_matches_checkpoint:
                 assert existing is not None
                 logger.info("ArXiv OAI day %s already has a complete checkpoint", day.iso)
@@ -79,10 +83,17 @@ class ArxivMetadataService:
                     was_written=False,
                 )
 
-            pages = tuple(self._client.pages(day))
             with TemporaryDirectory(prefix="arxiv-oai-") as temporary_directory:
                 archive_path = Path(temporary_directory) / "responses.tar.zst"
-                archive_sha256 = write_response_archive(pages, archive_path)
+                if not refresh and existing is None and raw_exists:
+                    logger.info("Reusing uncommitted ArXiv OAI archive %s", raw_uri)
+                    self._object_store.download(raw_uri, archive_path)
+                    pages = read_response_archive(archive_path)
+                    archive_sha256 = response_archive_sha256(archive_path)
+                else:
+                    pages = tuple(self._client.pages(day))
+                    archive_sha256 = write_response_archive(pages, archive_path)
+                    self._object_store.upload(archive_path, raw_uri)
                 records = parse_oai_pages(
                     pages,
                     day,
@@ -90,7 +101,6 @@ class ArxivMetadataService:
                     raw_object_sha256=archive_sha256,
                     contracts=self._contracts,
                 )
-                self._object_store.upload(archive_path, raw_uri)
                 write = repository.publish_day(
                     records,
                     datestamp_date=day.value,

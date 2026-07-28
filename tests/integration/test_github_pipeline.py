@@ -89,6 +89,30 @@ def _run_dbt(*arguments: str) -> None:
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
 
 
+def _engineering_mart_rows(
+    executor: TrinoExecutor,
+    repository_relation: str,
+    contributor_relation: str,
+) -> tuple[tuple[object, ...], tuple[object, ...]]:
+    repository_mart = executor.execute(
+        f"""
+        SELECT activity_date, event_count, pushed_commit_count, repository_name
+        FROM {repository_relation}
+        WHERE repository_id = ?
+        """,
+        (_REPOSITORY_ID,),
+    )
+    contributor_mart = executor.execute(
+        f"""
+        SELECT activity_date, event_count, actor_login
+        FROM {contributor_relation}
+        WHERE actor_id = ?
+        """,
+        (_ACTOR_ID,),
+    )
+    return repository_mart.rows, contributor_mart.rows
+
+
 def test_landing_curation_merge_and_analytics_build_end_to_end() -> None:
     settings = get_settings()
     current_hour = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
@@ -104,28 +128,35 @@ def test_landing_curation_merge_and_analytics_build_end_to_end() -> None:
 
     with load_iceberg_catalog(settings) as catalog:
         landing = GithubArchiveRepository(settings, catalog=catalog)
-        landing.write_hour(
-            _event(
-                source_hour=first_hour,
-                occurred_at=first_occurred_at,
-                ingested_at=current_hour,
-                actor_login="e2e-old",
-                repository_name="e2e/old-name",
-                push_commit_count=2,
-            ),
-            first_hour.value,
+        first_events = _event(
+            source_hour=first_hour,
+            occurred_at=first_occurred_at,
+            # Simulate an older checkpoint being backfilled after newer data.
+            ingested_at=current_hour + timedelta(minutes=2),
+            actor_login="e2e-old",
+            repository_name="e2e/old-name",
+            push_commit_count=2,
         )
-        landing.write_hour(
-            _event(
-                source_hour=second_hour,
-                occurred_at=second_occurred_at,
-                ingested_at=current_hour + timedelta(minutes=1),
-                actor_login="e2e-current",
-                repository_name="e2e/current-name",
-                push_commit_count=3,
-            ),
+        first_write = landing.write_hour(first_events, first_hour.value)
+        repeated_first_write = landing.write_hour(first_events, first_hour.value)
+        second_events = _event(
+            source_hour=second_hour,
+            occurred_at=second_occurred_at,
+            ingested_at=current_hour + timedelta(minutes=1),
+            actor_login="e2e-current",
+            repository_name="e2e/current-name",
+            push_commit_count=3,
+        )
+        second_write = landing.write_hour(
+            second_events,
             second_hour.value,
         )
+        repeated_second_write = landing.write_hour(second_events, second_hour.value)
+
+        assert first_write.was_written is True
+        assert second_write.was_written is True
+        assert repeated_first_write.was_written is False
+        assert repeated_second_write.was_written is False
 
     contracts = load_contracts(settings.contracts_dir)
     product = contracts.curated_product("github")
@@ -134,6 +165,10 @@ def test_landing_curation_merge_and_analytics_build_end_to_end() -> None:
         curation = GithubCurationService(settings, executor=executor, contracts=contracts)
         curation.curate(first_hour)
         curation.curate(second_hour)
+        # Replaying an older checkpoint and then the current checkpoint must converge.
+        curation.curate(first_hour)
+        repeated_curation = curation.curate(second_hour)
+        assert repeated_curation.event_rows == 1
 
         events = executor.execute(
             f"""
@@ -143,6 +178,22 @@ def test_landing_curation_merge_and_analytics_build_end_to_end() -> None:
             """,
             (_EVENT_ID,),
         )
+        actors = executor.execute(
+            f"""
+            SELECT actor_login, last_observed_at
+            FROM {product.table_identifier("actors_current").trino(settings.trino.catalog)}
+            WHERE actor_id = ?
+            """,
+            (_ACTOR_ID,),
+        )
+        repositories = executor.execute(
+            f"""
+            SELECT repository_name, last_observed_at
+            FROM {product.table_identifier("repositories_current").trino(settings.trino.catalog)}
+            WHERE repository_id = ?
+            """,
+            (_REPOSITORY_ID,),
+        )
         assert events.rows == (
             (
                 second_occurred_at.date(),
@@ -151,6 +202,8 @@ def test_landing_curation_merge_and_analytics_build_end_to_end() -> None:
                 "e2e-current",
             ),
         )
+        assert actors.rows == (("e2e-current", second_occurred_at),)
+        assert repositories.rows == (("e2e/current-name", second_occurred_at),)
 
     _run_dbt("source", "freshness", "--selector", "github_sources")
     _run_dbt(
@@ -160,8 +213,7 @@ def test_landing_curation_merge_and_analytics_build_end_to_end() -> None:
         "--indirect-selection",
         "cautious",
     )
-    _run_dbt("run", "--selector", "engineering_marts", "--threads", "1")
-    _run_dbt("test", "--selector", "engineering_marts")
+    _run_dbt("build", "--selector", "engineering_marts", "--threads", "1")
 
     repository_mart_relation = TableIdentifier(
         domain.analytics_namespace,
@@ -172,22 +224,37 @@ def test_landing_curation_merge_and_analytics_build_end_to_end() -> None:
         "fct_contributor_activity_daily",
     ).trino(settings.trino.catalog)
     with TrinoExecutor(settings.trino) as executor:
-        repository_mart = executor.execute(
-            f"""
-            SELECT activity_date, event_count, pushed_commit_count, repository_name
-            FROM {repository_mart_relation}
-            WHERE repository_id = ?
-            """,
-            (_REPOSITORY_ID,),
-        )
-        contributor_mart = executor.execute(
-            f"""
-            SELECT activity_date, event_count, actor_login
-            FROM {contributor_mart_relation}
-            WHERE actor_id = ?
-            """,
-            (_ACTOR_ID,),
+        first_build = _engineering_mart_rows(
+            executor,
+            repository_mart_relation,
+            contributor_mart_relation,
         )
 
-    assert repository_mart.rows == ((second_occurred_at.date(), 1, 3, "e2e/current-name"),)
-    assert contributor_mart.rows == ((second_occurred_at.date(), 1, "e2e-current"),)
+    _run_dbt("build", "--selector", "engineering_marts", "--threads", "1")
+
+    with TrinoExecutor(settings.trino) as executor:
+        second_build = _engineering_mart_rows(
+            executor,
+            repository_mart_relation,
+            contributor_mart_relation,
+        )
+        temporary_relations = executor.execute(
+            f"""
+            SELECT table_name
+            FROM "{settings.trino.catalog}".information_schema.tables
+            WHERE table_schema = ?
+              AND (
+                  table_name LIKE '%__dbt_tmp%'
+                  OR regexp_like(table_name, '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}')
+              )
+            """,
+            (".".join(domain.analytics_namespace),),
+        )
+
+    expected = (
+        ((second_occurred_at.date(), 1, 3, "e2e/current-name"),),
+        ((second_occurred_at.date(), 1, "e2e-current"),),
+    )
+    assert first_build == expected
+    assert second_build == expected
+    assert temporary_relations.rows == ()

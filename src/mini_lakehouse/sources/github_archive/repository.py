@@ -97,6 +97,7 @@ class GithubArchiveRepository:
             ),
             snapshot_properties={
                 "data-tier": "landing",
+                "schema-contract": self._source.table_schema_contract("events_raw"),
                 "source-hour": source_hour.isoformat(),
                 "source-row-count": str(events.num_rows),
                 "source-system": "github_archive",

@@ -59,9 +59,12 @@ def test_curation_is_bounded_to_one_source_hour() -> None:
     event_merge = merge_calls[0][0]
     assert 'ON target."event_id" = source."event_id"' in event_merge
     assert "target.event_date_utc = source.event_date_utc" not in event_merge
-    assert "source.ingested_at," in event_merge
-    assert "source.source_hour," in event_merge
+    assert event_merge.index("source.source_hour,") < event_merge.index("source.ingested_at,")
+    assert event_merge.index("target.source_hour,") < event_merge.index("target.ingested_at,")
     assert "source.source_file" in event_merge
+    assert "ORDER BY source_hour DESC, ingested_at DESC, source_file DESC" in event_merge
+    for entity_merge, _ in merge_calls[1:]:
+        assert 'source."last_observed_at" > target."last_observed_at"' in entity_merge
     assert not any(call[0].startswith("CREATE TABLE") for call in executor.calls)
 
 

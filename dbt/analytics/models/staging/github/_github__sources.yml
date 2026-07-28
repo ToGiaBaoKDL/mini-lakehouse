@@ -2,14 +2,12 @@ version: 2
 
 sources:
   - name: github
-    description: Canonical, source-conformed GitHub product owned by Data Platform.
+    description: Canonical validated GitHub entities and events for downstream data products.
     database: "{{ env_var('LAKEHOUSE_TRINO__CATALOG', 'prod') }}"
     schema: curated.github
     meta:
       owner: data-platform
       contact: bao.to@timo.vn
-      product: github
-      physical_bucket: curated
     tables:
       - name: events
         description: Deduplicated and normalized GitHub events at one row per stable event ID.

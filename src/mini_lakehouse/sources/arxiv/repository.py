@@ -139,7 +139,18 @@ class ArxivLandingRepository:
             )
 
         records_table = self._table("oai_records_raw")
-        records_table.overwrite(records, overwrite_filter=self._day_filter(datestamp_date))
+        records_table.overwrite(
+            records,
+            overwrite_filter=self._day_filter(datestamp_date),
+            snapshot_properties={
+                "data-tier": "landing",
+                "schema-contract": self._source.table_schema_contract("oai_records_raw"),
+                "source-datestamp": datestamp_date.isoformat(),
+                "source-object-sha256": raw_object_sha256,
+                "source-row-count": str(records.num_rows),
+                "source-system": "arxiv",
+            },
+        )
         records_snapshot_id = self._snapshot_id(records_table)
 
         checkpoint_contract = self._source.table("oai_checkpoints")
@@ -161,6 +172,14 @@ class ArxivLandingRepository:
         checkpoint_table.overwrite(
             checkpoint,
             overwrite_filter=self._day_filter(datestamp_date),
+            snapshot_properties={
+                "data-tier": "landing",
+                "schema-contract": self._source.table_schema_contract("oai_checkpoints"),
+                "source-datestamp": datestamp_date.isoformat(),
+                "source-object-sha256": raw_object_sha256,
+                "source-row-count": "1",
+                "source-system": "arxiv",
+            },
         )
         checkpoint_snapshot_id = self._snapshot_id(checkpoint_table)
         return ArxivLandingWrite(

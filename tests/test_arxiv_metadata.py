@@ -1,15 +1,26 @@
 import hashlib
 from datetime import UTC, date, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import create_autospec
+
+import pytest
+from pyiceberg.catalog import Catalog
+from pyiceberg.table import Table
 
 from mini_lakehouse.config.settings import ArxivSettings, Settings
-from mini_lakehouse.sources.arxiv.archive import write_response_archive
+from mini_lakehouse.contracts import load_contracts
+from mini_lakehouse.sources.arxiv.archive import (
+    read_response_archive,
+    write_response_archive,
+)
 from mini_lakehouse.sources.arxiv.client import ArxivOaiClient
 from mini_lakehouse.sources.arxiv.models import OaiDay
 from mini_lakehouse.sources.arxiv.parser import parse_oai_pages
 from mini_lakehouse.sources.arxiv.repository import (
     ArxivLandingDayState,
+    ArxivLandingRepository,
     ArxivLandingWrite,
 )
 from mini_lakehouse.sources.arxiv.service import ArxivMetadataService
@@ -121,6 +132,7 @@ def test_raw_response_archive_is_deterministic(tmp_path: Path) -> None:
 
     assert first.read_bytes() == second.read_bytes()
     assert first_hash == second_hash == hashlib.sha256(first.read_bytes()).hexdigest()
+    assert read_response_archive(first) == (OAI_PAGE,)
 
 
 class _UnusedClient:
@@ -144,6 +156,29 @@ class _ObjectStore:
         self.uploads += 1
 
 
+class _RetryObjectStore:
+    def __init__(self) -> None:
+        self.content: bytes | None = None
+        self.uploads = 0
+        self.downloads = 0
+
+    def exists(self, _uri: str) -> bool:
+        return self.content is not None
+
+    def sha256(self, _uri: str) -> str:
+        assert self.content is not None
+        return hashlib.sha256(self.content).hexdigest()
+
+    def upload(self, source: Path, _destination_uri: str) -> None:
+        self.content = source.read_bytes()
+        self.uploads += 1
+
+    def download(self, _uri: str, destination: Path) -> None:
+        assert self.content is not None
+        destination.write_bytes(self.content)
+        self.downloads += 1
+
+
 class _Repository:
     def __init__(self, state: ArxivLandingDayState | None) -> None:
         self.state = state
@@ -154,6 +189,17 @@ class _Repository:
 
     def publish_day(self, *_args: object, **_kwargs: object) -> ArxivLandingWrite:
         self.publications += 1
+        return ArxivLandingWrite(
+            records_snapshot_id=11,
+            checkpoint_snapshot_id=12,
+        )
+
+
+class _RetryRepository(_Repository):
+    def publish_day(self, *_args: object, **_kwargs: object) -> ArxivLandingWrite:
+        self.publications += 1
+        if self.publications == 1:
+            raise RuntimeError("Iceberg commit failed")
         return ArxivLandingWrite(
             records_snapshot_id=11,
             checkpoint_snapshot_id=12,
@@ -238,3 +284,97 @@ def test_mismatched_raw_object_rebuilds_the_checkpoint_on_retry() -> None:
     assert result.was_written is True
     assert object_store.uploads == 1
     assert repository.publications == 1
+
+
+def test_retry_reuses_the_published_response_archive() -> None:
+    repository = _RetryRepository(None)
+    object_store = _RetryObjectStore()
+    session = _Session([OAI_PAGE])
+    service = ArxivMetadataService(
+        Settings(),
+        client=ArxivOaiClient(ArxivSettings(), session=session),  # type: ignore[arg-type]
+        object_store=object_store,  # type: ignore[arg-type]
+        repository=repository,  # type: ignore[arg-type]
+    )
+    day = OaiDay(value=date(2026, 7, 22))
+
+    with pytest.raises(RuntimeError, match="Iceberg commit failed"):
+        service.sync_day(day)
+    retried = service.sync_day(day)
+
+    assert retried.was_written is True
+    assert retried.record_count == 1
+    assert len(session.calls) == 1
+    assert object_store.uploads == 1
+    assert object_store.downloads == 1
+    assert repository.publications == 2
+
+
+def test_landing_day_publishes_records_before_the_checkpoint() -> None:
+    contracts = load_contracts()
+    source = contracts.source("arxiv")
+    day = date(2026, 7, 22)
+    records = parse_oai_pages(
+        (OAI_PAGE,),
+        OaiDay(value=day),
+        raw_object_key="api/arxiv/raw/oai/datestamp=2026-07-22/responses.tar.zst",
+        raw_object_sha256="a" * 64,
+        contracts=contracts,
+    )
+    catalog = create_autospec(Catalog, instance=True)
+    records_table = create_autospec(Table, instance=True)
+    checkpoint_table = create_autospec(Table, instance=True)
+    publication_order: list[str] = []
+    catalog.table_exists.return_value = True
+
+    def load_table(identifier: tuple[str, ...]) -> Table:
+        return {
+            source.table_identifier("oai_records_raw").iceberg: records_table,
+            source.table_identifier("oai_checkpoints").iceberg: checkpoint_table,
+        }[identifier]
+
+    def record_publication(_value: object, **_kwargs: object) -> None:
+        publication_order.append("records")
+
+    def checkpoint_publication(_value: object, **_kwargs: object) -> None:
+        publication_order.append("checkpoint")
+
+    catalog.load_table.side_effect = load_table
+    records_table.overwrite.side_effect = record_publication
+    checkpoint_table.overwrite.side_effect = checkpoint_publication
+    records_table.refresh.return_value.current_snapshot.return_value = SimpleNamespace(
+        snapshot_id=11
+    )
+    checkpoint_table.refresh.return_value.current_snapshot.return_value = SimpleNamespace(
+        snapshot_id=12
+    )
+    repository = ArxivLandingRepository(
+        Settings(),
+        catalog=catalog,
+        contracts=contracts,
+    )
+
+    result = repository.publish_day(
+        records,
+        datestamp_date=day,
+        raw_object_key="api/arxiv/raw/oai/datestamp=2026-07-22/responses.tar.zst",
+        raw_object_sha256="a" * 64,
+        page_count=1,
+    )
+
+    assert publication_order == ["records", "checkpoint"]
+    assert result == ArxivLandingWrite(
+        records_snapshot_id=11,
+        checkpoint_snapshot_id=12,
+    )
+    assert records_table.overwrite.call_args.kwargs["snapshot_properties"] == {
+        "data-tier": "landing",
+        "schema-contract": "arxiv.oai_records_raw.v1",
+        "source-datestamp": day.isoformat(),
+        "source-object-sha256": "a" * 64,
+        "source-row-count": "1",
+        "source-system": "arxiv",
+    }
+    checkpoint = checkpoint_table.overwrite.call_args.args[0].to_pylist()
+    assert checkpoint[0]["record_count"] == 1
+    assert checkpoint[0]["schema_version"] == "arxiv.oai_records_raw.v1"

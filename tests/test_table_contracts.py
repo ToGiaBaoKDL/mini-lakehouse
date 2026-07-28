@@ -12,7 +12,10 @@ from pyiceberg.transforms import HourTransform
 
 from mini_lakehouse.config.settings import Settings
 from mini_lakehouse.contracts import TableIdentifier, load_contracts, partition_spec
-from mini_lakehouse.sources.github_archive.repository import GithubArchiveRepository
+from mini_lakehouse.sources.github_archive.repository import (
+    GithubArchiveRepository,
+    GithubArchiveWrite,
+)
 
 
 def _events_partition_spec() -> PartitionSpec:
@@ -114,4 +117,38 @@ def test_new_hour_uses_checkpoint_predicate_overwrite_as_the_idempotent_commit()
     assert result.snapshot_id == 9
     table.overwrite.assert_called_once()
     assert isinstance(table.overwrite.call_args.kwargs["overwrite_filter"], EqualTo)
+    assert table.overwrite.call_args.kwargs["snapshot_properties"] == {
+        "data-tier": "landing",
+        "schema-contract": "github_archive.events_raw.v1",
+        "source-hour": source_hour.isoformat(),
+        "source-row-count": "1",
+        "source-system": "github_archive",
+    }
     table.append.assert_not_called()
+
+
+def test_repeated_hour_does_not_create_another_snapshot() -> None:
+    source_hour = datetime(2025, 1, 2, 3, tzinfo=UTC)
+    catalog = create_autospec(Catalog, instance=True)
+    table = create_autospec(Table, instance=True)
+    catalog.table_exists.return_value = True
+    catalog.load_table.return_value = table
+    table.scan.return_value.plan_files.side_effect = [
+        [],
+        [SimpleNamespace(file=SimpleNamespace(record_count=1))],
+    ]
+    table.refresh.return_value.current_snapshot.return_value = SimpleNamespace(snapshot_id=9)
+    table.current_snapshot.return_value = SimpleNamespace(snapshot_id=9)
+    repository = GithubArchiveRepository(Settings(), catalog=catalog)
+    events = pa.table({"source_hour": [source_hour]})
+
+    first = repository.write_hour(events, source_hour)
+    repeated = repository.write_hour(events, source_hour)
+
+    assert first.was_written is True
+    assert repeated == GithubArchiveWrite(
+        row_count=1,
+        snapshot_id=9,
+        was_written=False,
+    )
+    table.overwrite.assert_called_once()
