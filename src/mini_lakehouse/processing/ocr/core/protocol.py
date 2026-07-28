@@ -74,7 +74,6 @@ class OcrInference(ProtocolModel):
 class OcrJob(ProtocolModel):
     schema_version: Literal["1.0.0"]
     batch_id: str = Field(pattern=r"^[0-9a-f]{64}$")
-    runner_bundle_sha256: Sha256 = Field(pattern=r"^[0-9a-f]{64}$")
     model: OcrModel
     layout_model: OcrModel
     adapter_version: str = Field(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")

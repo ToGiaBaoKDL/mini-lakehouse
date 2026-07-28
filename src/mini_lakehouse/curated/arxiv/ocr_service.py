@@ -20,10 +20,10 @@ from mini_lakehouse.processing.ocr.archive import (
     OcrBatchMismatchError,
     validate_runner_output,
 )
-from mini_lakehouse.processing.ocr.core.files import file_sha256
 from mini_lakehouse.processing.ocr.core.identity import (
     batch_id,
     config_hash,
+    file_sha256,
     request_id,
 )
 from mini_lakehouse.processing.ocr.core.protocol import (
@@ -41,8 +41,8 @@ from mini_lakehouse.processing.ocr.provider import (
     OcrProviderState,
     OcrRunNotFoundError,
     OcrRunStatus,
+    create_ocr_provider,
 )
-from mini_lakehouse.processing.ocr.providers import create_ocr_provider
 from mini_lakehouse.storage.object_store import ObjectStore, create_object_store
 
 
@@ -168,7 +168,6 @@ class ArxivOcrService:
         self,
         batch_key: str,
         documents: tuple[OcrBatchDocument, ...],
-        runner_bundle_sha256: str,
     ) -> OcrJob:
         processor = self._processor
         request_ids = [document.request.request_id for document in documents]
@@ -178,7 +177,6 @@ class ArxivOcrService:
         return OcrJob(
             schema_version="1.0.0",
             batch_id=batch_key,
-            runner_bundle_sha256=runner_bundle_sha256,
             model=OcrModel.model_validate(processor.model.model_dump()),
             layout_model=OcrModel.model_validate(processor.layout_model.model_dump()),
             adapter_version=processor.adapter_version,
@@ -237,13 +235,6 @@ class ArxivOcrService:
         if not candidates:
             return None
         provider = provider or self._provider_client(provider_name)
-        capacity = provider.capacity()
-        if not capacity.ready:
-            return OcrCycleResult(
-                action="deferred_quota",
-                remaining_gpu_quota_minutes=capacity.remaining_minutes,
-                quota_refresh_at=capacity.refresh_at,
-            )
         documents = self._documents(candidates)
         request_keys = [document.request.request_id for document in documents]
         attempts = {document.request.request_id: document.attempt_count for document in documents}
@@ -251,7 +242,7 @@ class ArxivOcrService:
             request_keys,
             attempts=attempts,
         )
-        job = self._job(batch_key, documents, provider.runner_bundle_sha256)
+        job = self._job(batch_key, documents)
         self._repository.prepare_batch(
             executor,
             job=job,
@@ -284,55 +275,22 @@ class ArxivOcrService:
         job = active.job
         provider_run_id = active.provider_run_id
         if active.state == "prepared" and provider_run_id is None:
-            run = provider.latest_run(active.batch_id)
-            if run is None or run.state == OcrProviderState.FAILED:
-                stale_configuration = job.config_hash != self._configuration_hash
-                stale_runner = job.runner_bundle_sha256 != provider.runner_bundle_sha256
-                if stale_configuration or stale_runner:
-                    stale_parts = [
-                        name
-                        for name, stale in (
-                            ("processor configuration", stale_configuration),
-                            ("runner bundle", stale_runner),
-                        )
-                        if stale
-                    ]
-                    return self._failed_cycle(
-                        executor,
-                        active,
-                        error_code="stale_prepared_execution",
-                        error_message=(
-                            f"The prepared batch uses an older {' and '.join(stale_parts)} "
-                            "and has no recoverable remote run; a new batch may be submitted"
-                        ),
-                    )
-                self._submit_prepared(executor, provider, job)
-                return OcrCycleResult(action="submitted", batch_id=active.batch_id)
-            provider_run_id = run.provider_run_id
-            self._repository.mark_batch_submitted(
-                executor,
-                batch_id=active.batch_id,
-                provider_run_id=provider_run_id,
-            )
-            if run.state == OcrProviderState.COMPLETE:
-                try:
-                    return self._import_completed(
-                        executor,
-                        provider,
-                        active,
-                        job,
-                        provider_run_id,
-                    )
-                except OcrBatchMismatchError:
-                    self._submit_prepared(executor, provider, job)
-                    return OcrCycleResult(action="submitted", batch_id=active.batch_id)
-                except InvalidOcrOutputError as error:
-                    return self._failed_cycle(
-                        executor,
-                        active,
-                        error_code="invalid_provider_output",
-                        error_message=str(error),
-                    )
+            if job.config_hash != self._configuration_hash:
+                return self._failed_cycle(
+                    executor,
+                    active,
+                    error_code="stale_prepared_execution",
+                    error_message=(
+                        "The prepared batch uses an older processor configuration and "
+                        "has no persisted provider run; a new batch may be submitted"
+                    ),
+                )
+            # Provider submission is intentionally at-least-once in the narrow
+            # crash window before provider_run_id is persisted. Deterministic
+            # processing IDs and immutable publication keep lakehouse effects
+            # idempotent without relying on provider-private recovery APIs.
+            self._submit_prepared(executor, provider, job)
+            return OcrCycleResult(action="submitted", batch_id=active.batch_id)
         else:
             if provider_run_id is None:
                 raise RuntimeError(f"Submitted OCR batch {active.batch_id} has no provider run ID")

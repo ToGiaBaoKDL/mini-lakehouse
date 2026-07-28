@@ -5,6 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from mini_lakehouse.config.settings import (
+    KaggleSettings,
     ModalSettings,
     NotificationSettings,
     PlatformAdminSettings,
@@ -155,6 +156,27 @@ def test_slack_credentials_must_be_configured_as_a_pair() -> None:
 def test_modal_credentials_must_be_configured_as_a_pair() -> None:
     with pytest.raises(ValidationError, match="token_id and token_secret"):
         ModalSettings.model_validate({"token_id": "ak-incomplete"})
+
+
+def test_kaggle_uses_the_sdk_standard_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KAGGLE_USERNAME", "owner")
+    monkeypatch.setenv("KAGGLE_API_TOKEN", "secret")
+
+    settings: KaggleSettings = cast(Any, KaggleSettings)(_env_file=None)
+
+    assert settings.username == "owner"
+    assert settings.configured
+
+
+def test_kaggle_credentials_must_be_configured_as_a_pair() -> None:
+    with pytest.raises(ValidationError, match="username and api_token"):
+        cast(Any, KaggleSettings)(
+            username="owner",
+            api_token=None,
+            _env_file=None,
+        )
 
 
 def test_empty_notification_environment_values_are_disabled() -> None:

@@ -42,31 +42,19 @@ runner:
   default_provider: kaggle
   kaggle:
     kernel_name: mini-lakehouse-arxiv-glm-ocr
-    runner_dataset_prefix: mini-lakehouse-arxiv-glm-ocr-runner
-    model_resources:
-      model:
-        name: mini-lakehouse-glm-ocr
-        framework: transformers
-        variation: safetensors
-        license_name: MIT
-      layout_model:
-        name: mini-lakehouse-pp-doclayout-v3
-        framework: transformers
-        variation: safetensors
-        license_name: Apache 2.0
+    runner_dataset_name: mini-lakehouse-arxiv-glm-ocr-runner
+    runner_dataset_version: 1
+    model_source: botgia/mini-lakehouse-glm-ocr/transformers/safetensors/1
+    layout_model_source: botgia/mini-lakehouse-pp-doclayout-v3/transformers/safetensors/1
     accelerator: NvidiaTeslaT4
     timeout_seconds: 14400
-    minimum_gpu_quota_minutes: 60
   modal:
     app_name: mini-lakehouse-arxiv-glm-ocr
     function_name: run_ocr
-    resource_function_name: provision_models
-    model_volume: mini-lakehouse-ocr-models
     output_volume: mini-lakehouse-ocr-outputs
     environment: null
     gpu: A100-40GB
     timeout_seconds: 14400
-    max_containers: 1
     scaledown_window_seconds: 300
 
 retry:

@@ -8,7 +8,6 @@ from mini_lakehouse.config.settings import ModalSettings
 from mini_lakehouse.contracts import load_contracts
 from mini_lakehouse.processing.ocr.modal_provider import ModalProvider
 from mini_lakehouse.processing.ocr.provider import OcrProviderState
-from mini_lakehouse.processing.ocr.runner_bundle import OcrRunnerBundle
 
 
 class _FakeCall:
@@ -44,7 +43,6 @@ def _provider() -> ModalProvider:
     return ModalProvider(
         ModalSettings.model_validate({"token_id": "ak-test", "token_secret": "as-test"}),
         load_contracts().processor("arxiv_glm_ocr"),
-        bundle=OcrRunnerBundle.load(),
         client=cast(Any, object()),
     )
 
@@ -70,9 +68,7 @@ def test_modal_provider_submits_and_polls_the_exact_function_call(
         ),
     )
     provider = _provider()
-    bundle_sha256 = provider.runner_bundle_sha256
     job = SimpleNamespace(
-        runner_bundle_sha256=bundle_sha256,
         model_dump_json=lambda: '{"batch_id":"batch"}',
     )
 

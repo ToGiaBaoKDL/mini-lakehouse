@@ -14,7 +14,7 @@ from mini_lakehouse.processing.ocr.core.protocol import (
     ArtifactFile,
     OcrPageMarkdownBundle,
 )
-from mini_lakehouse.processing.ocr.page_bundle import read_page_markdown_bundle
+from mini_lakehouse.processing.ocr.core.text import read_page_markdown_bundle
 from mini_lakehouse.storage.object_store import ObjectStore
 
 MANIFEST_MAX_BYTES = 2 * 1024 * 1024

@@ -2,39 +2,28 @@ import gzip
 import io
 import json
 import tarfile
-from collections.abc import Iterator, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Literal, cast
 
 import pytest
 import zstandard
-from requests.exceptions import ChunkedEncodingError
 
 from mini_lakehouse.config.settings import KaggleSettings, Settings
 from mini_lakehouse.contracts import load_contracts
-from mini_lakehouse.curated.arxiv.models import (
-    ActiveOcrBatch,
-    OcrBatchDocument,
-    OcrCandidate,
-    OcrRunState,
-)
-from mini_lakehouse.curated.arxiv.ocr_publisher import ArxivOcrPublisher
-from mini_lakehouse.curated.arxiv.ocr_repository import ArxivOcrRepository
+from mini_lakehouse.curated.arxiv.models import ActiveOcrBatch, OcrBatchDocument, OcrCandidate
 from mini_lakehouse.curated.arxiv.ocr_service import ArxivOcrService
-from mini_lakehouse.platform.trino import QueryResult
 from mini_lakehouse.processing.ocr.archive import (
     InvalidOcrOutputError,
     document_manifest_sha256,
     extract_archive,
     validate_runner_output,
 )
-from mini_lakehouse.processing.ocr.artifacts import artifact_root_uri
-from mini_lakehouse.processing.ocr.core.files import file_sha256
 from mini_lakehouse.processing.ocr.core.identity import (
     batch_id,
-    canonical_json_sha256,
     config_hash,
+    file_sha256,
     processing_id,
     request_id,
 )
@@ -50,89 +39,38 @@ from mini_lakehouse.processing.ocr.core.protocol import (
     OcrJob,
     OcrLimits,
     OcrModel,
-    OcrReuseReference,
 )
-from mini_lakehouse.processing.ocr.core.text import (
-    build_page_markdown_bundle,
-    serialize_plain_text,
-)
-from mini_lakehouse.processing.ocr.kaggle_gateway import KaggleGateway
+from mini_lakehouse.processing.ocr.core.text import build_page_markdown_bundle
 from mini_lakehouse.processing.ocr.kaggle_provider import KaggleProvider, render_launcher
-from mini_lakehouse.processing.ocr.kaggle_resources import KaggleOcrResourceManager
-from mini_lakehouse.processing.ocr.kaggle_types import (
-    KaggleCurrentRun,
-    KaggleKernelState,
-    KaggleResourceNotFoundError,
-    KaggleRunStatus,
-)
-from mini_lakehouse.processing.ocr.provider import OcrProviderCapacity
-from mini_lakehouse.processing.ocr.runner_bundle import (
-    MODEL_MANIFEST_NAME,
-    ModelResourceManifest,
-    OcrRunnerBundle,
-    RunnerResourceManifest,
-)
+from mini_lakehouse.processing.ocr.provider import OcrProviderState, OcrRunStatus
+from runners.kaggle.glm_ocr.deploy import build_runner
 
 SOURCE_RECORD_SHA256 = "a" * 64
-RUNNER_BUNDLE = OcrRunnerBundle.load(include_kaggle_bootstrap=True)
-RUNNER_DATASET_SLUG = f"owner/mini-lakehouse-arxiv-glm-ocr-runner-{RUNNER_BUNDLE.sha256[:12]}"
 
 
-def _configuration_hash() -> str:
-    return config_hash(load_contracts().processor("arxiv_glm_ocr"))
-
-
-def _reuse_reference(
-    *,
-    arxiv_id: str = "hep-th/9901001",
-    configuration_hash: str | None = None,
-) -> OcrReuseReference:
-    current_hash = configuration_hash or _configuration_hash()
-    return OcrReuseReference(
-        pdf_sha256="d" * 64,
-        pdf_size_bytes=100,
-        page_count=1,
-        processing_id=processing_id(
-            arxiv_id=arxiv_id,
-            pdf_sha256="d" * 64,
-            configuration_hash=current_hash,
-        ),
-        manifest_sha256="e" * 64,
-    )
-
-
-def _job(
-    attempt_count: int = 1,
-    *,
-    reuse: OcrReuseReference | None = None,
-) -> OcrJob:
+def _job(attempt_count: int = 1, *, configuration_hash: str | None = None) -> OcrJob:
     processor = load_contracts().processor("arxiv_glm_ocr")
-    configuration_hash = _configuration_hash()
+    current_hash = configuration_hash or config_hash(processor)
     request = OcrDocumentRequest(
         request_id=request_id(
             arxiv_id="hep-th/9901001",
             source_record_sha256=SOURCE_RECORD_SHA256,
-            configuration_hash=configuration_hash,
+            configuration_hash=current_hash,
         ),
         arxiv_id="hep-th/9901001",
         oai_datestamp=date(2026, 7, 22),
         source_record_sha256=SOURCE_RECORD_SHA256,
         pdf_url="https://arxiv.org/pdf/hep-th/9901001",
-        reuse=reuse,
     )
-    batch_key = batch_id(
-        (request.request_id,),
-        attempts={request.request_id: attempt_count},
-    )
+    key = batch_id((request.request_id,), attempts={request.request_id: attempt_count})
     return OcrJob(
         schema_version="1.0.0",
-        batch_id=batch_key,
-        runner_bundle_sha256=RUNNER_BUNDLE.sha256,
+        batch_id=key,
         model=OcrModel.model_validate(processor.model.model_dump()),
         layout_model=OcrModel.model_validate(processor.layout_model.model_dump()),
         adapter_version=processor.adapter_version,
         output_schema_version=OCR_OUTPUT_SCHEMA_VERSION,
-        config_hash=configuration_hash,
+        config_hash=current_hash,
         limits=OcrLimits(
             max_pdf_bytes=processor.batch.max_pdf_bytes,
             max_pages_per_document=processor.batch.max_pages_per_document,
@@ -164,10 +102,10 @@ def _archive(source: Path, destination: Path) -> None:
                 bundle.addfile(info, source_file)
 
 
-def _successful_output(output: Path, job: OcrJob, *, include_untracked_file: bool = False) -> None:
+def _successful_output(output: Path, job: OcrJob) -> None:
     request = job.documents[0]
-    root = output / "content"
-    document = root.joinpath(*runner_document_path(request.arxiv_id, request.request_id).parts)
+    content = output / "content"
+    document = content.joinpath(*runner_document_path(request.arxiv_id, request.request_id).parts)
     document.mkdir(parents=True)
     element = OcrElement(
         element_id="e" * 64,
@@ -177,8 +115,8 @@ def _successful_output(output: Path, job: OcrJob, *, include_untracked_file: boo
         text_content="Paper",
         markdown_content="Paper",
     )
-    page_bundle = build_page_markdown_bundle((element,), page_count=1)
-    _gzip(document / "pages.json.gz", page_bundle.model_dump_json().encode())
+    pages = build_page_markdown_bundle((element,), page_count=1)
+    _gzip(document / "pages.json.gz", pages.model_dump_json().encode())
     _gzip(document / "elements.jsonl.gz", f"{element.model_dump_json()}\n".encode())
     visualizations = document / "layout_vis"
     visualizations.mkdir()
@@ -192,71 +130,28 @@ def _successful_output(output: Path, job: OcrJob, *, include_untracked_file: boo
         )
         for path in sorted(item for item in document.rglob("*") if item.is_file())
     )
-    current_processing_id = processing_id(
-        arxiv_id=request.arxiv_id,
-        pdf_sha256="d" * 64,
-        configuration_hash=job.config_hash,
-    )
-    draft = OcrDocumentResult.model_construct(
+    result = OcrDocumentResult.model_construct(
         request_id=request.request_id,
         arxiv_id=request.arxiv_id,
         state="succeeded",
         pdf_sha256="d" * 64,
         pdf_size_bytes=100,
         page_count=1,
-        processing_id=current_processing_id,
+        processing_id=processing_id(
+            arxiv_id=request.arxiv_id,
+            pdf_sha256="d" * 64,
+            configuration_hash=job.config_hash,
+        ),
         manifest_sha256=None,
         error_code=None,
         error_message=None,
         files=files,
     )
     result = OcrDocumentResult.model_validate(
-        {
-            **draft.model_dump(mode="json"),
-            "manifest_sha256": document_manifest_sha256(draft),
-        }
+        {**result.model_dump(mode="json"), "manifest_sha256": document_manifest_sha256(result)}
     )
-    if include_untracked_file:
-        (root / "untracked.txt").write_text("not declared by the manifest", encoding="utf-8")
-    archive = output / "result.tar.zst"
-    _archive(root, archive)
-    manifest = OcrBatchManifest(
-        schema_version="1.0.0",
-        batch_id=job.batch_id,
-        created_at=datetime.now(UTC),
-        archive_sha256=file_sha256(archive),
-        archive_size_bytes=archive.stat().st_size,
-        documents=(result,),
-    )
-    (output / "result_manifest.json").write_text(
-        manifest.model_dump_json(),
-        encoding="utf-8",
-    )
-
-
-def _reused_output(
-    output: Path,
-    job: OcrJob,
-    *,
-    manifest_sha256: str | None = None,
-) -> None:
-    request = job.documents[0]
-    assert request.reuse is not None
-    content = output / "content"
-    content.mkdir()
     archive = output / "result.tar.zst"
     _archive(content, archive)
-    reuse = request.reuse
-    result = OcrDocumentResult(
-        request_id=request.request_id,
-        arxiv_id=request.arxiv_id,
-        state="reused",
-        pdf_sha256=reuse.pdf_sha256,
-        pdf_size_bytes=reuse.pdf_size_bytes,
-        page_count=reuse.page_count,
-        processing_id=reuse.processing_id,
-        manifest_sha256=manifest_sha256 or reuse.manifest_sha256,
-    )
     manifest = OcrBatchManifest(
         schema_version="1.0.0",
         batch_id=job.batch_id,
@@ -271,155 +166,21 @@ def _reused_output(
     )
 
 
-def test_ocr_identity_and_paths_are_deterministic_and_paper_readable() -> None:
+def test_ocr_identity_changes_only_with_output_semantics() -> None:
     processor = load_contracts().processor("arxiv_glm_ocr")
-    assert processor.inference.enforce_eager is True
-    assert processor.inference.max_num_seqs == 4
-    assert processor.inference.max_workers == 8
-    assert processor.inference.request_timeout_seconds == 600
-    assert processor.inference.layout_device == "cpu"
-    assert processor.output_schema_version == "1.1.0"
-    assert '"wrapt==2.2.2"' in (Path("runners/glm_ocr/pyproject.toml").read_text(encoding="utf-8"))
-    first_hash = config_hash(processor)
-    operationally_tuned = processor.model_copy(
+    current = config_hash(processor)
+    operational_change = processor.model_copy(
         update={
-            "inference": processor.inference.model_copy(
-                update={
-                    "api_port": 8081,
-                    "enforce_eager": False,
-                    "gpu_memory_utilization": 0.9,
-                    "max_num_seqs": 4,
-                    "max_workers": 4,
-                    "request_timeout_seconds": 900,
-                }
-            )
+            "inference": processor.inference.model_copy(update={"api_port": 9000, "max_workers": 2})
         }
     )
-    output_changed = processor.model_copy(
-        update={
-            "inference": processor.inference.model_copy(
-                update={"max_model_len": processor.inference.max_model_len * 2}
-            )
-        }
-    )
-    assert config_hash(operationally_tuned) == first_hash
-    assert config_hash(output_changed) != first_hash
-    first = request_id(
-        arxiv_id="hep-th/9901001",
-        source_record_sha256=SOURCE_RECORD_SHA256,
-        configuration_hash=first_hash,
+    semantic_change = processor.model_copy(
+        update={"adapter_version": "1.0.1"},
     )
 
-    assert first == request_id(
-        arxiv_id="hep-th/9901001",
-        source_record_sha256=SOURCE_RECORD_SHA256,
-        configuration_hash=first_hash,
-    )
-    assert first != request_id(
-        arxiv_id="hep-th/9901001",
-        source_record_sha256="b" * 64,
-        configuration_hash=first_hash,
-    )
-    first_processing = processing_id(
-        arxiv_id="hep-th/9901001",
-        pdf_sha256="d" * 64,
-        configuration_hash=first_hash,
-    )
-    assert first_processing == processing_id(
-        arxiv_id="hep-th/9901001",
-        pdf_sha256="d" * 64,
-        configuration_hash=first_hash,
-    )
-    assert first_processing != processing_id(
-        arxiv_id="2607.00001",
-        pdf_sha256="d" * 64,
-        configuration_hash=first_hash,
-    )
-    assert (
-        artifact_root_uri(
-            Settings(),
-            processor,
-            arxiv_id="hep-th/9901001",
-            processing_id="c" * 64,
-        )
-        == f"s3://curated/arxiv/ocr/papers/hep-th%2F9901001/{'c' * 64}"
-    )
-    assert batch_id((first, "a" * 64), attempts={first: 1, "a" * 64: 2}) == batch_id(
-        ("a" * 64, first),
-        attempts={"a" * 64: 2, first: 1},
-    )
-    assert batch_id((first,), attempts={first: 1}) != batch_id(
-        (first,),
-        attempts={first: 2},
-    )
-    with pytest.raises(ValueError, match="positive value"):
-        batch_id((first,), attempts={first: 0})
-
-
-def test_content_manifest_is_independent_of_request_attempt_identity() -> None:
-    files = tuple(
-        ArtifactFile(
-            relative_path=path,
-            sha256=character * 64,
-            size_bytes=index,
-            media_type="application/octet-stream",
-        )
-        for index, (path, character) in enumerate(
-            (
-                ("elements.jsonl.gz", "1"),
-                ("layout_vis/page-0001.jpg", "2"),
-                ("pages.json.gz", "3"),
-            ),
-            start=1,
-        )
-    )
-    first = OcrDocumentResult.model_construct(
-        request_id="4" * 64,
-        arxiv_id="2607.00001",
-        state="succeeded",
-        pdf_sha256="5" * 64,
-        pdf_size_bytes=100,
-        page_count=1,
-        processing_id="6" * 64,
-        manifest_sha256=None,
-        error_code=None,
-        error_message=None,
-        files=files,
-    )
-    retried = first.model_copy(update={"request_id": "7" * 64})
-
-    assert document_manifest_sha256(first) == document_manifest_sha256(retried)
-    assert document_manifest_sha256(first) != document_manifest_sha256(
-        first.model_copy(update={"arxiv_id": "2607.00002"})
-    )
-
-
-def test_plain_text_is_rebuilt_from_page_and_reading_order() -> None:
-    elements = (
-        OcrElement(
-            element_id="b" * 64,
-            page_number=2,
-            reading_order=0,
-            element_type="text",
-            text_content="Second page",
-        ),
-        OcrElement(
-            element_id="a" * 64,
-            page_number=1,
-            reading_order=1,
-            element_type="text",
-            text_content="Second block",
-        ),
-        OcrElement(
-            element_id="c" * 64,
-            page_number=1,
-            reading_order=0,
-            element_type="title",
-            text_content="Title",
-        ),
-    )
-
-    assert serialize_plain_text(elements) == "Title\n\nSecond block\n\n\f\n\nSecond page"
+    assert config_hash(operational_change) == current
+    assert config_hash(semantic_change) != current
+    assert _job().model_dump_json() == _job().model_dump_json()
 
 
 def test_completed_runner_output_is_validated_and_safely_extracted(tmp_path: Path) -> None:
@@ -434,107 +195,8 @@ def test_completed_runner_output_is_validated_and_safely_extracted(tmp_path: Pat
     assert manifest.documents[0].state == "succeeded"
 
 
-def test_unchanged_pdf_reuses_validated_content_without_republishing_files(
-    tmp_path: Path,
-) -> None:
-    reuse = _reuse_reference()
-    job = _job(reuse=reuse)
-    output = tmp_path / "output"
-    output.mkdir()
-    _reused_output(output, job)
-
-    manifest = validate_runner_output(output, tmp_path / "extracted", job=job)
-
-    assert manifest.documents[0].state == "reused"
-    assert manifest.documents[0].processing_id == reuse.processing_id
-    assert not any((tmp_path / "extracted").rglob("*"))
-
-
-def test_reused_output_must_match_requested_content_lineage(tmp_path: Path) -> None:
-    job = _job(reuse=_reuse_reference())
-    output = tmp_path / "output"
-    output.mkdir()
-    _reused_output(output, job, manifest_sha256="f" * 64)
-
-    with pytest.raises(InvalidOcrOutputError, match="lineage does not match"):
-        validate_runner_output(output, tmp_path / "extracted", job=job)
-
-
-class _ExistingProcessingRepository:
-    def __init__(self, manifest_sha256: str, artifact_uri: str) -> None:
-        self.existing = (manifest_sha256, artifact_uri)
-        self.imported: tuple[str, OcrDocumentResult, str] | None = None
-
-    def processing_manifest(
-        self,
-        _executor: object,
-        _processing_id: str,
-    ) -> tuple[str, str]:
-        return self.existing
-
-    def mark_document_imported(
-        self,
-        _executor: object,
-        *,
-        batch_id: str,
-        result: OcrDocumentResult,
-        artifact_uri: str,
-    ) -> None:
-        self.imported = (batch_id, result, artifact_uri)
-
-
-def test_reused_result_links_existing_artifacts_without_object_writes(tmp_path: Path) -> None:
-    processor = load_contracts().processor("arxiv_glm_ocr")
-    reuse = _reuse_reference()
-    job = _job(reuse=reuse)
-    request = job.documents[0]
-    result = OcrDocumentResult(
-        request_id=request.request_id,
-        arxiv_id=request.arxiv_id,
-        state="reused",
-        pdf_sha256=reuse.pdf_sha256,
-        pdf_size_bytes=reuse.pdf_size_bytes,
-        page_count=reuse.page_count,
-        processing_id=reuse.processing_id,
-        manifest_sha256=reuse.manifest_sha256,
-    )
-    uri = artifact_root_uri(
-        Settings(),
-        processor,
-        arxiv_id=request.arxiv_id,
-        processing_id=reuse.processing_id,
-    )
-    repository = _ExistingProcessingRepository(reuse.manifest_sha256, uri)
-    publisher = ArxivOcrPublisher(
-        Settings(),
-        processor,
-        cast(Any, repository),
-        cast(Any, _NoopObjectStore()),
-    )
-
-    publisher.publish(
-        cast(Any, _NoopExecutor()),
-        job,
-        result,
-        tmp_path / "missing-extracted",
-        tmp_path,
-    )
-
-    assert repository.imported == (job.batch_id, result, uri)
-
-
-def test_runner_output_rejects_files_not_declared_by_the_manifest(tmp_path: Path) -> None:
-    job = _job()
-    output = tmp_path / "output"
-    output.mkdir()
-    _successful_output(output, job, include_untracked_file=True)
-
-    with pytest.raises(InvalidOcrOutputError, match="untracked or missing"):
-        validate_runner_output(output, tmp_path / "extracted", job=job)
-
-
 def test_archive_rejects_path_traversal(tmp_path: Path) -> None:
-    archive = tmp_path / "malicious.tar.zst"
+    archive = tmp_path / "unsafe.tar.zst"
     with (
         archive.open("xb") as raw,
         zstandard.ZstdCompressor().stream_writer(raw) as compressed,
@@ -545,533 +207,93 @@ def test_archive_rejects_path_traversal(tmp_path: Path) -> None:
         info.size = len(content)
         bundle.addfile(info, io.BytesIO(content))
 
-    try:
-        extract_archive(
-            archive,
-            tmp_path / "extracted",
-            max_output_bytes=1024,
-        )
-    except InvalidOcrOutputError as error:
-        assert "Unsafe archive member" in str(error)
-    else:
-        raise AssertionError("Path traversal archive was accepted")
+    with pytest.raises(InvalidOcrOutputError, match="Unsafe archive member"):
+        extract_archive(archive, tmp_path / "extracted", max_output_bytes=1024)
 
 
-def test_kaggle_launcher_contains_only_job_and_pinned_runner_reference() -> None:
+def test_kaggle_runner_artifact_contains_only_runtime_sources(tmp_path: Path) -> None:
+    destination = tmp_path / "runner"
+
+    build_runner(destination)
+
+    package = destination / "mini_lakehouse" / "processing" / "ocr" / "core"
+    assert (destination / "bootstrap.py").is_file()
+    assert (destination / "runtime.py").is_file()
+    assert (package / "protocol.py").is_file()
+    assert not (destination / "resource_manifest.json").exists()
+    assert not (destination / "progress.py").exists()
+
+
+def test_kaggle_launcher_uses_declared_runner_and_models() -> None:
     launcher = render_launcher(
         job=_job(),
-        runner_dataset_source=("owner/mini-lakehouse-arxiv-glm-ocr-runner/versions/4"),
-        model_source="owner/mini-lakehouse-glm-ocr/transformers/safetensors/2",
-        layout_model_source=("owner/mini-lakehouse-pp-doclayout-v3/transformers/safetensors/3"),
+        runner_dataset_source="owner/runner/versions/1",
+        model_source="owner/model/transformers/safetensors/2",
+        layout_model_source="owner/layout/transformers/safetensors/3",
     )
 
     compile(launcher, "launcher.py", "exec")
-    assert (
-        "kagglehub.dataset_download('owner/mini-lakehouse-arxiv-glm-ocr-runner/versions/4')"
-    ) in launcher
-    assert RUNNER_BUNDLE.sha256 in launcher
-    assert "mini-lakehouse-glm-ocr/transformers/safetensors/2" in launcher
-    assert "mini-lakehouse-pp-doclayout-v3/transformers/safetensors/3" in launcher
-    assert "job.json" not in launcher
+    assert "kagglehub.dataset_download('owner/runner/versions/1')" in launcher
+    assert "kagglehub.model_download('owner/model/transformers/safetensors/2')" in launcher
+    assert "kagglehub.model_download('owner/layout/transformers/safetensors/3')" in launcher
+    assert "bundle_sha256" not in launcher
 
 
-def test_kaggle_runner_bundle_preserves_the_shared_package_namespace(
-    tmp_path: Path,
-) -> None:
-    destination = tmp_path / "runner"
-
-    RUNNER_BUNDLE.write(destination)
-
-    package = destination / "mini_lakehouse" / "processing" / "ocr" / "core"
-    assert (package / "__init__.py").is_file()
-    assert (package / "files.py").is_file()
-    assert (package / "identity.py").is_file()
-    assert (package / "paths.py").is_file()
-    assert (package / "protocol.py").is_file()
-    assert (package / "text.py").is_file()
-    assert not (destination / "identity.py").exists()
-    assert not (destination / "protocol.py").exists()
-
-
-def test_kaggle_private_resource_forbidden_is_treated_as_missing(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    class _Response:
-        status_code = 403
-
-    class _ForbiddenError(RuntimeError):
-        response = _Response()
-
-    gateway = KaggleGateway(
-        KaggleSettings.model_validate({"username": "owner", "api_token": "secret"})
-    )
-
-    def raise_forbidden(*_args: object, **_kwargs: object) -> None:
-        raise _ForbiddenError("private resource is not visible")
-
-    monkeypatch.setattr(gateway, "_api", raise_forbidden)
-    monkeypatch.setattr("kagglehub.dataset_download", raise_forbidden)
-    monkeypatch.setattr("kagglehub.model_download", raise_forbidden)
-
-    with pytest.raises(KaggleResourceNotFoundError):
-        gateway.dataset_version("owner/missing-dataset")
-    with pytest.raises(KaggleResourceNotFoundError):
-        gateway.model_version("owner/missing-model/transformers/default")
-    with pytest.raises(KaggleResourceNotFoundError):
-        gateway.download_dataset_file("owner/missing-dataset", "manifest.json", tmp_path)
-    with pytest.raises(KaggleResourceNotFoundError):
-        gateway.download_model_file(
-            "owner/missing-model/transformers/default",
-            "manifest.json",
-            tmp_path,
-        )
-    assert gateway.current_kernel_run("owner/missing-kernel") is None
-
-
-def test_kaggle_log_stream_uses_official_events_and_preserves_lines(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class _LogApi:
-        def kernels_logs_stream(self, kernel_slug: str) -> Sequence[dict[str, str]]:
-            assert kernel_slug == "owner/kernel"
-            return (
-                {"data": "first line\n"},
-                {"data": "second line"},
-                {"stream_name": "stdout"},
-            )
-
-    gateway = KaggleGateway(
-        KaggleSettings.model_validate({"username": "owner", "api_token": "secret"})
-    )
-
-    def accept_current_version(owner: str, kernel: str, version: int) -> None:
-        assert (owner, kernel, version) == ("owner", "kernel", 7)
-
-    monkeypatch.setattr(
-        gateway,
-        "_require_current_kernel_version",
-        accept_current_version,
-    )
-    monkeypatch.setattr(gateway, "_api", _LogApi)
-
-    assert tuple(gateway.stream_kernel_logs("owner/kernel/7")) == (
-        "first line\n",
-        "second line",
-    )
-    assert gateway.kernel_logs("owner/kernel/7") == "first line\nsecond line\n"
-
-
-def test_kaggle_log_stream_reconnects_and_deduplicates_replayed_events(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class _FlakyLogApi:
-        calls = 0
-
-        def kernels_logs_stream(self, kernel_slug: str) -> Iterator[dict[str, str]]:
-            assert kernel_slug == "owner/kernel"
-            self.calls += 1
-            yield {"data": "first\n"}
-            if self.calls == 1:
-                raise ChunkedEncodingError("transient disconnect")
-            yield {"data": "second\n"}
-
-    api = _FlakyLogApi()
-    gateway = KaggleGateway(
-        KaggleSettings.model_validate({"username": "owner", "api_token": "secret"}),
-        sleeper=lambda _seconds: None,
-    )
-
-    def accept_current_version(owner: str, kernel: str, version: int) -> None:
-        assert (owner, kernel, version) == ("owner", "kernel", 7)
-
-    monkeypatch.setattr(
-        gateway,
-        "_require_current_kernel_version",
-        accept_current_version,
-    )
-    monkeypatch.setattr(gateway, "_api", lambda: api)
-
-    assert tuple(gateway.stream_kernel_logs("owner/kernel/7")) == ("first\n", "second\n")
-    assert api.calls == 2
-
-
-class _ResourceClient:
-    def __init__(self, manifest: RunnerResourceManifest | None = None) -> None:
-        self.dataset_manifest = manifest
-        self.dataset_version_number = 1 if manifest is not None else 0
-        self.dataset_uploads = 0
-        self.model_manifests: dict[str, ModelResourceManifest] = {}
-        self.model_versions: dict[str, int] = {}
-        self.model_uploads: dict[str, int] = {}
-
-    def download_dataset_file(
-        self,
-        dataset_slug: str,
-        relative_path: str,
-        destination: Path,
-    ) -> Path:
-        assert dataset_slug == RUNNER_DATASET_SLUG
-        if self.dataset_manifest is None:
-            raise KaggleResourceNotFoundError("missing")
-        path = destination / relative_path
-        path.write_text(self.dataset_manifest.model_dump_json(), encoding="utf-8")
-        return path
-
-    def upload_dataset(
-        self,
-        dataset_slug: str,
-        source: Path,
-        *,
-        version_notes: str,
-    ) -> None:
-        assert dataset_slug == RUNNER_DATASET_SLUG
-        self.dataset_manifest = RunnerResourceManifest.model_validate_json(
-            (source / "resource_manifest.json").read_text(encoding="utf-8")
-        )
-        assert self.dataset_manifest.bundle_sha256 in version_notes
-        self.dataset_version_number += 1
-        self.dataset_uploads += 1
-
-    def dataset_version(self, dataset_slug: str) -> int:
-        assert dataset_slug == RUNNER_DATASET_SLUG
-        if self.dataset_version_number == 0:
-            raise KaggleResourceNotFoundError("missing")
-        return self.dataset_version_number
-
-    def download_model_file(
-        self,
-        model_slug: str,
-        relative_path: str,
-        destination: Path,
-    ) -> Path:
-        manifest = self.model_manifests.get(model_slug)
-        if manifest is None:
-            raise KaggleResourceNotFoundError("missing")
-        path = destination / relative_path
-        path.write_text(manifest.model_dump_json(), encoding="utf-8")
-        return path
-
-    def upload_model(
-        self,
-        model_slug: str,
-        source: Path,
-        *,
-        license_name: str,
-        version_notes: str,
-    ) -> None:
-        manifest = ModelResourceManifest.model_validate_json(
-            (source / MODEL_MANIFEST_NAME).read_text(encoding="utf-8")
-        )
-        assert (source / "model.safetensors").is_file()
-        assert manifest.identity_sha256 in version_notes
-        assert license_name in {"Apache 2.0", "MIT"}
-        self.model_manifests[model_slug] = manifest
-        self.model_versions[model_slug] = self.model_versions.get(model_slug, 0) + 1
-        self.model_uploads[model_slug] = self.model_uploads.get(model_slug, 0) + 1
-
-    def model_version(self, model_slug: str) -> int:
-        try:
-            return self.model_versions[model_slug]
-        except KeyError as error:
-            raise KaggleResourceNotFoundError("missing") from error
-
-
-class _SnapshotClient:
+class _KaggleApi:
     def __init__(self) -> None:
-        self.downloads: list[tuple[str, str]] = []
-
-    def download(self, repository: str, revision: str, destination: Path) -> None:
-        self.downloads.append((repository, revision))
-        destination.mkdir(parents=True)
-        (destination / "model.safetensors").write_bytes(b"model")
-
-
-def _resource_manager(
-    client: _ResourceClient,
-    snapshots: _SnapshotClient | None = None,
-) -> KaggleOcrResourceManager:
-    return KaggleOcrResourceManager(
-        KaggleSettings.model_validate({"username": "owner", "api_token": "secret"}),
-        load_contracts().processor("arxiv_glm_ocr"),
-        client,
-        bundle=RUNNER_BUNDLE,
-        snapshots=snapshots or _SnapshotClient(),
-        readiness_attempts=1,
-        readiness_delay_seconds=0,
-    )
-
-
-def test_kaggle_runner_resource_reconciliation_is_content_idempotent() -> None:
-    client = _ResourceClient()
-    resources = _resource_manager(client)
-
-    created = resources.reconcile("runner")
-    unchanged = resources.reconcile("runner")
-
-    assert created.action == "created"
-    assert created.name == "runner"
-    assert created.source.endswith("/versions/1")
-    assert unchanged.action == "unchanged"
-    assert unchanged.identity_sha256 == RUNNER_BUNDLE.sha256
-    assert client.dataset_uploads == 1
-
-
-def test_kaggle_runner_resource_updates_drifted_content_once() -> None:
-    stale_files = {
-        **RUNNER_BUNDLE.manifest.files,
-        "runtime.py": "f" * 64,
-    }
-    stale = RunnerResourceManifest(
-        schema_version="1.0.0",
-        bundle_sha256=canonical_json_sha256({"files": stale_files}),
-        files=stale_files,
-    )
-    client = _ResourceClient(stale)
-
-    result = _resource_manager(client).reconcile("runner")
-
-    assert result.action == "updated"
-    assert result.source.endswith("/versions/2")
-    assert client.dataset_uploads == 1
-
-
-def test_kaggle_model_resource_reconciliation_pins_revision_and_is_idempotent() -> None:
-    client = _ResourceClient()
-    snapshots = _SnapshotClient()
-    resources = _resource_manager(client, snapshots)
-
-    created = resources.reconcile("model")
-    unchanged = resources.reconcile("model")
-
-    processor = load_contracts().processor("arxiv_glm_ocr")
-    assert created.action == "created"
-    assert created.source == "owner/mini-lakehouse-glm-ocr/transformers/safetensors/1"
-    assert unchanged.action == "unchanged"
-    assert snapshots.downloads == [(processor.model.repository, processor.model.revision)]
-    assert client.model_uploads[created.source.rsplit("/", 1)[0]] == 1
-
-
-def test_kaggle_model_resource_retry_recovers_after_remote_publish() -> None:
-    class _CrashAfterPublishClient(_ResourceClient):
-        should_crash = True
-
-        def upload_model(
-            self,
-            model_slug: str,
-            source: Path,
-            *,
-            license_name: str,
-            version_notes: str,
-        ) -> None:
-            super().upload_model(
-                model_slug,
-                source,
-                license_name=license_name,
-                version_notes=version_notes,
-            )
-            if self.should_crash:
-                self.should_crash = False
-                raise RuntimeError("worker stopped after Kaggle accepted the version")
-
-    client = _CrashAfterPublishClient()
-    with pytest.raises(RuntimeError, match="worker stopped"):
-        _resource_manager(client).reconcile("model")
-
-    recovered = _resource_manager(client).reconcile("model")
-
-    assert recovered.action == "unchanged"
-    assert client.model_uploads["owner/mini-lakehouse-glm-ocr/transformers/safetensors"] == 1
-
-
-def test_kaggle_resource_manager_resolves_only_a_complete_resource_set() -> None:
-    client = _ResourceClient()
-    resources = _resource_manager(client)
-    resources.reconcile("runner")
-    resources.reconcile("model")
-
-    with pytest.raises(KaggleResourceNotFoundError, match="gov_arxiv_ocr_resources"):
-        resources.resolve_all()
-
-    resources.reconcile("layout_model")
-    resolved = resources.resolve_all()
-
-    assert resolved.runner.kind == "dataset"
-    assert resolved.model_sources == [
-        "owner/mini-lakehouse-glm-ocr/transformers/safetensors/1",
-        "owner/mini-lakehouse-pp-doclayout-v3/transformers/safetensors/1",
-    ]
-
-
-class _RunIdentityGateway:
-    def __init__(self, source: str) -> None:
-        self.source = source
-        self.current_run_calls: list[str] = []
-
-    def current_kernel_run(self, kernel_slug: str) -> KaggleCurrentRun:
-        assert kernel_slug == "owner/mini-lakehouse-arxiv-glm-ocr"
-        self.current_run_calls.append(kernel_slug)
-        return KaggleCurrentRun(
-            status=KaggleRunStatus(
-                provider_run_id="owner/mini-lakehouse-arxiv-glm-ocr/7",
-                state=KaggleKernelState.RUNNING,
-            ),
-            source=self.source,
-        )
-
-
-def test_kaggle_recovery_adopts_only_the_latest_matching_batch_version() -> None:
-    job = _job()
-    settings = KaggleSettings.model_validate({"username": "owner", "api_token": "secret"})
-    processor = load_contracts().processor("arxiv_glm_ocr")
-    matching = _RunIdentityGateway(
-        render_launcher(
-            job=job,
-            runner_dataset_source=("owner/mini-lakehouse-arxiv-glm-ocr-runner/versions/1"),
-            model_source="owner/model/transformers/default/1",
-            layout_model_source="owner/layout/transformers/default/1",
-        )
-    )
-    provider = KaggleProvider(
-        settings,
-        processor,
-        gateway=cast(Any, matching),
-        bundle=RUNNER_BUNDLE,
-    )
-
-    run = provider.latest_run(job.batch_id)
-
-    assert run is not None
-    assert run.provider_run_id.endswith("/7")
-    assert matching.current_run_calls == ["owner/mini-lakehouse-arxiv-glm-ocr"]
-
-    unrelated = _RunIdentityGateway("# mini-lakehouse-batch-id: " + "0" * 64 + "\n")
-    unrelated_provider = KaggleProvider(
-        settings,
-        processor,
-        gateway=cast(Any, unrelated),
-        bundle=RUNNER_BUNDLE,
-    )
-    assert unrelated_provider.latest_run(job.batch_id) is None
-    assert unrelated.current_run_calls == ["owner/mini-lakehouse-arxiv-glm-ocr"]
-
-
-class _PinnedResourceGateway:
-    def __init__(self) -> None:
-        self.output_calls: list[tuple[str, str]] = []
-        self.launcher = ""
         self.metadata: dict[str, Any] = {}
+        self.output_kernel: str | None = None
 
-    def push_kernel(
-        self,
-        submission_directory: Path,
-        *,
-        timeout_seconds: int,
-        accelerator: str,
-    ) -> int:
-        assert timeout_seconds > 0
-        assert accelerator in {"NvidiaTeslaP100", "NvidiaTeslaT4"}
-        self.launcher = (submission_directory / "launcher.py").read_text(encoding="utf-8")
+    def kernels_push(self, folder: str, timeout: str, accelerator: str) -> Any:
+        assert int(timeout) > 0
+        assert accelerator == "NvidiaTeslaT4"
         self.metadata = json.loads(
-            (submission_directory / "kernel-metadata.json").read_text(encoding="utf-8")
+            (Path(folder) / "kernel-metadata.json").read_text(encoding="utf-8")
         )
-        return 17
-
-    def download_dataset_file(
-        self,
-        dataset_slug: str,
-        relative_path: str,
-        destination: Path,
-    ) -> Path:
-        assert dataset_slug == RUNNER_DATASET_SLUG
-        path = destination / relative_path
-        path.write_text(RUNNER_BUNDLE.manifest.model_dump_json(), encoding="utf-8")
-        return path
-
-    def dataset_version(self, dataset_slug: str) -> int:
-        assert dataset_slug == RUNNER_DATASET_SLUG
-        return 4
-
-    def download_model_file(
-        self,
-        model_slug: str,
-        relative_path: str,
-        destination: Path,
-    ) -> Path:
-        processor = load_contracts().processor("arxiv_glm_ocr")
-        if model_slug == "owner/mini-lakehouse-glm-ocr/transformers/safetensors":
-            name = "model"
-            model = processor.model
-        elif model_slug == ("owner/mini-lakehouse-pp-doclayout-v3/transformers/safetensors"):
-            name = "layout_model"
-            model = processor.layout_model
-        else:
-            raise AssertionError(f"Unexpected model slug {model_slug}")
-        identity = canonical_json_sha256(
-            {
-                "repository": model.repository,
-                "resource_name": name,
-                "revision": model.revision,
-            }
+        return SimpleNamespace(
+            error=None,
+            invalid_dataset_sources=[],
+            invalid_kernel_sources=[],
+            invalid_model_sources=[],
         )
-        path = destination / relative_path
-        path.write_text(
-            ModelResourceManifest(
-                schema_version="1.0.0",
-                resource_name=cast(Any, name),
-                repository=model.repository,
-                revision=model.revision,
-                identity_sha256=identity,
-            ).model_dump_json(),
-            encoding="utf-8",
+
+    def kernels_status(self, kernel: str) -> Any:
+        return SimpleNamespace(
+            status=SimpleNamespace(name="RUNNING"),
+            failure_message=None,
         )
-        return path
 
-    def model_version(self, model_slug: str) -> int:
-        if model_slug.endswith("/mini-lakehouse-glm-ocr/transformers/safetensors"):
-            return 2
-        if model_slug.endswith("/mini-lakehouse-pp-doclayout-v3/transformers/safetensors"):
-            return 3
-        raise AssertionError(f"Unexpected model slug {model_slug}")
+    def kernels_logs(self, kernel: str) -> str:
+        return f"{kernel}: running"
 
-    def download_notebook_file(
-        self,
-        provider_run_id: str,
-        relative_path: str,
-        destination: Path,
-    ) -> Path:
-        self.output_calls.append((provider_run_id, relative_path))
-        path = destination / relative_path
-        path.write_bytes(b"output")
-        return path
+    def kernels_output(self, kernel: str, path: str, **_kwargs: object) -> None:
+        self.output_kernel = kernel
+        destination = Path(path)
+        (destination / "result_manifest.json").write_text("{}", encoding="utf-8")
+        (destination / "result.tar.zst").write_bytes(b"archive")
 
 
-def test_kaggle_submission_and_output_pin_resource_and_run_versions(tmp_path: Path) -> None:
-    gateway = _PinnedResourceGateway()
+def test_kaggle_provider_delegates_to_public_sdk(tmp_path: Path) -> None:
+    api = _KaggleApi()
     processor = load_contracts().processor("arxiv_glm_ocr")
     provider = KaggleProvider(
         KaggleSettings.model_validate({"username": "owner", "api_token": "secret"}),
         processor,
-        gateway=cast(Any, gateway),
-        bundle=RUNNER_BUNDLE,
-    )
-    provider_run_id = provider.submit(_job())
-    provider.download_output(
-        provider_run_id,
-        tmp_path / "output",
+        api=api,
     )
 
-    assert provider_run_id == "owner/mini-lakehouse-arxiv-glm-ocr/17"
-    assert gateway.metadata["dataset_sources"] == [RUNNER_DATASET_SLUG]
-    assert gateway.metadata["model_sources"] == [
-        "owner/mini-lakehouse-glm-ocr/transformers/safetensors/2",
-        "owner/mini-lakehouse-pp-doclayout-v3/transformers/safetensors/3",
-    ]
-    assert gateway.metadata["model_sources"][0] in gateway.launcher
-    assert gateway.metadata["model_sources"][1] in gateway.launcher
-    assert gateway.output_calls == [
-        ("owner/mini-lakehouse-arxiv-glm-ocr/17", "result_manifest.json"),
-        ("owner/mini-lakehouse-arxiv-glm-ocr/17", "result.tar.zst"),
+    run_id = provider.submit(_job())
+    status = provider.status(run_id)
+    provider.download_output(run_id, tmp_path / "output")
+
+    assert run_id == "owner/mini-lakehouse-arxiv-glm-ocr"
+    assert status.state == OcrProviderState.RUNNING
+    assert provider.logs(run_id) == f"{run_id}: running"
+    assert api.output_kernel == run_id
+    assert api.metadata["dataset_sources"] == ["owner/mini-lakehouse-arxiv-glm-ocr-runner/1"]
+    assert api.metadata["model_sources"] == [
+        processor.runner.kaggle.model_source,
+        processor.runner.kaggle.layout_model_source,
     ]
 
 
@@ -1079,249 +301,27 @@ class _NoopExecutor:
     pass
 
 
-class _SqlCapture:
-    def __init__(self, rows: tuple[tuple[Any, ...], ...] = ()) -> None:
-        self.calls: list[tuple[str, tuple[Any, ...] | None]] = []
-        self.rows = rows
-
-    def execute(
-        self,
-        statement: str,
-        parameters: Sequence[Any] | None = None,
-    ) -> QueryResult:
-        self.calls.append((statement, tuple(parameters) if parameters is not None else None))
-        return QueryResult(columns=(), rows=self.rows)
-
-
-def test_ocr_repository_publishes_the_batch_commit_marker_last() -> None:
-    job = _job()
-    documents = (OcrBatchDocument(request=job.documents[0], attempt_count=1),)
-    executor = _SqlCapture()
-    repository = ArxivOcrRepository(Settings())
-
-    repository.prepare_batch(
-        executor,
-        job=job,
-        documents=documents,
-        provider="kaggle",
-        provider_reference="owner/kernel",
-    )
-
-    assert len(executor.calls) == 2
-    assert '"ocr_document_runs"' in executor.calls[0][0]
-    assert "target.batch_id = source.batch_id" in executor.calls[0][0]
-    assert "WHEN MATCHED" not in executor.calls[0][0]
-    assert '"ocr_batches"' in executor.calls[-1][0]
-    assert "job_json" in executor.calls[-1][0]
-    assert "WHEN MATCHED" not in executor.calls[-1][0]
-    assert executor.calls[-1][1] is not None
-    assert executor.calls[-1][1][-2] == job.model_dump_json()
-    assert executor.calls[-1][1][-1] == "kaggle"
-    assert all(
-        statement.count("?") == len(parameters or ()) for statement, parameters in executor.calls
-    )
-
-
-class _ActiveBatchExecutor:
-    def __init__(self, job: OcrJob, *, raw_job: str | None = None) -> None:
-        request = job.documents[0]
-        self.rows = (
-            (
-                job.batch_id,
-                "running",
-                "owner/kernel/7",
-                "kaggle",
-                "owner/kernel",
-                1,
-                raw_job or job.model_dump_json(),
-                request.request_id,
-                request.arxiv_id,
-                request.oai_datestamp,
-                request.source_record_sha256,
-                request.pdf_url,
-                1,
-                "running",
-            ),
-        )
-
-    def execute(
-        self,
-        statement: str,
-        parameters: Sequence[Any] | None = None,
-    ) -> QueryResult:
-        del statement, parameters
-        return QueryResult(columns=(), rows=self.rows)
-
-
-def test_active_ocr_batch_restores_its_immutable_job_payload() -> None:
-    job = _job(reuse=_reuse_reference())
-
-    active = ArxivOcrRepository(Settings()).active_batch(_ActiveBatchExecutor(job))
-
-    assert active is not None
-    assert active.job == job
-    assert active.documents[0].request == job.documents[0]
-
-
-def test_active_ocr_batch_rejects_noncanonical_dtype() -> None:
-    current_job = _job()
-    invalid_payload = current_job.model_dump(mode="json")
-    invalid_payload["inference"]["dtype"] = "half"
-
-    with pytest.raises(RuntimeError, match="invalid immutable job payload"):
-        ArxivOcrRepository(Settings()).active_batch(
-            _ActiveBatchExecutor(current_job, raw_job=json.dumps(invalid_payload))
-        )
-
-
-def test_ocr_candidates_use_config_identity_and_ignore_orphan_attempts() -> None:
-    processor = load_contracts().processor("arxiv_glm_ocr")
-    executor = _SqlCapture()
-    repository = ArxivOcrRepository(Settings())
-
-    assert (
-        repository.candidates(
-            executor,
-            processor,
-            configuration_hash=_configuration_hash(),
-            limit=1,
-        )
-        == ()
-    )
-
-    statement, parameters = executor.calls[0]
-    assert 'JOIN "prod"."curated.arxiv"."ocr_batches"' in statement
-    assert "row_number() OVER" in statement
-    assert "document.source_record_sha256 = paper.source_record_sha256" in statement
-    assert "matching_success" in statement
-    assert "document.state = ?" in statement
-    assert "document.config_hash = ?" in statement
-    assert "json_extract_scalar" not in statement
-    assert "success.arxiv_id IS NULL" in statement
-    assert "reusable_success" in statement
-    assert "document.artifact_uri IS NOT NULL" in statement
-    assert parameters == (
-        _configuration_hash(),
-        "imported",
-        _configuration_hash(),
-        "imported",
-        _configuration_hash(),
-        False,
-        "retryable_failed",
-        processor.retry.max_document_attempts,
-    )
-    assert parameters is not None
-    assert statement.count("?") == len(parameters)
-
-
-def test_ocr_candidates_attach_latest_reusable_content_lineage() -> None:
-    reusable = _reuse_reference(arxiv_id="2607.00001")
-    executor = _SqlCapture(
-        rows=(
-            (
-                "2607.00001",
-                date(2026, 7, 27),
-                "f" * 64,
-                "https://arxiv.org/pdf/2607.00001",
-                0,
-                reusable.pdf_sha256,
-                reusable.pdf_size_bytes,
-                reusable.page_count,
-                reusable.processing_id,
-                reusable.manifest_sha256,
-            ),
-        )
-    )
-
-    candidates = ArxivOcrRepository(Settings()).candidates(
-        executor,
-        load_contracts().processor("arxiv_glm_ocr"),
-        configuration_hash=_configuration_hash(),
-        limit=1,
-    )
-
-    assert len(candidates) == 1
-    assert candidates[0].reuse == reusable
-
-
-def test_document_state_is_committed_before_batch_state() -> None:
-    executor = _SqlCapture()
-    repository = ArxivOcrRepository(Settings())
-
-    repository.mark_batch_submitted(
-        executor,
-        batch_id="b" * 64,
-        provider_run_id="owner/kernel/1",
-    )
-
-    assert len(executor.calls) == 2
-    assert '"ocr_document_runs"' in executor.calls[0][0]
-    assert '"ocr_batches"' in executor.calls[1][0]
-
-
 class _NoopObjectStore:
-    def exists(self, _uri: str) -> bool:
-        return False
-
-    def upload(self, _source: Path, _destination_uri: str) -> None:
-        pass
-
-    def upload_if_absent(self, _source: Path, _destination_uri: str) -> bool:
-        return True
-
-    def download(self, _source_uri: str, _destination: Path) -> None:
-        pass
+    pass
 
 
-class _SubmissionProvider:
-    name: Literal["kaggle"] = "kaggle"
-    reference = "owner/mini-lakehouse-arxiv-glm-ocr"
-    runner_bundle_sha256 = RUNNER_BUNDLE.sha256
-
-    def __init__(self) -> None:
-        self.submitted_job: OcrJob | None = None
-        self.status_run_ids: list[str] = []
-
-    def submit(self, job: OcrJob) -> str:
-        self.submitted_job = job
-        return f"{self.reference}/1"
-
-    def latest_run(self, batch_id: str) -> None:
-        del batch_id
-        return None
-
-    def status(self, provider_run_id: str) -> KaggleRunStatus:
-        self.status_run_ids.append(provider_run_id)
-        return KaggleRunStatus(
-            provider_run_id=provider_run_id,
-            state=KaggleKernelState.RUNNING,
+class _Repository:
+    def __init__(self, active: ActiveOcrBatch | None = None) -> None:
+        self.active = active
+        self._allow_candidates = active is None
+        self.prepared_job = (
+            active.job if active is not None and active.state == "prepared" else None
         )
-
-    def logs(self, provider_run_id: str) -> str:
-        del provider_run_id
-        return ""
-
-    def capacity(self) -> OcrProviderCapacity:
-        return OcrProviderCapacity(ready=True, remaining_minutes=120)
-
-    def download_output(self, provider_run_id: str, destination: Path) -> None:
-        del provider_run_id, destination
-        raise AssertionError("No output should be downloaded while submitting")
-
-    def reconcile_resources(self) -> dict[str, object]:
-        return {}
-
-
-class _SubmissionRepository:
-    def __init__(self) -> None:
-        self.prepared_job: OcrJob | None = None
         self.submitted_run_id: str | None = None
+        self.document_state: str | None = None
+        self.batch_state: str | None = None
 
-    def active_batch(self, _executor: object) -> None:
-        return None
+    def active_batch(self, _executor: object) -> ActiveOcrBatch | None:
+        active, self.active = self.active, None
+        return active
 
     def candidates(self, *_args: object, **_kwargs: object) -> tuple[OcrCandidate, ...]:
-        if self.prepared_job is not None:
+        if not self._allow_candidates or self.prepared_job is not None:
             return ()
         return (
             OcrCandidate(
@@ -1333,18 +333,7 @@ class _SubmissionRepository:
             ),
         )
 
-    def prepare_batch(
-        self,
-        _executor: object,
-        *,
-        job: OcrJob,
-        documents: tuple[OcrBatchDocument, ...],
-        provider: str,
-        provider_reference: str,
-    ) -> None:
-        assert len(documents) == 1
-        assert provider == _SubmissionProvider.name
-        assert provider_reference == _SubmissionProvider.reference
+    def prepare_batch(self, _executor: object, *, job: OcrJob, **_kwargs: object) -> None:
         self.prepared_job = job
 
     def mark_batch_submitted(
@@ -1358,213 +347,43 @@ class _SubmissionRepository:
         assert batch_id == self.prepared_job.batch_id
         self.submitted_run_id = provider_run_id
 
-
-class _IdleRepository:
-    def active_batch(self, _executor: object) -> None:
-        return None
-
-    def candidates(self, *_args: object, **_kwargs: object) -> tuple[OcrCandidate, ...]:
-        return ()
-
-
-class _LimitCaptureRepository(_IdleRepository):
-    def __init__(self) -> None:
-        self.limit: int | None = None
-        self.arxiv_ids: tuple[str, ...] | None = None
-        self.verify_pdf: bool | None = None
-
-    def candidates(self, *_args: object, **kwargs: object) -> tuple[OcrCandidate, ...]:
-        self.limit = cast(int, kwargs["limit"])
-        self.arxiv_ids = cast(tuple[str, ...], kwargs["arxiv_ids"])
-        self.verify_pdf = cast(bool, kwargs["verify_pdf"])
-        return ()
-
-
-def test_idle_ocr_cycle_does_not_require_kaggle_credentials() -> None:
-    service = ArxivOcrService(
-        Settings(),
-        executor=cast(Any, _NoopExecutor()),
-        repository=cast(Any, _IdleRepository()),
-        object_store=cast(Any, _NoopObjectStore()),
-    )
-
-    assert service.run_once().action == "idle"
-
-
-def test_ocr_cycle_uses_the_declared_hard_batch_limit() -> None:
-    repository = _LimitCaptureRepository()
-    service = ArxivOcrService(
-        Settings(),
-        executor=cast(Any, _NoopExecutor()),
-        repository=cast(Any, repository),
-        object_store=cast(Any, _NoopObjectStore()),
-    )
-
-    assert service.run_once().action == "idle"
-    assert repository.limit == 2
-    assert repository.arxiv_ids == ()
-    assert repository.verify_pdf is False
-
-
-def test_ocr_cycle_passes_every_explicit_identifier_without_truncating() -> None:
-    repository = _LimitCaptureRepository()
-    service = ArxivOcrService(
-        Settings(),
-        executor=cast(Any, _NoopExecutor()),
-        repository=cast(Any, repository),
-        object_store=cast(Any, _NoopObjectStore()),
-    )
-
-    assert service.run_once(arxiv_ids=("2607.00001", "2607.00002")).action == "idle"
-    assert repository.limit == 2
-    assert repository.arxiv_ids == ("2607.00001", "2607.00002")
-    assert repository.verify_pdf is False
-
-
-def test_ocr_cycle_forces_a_bounded_pdf_verification() -> None:
-    repository = _LimitCaptureRepository()
-    service = ArxivOcrService(
-        Settings(),
-        executor=cast(Any, _NoopExecutor()),
-        repository=cast(Any, repository),
-        object_store=cast(Any, _NoopObjectStore()),
-    )
-
-    assert service.run_once(arxiv_ids=("2607.00001",), verify_pdf=True).action == "idle"
-    assert repository.arxiv_ids == ("2607.00001",)
-    assert repository.verify_pdf is True
-
-
-def test_ocr_cycle_rejects_unbounded_pdf_verification() -> None:
-    service = ArxivOcrService(
-        Settings(),
-        executor=cast(Any, _NoopExecutor()),
-        repository=cast(Any, _IdleRepository()),
-        object_store=cast(Any, _NoopObjectStore()),
-    )
-
-    with pytest.raises(ValueError, match="at least one explicit ArXiv ID"):
-        service.run_once(verify_pdf=True)
-
-
-def test_ocr_cycle_rejects_more_explicit_ids_than_one_complete_batch() -> None:
-    service = ArxivOcrService(
-        Settings(),
-        executor=cast(Any, _NoopExecutor()),
-        repository=cast(Any, _IdleRepository()),
-        object_store=cast(Any, _NoopObjectStore()),
-    )
-
-    with pytest.raises(ValueError, match="at most 2 unique arxiv_ids"):
-        service.run_once(arxiv_ids=tuple(f"2607.{number:05d}" for number in range(1, 4)))
-
-
-def test_ocr_cycle_prepares_durable_state_before_remote_submission() -> None:
-    repository = _SubmissionRepository()
-    provider = _SubmissionProvider()
-    service = ArxivOcrService(
-        Settings(),
-        executor=cast(Any, _NoopExecutor()),
-        repository=cast(Any, repository),
-        provider=provider,
-        object_store=cast(Any, _NoopObjectStore()),
-    )
-
-    result = service.run_once()
-
-    assert result.action == "submitted"
-    assert repository.prepared_job == provider.submitted_job
-    assert repository.submitted_run_id == f"{provider.reference}/1"
-
-
-class _QuotaExhaustedProvider(_SubmissionProvider):
-    def capacity(self) -> OcrProviderCapacity:
-        return OcrProviderCapacity(
-            ready=False,
-            remaining_minutes=15,
-            refresh_at=datetime(2026, 7, 27, tzinfo=UTC),
-        )
-
-
-def test_ocr_cycle_defers_before_durable_prepare_when_gpu_quota_is_low() -> None:
-    repository = _SubmissionRepository()
-    service = ArxivOcrService(
-        Settings(),
-        executor=cast(Any, _NoopExecutor()),
-        repository=cast(Any, repository),
-        provider=_QuotaExhaustedProvider(),
-        object_store=cast(Any, _NoopObjectStore()),
-    )
-
-    result = service.run_once()
-
-    assert result.action == "deferred_quota"
-    assert result.remaining_gpu_quota_minutes == 15
-    assert result.quota_refresh_at == datetime(2026, 7, 27, tzinfo=UTC)
-    assert repository.prepared_job is None
-
-
-class _FailedRepository:
-    def __init__(self, active: ActiveOcrBatch) -> None:
-        self.active = active
-        self.document_state: str | None = None
-        self.batch_state: str | None = None
-
-    def active_batch(self, _executor: object) -> ActiveOcrBatch | None:
-        active, self.active = self.active, cast(Any, None)
-        return active
-
-    def candidates(self, *_args: object, **_kwargs: object) -> tuple[OcrCandidate, ...]:
-        return ()
-
     def mark_document_failure(self, *_args: object, **kwargs: object) -> None:
-        self.document_state = cast(str, kwargs["state"])
+        self.document_state = str(kwargs["state"])
 
     def mark_batch_terminal(self, *_args: object, **kwargs: object) -> None:
-        self.batch_state = cast(str, kwargs["state"])
+        self.batch_state = str(kwargs["state"])
 
 
-class _FailedProvider(_SubmissionProvider):
-    def status(self, provider_run_id: str) -> KaggleRunStatus:
-        self.status_run_ids.append(provider_run_id)
-        return KaggleRunStatus(
+class _Provider:
+    name: Literal["kaggle"] = "kaggle"
+    reference = "owner/mini-lakehouse-arxiv-glm-ocr"
+
+    def __init__(self, state: OcrProviderState = OcrProviderState.RUNNING) -> None:
+        self.state = state
+        self.submitted_job: OcrJob | None = None
+
+    def submit(self, job: OcrJob) -> str:
+        self.submitted_job = job
+        return self.reference
+
+    def status(self, provider_run_id: str) -> OcrRunStatus:
+        return OcrRunStatus(
             provider_run_id=provider_run_id,
-            state=KaggleKernelState.FAILED,
-            failure_message="GPU worker failed",
+            state=self.state,
+            failure_message="GPU worker failed" if self.state == OcrProviderState.FAILED else None,
         )
 
     def logs(self, provider_run_id: str) -> str:
         del provider_run_id
         return "remote traceback"
 
-
-class _InvalidOutputProvider(_SubmissionProvider):
-    def status(self, provider_run_id: str) -> KaggleRunStatus:
-        self.status_run_ids.append(provider_run_id)
-        return KaggleRunStatus(
-            provider_run_id=provider_run_id,
-            state=KaggleKernelState.COMPLETE,
-        )
-
     def download_output(self, provider_run_id: str, destination: Path) -> None:
         del provider_run_id
         destination.mkdir()
 
 
-def test_exhausted_remote_failure_becomes_terminal_without_resubmission() -> None:
-    job = _job(attempt_count=3)
-    active = ActiveOcrBatch(
-        batch_id=job.batch_id,
-        state="running",
-        provider="kaggle",
-        provider_reference=_SubmissionProvider.reference,
-        provider_run_id="owner/mini-lakehouse-arxiv-glm-ocr/1",
-        job=job,
-        documents=(OcrBatchDocument(request=job.documents[0], attempt_count=3),),
-    )
-    repository = _FailedRepository(active)
-    provider = _FailedProvider()
-    service = ArxivOcrService(
+def _service(repository: _Repository, provider: _Provider) -> ArxivOcrService:
+    return ArxivOcrService(
         Settings(),
         executor=cast(Any, _NoopExecutor()),
         repository=cast(Any, repository),
@@ -1572,125 +391,75 @@ def test_exhausted_remote_failure_becomes_terminal_without_resubmission() -> Non
         object_store=cast(Any, _NoopObjectStore()),
     )
 
-    result = service.run_once()
 
-    assert result.action == "reconciled"
-    assert result.terminal_failures == 1
-    assert repository.document_state == "terminal_failed"
-    assert repository.batch_state == "failed"
-    assert provider.status_run_ids == ["owner/mini-lakehouse-arxiv-glm-ocr/1"]
+def test_ocr_cycle_persists_before_remote_submission() -> None:
+    repository = _Repository()
+    provider = _Provider()
+
+    result = _service(repository, provider).run_once()
+
+    assert result.action == "submitted"
+    assert repository.prepared_job == provider.submitted_job
+    assert repository.submitted_run_id == provider.reference
 
 
-def test_invalid_remote_output_becomes_a_typed_retryable_attempt() -> None:
+def test_prepared_batch_is_resubmitted_without_private_provider_recovery() -> None:
     job = _job()
     active = ActiveOcrBatch(
         batch_id=job.batch_id,
-        state="running",
+        state="prepared",
         provider="kaggle",
-        provider_reference=_SubmissionProvider.reference,
-        provider_run_id="owner/mini-lakehouse-arxiv-glm-ocr/1",
+        provider_reference=_Provider.reference,
+        provider_run_id=None,
         job=job,
         documents=(OcrBatchDocument(request=job.documents[0], attempt_count=1),),
     )
-    repository = _FailedRepository(active)
-    service = ArxivOcrService(
-        Settings(),
-        executor=cast(Any, _NoopExecutor()),
-        repository=cast(Any, repository),
-        provider=_InvalidOutputProvider(),
-        object_store=cast(Any, _NoopObjectStore()),
-    )
+    repository = _Repository(active)
+    provider = _Provider()
 
-    result = service.run_once()
+    result = _service(repository, provider).run_once()
 
-    assert result.action == "reconciled"
-    assert result.retryable_failures == 1
-    assert repository.document_state == "retryable_failed"
-    assert repository.batch_state == "failed"
+    assert result.action == "submitted"
+    assert provider.submitted_job == job
 
 
-def test_remote_batch_failure_never_downgrades_an_imported_document() -> None:
-    job = _job()
+def test_stale_prepared_batch_is_failed_without_submission() -> None:
+    job = _job(configuration_hash="f" * 64)
     active = ActiveOcrBatch(
         batch_id=job.batch_id,
-        state="running",
-        provider="kaggle",
-        provider_reference=_SubmissionProvider.reference,
-        provider_run_id="owner/mini-lakehouse-arxiv-glm-ocr/1",
-        job=job,
-        documents=(
-            OcrBatchDocument(
-                request=job.documents[0],
-                attempt_count=1,
-                state=OcrRunState.IMPORTED,
-            ),
-        ),
-    )
-    repository = _FailedRepository(active)
-    service = ArxivOcrService(
-        Settings(),
-        executor=cast(Any, _NoopExecutor()),
-        repository=cast(Any, repository),
-        provider=_FailedProvider(),
-        object_store=cast(Any, _NoopObjectStore()),
-    )
-
-    result = service.run_once()
-
-    assert result.action == "reconciled"
-    assert result.retryable_failures == 0
-    assert result.terminal_failures == 0
-    assert repository.document_state is None
-    assert repository.batch_state == "failed"
-
-
-def test_prepared_batch_from_an_old_configuration_is_released_for_a_new_batch() -> None:
-    current_job = _job()
-    old_configuration_hash = "f" * 64
-    current_request = current_job.documents[0]
-    old_request = current_request.model_copy(
-        update={
-            "request_id": request_id(
-                arxiv_id=current_request.arxiv_id,
-                source_record_sha256=current_request.source_record_sha256,
-                configuration_hash=old_configuration_hash,
-            )
-        }
-    )
-    old_batch_id = batch_id(
-        (old_request.request_id,),
-        attempts={old_request.request_id: 1},
-    )
-    old_job = OcrJob.model_validate(
-        {
-            **current_job.model_dump(),
-            "batch_id": old_batch_id,
-            "config_hash": old_configuration_hash,
-            "documents": (old_request,),
-        }
-    )
-    active = ActiveOcrBatch(
-        batch_id=old_job.batch_id,
         state="prepared",
         provider="kaggle",
-        provider_reference=_SubmissionProvider.reference,
+        provider_reference=_Provider.reference,
         provider_run_id=None,
-        job=old_job,
-        documents=(OcrBatchDocument(request=old_job.documents[0], attempt_count=1),),
+        job=job,
+        documents=(OcrBatchDocument(request=job.documents[0], attempt_count=1),),
     )
-    repository = _FailedRepository(active)
-    provider = _SubmissionProvider()
-    service = ArxivOcrService(
-        Settings(),
-        executor=cast(Any, _NoopExecutor()),
-        repository=cast(Any, repository),
-        provider=provider,
-        object_store=cast(Any, _NoopObjectStore()),
-    )
+    repository = _Repository(active)
+    provider = _Provider()
 
-    result = service.run_once()
+    result = _service(repository, provider).run_once()
 
     assert result.action == "reconciled"
     assert repository.document_state == "retryable_failed"
     assert repository.batch_state == "failed"
     assert provider.submitted_job is None
+
+
+def test_exhausted_remote_failure_becomes_terminal() -> None:
+    job = _job(attempt_count=3)
+    active = ActiveOcrBatch(
+        batch_id=job.batch_id,
+        state="running",
+        provider="kaggle",
+        provider_reference=_Provider.reference,
+        provider_run_id=_Provider.reference,
+        job=job,
+        documents=(OcrBatchDocument(request=job.documents[0], attempt_count=3),),
+    )
+    repository = _Repository(active)
+
+    result = _service(repository, _Provider(OcrProviderState.FAILED)).run_once()
+
+    assert result.terminal_failures == 1
+    assert repository.document_state == "terminal_failed"
+    assert repository.batch_state == "failed"

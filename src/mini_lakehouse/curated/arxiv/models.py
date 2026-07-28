@@ -1,6 +1,6 @@
 """Application models owned by the curated ArXiv product."""
 
-from datetime import date, datetime
+from datetime import date
 from enum import StrEnum
 from typing import Literal
 
@@ -77,7 +77,6 @@ class OcrCycleResult(ArxivProductModel):
     action: Literal[
         "idle",
         "waiting",
-        "deferred_quota",
         "submitted",
         "reconciled",
         "reconciled_and_submitted",
@@ -87,5 +86,3 @@ class OcrCycleResult(ArxivProductModel):
     imported_documents: int = Field(default=0, ge=0)
     retryable_failures: int = Field(default=0, ge=0)
     terminal_failures: int = Field(default=0, ge=0)
-    remaining_gpu_quota_minutes: int | None = Field(default=None, ge=0)
-    quota_refresh_at: datetime | None = None

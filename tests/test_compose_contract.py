@@ -275,7 +275,7 @@ def test_container_environment_files_follow_service_ownership() -> None:
         "LAKEHOUSE_STORAGE__ENDPOINTS__INTERNAL_URL",
         "LAKEHOUSE_POLARIS__CATALOG_NAME",
         "LAKEHOUSE_ARXIV__BASE_URL",
-        "LAKEHOUSE_KAGGLE__API_TOKEN",
+        "KAGGLE_API_TOKEN",
         "MODAL_TOKEN_SECRET",
         "LAKEHOUSE_NOTIFICATIONS__SLACK_BOT_TOKEN",
         "LAKEHOUSE_NOTIFICATIONS__GMAIL_APP_PASSWORD",

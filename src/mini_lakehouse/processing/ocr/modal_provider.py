@@ -1,6 +1,5 @@
-"""Modal submission, reconciliation, logs, and durable output download."""
+"""Modal execution adapter backed by the public Modal SDK."""
 
-import json
 from pathlib import Path
 from typing import Literal
 
@@ -11,15 +10,12 @@ from mini_lakehouse.config.settings import ModalSettings
 from mini_lakehouse.contracts.processors import ProcessorContract
 from mini_lakehouse.processing.ocr.core.protocol import OcrJob
 from mini_lakehouse.processing.ocr.provider import (
-    OcrProviderCapacity,
+    OCR_RESULT_FILES,
     OcrProviderError,
     OcrProviderState,
     OcrRunNotFoundError,
     OcrRunStatus,
 )
-from mini_lakehouse.processing.ocr.runner_bundle import OcrRunnerBundle
-
-RESULT_FILES = ("result_manifest.json", "result.tar.zst")
 
 
 class ModalRunResult(BaseModel):
@@ -38,16 +34,12 @@ class ModalProvider:
         settings: ModalSettings,
         processor: ProcessorContract,
         *,
-        bundle: OcrRunnerBundle | None = None,
         client: modal.Client | None = None,
     ) -> None:
         if not settings.configured:
             raise ValueError("Modal OCR requires MODAL_TOKEN_ID and MODAL_TOKEN_SECRET")
         runner = processor.runner.modal
-        self._processor = processor
         self._runner = runner
-        runner_bundle = bundle or OcrRunnerBundle.load()
-        self.runner_bundle_sha256 = runner_bundle.sha256
         self.reference = f"{runner.app_name}/{runner.function_name}"
         if client is None:
             assert settings.token_id is not None
@@ -75,14 +67,8 @@ class ModalProvider:
             ) from error
 
     def submit(self, job: OcrJob) -> str:
-        if job.runner_bundle_sha256 != self.runner_bundle_sha256:
-            raise ValueError("OCR job and local Modal runner bundle identities differ")
         call = self._function(self._runner.function_name).spawn(job.model_dump_json())
         return call.object_id
-
-    def latest_run(self, batch_id: str) -> OcrRunStatus | None:
-        del batch_id
-        return None
 
     def _result(self, provider_run_id: str, *, timeout: float) -> ModalRunResult:
         call = self._call(provider_run_id)
@@ -132,9 +118,6 @@ class ModalProvider:
         except modal.exception.Error as error:
             raise OcrProviderError(f"Cannot read Modal logs: {error}") from error
 
-    def capacity(self) -> OcrProviderCapacity:
-        return OcrProviderCapacity(ready=True)
-
     def download_output(self, provider_run_id: str, destination: Path) -> None:
         result = self._result(provider_run_id, timeout=0)
         destination.mkdir(parents=True, exist_ok=False)
@@ -144,7 +127,7 @@ class ModalProvider:
                 environment_name=self._runner.environment,
                 client=self._client,
             )
-            for filename in RESULT_FILES:
+            for filename in OCR_RESULT_FILES:
                 target = destination / filename
                 with target.open("xb") as output:
                     for chunk in volume.read_file(f"{result.output_prefix}/{filename}"):
@@ -153,15 +136,3 @@ class ModalProvider:
             raise OcrProviderError(
                 f"Cannot download Modal output for {result.batch_id}: {error}"
             ) from error
-
-    def reconcile_resources(self) -> dict[str, object]:
-        specification = {
-            "model": self._processor.model.model_dump(mode="json"),
-            "layout_model": self._processor.layout_model.model_dump(mode="json"),
-        }
-        result = self._function(self._runner.resource_function_name).remote(
-            json.dumps(specification, separators=(",", ":"), sort_keys=True)
-        )
-        if not isinstance(result, dict):
-            raise OcrProviderError("Modal model provisioning returned an invalid result")
-        return result

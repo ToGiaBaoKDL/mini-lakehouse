@@ -3,7 +3,6 @@ import sys
 from datetime import date
 from pathlib import Path
 from types import ModuleType
-from typing import Any
 
 import pytest
 
@@ -24,7 +23,6 @@ from mini_lakehouse.processing.ocr.core.protocol import (
     OcrModel,
     OcrReuseReference,
 )
-from mini_lakehouse.processing.ocr.runner_bundle import OcrRunnerBundle
 
 
 def _runtime_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
@@ -33,12 +31,9 @@ def _runtime_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     glmocr.GlmOcr = object  # type: ignore[attr-defined]
     config = ModuleType("glmocr.config")
     config.GlmOcrConfig = object  # type: ignore[attr-defined]
-    progress = ModuleType("progress")
-    progress.GlmOcrPageProgress = object  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "fitz", fitz)
     monkeypatch.setitem(sys.modules, "glmocr", glmocr)
     monkeypatch.setitem(sys.modules, "glmocr.config", config)
-    monkeypatch.setitem(sys.modules, "progress", progress)
 
     name = "mini_lakehouse_test_glm_ocr_runtime"
     path = Path("runners/glm_ocr/runtime.py")
@@ -82,7 +77,6 @@ def _job() -> OcrJob:
     return OcrJob(
         schema_version="1.0.0",
         batch_id=batch_id((request.request_id,), attempts=request_attempts),
-        runner_bundle_sha256=OcrRunnerBundle.load().sha256,
         model=OcrModel.model_validate(processor.model.model_dump()),
         layout_model=OcrModel.model_validate(processor.layout_model.model_dump()),
         adapter_version=processor.adapter_version,
@@ -98,7 +92,7 @@ def _job() -> OcrJob:
     )
 
 
-def test_unchanged_batch_skips_model_resolution_and_vllm(
+def test_unchanged_batch_skips_model_validation_and_vllm(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -111,21 +105,17 @@ def test_unchanged_batch_skips_model_resolution_and_vllm(
         destination.write_bytes(b"%PDF-placeholder")
         return reuse.pdf_sha256, reuse.pdf_size_bytes
 
-    def unexpected_model_resolution(*_args: object, **_kwargs: object) -> Any:
-        raise AssertionError("An unchanged PDF batch must not resolve model resources")
-
     def pdf_page_count(_path: Path, _maximum: int) -> int:
         return reuse.page_count
 
     monkeypatch.setattr(runtime, "download_pdf", download_pdf)
     monkeypatch.setattr(runtime, "pdf_page_count", pdf_page_count)
-    monkeypatch.setattr(runtime, "resolve_model_source", unexpected_model_resolution)
 
     runtime.run(
         job,
         tmp_path,
-        model_source="owner/model/transformers/safetensors/1",
-        layout_model_source="owner/layout/transformers/safetensors/1",
+        model_path=tmp_path / "missing-model",
+        layout_model_path=tmp_path / "missing-layout-model",
     )
 
     manifest = OcrBatchManifest.model_validate_json(
@@ -133,6 +123,27 @@ def test_unchanged_batch_skips_model_resolution_and_vllm(
     )
     assert manifest.documents[0].state == "reused"
     assert manifest.documents[0].files == ()
+
+
+def test_unexpected_preparation_error_aborts_the_batch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime_module(monkeypatch)
+
+    def fail_preparation(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("runner bug")
+
+    monkeypatch.setattr(runtime, "prepare_document", fail_preparation)
+
+    with pytest.raises(AssertionError, match="runner bug"):
+        runtime.run(
+            _job(),
+            tmp_path,
+            model_path=tmp_path / "model",
+            layout_model_path=tmp_path / "layout-model",
+        )
+    assert not (tmp_path / "result_manifest.json").exists()
 
 
 def test_changed_pdf_is_prepared_for_inference(
@@ -214,12 +225,12 @@ def test_compatible_inference_engine_reuses_one_vllm_server(
     model_path = tmp_path / "model"
     layout_path = tmp_path / "layout"
 
-    first, _ = engine.acquire(
+    first = engine.acquire(
         job,
         model_path=model_path,
         layout_model_path=layout_path,
     )
-    second, _ = engine.acquire(
+    second = engine.acquire(
         job,
         model_path=model_path,
         layout_model_path=layout_path,

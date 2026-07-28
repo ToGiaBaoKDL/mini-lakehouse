@@ -6,8 +6,6 @@ import hashlib
 import io
 import json
 import os
-import re
-import shutil
 import subprocess
 import sys
 import tarfile
@@ -26,13 +24,12 @@ import yaml
 import zstandard
 from glmocr import GlmOcr
 from glmocr.config import GlmOcrConfig
-from progress import GlmOcrPageProgress
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from mini_lakehouse.processing.ocr.core.files import file_sha256
 from mini_lakehouse.processing.ocr.core.identity import (
     canonical_json_sha256,
+    file_sha256,
     processing_id,
     successful_document_manifest_sha256,
 )
@@ -51,20 +48,8 @@ from mini_lakehouse.processing.ocr.core.protocol import (
 )
 from mini_lakehouse.processing.ocr.core.text import build_page_markdown_bundle
 
-SOURCE_DIRECTORY = Path(__file__).resolve().parent
-MODEL_MANIFEST_NAME = "mini_lakehouse_resource.json"
 VLLM_DIAGNOSTIC_CHARACTERS = 32_000
-VLLM_LOG_EVENT_CHARACTERS = 8_000
-VLLM_METRIC_CHARACTERS = 16_000
 ERROR_MESSAGE_CHARACTERS = 2_000
-VLLM_DIAGNOSTIC_METRICS = (
-    "vllm:num_requests_running",
-    "vllm:num_requests_waiting",
-    "vllm:kv_cache_usage_perc",
-    "vllm:request_queue_time_seconds",
-    "vllm:time_to_first_token_seconds",
-    "vllm:e2e_request_latency_seconds",
-)
 MEDIA_TYPES = {
     ".gz": "application/gzip",
     ".jpg": "image/jpeg",
@@ -364,53 +349,39 @@ def write_elements(path: Path, elements: Iterable[OcrElement]) -> None:
             output.write("\n")
 
 
-def copy_sdk_artifacts(
-    saved_root: Path,
+def save_sdk_artifacts(
+    parsed: Any,
     destination: Path,
     *,
     expected_pages: int,
 ) -> None:
-    images = saved_root / "imgs"
-    if images.is_dir():
-        shutil.copytree(images, destination / "imgs")
-    visualizations = saved_root / "layout_vis"
-    sources = (
-        tuple(path for path in visualizations.iterdir() if path.is_file())
-        if visualizations.is_dir()
-        else ()
-    )
-    indexed: dict[int, Path] = {}
-    if expected_pages == 1 and len(sources) == 1:
-        indexed[1] = sources[0]
-    else:
-        for source in sources:
-            match = re.search(r"_page([0-9]+)$", source.stem)
-            if match is None:
-                raise DocumentError(
-                    "invalid_model_output",
-                    f"Cannot resolve SDK visualization page from {source.name}",
-                    retryable=True,
-                )
-            page_number = int(match.group(1)) + 1
-            if page_number in indexed:
-                raise DocumentError(
-                    "invalid_model_output",
-                    f"Duplicate SDK visualization for page {page_number}",
-                    retryable=True,
-                )
-            indexed[page_number] = source
-    expected = set(range(1, expected_pages + 1))
-    if set(indexed) != expected:
+    visualizations = parsed.layout_vis_images or {}
+    expected = set(range(expected_pages))
+    if set(visualizations) != expected:
         raise DocumentError(
             "incomplete_model_output",
-            f"GLM-OCR produced visualizations for pages {sorted(indexed)}, "
+            f"GLM-OCR produced visualizations for pages {sorted(visualizations)}, "
             f"expected {sorted(expected)}",
             retryable=True,
         )
-    target = destination / "layout_vis"
-    target.mkdir()
-    for page_number, source in sorted(indexed.items()):
-        shutil.copy2(source, target / f"page-{page_number:04d}{source.suffix.lower()}")
+    layout_target = destination / "layout_vis"
+    layout_target.mkdir()
+    for page_index, image in sorted(visualizations.items()):
+        image.save(layout_target / f"page-{page_index + 1:04d}.jpg", quality=95)
+
+    image_files = parsed.image_files or {}
+    if image_files:
+        image_target = destination / "imgs"
+        image_target.mkdir()
+        for name, image in sorted(image_files.items()):
+            path = PurePosixPath(name)
+            if path.name != name or name in {"", ".", ".."}:
+                raise DocumentError(
+                    "invalid_model_output",
+                    f"Unsafe GLM-OCR image filename: {name!r}",
+                    retryable=True,
+                )
+            image.save(image_target / name)
 
 
 def artifact_files(root: Path, maximum_bytes: int) -> tuple[ArtifactFile, ...]:
@@ -521,17 +492,7 @@ def successful_result(
         configuration_hash=job.config_hash,
     )
     try:
-        with GlmOcrPageProgress(
-            parser,
-            arxiv_id=request.arxiv_id,
-            document_count=prepared.document_count,
-            document_index=prepared.document_index,
-            page_count=pages,
-            request_id=request.request_id,
-            started_at=prepared.started_at,
-            emit=log_stage,
-        ):
-            parsed = parser.parse(pdf, save_layout_visualization=True)
+        parsed = parser.parse(pdf, save_layout_visualization=True)
     except Exception as error:
         raise DocumentError("ocr_inference_failed", str(error), retryable=True) from error
 
@@ -546,15 +507,7 @@ def successful_result(
     )
     write_elements(document_root / "elements.jsonl.gz", elements)
 
-    saved = work_root / "sdk-output"
-    parsed.save(output_dir=saved, save_layout_visualization=True)
-    saved_directories = [path for path in saved.iterdir() if path.is_dir()]
-    if len(saved_directories) == 1:
-        copy_sdk_artifacts(
-            saved_directories[0],
-            document_root,
-            expected_pages=pages,
-        )
+    save_sdk_artifacts(parsed, document_root, expected_pages=pages)
 
     files = artifact_files(document_root, job.limits.max_output_bytes)
     payload: dict[str, Any] = {
@@ -678,40 +631,6 @@ def write_config(path: Path, job: OcrJob, layout_model_path: str) -> None:
     )
 
 
-def resolve_model_source(
-    source: str,
-    *,
-    resource_name: str,
-    repository: str,
-    revision: str,
-) -> Path:
-    candidate = Path(source)
-    if candidate.is_absolute():
-        if not candidate.is_dir():
-            raise RuntimeError(f"Provisioned OCR model path does not exist: {candidate}")
-        path = candidate
-    else:
-        import kagglehub
-
-        path = Path(kagglehub.model_download(source))
-    try:
-        manifest = json.loads((path / MODEL_MANIFEST_NAME).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise RuntimeError(f"OCR model {source!r} has an invalid resource manifest") from error
-    expected = {
-        "resource_name": resource_name,
-        "repository": repository,
-        "revision": revision,
-    }
-    expected_identity = canonical_json_sha256(expected)
-    if (
-        any(manifest.get(name) != value for name, value in expected.items())
-        or manifest.get("identity_sha256") != expected_identity
-    ):
-        raise RuntimeError(f"OCR model {source!r} does not match the OCR job")
-    return path
-
-
 def start_vllm(
     job: OcrJob,
     model_path: Path,
@@ -807,7 +726,7 @@ class InferenceEngine:
         *,
         model_path: Path,
         layout_model_path: Path,
-    ) -> tuple[GlmOcr, Path]:
+    ) -> GlmOcr:
         signature = canonical_json_sha256(
             {
                 "inference": job.inference.model_dump(mode="json"),
@@ -841,7 +760,7 @@ class InferenceEngine:
             self._parser = parser
         if self._parser is None:
             raise RuntimeError("GLM-OCR inference engine did not initialize")
-        return self._parser, self._log_path
+        return self._parser
 
     def close(self) -> None:
         self._parser = None
@@ -886,80 +805,12 @@ def write_text_atomic(destination: Path, content: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _vllm_log_tail(log_path: Path) -> str:
-    try:
-        return log_path.read_text(encoding="utf-8", errors="replace")[-VLLM_DIAGNOSTIC_CHARACTERS:]
-    except OSError as error:
-        return f"vLLM log unavailable: {error}"
-
-
-def _vllm_metrics(api_port: int) -> str:
-    try:
-        response = requests.get(f"http://127.0.0.1:{api_port}/metrics", timeout=5)
-        response.raise_for_status()
-    except requests.RequestException as error:
-        return f"vLLM metrics unavailable: {error}"
-    metrics = "\n".join(
-        line
-        for line in response.text.splitlines()
-        if not line.startswith("#") and any(name in line for name in VLLM_DIAGNOSTIC_METRICS)
-    )
-    return metrics[-VLLM_METRIC_CHARACTERS:] or "No selected vLLM metrics were reported"
-
-
-def persist_vllm_diagnostic(
-    output_directory: Path,
-    log_path: Path,
-    job: OcrJob,
-    *,
-    error: BaseException,
-    request: OcrDocumentRequest | None,
-) -> None:
-    """Persist bounded server evidence and mirror a useful tail to the provider log."""
-    log_tail = _vllm_log_tail(log_path)
-    payload = {
-        "batch_id": job.batch_id,
-        "captured_at": datetime.now(UTC).isoformat(),
-        "error": str(error)[:2000],
-        "request_id": None if request is None else request.request_id,
-        "arxiv_id": None if request is None else request.arxiv_id,
-        "metrics": _vllm_metrics(job.inference.api_port),
-        "vllm_log_tail": log_tail,
-    }
-    diagnostics = output_directory / "diagnostics"
-    name = "runtime" if request is None else request.request_id
-    diagnostic_file: str | None = f"diagnostics/{name}.json"
-    try:
-        diagnostics.mkdir(parents=True, exist_ok=True)
-        write_text_atomic(
-            diagnostics / f"{name}.json",
-            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        )
-    except OSError as diagnostic_error:
-        diagnostic_file = None
-        payload["persistence_error"] = str(diagnostic_error)
-    print(
-        json.dumps(
-            {
-                **payload,
-                "event": "vllm_diagnostic",
-                "diagnostic_file": diagnostic_file,
-                "vllm_log_tail": log_tail[-VLLM_LOG_EVENT_CHARACTERS:],
-            },
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        ),
-        flush=True,
-    )
-
-
 def run(
     job: OcrJob,
     output_directory: Path,
     *,
-    model_source: str,
-    layout_model_source: str,
+    model_path: Path,
+    layout_model_path: Path,
     engine: InferenceEngine | None = None,
 ) -> None:
     batch_started_at = time.perf_counter()
@@ -1015,44 +866,20 @@ def run(
                     document_index=document_index,
                     started_at=document_started_at,
                 )
-            except Exception as error:
-                document_error = DocumentError(
-                    "unexpected_runner_error",
-                    str(error),
-                    retryable=True,
-                )
-                results[request.request_id] = failed_result(request, document_error)
-                log_document_failure(
-                    request,
-                    document_error,
-                    document_count=document_count,
-                    document_index=document_index,
-                    started_at=document_started_at,
-                )
             if request.request_id in results:
                 log_batch_progress(job, results, batch_started_at)
 
         if prepared_documents:
             model_started_at = time.perf_counter()
-            model_path = resolve_model_source(
-                model_source,
-                resource_name="model",
-                repository=job.model.repository,
-                revision=job.model.revision,
-            )
-            layout_path = resolve_model_source(
-                layout_model_source,
-                resource_name="layout_model",
-                repository=job.layout_model.repository,
-                revision=job.layout_model.revision,
-            )
-            log_stage("models_resolved", model_started_at, batch_id=job.batch_id)
+            if not model_path.is_dir() or not layout_model_path.is_dir():
+                raise FileNotFoundError("OCR model paths must be existing directories")
+            log_stage("models_ready", model_started_at, batch_id=job.batch_id)
             server_started_at = time.perf_counter()
             inference_engine = engine or InferenceEngine(temp / "engine")
-            parser, vllm_log_path = inference_engine.acquire(
+            parser = inference_engine.acquire(
                 job,
                 model_path=model_path,
-                layout_model_path=layout_path,
+                layout_model_path=layout_model_path,
             )
             log_stage("vllm_ready", server_started_at, batch_id=job.batch_id)
             try:
@@ -1066,13 +893,6 @@ def run(
                             extracted,
                         )
                     except DocumentError as error:
-                        persist_vllm_diagnostic(
-                            output_directory,
-                            vllm_log_path,
-                            job,
-                            error=error,
-                            request=request,
-                        )
                         result = failed_result(request, error)
                         log_document_failure(
                             request,
@@ -1081,37 +901,9 @@ def run(
                             document_index=prepared.document_index,
                             started_at=prepared.started_at,
                         )
-                    except Exception as error:
-                        document_error = DocumentError(
-                            "unexpected_runner_error",
-                            str(error),
-                            retryable=True,
-                        )
-                        persist_vllm_diagnostic(
-                            output_directory,
-                            vllm_log_path,
-                            job,
-                            error=document_error,
-                            request=request,
-                        )
-                        result = failed_result(request, document_error)
-                        log_document_failure(
-                            request,
-                            document_error,
-                            document_count=prepared.document_count,
-                            document_index=prepared.document_index,
-                            started_at=prepared.started_at,
-                        )
                     results[request.request_id] = result
                     log_batch_progress(job, results, batch_started_at)
-            except Exception as error:
-                persist_vllm_diagnostic(
-                    output_directory,
-                    vllm_log_path,
-                    job,
-                    error=error,
-                    request=None,
-                )
+            except Exception:
                 if engine is not None:
                     engine.close()
                 raise
@@ -1154,16 +946,17 @@ def run(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--job", type=Path, required=True)
     parser.add_argument("--output-directory", type=Path, required=True)
-    parser.add_argument("--model-source", required=True)
-    parser.add_argument("--layout-model-source", required=True)
+    parser.add_argument("--model-path", type=Path, required=True)
+    parser.add_argument("--layout-model-path", type=Path, required=True)
     arguments = parser.parse_args()
-    job = OcrJob.model_validate_json((SOURCE_DIRECTORY / "job.json").read_bytes())
+    job = OcrJob.model_validate_json(arguments.job.read_bytes())
     run(
         job,
         arguments.output_directory,
-        model_source=arguments.model_source,
-        layout_model_source=arguments.layout_model_source,
+        model_path=arguments.model_path,
+        layout_model_path=arguments.layout_model_path,
     )
 
 

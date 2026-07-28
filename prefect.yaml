@@ -103,15 +103,6 @@ deployments:
     concurrency_limit: *singleton
     work_pool: *processing_work_pool
 
-  - name: gov_arxiv_ocr_resources
-    description: Manually reconcile immutable resources for one OCR provider.
-    entrypoint: orchestration/flows/arxiv/gov_arxiv_ocr_resources.py:gov_arxiv_ocr_resources
-    parameters:
-      provider: null
-    schedules: []
-    concurrency_limit: *singleton
-    work_pool: *maintenance_work_pool
-
   - name: gov_iceberg_maintenance
     description: Apply inherited Polaris maintenance policies to discovered Iceberg tables.
     entrypoint: orchestration/flows/platform/gov_iceberg_maintenance.py:gov_iceberg_maintenance

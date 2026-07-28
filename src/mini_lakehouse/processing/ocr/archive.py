@@ -7,9 +7,9 @@ from pathlib import Path, PurePosixPath
 
 import zstandard
 
-from mini_lakehouse.processing.ocr.core.files import file_sha256
 from mini_lakehouse.processing.ocr.core.identity import (
     canonical_json_sha256,
+    file_sha256,
     processing_id,
     successful_document_manifest_payload,
 )
@@ -23,7 +23,7 @@ from mini_lakehouse.processing.ocr.core.protocol import (
     OcrElement,
     OcrJob,
 )
-from mini_lakehouse.processing.ocr.page_bundle import (
+from mini_lakehouse.processing.ocr.core.text import (
     InvalidPageMarkdownBundleError,
     read_page_markdown_bundle,
 )

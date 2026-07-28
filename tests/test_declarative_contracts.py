@@ -58,16 +58,14 @@ def test_repository_contracts_form_a_valid_registry() -> None:
         "api/arxiv/tables/oai_records_raw"
     )
     assert (
-        arxiv_processor.runner.kaggle.runner_dataset_prefix == "mini-lakehouse-arxiv-glm-ocr-runner"
+        arxiv_processor.runner.kaggle.runner_dataset_name == "mini-lakehouse-arxiv-glm-ocr-runner"
     )
+    assert arxiv_processor.runner.kaggle.runner_dataset_version == 1
     assert arxiv_processor.batch.max_documents == 2
     assert arxiv_processor.inference.max_workers == 8
     assert arxiv_processor.runner.default_provider == "kaggle"
-    assert arxiv_processor.runner.kaggle.model_resources.model.name == "mini-lakehouse-glm-ocr"
-    assert (
-        arxiv_processor.runner.kaggle.model_resources.layout_model.name
-        == "mini-lakehouse-pp-doclayout-v3"
-    )
+    assert arxiv_processor.runner.kaggle.model_source.endswith("/safetensors/1")
+    assert arxiv_processor.runner.kaggle.layout_model_source.endswith("/safetensors/1")
     assert arxiv_processor.runner.modal.gpu == "A100-40GB"
     assert contracts.curated_product("github").table_identifier("events").iceberg == (
         "curated",

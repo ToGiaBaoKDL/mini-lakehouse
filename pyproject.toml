@@ -30,7 +30,6 @@ orchestration = [
     "dbt-trino>=1.10,<1.11",
     "prefect>=3.7,<4",
     "prefect-dbt>=0.7,<0.8",
-    "huggingface-hub>=1.7,<2",
     "kaggle>=2,<3",
     "kagglehub>=1,<2",
     "modal>=1.5.3,<1.6",

@@ -1,6 +1,8 @@
 """Deterministic text projections of canonical OCR elements."""
 
+import gzip
 from collections.abc import Sequence
+from typing import BinaryIO
 
 from mini_lakehouse.processing.ocr.core.protocol import (
     OcrElement,
@@ -9,20 +11,8 @@ from mini_lakehouse.processing.ocr.core.protocol import (
 )
 
 
-def serialize_plain_text(elements: Sequence[OcrElement]) -> str:
-    pages: dict[int, list[OcrElement]] = {}
-    for element in elements:
-        pages.setdefault(element.page_number, []).append(element)
-    serialized_pages = []
-    for page_number in sorted(pages):
-        ordered = sorted(
-            pages[page_number],
-            key=lambda element: (element.reading_order, element.element_id),
-        )
-        serialized_pages.append(
-            "\n\n".join(content for element in ordered if (content := element.text_content.strip()))
-        )
-    return "\n\n\f\n\n".join(serialized_pages)
+class InvalidPageMarkdownBundleError(ValueError):
+    """The compressed page Markdown projection violates its contract."""
 
 
 def build_page_markdown_bundle(
@@ -60,3 +50,27 @@ def build_page_markdown_bundle(
             for page_number in range(1, page_count + 1)
         ),
     )
+
+
+def read_page_markdown_bundle(
+    source: BinaryIO,
+    *,
+    max_uncompressed_bytes: int,
+) -> OcrPageMarkdownBundle:
+    try:
+        with gzip.GzipFile(fileobj=source, mode="rb") as compressed:
+            payload = compressed.read(max_uncompressed_bytes + 1)
+    except (EOFError, gzip.BadGzipFile, OSError) as error:
+        raise InvalidPageMarkdownBundleError(
+            f"Cannot decompress OCR page Markdown: {error}"
+        ) from error
+    if len(payload) > max_uncompressed_bytes:
+        raise InvalidPageMarkdownBundleError(
+            "OCR page Markdown exceeds its uncompressed-size limit"
+        )
+    try:
+        return OcrPageMarkdownBundle.model_validate_json(payload)
+    except ValueError as error:
+        raise InvalidPageMarkdownBundleError(
+            f"Invalid OCR page Markdown bundle: {error}"
+        ) from error

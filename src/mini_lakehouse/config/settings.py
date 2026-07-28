@@ -147,38 +147,32 @@ class ArxivSettings(_SettingsModel):
     user_agent: str = "mini-lakehouse"
 
 
-class KaggleSettings(_SettingsModel):
+class KaggleSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_prefix="KAGGLE_",
+        extra="ignore",
+    )
+
     username: str | None = None
     api_token: SecretStr | None = None
 
-    @field_validator("username", mode="before")
+    @field_validator("username", "api_token", mode="before")
     @classmethod
-    def empty_username_is_unset(cls, value: object) -> object:
+    def empty_credential_is_unset(cls, value: object) -> object:
         return None if value == "" else value
 
-    @field_validator("api_token", mode="before")
-    @classmethod
-    def empty_token_is_unset(cls, value: object) -> object:
-        return None if value == "" else value
+    @model_validator(mode="after")
+    def validate_credentials(self) -> Self:
+        values = (self.username, self.api_token)
+        if any(value is None for value in values) and any(value is not None for value in values):
+            raise ValueError("Kaggle username and api_token must be configured together")
+        return self
 
     @property
     def configured(self) -> bool:
         return self.username is not None and self.api_token is not None
-
-    def kernel_slug(self, kernel_name: str) -> str:
-        if self.username is None:
-            raise ValueError("Kaggle username is not configured")
-        return f"{self.username}/{kernel_name}"
-
-    def dataset_slug(self, dataset_name: str) -> str:
-        if self.username is None:
-            raise ValueError("Kaggle username is not configured")
-        return f"{self.username}/{dataset_name}"
-
-    def model_slug(self, model_name: str, *, framework: str, variation: str) -> str:
-        if self.username is None:
-            raise ValueError("Kaggle username is not configured")
-        return f"{self.username}/{model_name}/{framework}/{variation}"
 
 
 class ModalSettings(BaseSettings):

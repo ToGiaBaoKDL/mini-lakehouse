@@ -1037,35 +1037,6 @@ wheels = [
 ]
 
 [[package]]
-name = "kagglehub"
-version = "1.0.2"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "kagglesdk" },
-    { name = "packaging" },
-    { name = "pyyaml" },
-    { name = "requests" },
-    { name = "tqdm" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/b5/b9/e1bdafdcdb98e8e5354b30959ed48f4a08ca2c2dc72c968c5b38c4baa1b5/kagglehub-1.0.2.tar.gz", hash = "sha256:08abae0c1e249904003ce6f23c189166e3032220478426a552c77c2edb08b93a", size = 117457, upload-time = "2026-06-09T17:14:05.313Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/61/1a/6b1293d0b091905e367f86771a7122e5f7f2729ab9f0f36a1617f7ad6c05/kagglehub-1.0.2-py3-none-any.whl", hash = "sha256:ffad2d79cfda9b06848e98cb0a4a48e286285cfba4aeadadc0b8dbd9bcadd372", size = 70645, upload-time = "2026-06-09T17:14:04.04Z" },
-]
-
-[[package]]
-name = "kagglesdk"
-version = "0.1.35"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "protobuf" },
-    { name = "requests" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/47/3f/2b7b46e8c17046261b138f22c5b7421bbbb85cf6a8f69f4aa43fe983eb1a/kagglesdk-0.1.35.tar.gz", hash = "sha256:7373c46e7546dc983e1cd87fb7555906f799869b6f02a747a3121c89edc420b8", size = 198490, upload-time = "2026-07-22T21:54:32.319Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/0b/96/37de4e0442378ac96e324123418b81cf5be0e9c7f7236fddae6641b20db2/kagglesdk-0.1.35-py3-none-any.whl", hash = "sha256:af662aedfad00aa5d5e3dd946c1a82b5117cf4964f6f9e96cea6e83b77419e17", size = 248627, upload-time = "2026-07-22T21:54:30.737Z" },
-]
-
-[[package]]
 name = "lark"
 version = "1.2.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1207,9 +1178,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-kaggle = [
-    { name = "kagglehub" },
-]
 modal = [
     { name = "huggingface-hub" },
 ]
@@ -1218,7 +1186,6 @@ modal = [
 requires-dist = [
     { name = "glmocr", extras = ["selfhosted"], specifier = "==0.1.5" },
     { name = "huggingface-hub", marker = "extra == 'modal'", specifier = ">=1.7,<2" },
-    { name = "kagglehub", marker = "extra == 'kaggle'", specifier = ">=1,<2" },
     { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "pyyaml", specifier = ">=6.0.3,<7" },
     { name = "requests", specifier = ">=2.32,<3" },
@@ -1226,7 +1193,7 @@ requires-dist = [
     { name = "wrapt", specifier = "==2.2.2" },
     { name = "zstandard", specifier = ">=0.23,<1" },
 ]
-provides-extras = ["kaggle", "modal"]
+provides-extras = ["modal"]
 
 [[package]]
 name = "mistral-common"

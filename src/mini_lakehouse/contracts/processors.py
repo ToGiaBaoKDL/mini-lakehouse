@@ -15,18 +15,6 @@ class ProcessorModelContract(ContractModel):
     revision: str = Field(pattern=r"^[0-9a-f]{40}$")
 
 
-class KaggleModelResourceContract(ContractModel):
-    name: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{2,49}$")
-    framework: Literal["transformers"]
-    variation: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{1,49}$")
-    license_name: Literal["Apache 2.0", "MIT"]
-
-
-class KaggleModelResourcesContract(ContractModel):
-    model: KaggleModelResourceContract
-    layout_model: KaggleModelResourceContract
-
-
 class ProcessorBatchContract(ContractModel):
     max_documents: int = Field(ge=1, le=10)
     max_pdf_bytes: int = Field(ge=1024 * 1024)
@@ -49,23 +37,21 @@ class ProcessorInferenceContract(ContractModel):
 
 class KaggleRunnerContract(ContractModel):
     kernel_name: str = Field(pattern=r"^[A-Za-z0-9_-]+$")
-    runner_dataset_prefix: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{2,36}$")
-    model_resources: KaggleModelResourcesContract
+    runner_dataset_name: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{2,49}$")
+    runner_dataset_version: int = Field(ge=1)
+    model_source: str = Field(min_length=1)
+    layout_model_source: str = Field(min_length=1)
     accelerator: Literal["NvidiaTeslaP100", "NvidiaTeslaT4"]
     timeout_seconds: int = Field(ge=300, le=12 * 60 * 60)
-    minimum_gpu_quota_minutes: int = Field(ge=1, le=12 * 60)
 
 
 class ModalRunnerContract(ContractModel):
     app_name: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{2,62}$")
     function_name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
-    resource_function_name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
-    model_volume: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{2,62}$")
     output_volume: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{2,62}$")
     environment: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]+$")
     gpu: Literal["A100", "A100-40GB", "A100-80GB"]
     timeout_seconds: int = Field(ge=300, le=24 * 60 * 60)
-    max_containers: Literal[1]
     scaledown_window_seconds: int = Field(ge=0, le=20 * 60)
 
 

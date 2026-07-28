@@ -15,7 +15,8 @@ THIRD_PARTY_SERVICES := postgres object-store object-store-provision polaris-boo
 	build-orchestration build-ocr-review start-core start-ocr-review start up-core \
 	up-ocr-review up down restart clean reset ps ps-all logs logs-follow smoke-core \
 	smoke-prefect smoke-ocr-review smoke wait-prefect-deploy prefect-deployments \
-	prefect-deploy modal-deploy platform-bootstrap platform-validate policy-prune-plan \
+	prefect-deploy modal-deploy kaggle-runner-deploy platform-bootstrap platform-validate \
+	policy-prune-plan \
 	policy-prune-apply platform-rotate-credentials
 
 help: ## Show the available project commands.
@@ -177,3 +178,7 @@ prefect-deploy: preflight ## Register all Prefect flow deployments.
 modal-deploy: ## Deploy the pinned Modal OCR app (requires Modal credentials).
 	@test -s .env || { printf '%s\n' "Missing .env; run 'make setup' first."; exit 1; }
 	uv run --env-file .env --extra orchestration modal deploy runners/modal/glm_ocr/app.py
+
+kaggle-runner-deploy: preflight ## Publish the Kaggle OCR runner Dataset with KaggleHub.
+	$(COMPOSE) run --rm --no-deps prefect-deploy \
+		python runners/kaggle/glm_ocr/deploy.py

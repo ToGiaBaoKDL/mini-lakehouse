@@ -52,7 +52,6 @@ def test_prefect_deployments_reuse_declared_work_pool_and_concurrency_contracts(
         "tl_github_analytics",
         "etl_arxiv_metadata",
         "etl_arxiv_ocr",
-        "gov_arxiv_ocr_resources",
         "gov_iceberg_maintenance",
     }
     assert set(cast(dict[str, object], definitions["work_pools"])) == {
@@ -85,11 +84,6 @@ def test_prefect_deployments_reuse_declared_work_pool_and_concurrency_contracts(
         "verify_pdf": False,
         "provider": None,
     }
-    arxiv_resources = next(
-        deployment for deployment in deployments if deployment["name"] == "gov_arxiv_ocr_resources"
-    )
-    assert arxiv_resources["parameters"] == {"provider": None}
-    assert arxiv_resources["schedules"] == []
     assert all("triggers" not in deployment for deployment in deployments)
     assert ingestion["schedules"] == [{"cron": "15 * * * *", "timezone": "UTC", "active": True}]
     assert transformation["schedules"] == [

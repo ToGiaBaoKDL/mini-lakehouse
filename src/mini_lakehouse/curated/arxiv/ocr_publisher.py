@@ -11,10 +11,8 @@ from mini_lakehouse.processing.ocr.archive import (
     document_manifest_payload,
     load_elements,
 )
-from mini_lakehouse.processing.ocr.artifacts import artifact_root_uri
-from mini_lakehouse.processing.ocr.core.files import file_sha256
-from mini_lakehouse.processing.ocr.core.identity import canonical_json_bytes
-from mini_lakehouse.processing.ocr.core.paths import runner_document_path
+from mini_lakehouse.processing.ocr.core.identity import canonical_json_bytes, file_sha256
+from mini_lakehouse.processing.ocr.core.paths import encoded_arxiv_id, runner_document_path
 from mini_lakehouse.processing.ocr.core.protocol import OcrDocumentResult, OcrJob
 from mini_lakehouse.storage.object_store import ObjectStore
 
@@ -47,11 +45,10 @@ class ArxivOcrPublisher:
         page_count = result.page_count
         if processing_key is None or manifest_hash is None or page_count is None:
             raise RuntimeError("Successful OCR result lacks complete content lineage")
-        artifact_uri = artifact_root_uri(
-            self._settings,
-            self._processor,
-            arxiv_id=result.arxiv_id,
-            processing_id=processing_key,
+        artifact_uri = (
+            f"{self._settings.storage.curated_uri.rstrip('/')}/"
+            f"{self._processor.artifact_prefix}/"
+            f"{encoded_arxiv_id(result.arxiv_id)}/{processing_key}"
         )
         existing = self._repository.processing_manifest(executor, processing_key)
         if existing is not None:

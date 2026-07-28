@@ -3,9 +3,13 @@
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
-from mini_lakehouse.contracts.processors import ProcessorContract
+
+def file_sha256(path: Path) -> str:
+    with path.open("rb") as source:
+        return hashlib.file_digest(source, "sha256").hexdigest()
 
 
 def canonical_json_bytes(value: Any) -> bytes:
@@ -23,7 +27,7 @@ def canonical_json_sha256(value: Any) -> str:
 
 
 def config_hash(
-    processor: ProcessorContract,
+    processor: Any,
 ) -> str:
     """Hash canonical output semantics, excluding execution and delivery tuning.
 

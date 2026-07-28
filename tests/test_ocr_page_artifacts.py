@@ -10,9 +10,9 @@ from mini_lakehouse.processing.ocr.core.protocol import (
     OcrPageMarkdown,
     OcrPageMarkdownBundle,
 )
-from mini_lakehouse.processing.ocr.core.text import build_page_markdown_bundle
-from mini_lakehouse.processing.ocr.page_bundle import (
+from mini_lakehouse.processing.ocr.core.text import (
     InvalidPageMarkdownBundleError,
+    build_page_markdown_bundle,
     read_page_markdown_bundle,
 )
 
