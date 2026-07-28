@@ -6,7 +6,6 @@ catalog:
   owner: data-platform
   default_storage_root: landing
   namespace_custom_locations: true
-  properties: {}
 
 namespaces:
   - path: [landing]

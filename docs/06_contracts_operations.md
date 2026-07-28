@@ -10,7 +10,7 @@
 | Landing tables | `contracts/sources/*.yaml` | Declared source owner | PyIceberg bootstrap; source repository writes |
 | Curated tables | `contracts/curated/*.yaml` | Declared product owner | PyIceberg bootstrap; curation repository merges |
 | Analytics models | Domain contracts + dbt metadata/tests | Declared domain owner | dbt and Trino |
-| Maintenance policy | `contracts/maintenance.yaml` | Declared tier owner | Polaris policy API + governance flow |
+| Maintenance policy | `contracts/maintenance.yaml` | Data Platform | Polaris policy API + governance flow |
 
 YAML is the source of truth for stable, non-secret definitions. Endpoints, credentials, and
 environment identity remain runtime configuration.

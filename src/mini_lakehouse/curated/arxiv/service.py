@@ -3,11 +3,23 @@
 from contextlib import nullcontext
 from datetime import date
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from mini_lakehouse.config.settings import Settings
 from mini_lakehouse.contracts import PlatformContracts, load_contracts
-from mini_lakehouse.curated.arxiv.models import ArxivCurationResult
 from mini_lakehouse.curated.arxiv.repository import ArxivCurationRepository
 from mini_lakehouse.platform.trino import SqlExecutor, TrinoExecutor
+
+
+class ArxivCurationResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    datestamp_date: date
+    source_rows: int = Field(ge=0)
+    paper_rows: int = Field(ge=0)
+    author_rows: int = Field(ge=0)
+    category_rows: int = Field(ge=0)
+    was_written: bool
 
 
 class ArxivCurationService:
@@ -21,8 +33,9 @@ class ArxivCurationService:
     ) -> None:
         self._settings = settings
         registry = contracts or load_contracts(settings.contracts_dir)
+        source = registry.source("arxiv")
         product = registry.curated_product("arxiv")
-        if product.upstream_sources != ("arxiv",):
+        if product.upstream_sources != (source.name,):
             raise ValueError("ArXiv curation requires arxiv as its only upstream source")
         self._executor = executor
         self._repository = repository or ArxivCurationRepository(settings, registry)

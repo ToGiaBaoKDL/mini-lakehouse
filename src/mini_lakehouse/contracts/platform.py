@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, model_validator
 
 from mini_lakehouse.contracts.base import (
     LIFECYCLE_TIERS,
@@ -18,19 +18,6 @@ class CatalogSpec(ContractModel):
     owner: ContractName
     default_storage_root: StorageTier
     namespace_custom_locations: bool = True
-    properties: dict[str, str] = Field(default_factory=dict)
-
-    @field_validator("properties")
-    @classmethod
-    def reject_managed_properties(cls, value: dict[str, str]) -> dict[str, str]:
-        managed = {
-            "owner",
-            "default-base-location",
-            "polaris.config.namespace-custom-location.enabled",
-        }
-        if overlap := managed.intersection(value):
-            raise ValueError(f"Catalog properties are managed by typed fields: {sorted(overlap)}")
-        return value
 
 
 class NamespaceContract(ContractModel):

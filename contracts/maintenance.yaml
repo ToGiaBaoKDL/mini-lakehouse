@@ -2,7 +2,6 @@ version: 1
 
 tiers:
   - tier: landing
-    owner: data-platform
     metadata_retention:
       delete_after_commit: true
       previous_versions_max: 30
@@ -18,7 +17,6 @@ tiers:
         target_file_size_bytes: 134217728
 
   - tier: curated
-    owner: data-platform
     metadata_retention:
       delete_after_commit: true
       previous_versions_max: 30
@@ -34,7 +32,6 @@ tiers:
         target_file_size_bytes: 134217728
 
   - tier: analytics
-    owner: analytics-platform
     metadata_retention:
       delete_after_commit: true
       previous_versions_max: 30

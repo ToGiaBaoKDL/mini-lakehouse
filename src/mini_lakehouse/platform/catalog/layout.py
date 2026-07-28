@@ -57,7 +57,6 @@ def catalog_properties(settings: Settings, contracts: PlatformContracts) -> dict
         "polaris.config.namespace-custom-location.enabled": str(
             spec.namespace_custom_locations
         ).lower(),
-        **spec.properties,
     }
 
 

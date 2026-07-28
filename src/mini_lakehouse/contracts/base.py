@@ -39,12 +39,6 @@ class ColumnContract(ContractModel):
     description: str
 
 
-class PartitionTransformContract(ContractModel):
-    field: Identifier
-    transform: Literal["identity", "day", "hour", "month", "year"]
-    name: Identifier | None = None
-
-
 def validate_relative_prefix(value: str) -> str:
     if value.startswith("/") or value.endswith("/") or ".." in value.split("/"):
         raise ValueError("Object prefixes must be normalized relative paths")

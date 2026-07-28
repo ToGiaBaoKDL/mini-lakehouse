@@ -19,15 +19,6 @@ class ArxivProductModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-class ArxivCurationResult(ArxivProductModel):
-    datestamp_date: date
-    source_rows: int = Field(ge=0)
-    paper_rows: int = Field(ge=0)
-    author_rows: int = Field(ge=0)
-    category_rows: int = Field(ge=0)
-    was_written: bool
-
-
 class OcrRunState(StrEnum):
     PREPARED = "prepared"
     SUBMITTED = "submitted"

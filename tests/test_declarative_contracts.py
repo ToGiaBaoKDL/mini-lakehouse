@@ -88,6 +88,13 @@ def test_contract_layout_has_one_file_per_platform_concern() -> None:
     assert not Path("contracts/policies").exists()
 
 
+def test_contracts_do_not_expose_unowned_generic_escape_hatches() -> None:
+    contracts = load_contracts()
+
+    assert "properties" not in type(contracts.platform.catalog).model_fields
+    assert all("owner" not in type(tier).model_fields for tier in contracts.maintenance.tiers)
+
+
 def test_entity_contract_collections_can_start_empty(tmp_path: Path) -> None:
     root = tmp_path / "contracts"
     shutil.copytree("contracts", root)
@@ -116,7 +123,6 @@ def test_maintenance_contract_rejects_unknown_optimization_fields() -> None:
                 "tiers": [
                     {
                         "tier": tier,
-                        "owner": "data-platform",
                         "metadata_retention": {
                             "delete_after_commit": True,
                             "previous_versions_max": 30,

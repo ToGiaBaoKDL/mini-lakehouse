@@ -24,7 +24,6 @@ from mini_lakehouse.storage.iceberg import load_iceberg_catalog
 class ArxivLandingWrite:
     records_snapshot_id: int | None
     checkpoint_snapshot_id: int | None
-    was_written: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,7 +166,6 @@ class ArxivLandingRepository:
         return ArxivLandingWrite(
             records_snapshot_id=records_snapshot_id,
             checkpoint_snapshot_id=checkpoint_snapshot_id,
-            was_written=True,
         )
 
     def table_contract(self, key: str) -> SourceTableContract:

@@ -157,7 +157,6 @@ class _Repository:
         return ArxivLandingWrite(
             records_snapshot_id=11,
             checkpoint_snapshot_id=12,
-            was_written=True,
         )
 
 

@@ -1,7 +1,7 @@
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import pyarrow as pa
 from pydantic import Field, model_validator
@@ -30,7 +30,6 @@ from mini_lakehouse.contracts.base import (
     ContractModel,
     ContractName,
     Identifier,
-    PartitionTransformContract,
 )
 
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -96,8 +95,11 @@ class TableIdentifier:
         return ".".join((_quoted(catalog), f'"{schema}"', _quoted(self.name)))
 
 
-class IcebergPartitionContract(PartitionTransformContract):
+class IcebergPartitionContract(ContractModel):
     field_id: int = Field(ge=1000)
+    field: Identifier
+    transform: Literal["identity", "day", "hour", "month", "year"]
+    name: Identifier | None = None
 
 
 class ManagedIcebergTableContract(ContractModel):

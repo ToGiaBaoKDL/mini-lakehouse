@@ -106,5 +106,5 @@ class ArxivMetadataService:
                 record_count=records.num_rows,
                 records_snapshot_id=write.records_snapshot_id,
                 checkpoint_snapshot_id=write.checkpoint_snapshot_id,
-                was_written=write.was_written,
+                was_written=True,
             )

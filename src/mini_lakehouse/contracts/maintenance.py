@@ -103,7 +103,6 @@ def parse_policy_content(
 class MaintenancePolicy:
     name: str
     namespace: NamespacePath
-    owner: str
     policy_type: PolicyType
     description: str
     content: TypedMaintenancePolicyContent
@@ -122,7 +121,6 @@ def policy_content_json(policy: MaintenancePolicy) -> str:
 
 class TierMaintenanceContract(ContractModel):
     tier: StorageTier
-    owner: ContractName
     metadata_retention: MetadataRetentionContract
     snapshot_max_age_days: int = Field(ge=7)
     orphan_file_max_age_days: int = Field(ge=7)
@@ -147,7 +145,6 @@ class TierMaintenanceContract(ContractModel):
             MaintenancePolicy(
                 name=f"mlh-{self.tier}-compact-metadata",
                 namespace=namespace,
-                owner=self.owner,
                 policy_type="system.metadata-compaction",
                 description=f"Compact Iceberg metadata in the {self.tier} tier.",
                 content=MaintenancePolicyContent(),
@@ -157,7 +154,6 @@ class TierMaintenanceContract(ContractModel):
             MaintenancePolicy(
                 name=f"mlh-{self.tier}-expire-snapshots",
                 namespace=namespace,
-                owner=self.owner,
                 policy_type="system.snapshot-expiry",
                 description=f"Expire old Iceberg snapshots in the {self.tier} tier.",
                 content=SnapshotExpiryPolicyContent(
@@ -168,7 +164,6 @@ class TierMaintenanceContract(ContractModel):
             MaintenancePolicy(
                 name=f"mlh-{self.tier}-remove-orphan-files",
                 namespace=namespace,
-                owner=self.owner,
                 policy_type="system.orphan-file-removal",
                 description=f"Remove aged orphan files from the {self.tier} tier.",
                 content=OrphanFileRemovalPolicyContent(
@@ -181,7 +176,6 @@ class TierMaintenanceContract(ContractModel):
             MaintenancePolicy(
                 name=f"mlh-{self.tier}-{optimization.name}-compact-data-files",
                 namespace=namespace,
-                owner=self.owner,
                 policy_type="system.data-compaction",
                 description=(
                     f"Compact recent {optimization.name} partitions in the {self.tier} tier."
