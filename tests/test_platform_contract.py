@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from mini_lakehouse.config.settings import Settings
 from mini_lakehouse.contracts import load_contracts
 from mini_lakehouse.platform.catalog.layout import (
@@ -107,3 +109,26 @@ def test_landing_table_locations_follow_source_ownership() -> None:
         )
         == "s3://landing/api/github_archive/tables/events_raw"
     )
+
+
+def test_catalog_and_table_lifecycle_mutations_stay_in_the_platform_boundary() -> None:
+    business_modules = [
+        *Path("src/mini_lakehouse/sources").rglob("*.py"),
+        *Path("src/mini_lakehouse/curated").rglob("*.py"),
+    ]
+    forbidden = (
+        ".create_table(",
+        ".create_table_if_not_exists(",
+        ".create_namespace",
+        ".update_namespace_properties(",
+        ".update_schema(",
+        ".update_spec(",
+        ".set_properties(",
+        "CREATE TABLE",
+        "ALTER TABLE",
+        "apache_polaris.sdk",
+    )
+
+    for path in business_modules:
+        content = path.read_text(encoding="utf-8")
+        assert all(token not in content for token in forbidden), path

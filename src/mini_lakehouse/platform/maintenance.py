@@ -14,9 +14,11 @@ from pyiceberg.types import DateType, TimestamptzType
 
 from mini_lakehouse.contracts import PlatformContracts, TableIdentifier
 from mini_lakehouse.contracts.maintenance import (
+    MAINTENANCE_POLICY_TYPES,
     DataCompactionPolicyContent,
     MaintenancePolicy,
     OrphanFileRemovalPolicyContent,
+    PolicyType,
     SnapshotExpiryPolicyContent,
     parse_policy_content,
 )
@@ -29,13 +31,6 @@ from mini_lakehouse.storage.iceberg import (
     discover_tables,
     metadata_retention_is_current,
     trino_metadata_retention_properties,
-)
-
-MAINTENANCE_POLICY_TYPES = (
-    "system.data-compaction",
-    "system.metadata-compaction",
-    "system.snapshot-expiry",
-    "system.orphan-file-removal",
 )
 
 
@@ -96,7 +91,7 @@ def maintenance_statements(
     iceberg_table: Table,
     catalog: str,
     policies: list[PolarisPolicy],
-    policy_contracts: Mapping[tuple[tuple[str, ...], str], MaintenancePolicy] | None = None,
+    policy_contracts: Mapping[tuple[tuple[str, ...], str], MaintenancePolicy],
 ) -> tuple[str, ...]:
     applicable = {
         policy.policy_type: policy
@@ -108,46 +103,57 @@ def maintenance_statements(
     ):
         raise ValueError(f"Multiple maintenance policies of the same type apply to {table.iceberg}")
 
-    relation = table.trino(catalog)
-    statements: list[str] = []
-    metadata_policy = applicable.get("system.metadata-compaction")
-    if metadata_policy is not None:
-        contract = (policy_contracts or {}).get(
-            (tuple(metadata_policy.namespace), metadata_policy.name)
-        )
-        if (
-            contract is None
-            or contract.policy_type != "system.metadata-compaction"
-            or contract.retention is None
-        ):
-            raise ValueError(
-                f"Metadata compaction policy {metadata_policy.name!r} "
-                "has no typed retention contract"
-            )
-        if not metadata_retention_is_current(iceberg_table.properties, contract.retention):
-            assignments = ", ".join(
-                f"{name} = {value}"
-                for name, value in trino_metadata_retention_properties(contract.retention).items()
-            )
-            statements.append(f"ALTER TABLE {relation} SET PROPERTIES {assignments}")
-
+    resolved: dict[PolicyType, MaintenancePolicy] = {}
     for policy_type in MAINTENANCE_POLICY_TYPES:
         policy = applicable.get(policy_type)
         if policy is None:
             continue
-        content = parse_policy_content(policy_type, policy_content_object(policy))
+        contract = policy_contracts.get((tuple(policy.namespace), policy.name))
+        if contract is None or contract.policy_type != policy_type:
+            raise ValueError(f"Maintenance policy {policy.name!r} has no matching contract")
+        live_content = parse_policy_content(
+            policy_type,
+            policy_content_object(policy),
+        )
+        if live_content != contract.content:
+            raise ValueError(
+                f"Maintenance policy {policy.name!r} content drifted from its contract"
+            )
+        resolved[policy_type] = contract
+
+    relation = table.trino(catalog)
+    statements: list[str] = []
+    metadata_contract = resolved.get("system.metadata-compaction")
+    if metadata_contract is not None:
+        if metadata_contract.retention is None:
+            raise ValueError(
+                f"Metadata compaction policy {metadata_contract.name!r} "
+                "has no typed retention contract"
+            )
+        if not metadata_retention_is_current(
+            iceberg_table.properties,
+            metadata_contract.retention,
+        ):
+            assignments = ", ".join(
+                f"{name} = {value}"
+                for name, value in trino_metadata_retention_properties(
+                    metadata_contract.retention
+                ).items()
+            )
+            statements.append(f"ALTER TABLE {relation} SET PROPERTIES {assignments}")
+
+    for policy_type in MAINTENANCE_POLICY_TYPES:
+        contract = resolved.get(policy_type)
+        if contract is None:
+            continue
+        content = contract.content
         if policy_type == "system.data-compaction":
             if not isinstance(content, DataCompactionPolicyContent):
                 raise AssertionError("Unexpected data compaction policy content")
             if content.enable:
-                contract = (policy_contracts or {}).get((tuple(policy.namespace), policy.name))
-                if (
-                    contract is None
-                    or contract.policy_type != "system.data-compaction"
-                    or contract.execution is None
-                ):
+                if contract.execution is None:
                     raise ValueError(
-                        f"Data compaction policy {policy.name!r} has no typed execution contract"
+                        f"Data compaction policy {contract.name!r} has no typed execution contract"
                     )
                 boundary = _optimize_boundary(
                     iceberg_table,

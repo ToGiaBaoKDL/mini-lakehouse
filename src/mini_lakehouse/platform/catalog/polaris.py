@@ -324,7 +324,7 @@ class PolarisPolicyClient:
                         f"Polaris policy {spec.name!r} disappeared during a concurrent update"
                     ) from None
                 current = refreshed
-        raise AssertionError("Policy reconciliation loop terminated unexpectedly")
+        raise AssertionError("Policy update loop terminated unexpectedly")
 
     def attach_policy(
         self,
@@ -384,7 +384,10 @@ class PolarisPolicyClient:
         else:
             policies = self._applicable_policies(target.path)
         return any(
-            policy.name == spec.name and policy.policy_type == spec.policy_type
+            not policy.inherited
+            and tuple(policy.namespace) == spec.namespace
+            and policy.name == spec.name
+            and policy.policy_type == spec.policy_type
             for policy in policies
         )
 

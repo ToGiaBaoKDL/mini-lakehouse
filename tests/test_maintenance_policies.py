@@ -204,6 +204,30 @@ def test_duplicate_policy_type_is_rejected() -> None:
         )
 
 
+def test_live_policy_content_must_match_the_yaml_contract() -> None:
+    table = TableIdentifier(("curated", "github"), "events")
+    policies = _policies(table)
+    snapshot_policy = next(
+        policy for policy in policies if policy.policy_type == "system.snapshot-expiry"
+    )
+    drifted = snapshot_policy.model_copy(
+        update={
+            "content": (
+                '{"config":{"max_snapshot_age_days":90},"enable":true,"version":"2025-02-03"}'
+            )
+        }
+    )
+
+    with pytest.raises(ValueError, match="content drifted from its contract"):
+        maintenance_statements(
+            table,
+            _partitioned_table("event_date_utc", DateType(), IdentityTransform()),
+            "prod",
+            [drifted if policy is snapshot_policy else policy for policy in policies],
+            _policy_contracts(),
+        )
+
+
 class _Catalog:
     def list_namespaces(self, namespace: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
         namespaces: dict[tuple[str, ...], list[tuple[str, ...]]] = {

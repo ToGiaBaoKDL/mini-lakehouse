@@ -75,8 +75,10 @@ make policy-prune-apply PLAN_SHA256=<reviewed-plan-sha256>
 Only absent policies using the reserved `mlh-` prefix are eligible. Never use that prefix for
 manually managed policies.
 
-When changing policy targets, create and bootstrap the replacement first, validate it, then prune
-the stale managed policy. This preserves coverage while avoiding speculative detach calls.
+Changing the target of an existing policy is an explicit mapping migration: bootstrap the new
+direct attachment, validate it, then detach the old target through a reviewed SDK migration.
+`policy-prune-*` removes only policies absent from the contract; it must not guess which attachment
+was intentionally retained.
 
 ## Rollback
 

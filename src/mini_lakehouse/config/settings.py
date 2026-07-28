@@ -95,7 +95,7 @@ class PlatformAdminSettings(BaseModel):
         try:
             guard = self.guard_file.read_text(encoding="utf-8").strip()
         except OSError as error:
-            raise RuntimeError("Platform reconciliation guard is not mounted") from error
+            raise RuntimeError("Platform administration guard is not mounted") from error
         if guard != "platform-admin":
             raise RuntimeError("Platform administration guard is invalid")
 

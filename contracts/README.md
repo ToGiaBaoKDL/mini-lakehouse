@@ -9,7 +9,7 @@ storage operation.
 | Contract | Owns |
 |---|---|
 | `platform.yaml` | Catalog identity and the three lifecycle root namespaces |
-| `access.yaml` | Catalog roles and grants |
+| `access.yaml` | Privileges granted to existing catalog roles |
 | `maintenance.yaml` | Tier retention defaults and bounded optimization overrides |
 | `sources/*.yaml` | External source boundary, landing schemas, checkpoints, and partitions |
 | `curated/*.yaml` | Canonical product schemas, keys, partitions, and upstream sources |
@@ -21,13 +21,12 @@ Executable extraction and transformation logic lives only in Python or SQL.
 Endpoints, storage roots, and credentials are runtime settings rather than
 contract fields.
 
-The compiler derives:
+The validated contract registry derives:
 
 - Catalog and namespace payloads.
 - Landing and curated table identifiers and physical locations.
 - Iceberg schemas and partition specs with stable field IDs.
 - Polaris maintenance policies from tier defaults.
-- A deterministic contract digest for reconciliation and review.
 
 `platform.yaml`, `access.yaml`, and `maintenance.yaml` are the required control-plane
 contracts. Entity collections under `sources/`, `curated/`, `processors/`, and `domains/`
@@ -61,4 +60,4 @@ managed table partitions.
 6. Run `make validate` and idempotency tests before enabling a schedule.
 
 Adding a source must not require changes to catalog bootstrap, namespace
-reconciliation, table-location rules, or generic maintenance behavior.
+administration, table-location rules, or generic maintenance behavior.

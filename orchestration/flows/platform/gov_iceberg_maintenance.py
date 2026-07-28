@@ -1,4 +1,3 @@
-import trino
 from prefect import flow, task
 
 from mini_lakehouse.config import get_settings
@@ -9,6 +8,7 @@ from mini_lakehouse.platform.maintenance import (
     build_maintenance_plan,
     collect_maintenance_results,
 )
+from mini_lakehouse.platform.trino import TrinoExecutor
 from mini_lakehouse.storage.iceberg import load_iceberg_catalog
 from orchestration.plugins.notifications import (
     notify_flow_failure,
@@ -45,23 +45,10 @@ def discover_maintenance_plan() -> list[MaintenancePlanItem]:
 )
 def maintain_table(plan: MaintenancePlanItem) -> int:
     settings = get_settings()
-    connection = trino.dbapi.connect(
-        host=settings.trino.host,
-        port=settings.trino.port,
-        user=settings.trino.user,
-        http_scheme=settings.trino.http_scheme,
-    )
-    try:
-        cursor = connection.cursor()
-        try:
-            for statement in plan.statements:
-                cursor.execute(statement)
-                cursor.fetchall()
-            return len(plan.statements)
-        finally:
-            cursor.close()
-    finally:
-        connection.close()
+    with TrinoExecutor(settings.trino) as executor:
+        for statement in plan.statements:
+            executor.execute(statement)
+    return len(plan.statements)
 
 
 @flow(

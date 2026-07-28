@@ -159,8 +159,9 @@ state. With incomplete configuration, the channel is disabled.
 
 Typed YAML policies attach at lifecycle namespaces and are inherited by child namespaces. The
 governance flow discovers tables from the catalog, resolves applicable Polaris policies, validates
-their full content, and invokes bounded Trino maintenance procedures. It has no table allowlist or
-consumer-owned table registry.
+their full content against the YAML contract, and invokes bounded Trino maintenance procedures.
+Polaris selects the applicable policy; YAML remains the only source of execution values. The flow
+has no table allowlist or consumer-owned table registry.
 
 ## Local operations
 

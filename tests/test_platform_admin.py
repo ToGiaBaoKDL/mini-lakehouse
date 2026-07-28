@@ -201,6 +201,25 @@ def test_policy_mapping_uses_typed_sdk_target_and_applicable_query() -> None:
     assert api.get_applicable_policies.call_args.kwargs["namespace"] == "\x1f".join(target.path)
 
 
+def test_policy_mapping_requires_the_exact_direct_attachment() -> None:
+    spec = load_contracts().policies[0]
+    target = spec.targets[0]
+    api = create_autospec(PolicyAPI, instance=True)
+    inherited = ApplicablePolicy.model_validate(
+        {
+            **_sdk_policy().model_dump(by_alias=True),
+            "inherited": True,
+            "namespace": list(spec.namespace),
+        }
+    )
+    api.get_applicable_policies.return_value = GetApplicablePoliciesResponse.model_validate(
+        {"applicable-policies": [inherited]}
+    )
+    client = PolarisPolicyClient(api, "prod")
+
+    assert not client.policy_applies(spec, target)
+
+
 def test_policy_prune_remains_an_explicit_destructive_operation() -> None:
     contracts = load_contracts()
     desired = contracts.policies[0]

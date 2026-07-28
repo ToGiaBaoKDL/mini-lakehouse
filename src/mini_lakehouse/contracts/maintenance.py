@@ -20,6 +20,12 @@ type PolicyType = Literal[
     "system.snapshot-expiry",
     "system.orphan-file-removal",
 ]
+MAINTENANCE_POLICY_TYPES: tuple[PolicyType, ...] = (
+    "system.data-compaction",
+    "system.metadata-compaction",
+    "system.snapshot-expiry",
+    "system.orphan-file-removal",
+)
 POLARIS_POLICY_CONTENT_VERSION = "2025-02-03"
 
 
