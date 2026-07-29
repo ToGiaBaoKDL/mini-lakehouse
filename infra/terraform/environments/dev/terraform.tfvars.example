@@ -1,0 +1,10 @@
+aws_region  = "ap-southeast-1"
+aws_profile = "your-aws-profile"
+document_inspector_database_names = ["curated_arxiv"]
+alert_email                       = "data-platform@example.com"
+slack_channel                     = "#data-platform-alerts"
+
+# Use explicit IAM Identity Center or operator roles.
+trusted_principal_arns = [
+  "arn:aws:iam::123456789012:role/Developer",
+]
