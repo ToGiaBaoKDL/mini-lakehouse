@@ -1,6 +1,6 @@
 {{
     config(
-        properties=analytics_iceberg_properties('engineering', 'month(activity_date)')
+        partitioned_by=['month(activity_date)']
     )
 }}
 

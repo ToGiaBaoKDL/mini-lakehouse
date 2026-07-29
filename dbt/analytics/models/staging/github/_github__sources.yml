@@ -3,8 +3,8 @@ version: 2
 sources:
   - name: github
     description: Canonical validated GitHub entities and events for downstream data products.
-    database: "{{ env_var('LAKEHOUSE_POLARIS__CATALOG_NAME', 'prod') }}"
-    schema: curated.github
+    database: awsdatacatalog
+    schema: curated_github
     meta:
       owner: data-platform
       contact: bao.to@timo.vn
@@ -14,8 +14,8 @@ sources:
         config:
           loaded_at_field: source_hour
           freshness:
-            warn_after: {count: 2, period: hour}
-            error_after: {count: 6, period: hour}
+            warn_after: {count: 30, period: hour}
+            error_after: {count: 54, period: hour}
         columns:
           - name: event_id
             data_tests: [not_null, unique]

@@ -1,11 +1,10 @@
-name: "mini_lakehouse_analytics"
+name: "lakehouse_platform_analytics"
 version: "0.3.0"
 config-version: 2
-profile: "mini_lakehouse"
+profile: "lakehouse_platform"
+require-dbt-version: [">=1.11.0", "<1.12.0"]
 
 model-paths: ["models"]
-test-paths: ["tests"]
-macro-paths: ["macros"]
 
 clean-targets:
   - "target"
@@ -16,10 +15,13 @@ flags:
   require_certificate_validation: true
 
 models:
-  mini_lakehouse_analytics:
+  lakehouse_platform_analytics:
     +persist_docs:
       relation: true
       columns: true
+    +meta:
+      owner: analytics-engineering
+      contact: bao.to@timo.vn
 
     staging:
       +materialized: ephemeral
@@ -30,10 +32,9 @@ models:
       +tags: ["intermediate", "engineering"]
 
     marts:
-      # A single CREATE OR REPLACE TABLE AS SELECT keeps refreshes atomic without
-      # renaming an intermediate relation whose physical path contains __dbt_tmp.
       +materialized: table
-      +on_table_exists: replace
+      +table_type: iceberg
       engineering:
-        +schema: analytics.engineering
         +tags: ["mart", "engineering"]
+        +meta:
+          business_owner: engineering

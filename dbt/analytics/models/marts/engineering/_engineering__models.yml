@@ -3,11 +3,8 @@ version: 2
 models:
   - name: fct_repository_activity_daily
     description: Daily engineering activity at the stable activity_date + repository_id grain.
-    meta:
-      owner: engineering-analytics
-      business_owner: engineering
     data_tests:
-      - unique_combination_of_columns:
+      - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: [activity_date, repository_id]
     columns:
@@ -45,11 +42,8 @@ models:
 
   - name: fct_contributor_activity_daily
     description: Daily engineering activity at the stable activity_date + actor_id grain.
-    meta:
-      owner: engineering-analytics
-      business_owner: engineering
     data_tests:
-      - unique_combination_of_columns:
+      - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: [activity_date, actor_id]
     columns:
