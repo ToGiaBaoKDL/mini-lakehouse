@@ -32,7 +32,7 @@ def _records(frame: pd.DataFrame) -> list[dict[str, Any]]:
     return normalized.to_dict(orient="records")
 
 
-class ArxivOcrReviewRepository:
+class ArxivDocumentRepository:
     def __init__(
         self,
         settings: Settings,
@@ -65,7 +65,17 @@ class ArxivOcrReviewRepository:
             f"""
             WITH ranked_runs AS (
                 SELECT
-                    document.*,
+                    document.arxiv_id,
+                    document.state,
+                    document.attempt_count,
+                    document.page_count,
+                    document.processing_id,
+                    document.model_repository,
+                    document.model_revision,
+                    document.completed_at,
+                    document.error_code,
+                    document.prepared_at,
+                    document.batch_id,
                     row_number() OVER (
                         PARTITION BY document.arxiv_id
                         ORDER BY

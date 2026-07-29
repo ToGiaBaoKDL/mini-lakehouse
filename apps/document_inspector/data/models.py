@@ -31,17 +31,17 @@ class OcrStateFilter(StrEnum):
     TERMINAL_FAILED = OcrRunState.TERMINAL_FAILED.value
 
 
-class OcrReviewModel(BaseModel):
+class DocumentInspectorModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-class OcrDocumentFilter(OcrReviewModel):
+class OcrDocumentFilter(DocumentInspectorModel):
     search: str = Field(default="", max_length=200)
     state: OcrStateFilter = OcrStateFilter.ALL
     limit: int = Field(default=50, ge=1, le=200)
 
 
-class OcrDocumentSummary(OcrReviewModel):
+class OcrDocumentSummary(DocumentInspectorModel):
     arxiv_id: str
     title: str | None = None
     state: OcrRunState
@@ -54,7 +54,7 @@ class OcrDocumentSummary(OcrReviewModel):
     error_code: str | None = None
 
 
-class OcrDocumentRun(OcrReviewModel):
+class OcrDocumentRun(DocumentInspectorModel):
     request_id: str
     batch_id: str
     arxiv_id: str
@@ -101,7 +101,7 @@ class OcrDocumentRun(OcrReviewModel):
         return f"https://arxiv.org/abs/{quote(self.arxiv_id, safe='/')}"
 
 
-class OcrPageElement(OcrReviewModel):
+class OcrPageElement(DocumentInspectorModel):
     element_id: str
     page_number: int = Field(ge=1)
     reading_order: int = Field(ge=0)
@@ -113,7 +113,7 @@ class OcrPageElement(OcrReviewModel):
     raw_attributes_json: str | None = None
 
 
-class PublishedOcrManifest(OcrReviewModel):
+class PublishedOcrManifest(DocumentInspectorModel):
     arxiv_id: str
     files: tuple[ArtifactFile, ...]
     page_count: int = Field(ge=1)

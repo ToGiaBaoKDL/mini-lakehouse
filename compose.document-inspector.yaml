@@ -6,8 +6,6 @@ services:
     build:
       context: .
       target: document-inspector
-    env_file:
-      - .env
     environment:
       LAKEHOUSE_ENVIRONMENT: ${LAKEHOUSE_ENVIRONMENT:-dev}
       LAKEHOUSE_LOG_LEVEL: ${LAKEHOUSE_LOG_LEVEL:-INFO}

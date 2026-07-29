@@ -2,6 +2,8 @@ import gzip
 import hashlib
 from collections.abc import Mapping
 from datetime import UTC, date, datetime
+from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -14,7 +16,7 @@ from document_ocr.protocol import (
 )
 
 from apps.document_inspector import components, state
-from apps.document_inspector.data.artifacts import OcrArtifactReader
+from apps.document_inspector.data.artifacts import OcrArtifactReader, S3ObjectReader
 from apps.document_inspector.data.athena import AthenaReader
 from apps.document_inspector.data.models import (
     OcrDocumentFilter,
@@ -22,7 +24,7 @@ from apps.document_inspector.data.models import (
     OcrRunState,
     OcrStateFilter,
 )
-from apps.document_inspector.data.repository import ArxivOcrReviewRepository
+from apps.document_inspector.data.repository import ArxivDocumentRepository
 from lakehouse_platform.config.settings import Settings
 
 
@@ -110,7 +112,7 @@ def _run(manifest_sha256: str) -> OcrDocumentRun:
     )
 
 
-def test_review_repository_keeps_search_and_state_parameterized() -> None:
+def test_document_repository_keeps_search_and_state_parameterized() -> None:
     frame = pd.DataFrame(
         [
             {
@@ -129,7 +131,7 @@ def test_review_repository_keeps_search_and_state_parameterized() -> None:
     )
     reader = _QueryReader(frame)
 
-    documents = ArxivOcrReviewRepository(Settings(environment="dev"), reader=reader).documents(
+    documents = ArxivDocumentRepository(Settings(environment="dev"), reader=reader).documents(
         OcrDocumentFilter(search="Paper%_", state=OcrStateFilter.IMPORTED, limit=20),
     )
 
@@ -140,6 +142,7 @@ def test_review_repository_keeps_search_and_state_parameterized() -> None:
     assert "Paper%_" not in reader.statement
     assert "strpos" in reader.statement
     assert " LIKE " not in reader.statement
+    assert "document.*" not in reader.statement
 
 
 def test_artifact_reader_uses_verified_manifest_and_declared_page_path() -> None:
@@ -200,6 +203,8 @@ def test_artifact_reader_uses_verified_manifest_and_declared_page_path() -> None
     assert page.data == image
     assert page.media_type == "image/jpeg"
     assert reader.page_markdowns(run, manifest).markdown(1) == "# Page one\n"
+    with pytest.raises(RuntimeError, match="lineage"):
+        reader.manifest(run.model_copy(update={"pdf_size_bytes": 101}))
 
 
 def test_artifact_reader_rejects_manifest_checksum_drift() -> None:
@@ -213,7 +218,7 @@ def test_artifact_reader_rejects_manifest_checksum_drift() -> None:
         reader.manifest(_run("9" * 64))
 
 
-def test_review_run_exposes_the_canonical_arxiv_paper_url() -> None:
+def test_document_run_exposes_the_canonical_arxiv_paper_url() -> None:
     assert _run("9" * 64).paper_url == "https://arxiv.org/abs/2607.20571"
     assert (
         _run("9" * 64).model_copy(update={"arxiv_id": "hep-th/9901001"}).paper_url
@@ -240,7 +245,7 @@ def test_run_header_shows_page_count_only_for_imported_output(
     assert captions == ["arXiv:2607.20571 · OAI 2026-07-25 · PDF 100.0 B"]
 
 
-def test_review_session_resets_dependent_selection_consistently() -> None:
+def test_document_session_resets_dependent_selection_consistently() -> None:
     session: dict[str, object] = {}
     state.initialize(session)
 
@@ -254,3 +259,51 @@ def test_review_session_resets_dependent_selection_consistently() -> None:
     assert state.reconcile_run(session, ("new-run",)) == "new-run"
     session[state.SessionKey.PAGE_NUMBER] = 99
     assert state.clamp_page(session, 3) == 3
+
+
+def test_s3_reader_uses_one_bounded_get_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = b"artifact"
+
+    class Client:
+        def __init__(self) -> None:
+            self.requests: list[dict[str, str]] = []
+            self.body = BytesIO(payload)
+
+        def get_object(self, **request: str) -> dict[str, object]:
+            self.requests.append(request)
+            return {"ContentLength": len(payload), "Body": self.body}
+
+    class Session:
+        def __init__(self, client: Client) -> None:
+            self._client = client
+
+        def client(self, service_name: str) -> Client:
+            assert service_name == "s3"
+            return self._client
+
+    client = Client()
+
+    def session_factory(**_: object) -> Session:
+        return Session(client)
+
+    monkeypatch.setattr(
+        "apps.document_inspector.data.artifacts.boto3.Session",
+        session_factory,
+    )
+
+    reader = S3ObjectReader(region_name="ap-southeast-1")
+
+    assert reader.read_bytes("s3://curated/path/artifact.bin", max_bytes=100) == payload
+    assert client.requests == [{"Bucket": "curated", "Key": "path/artifact.bin"}]
+    assert client.body.closed
+
+
+def test_document_inspector_owns_config_and_bounded_caches() -> None:
+    source = Path("apps/document_inspector/app.py").read_text(encoding="utf-8")
+
+    assert Path("apps/document_inspector/.streamlit/config.toml").is_file()
+    assert not Path(".streamlit/config.toml").exists()
+    assert 'st.form("document-filters"' in source
+    assert "max_entries=24" in source
+    assert "max_entries=12" in source
+    assert "{error}" not in source

@@ -9,10 +9,10 @@ from apps.document_inspector.data.models import (
     OcrStateFilter,
     PublishedOcrManifest,
 )
-from apps.document_inspector.data.service import ArxivOcrReviewService
+from apps.document_inspector.data.service import ArxivDocumentService
 
 __all__ = [
-    "ArxivOcrReviewService",
+    "ArxivDocumentService",
     "OcrDocumentFilter",
     "OcrDocumentRun",
     "OcrDocumentSummary",

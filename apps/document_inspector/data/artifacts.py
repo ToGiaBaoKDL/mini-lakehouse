@@ -56,11 +56,14 @@ class S3ObjectReader:
             raise ValueError(f"Expected an S3 object URI, got {uri!r}")
         bucket = parsed.netloc
         key = parsed.path.lstrip("/")
-        metadata = self._client.head_object(Bucket=bucket, Key=key)
-        if int(metadata["ContentLength"]) > max_bytes:
-            raise ValueError(f"Object exceeds the {max_bytes}-byte read limit: {uri}")
         response = self._client.get_object(Bucket=bucket, Key=key)
-        payload = response["Body"].read(max_bytes + 1)
+        body = response["Body"]
+        try:
+            if int(response["ContentLength"]) > max_bytes:
+                raise ValueError(f"Object exceeds the {max_bytes}-byte read limit: {uri}")
+            payload = body.read(max_bytes + 1)
+        finally:
+            body.close()
         if len(payload) > max_bytes:
             raise ValueError(f"Object exceeds the {max_bytes}-byte read limit: {uri}")
         return payload
@@ -88,6 +91,7 @@ class OcrArtifactReader:
             or manifest.processing_id != run.processing_id
             or manifest.page_count != run.page_count
             or manifest.pdf_sha256 != run.pdf_sha256
+            or manifest.pdf_size_bytes != run.pdf_size_bytes
         ):
             raise RuntimeError("Published OCR manifest lineage does not match Iceberg state")
         return manifest

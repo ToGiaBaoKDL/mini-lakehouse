@@ -57,6 +57,18 @@ def test_compose_uses_aws_credential_chain_without_static_keys() -> None:
     assert "MINIO_" not in rendered
 
 
+def test_document_inspector_receives_only_its_explicit_environment() -> None:
+    service = _compose("compose.document-inspector.yaml")["services"]["document-inspector"]
+
+    assert "env_file" not in service
+    assert set(service["environment"]) == {
+        "LAKEHOUSE_ENVIRONMENT",
+        "LAKEHOUSE_LOG_LEVEL",
+        "AWS_PROFILE",
+        "AWS_REGION",
+    }
+
+
 def test_all_container_images_are_immutable() -> None:
     dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
     compose = Path("compose.airflow.yaml").read_text(encoding="utf-8")
@@ -68,6 +80,7 @@ def test_all_container_images_are_immutable() -> None:
     assert '"apache-airflow==${AIRFLOW_VERSION}"' in dockerfile
     assert "postgres:17.10" in compose
     assert ":latest" not in f"{dockerfile}\n{compose}"
+    assert "COPY apps/document_inspector/.streamlit ./.streamlit" in dockerfile
 
 
 def test_makefile_exposes_owned_operational_entrypoints() -> None:

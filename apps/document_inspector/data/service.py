@@ -1,4 +1,4 @@
-"""Application service for read-only ArXiv OCR inspection."""
+"""Application service for read-only ArXiv document inspection."""
 
 from document_ocr.protocol import OcrPageMarkdownBundle
 
@@ -14,16 +14,16 @@ from apps.document_inspector.data.models import (
     OcrPageElement,
     PublishedOcrManifest,
 )
-from apps.document_inspector.data.repository import ArxivOcrReviewRepository
+from apps.document_inspector.data.repository import ArxivDocumentRepository
 from lakehouse_platform.aws import get_runtime_parameter
 from lakehouse_platform.config.settings import Settings
 
 
-class ArxivOcrReviewService:
+class ArxivDocumentService:
     """Keep Streamlit independent of Athena SQL, S3 paths, and artifact validation."""
 
     def __init__(self, settings: Settings) -> None:
-        self._repository = ArxivOcrReviewRepository(settings)
+        self._repository = ArxivDocumentRepository(settings)
         self._artifacts = OcrArtifactReader(
             S3ObjectReader(
                 region_name=settings.aws_region,

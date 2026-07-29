@@ -13,7 +13,7 @@ from apps.document_inspector.components import (
     run_label,
 )
 from apps.document_inspector.data import (
-    ArxivOcrReviewService,
+    ArxivDocumentService,
     OcrDocumentFilter,
     OcrDocumentRun,
     OcrDocumentSummary,
@@ -46,45 +46,45 @@ state.initialize(st.session_state)
 
 
 @st.cache_resource(show_spinner=False)
-def review_service() -> ArxivOcrReviewService:
-    return ArxivOcrReviewService(SETTINGS)
+def document_service() -> ArxivDocumentService:
+    return ArxivDocumentService(SETTINGS)
 
 
 @st.cache_data(ttl=30, max_entries=64, show_spinner=False)
 def load_documents(filters: OcrDocumentFilter) -> tuple[OcrDocumentSummary, ...]:
-    return review_service().documents(filters)
+    return document_service().documents(filters)
 
 
 @st.cache_data(ttl=30, max_entries=128, show_spinner=False)
 def load_runs(arxiv_id: str) -> tuple[OcrDocumentRun, ...]:
-    return review_service().document_runs(arxiv_id)
+    return document_service().document_runs(arxiv_id)
 
 
-@st.cache_data(ttl=300, max_entries=128, show_spinner=False)
+@st.cache_data(ttl=300, max_entries=64, show_spinner=False)
 def load_manifest(run: OcrDocumentRun) -> PublishedOcrManifest:
-    return review_service().manifest(run)
+    return document_service().manifest(run)
 
 
-@st.cache_data(ttl=300, max_entries=256, show_spinner=False)
+@st.cache_data(ttl=300, max_entries=24, show_spinner=False)
 def load_page_image(
     run: OcrDocumentRun,
     manifest: PublishedOcrManifest,
     page_number: int,
 ) -> OcrArtifactContent:
-    return review_service().page_image(run, manifest, page_number=page_number)
+    return document_service().page_image(run, manifest, page_number=page_number)
 
 
-@st.cache_data(ttl=300, max_entries=256, show_spinner=False)
+@st.cache_data(ttl=300, max_entries=12, show_spinner=False)
 def load_page_markdowns(
     run: OcrDocumentRun,
     manifest: PublishedOcrManifest,
 ) -> OcrPageMarkdownBundle:
-    return review_service().page_markdowns(run, manifest)
+    return document_service().page_markdowns(run, manifest)
 
 
-@st.cache_data(ttl=300, max_entries=256, show_spinner=False)
+@st.cache_data(ttl=300, max_entries=64, show_spinner=False)
 def load_page_elements(processing_id: str, page_number: int) -> tuple[OcrPageElement, ...]:
-    return review_service().page_elements(
+    return document_service().page_elements(
         processing_id=processing_id,
         page_number=page_number,
     )
@@ -98,7 +98,7 @@ def on_run_change() -> None:
     state.reset_page(st.session_state)
 
 
-def refresh_review_data() -> None:
+def refresh_document_data() -> None:
     """Refresh mutable Iceberg state while retaining immutable artifact caches."""
     load_documents.clear()
     load_runs.clear()
@@ -114,27 +114,34 @@ def render_sidebar() -> OcrDocumentFilter:
             width="stretch",
             type="secondary",
         ):
-            refresh_review_data()
+            refresh_document_data()
         st.divider()
-        st.text_input(
-            "Search",
-            key=state.SessionKey.SEARCH,
-            placeholder="ArXiv ID or paper title",
-            icon=":material/search:",
-        )
-        st.selectbox(
-            "Latest run state",
-            STATE_OPTIONS,
-            format_func=lambda value: value.replace("_", " ").title(),
-            key=state.SessionKey.STATE_FILTER,
-        )
-        st.slider(
-            "Result limit",
-            min_value=10,
-            max_value=200,
-            step=10,
-            key=state.SessionKey.RESULT_LIMIT,
-        )
+        with st.form("document-filters", border=False):
+            st.text_input(
+                "Search",
+                key=state.SessionKey.SEARCH,
+                placeholder="ArXiv ID or paper title",
+                icon=":material/search:",
+            )
+            st.selectbox(
+                "Latest run state",
+                STATE_OPTIONS,
+                format_func=lambda value: value.replace("_", " ").title(),
+                key=state.SessionKey.STATE_FILTER,
+            )
+            st.slider(
+                "Result limit",
+                min_value=10,
+                max_value=200,
+                step=10,
+                key=state.SessionKey.RESULT_LIMIT,
+            )
+            st.form_submit_button(
+                "Apply filters",
+                icon=":material/filter_alt:",
+                width="stretch",
+                type="primary",
+            )
         return OcrDocumentFilter.model_validate(
             {
                 "search": st.session_state[state.SessionKey.SEARCH],
@@ -195,9 +202,9 @@ def render_artifacts(run: OcrDocumentRun) -> None:
     assert run.page_count is not None
     try:
         manifest = load_manifest(run)
-    except Exception as error:
+    except Exception:
         LOGGER.exception("Cannot load OCR manifest for {}", run.arxiv_id)
-        st.error(f"Cannot validate this OCR artifact manifest: {error}")
+        st.error("Cannot validate this OCR artifact manifest. Check the application logs.")
         return
 
     _, selector_column = st.columns((2.2, 1), gap="large")
@@ -224,13 +231,13 @@ def render_artifacts(run: OcrDocumentRun) -> None:
 
         st.markdown("#### Elements")
         render_elements(elements)
-    except Exception as error:
+    except Exception:
         LOGGER.exception(
             "Cannot render OCR artifact for {} page {}",
             run.arxiv_id,
             page_number,
         )
-        st.error(f"Cannot load the selected OCR artifact: {error}")
+        st.error("Cannot load the selected OCR artifact. Check the application logs.")
 
 
 def main() -> None:
@@ -238,9 +245,9 @@ def main() -> None:
     filters = render_sidebar()
     try:
         documents = load_documents(filters)
-    except Exception as error:
+    except Exception:
         LOGGER.exception("Cannot list OCR documents")
-        st.error(f"Cannot query OCR documents: {error}")
+        st.error("Cannot query OCR documents. Check the application logs.")
         st.stop()
 
     with st.sidebar:
@@ -252,9 +259,9 @@ def main() -> None:
 
     try:
         runs = load_runs(document.arxiv_id)
-    except Exception as error:
+    except Exception:
         LOGGER.exception("Cannot list OCR runs for {}", document.arxiv_id)
-        st.error(f"Cannot query processing history: {error}")
+        st.error("Cannot query processing history. Check the application logs.")
         return
     run = select_run(runs)
     if run is None:

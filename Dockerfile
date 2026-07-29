@@ -34,8 +34,8 @@ FROM document-inspector-dependencies AS document-inspector
 COPY --from=platform-wheel /dist /dist
 COPY --from=ocr-wheel /dist /dist
 COPY contracts ./contracts
-COPY apps ./apps
-COPY .streamlit ./.streamlit
+COPY apps/document_inspector ./apps/document_inspector
+COPY apps/document_inspector/.streamlit ./.streamlit
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /app/.venv/bin/python --no-deps \
     /dist/lakehouse_platform-*.whl /dist/document_ocr-*.whl
