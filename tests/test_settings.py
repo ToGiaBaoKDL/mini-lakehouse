@@ -1,166 +1,37 @@
-from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from document_ocr.settings import KaggleSettings, ModalSettings
 from pydantic import ValidationError
 
-from mini_lakehouse.config.settings import (
-    KaggleSettings,
-    ModalSettings,
-    NotificationSettings,
-    PlatformAdminSettings,
-    PolarisSettings,
-    Settings,
-    StorageEndpointSettings,
-    StorageSettings,
-)
+from lakehouse_platform.config.settings import Settings
 
 
-def test_default_contract_uses_three_distinct_buckets() -> None:
-    settings = Settings()
+def test_runtime_settings_only_contain_process_configuration() -> None:
+    settings = Settings(environment="dev")
 
-    assert settings.polaris.catalog_name == "prod"
-    assert settings.polaris.oauth2_server_uri.endswith("/v1/oauth/tokens")
-    assert settings.storage.landing_uri == "s3://landing"
-    assert settings.storage.curated_uri == "s3://curated"
-    assert settings.storage.analytics_uri == "s3://analytics"
-    assert settings.storage.endpoint_url == "http://localhost:9000"
+    assert settings.aws_region == "ap-southeast-1"
+    assert settings.aws_profile is None
+    assert "landing_uri" not in type(settings).model_fields
+    assert "catalog_name" not in type(settings).model_fields
 
 
-def test_storage_selects_an_endpoint_for_the_runtime_network() -> None:
-    storage = StorageSettings(network_scope="internal")
+def test_aws_environment_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.setenv("AWS_PROFILE", "lakehouse-dev-catalog-admin")
 
-    assert storage.endpoint_url == "http://object-store:9000"
+    settings = Settings(environment="dev")
 
-
-def test_nested_storage_endpoints_load_from_environment(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("LAKEHOUSE_STORAGE__NETWORK_SCOPE", "internal")
-    monkeypatch.setenv(
-        "LAKEHOUSE_STORAGE__ENDPOINTS__EXTERNAL_URL",
-        "https://storage.example.com",
-    )
-    monkeypatch.setenv(
-        "LAKEHOUSE_STORAGE__ENDPOINTS__INTERNAL_URL",
-        "http://storage.internal:9000",
-    )
-
-    storage = Settings().storage
-
-    assert storage.endpoint_url == "http://storage.internal:9000"
-    assert storage.endpoints.external_url == "https://storage.example.com"
-
-
-def test_native_s3_does_not_require_custom_endpoints() -> None:
-    storage = StorageSettings(
-        endpoints=StorageEndpointSettings(external_url=None, internal_url=None)
-    )
-
-    assert storage.endpoint_url is None
-
-
-def test_storage_rejects_endpoint_paths() -> None:
-    with pytest.raises(ValidationError, match="cannot contain a path"):
-        StorageEndpointSettings(external_url="https://storage.example.com/s3")
-
-
-def test_storage_accepts_isolated_prefixes_in_one_object_store_bucket() -> None:
-    settings = StorageSettings(
-        landing_uri="s3://shared/landing",
-        curated_uri="s3://shared/curated",
-        analytics_uri="s3://shared/analytics",
-    )
-
-    assert settings.curated_uri == "s3://shared/curated"
-
-
-def test_storage_normalizes_trailing_slashes() -> None:
-    settings = StorageSettings(landing_uri="s3://landing/")
-
-    assert settings.landing_uri == "s3://landing"
-
-
-def test_storage_rejects_non_normalized_prefixes() -> None:
-    with pytest.raises(ValidationError, match="must be normalized"):
-        StorageSettings(landing_uri="s3://shared/../landing")
-
-
-def test_storage_rejects_the_removed_backend_setting() -> None:
-    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-        StorageSettings.model_validate({"backend": "gcs"})
-
-
-def test_storage_rejects_static_and_vended_iceberg_credentials_together() -> None:
-    with pytest.raises(ValidationError, match="mutually exclusive"):
-        StorageSettings(iceberg_access_delegation="vended-credentials")
-
-
-def test_polaris_client_secret_cannot_be_empty() -> None:
-    with pytest.raises(ValidationError, match="at least 1"):
-        PolarisSettings.model_validate({"client_secret": ""})
-
-
-def test_production_rejects_local_root_credentials() -> None:
-    with pytest.raises(ValidationError, match="Production cannot use"):
-        Settings(environment="production")
-
-
-def test_platform_administration_requires_the_container_capability(tmp_path: Path) -> None:
-    marker = tmp_path / "container"
-    guard = tmp_path / "guard"
-    marker.write_text("", encoding="utf-8")
-    guard.write_text("platform-admin\n", encoding="utf-8")
-
-    PlatformAdminSettings(
-        container_marker=marker,
-        guard_file=guard,
-    ).require_capability()
-
-    with pytest.raises(RuntimeError, match="runtime marker"):
-        PlatformAdminSettings(container_marker=tmp_path / "missing").require_capability()
-
-
-def test_nested_docker_secrets_load_without_custom_parsing(tmp_path: Path) -> None:
-    (tmp_path / "LAKEHOUSE_POLARIS__CLIENT_SECRET").write_text(
-        "runtime-secret\n",
-        encoding="utf-8",
-    )
-    (tmp_path / "LAKEHOUSE_PLATFORM_ADMIN__SERVICE_SECRETS__prefect_ingestion").write_text(
-        "ingestion-secret\n",
-        encoding="utf-8",
-    )
-
-    settings: Settings = cast(Any, Settings)(
-        _env_file=None,
-        _secrets_dir=tmp_path,
-    )
-
-    assert settings.polaris.client_secret.get_secret_value() == "runtime-secret"
-    assert (
-        settings.platform_admin.service_secrets["prefect_ingestion"].get_secret_value()
-        == "ingestion-secret"
-    )
-
-
-def test_gmail_notification_channel_requires_complete_delivery_config() -> None:
-    with pytest.raises(ValidationError, match="sender, app_password, and recipients"):
-        NotificationSettings(gmail_sender="lakehouse-alerts@gmail.com")
-
-
-def test_slack_credentials_must_be_configured_as_a_pair() -> None:
-    with pytest.raises(ValidationError, match="bot_token and channel_id"):
-        NotificationSettings(slack_channel_id="C0123456789")
+    assert settings.aws_region == "us-east-1"
+    assert settings.aws_profile == "lakehouse-dev-catalog-admin"
 
 
 def test_modal_credentials_must_be_configured_as_a_pair() -> None:
     with pytest.raises(ValidationError, match="token_id and token_secret"):
-        ModalSettings.model_validate({"token_id": "ak-incomplete"})
+        cast(Any, ModalSettings)(token_id="ak-incomplete", _env_file=None)
 
 
-def test_kaggle_uses_the_sdk_standard_environment(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_kaggle_uses_sdk_standard_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KAGGLE_USERNAME", "owner")
     monkeypatch.setenv("KAGGLE_API_TOKEN", "secret")
 
@@ -168,28 +39,3 @@ def test_kaggle_uses_the_sdk_standard_environment(
 
     assert settings.username == "owner"
     assert settings.configured
-
-
-def test_kaggle_credentials_must_be_configured_as_a_pair() -> None:
-    with pytest.raises(ValidationError, match="username and api_token"):
-        cast(Any, KaggleSettings)(
-            username="owner",
-            api_token=None,
-            _env_file=None,
-        )
-
-
-def test_empty_notification_environment_values_are_disabled() -> None:
-    settings = NotificationSettings.model_validate(
-        {
-            "slack_bot_token": "",
-            "slack_channel_id": "",
-            "gmail_sender": "",
-            "gmail_app_password": "",
-        }
-    )
-
-    assert settings.slack_bot_token is None
-    assert settings.slack_channel_id is None
-    assert settings.gmail_sender is None
-    assert settings.gmail_app_password is None

@@ -1,10 +1,10 @@
 version: 1
 name: engineering
+database: analytics_engineering
 owner: engineering-analytics
 contact:
   name: Engineering Analytics
   email: bao.to@timo.vn
 business_owner: engineering
 description: Consumer-facing engineering activity metrics.
-analytics_namespace: [analytics, engineering]
 upstream_curated_products: [github]

@@ -1,5 +1,6 @@
 version: 1
 name: arxiv
+database: landing_arxiv
 source_type: api
 owner: data-platform
 contact:
@@ -14,7 +15,7 @@ checkpoint:
 
 tables:
   - key: oai_records_raw
-    name: arxiv_oai_records_raw
+    name: oai_records_raw
     description: Parsed immutable OAI records for one ArXiv datestamp checkpoint.
     schema_version: 1
     columns:
@@ -46,7 +47,7 @@ tables:
         transform: identity
 
   - key: oai_checkpoints
-    name: arxiv_oai_checkpoints
+    name: oai_checkpoints
     description: Successful ArXiv OAI publication checkpoints and raw-object lineage.
     schema_version: 1
     columns:

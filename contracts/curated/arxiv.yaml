@@ -1,11 +1,11 @@
 version: 1
 name: arxiv
+database: curated_arxiv
 owner: data-platform
 contact:
   name: Data Platform
   email: bao.to@timo.vn
 description: Canonical current ArXiv metadata and OCR results.
-curated_namespace: [curated, arxiv]
 upstream_sources: [arxiv]
 
 tables:

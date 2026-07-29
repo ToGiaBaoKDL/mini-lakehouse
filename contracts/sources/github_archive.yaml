@@ -1,5 +1,6 @@
 version: 1
 name: github_archive
+database: landing_github_archive
 source_type: api
 owner: data-platform
 contact:
@@ -13,7 +14,7 @@ checkpoint:
 
 tables:
   - key: events_raw
-    name: github_archive_events_raw
+    name: events_raw
     description: Parsed immutable GitHub Archive events for one source checkpoint hour.
     schema_version: 1
     columns:

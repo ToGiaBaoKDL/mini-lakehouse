@@ -1,11 +1,11 @@
 version: 1
 name: github
+database: curated_github
 owner: data-platform
 contact:
   name: Data Platform
   email: bao.to@timo.vn
 description: Canonical validated GitHub entities and events for downstream data products.
-curated_namespace: [curated, github]
 upstream_sources: [github_archive]
 
 tables:
