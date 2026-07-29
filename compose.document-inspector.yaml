@@ -1,0 +1,32 @@
+# Self-hosted read-only document inspection surface.
+
+services:
+  document-inspector:
+    image: lakehouse-platform-document-inspector:local
+    build:
+      context: .
+      target: document-inspector
+    env_file:
+      - .env
+    environment:
+      LAKEHOUSE_ENVIRONMENT: ${LAKEHOUSE_ENVIRONMENT:-dev}
+      LAKEHOUSE_LOG_LEVEL: ${LAKEHOUSE_LOG_LEVEL:-INFO}
+      AWS_PROFILE: ${DOCUMENT_INSPECTOR_AWS_PROFILE:-lakehouse-dev-document-inspector}
+      AWS_REGION: ${AWS_REGION:-ap-southeast-1}
+    volumes:
+      - ${AWS_CONFIG_DIR:-./.aws}:/root/.aws:ro
+    ports:
+      - "127.0.0.1:8501:8501"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request as u; u.urlopen('http://localhost:8501/_stcore/health', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped

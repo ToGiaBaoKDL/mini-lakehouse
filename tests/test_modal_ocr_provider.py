@@ -3,11 +3,10 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import modal
-
-from mini_lakehouse.config.settings import ModalSettings
-from mini_lakehouse.contracts import load_contracts
-from mini_lakehouse.processing.ocr.modal_provider import ModalProvider
-from mini_lakehouse.processing.ocr.provider import OcrProviderState
+from document_ocr.config import load_ocr_config
+from document_ocr.providers.base import OcrProviderState
+from document_ocr.providers.modal import ModalProvider
+from document_ocr.settings import ModalSettings
 
 
 class _FakeCall:
@@ -42,7 +41,7 @@ class _FakeVolume:
 def _provider() -> ModalProvider:
     return ModalProvider(
         ModalSettings.model_validate({"token_id": "ak-test", "token_secret": "as-test"}),
-        load_contracts().processor("arxiv_glm_ocr"),
+        load_ocr_config("arxiv_glm_ocr"),
         client=cast(Any, object()),
     )
 

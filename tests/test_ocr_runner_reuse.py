@@ -1,19 +1,18 @@
-import importlib.util
+import importlib
 import sys
 from datetime import date
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
-
-from mini_lakehouse.contracts import load_contracts
-from mini_lakehouse.processing.ocr.core.identity import (
+from document_ocr.config import load_ocr_config
+from document_ocr.identity import (
     batch_id,
     config_hash,
     processing_id,
     request_id,
 )
-from mini_lakehouse.processing.ocr.core.protocol import (
+from document_ocr.protocol import (
     OCR_OUTPUT_SCHEMA_VERSION,
     OcrBatchManifest,
     OcrDocumentRequest,
@@ -25,7 +24,7 @@ from mini_lakehouse.processing.ocr.core.protocol import (
 )
 
 
-def _runtime_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+def _runner_modules(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     fitz = ModuleType("fitz")
     glmocr = ModuleType("glmocr")
     glmocr.GlmOcr = object  # type: ignore[attr-defined]
@@ -34,19 +33,22 @@ def _runtime_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     monkeypatch.setitem(sys.modules, "fitz", fitz)
     monkeypatch.setitem(sys.modules, "glmocr", glmocr)
     monkeypatch.setitem(sys.modules, "glmocr.config", config)
-
-    name = "mini_lakehouse_test_glm_ocr_runtime"
-    path = Path("runners/glm_ocr/runtime.py")
-    spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, name, module)
-    spec.loader.exec_module(module)
-    return module
+    module_names = (
+        "ocr.runners.glm_ocr.runner.documents",
+        "ocr.runners.glm_ocr.runner.engine",
+        "ocr.runners.glm_ocr.runner.batch",
+    )
+    for name in module_names:
+        sys.modules.pop(name, None)
+    return SimpleNamespace(
+        documents=importlib.import_module(module_names[0]),
+        engine=importlib.import_module(module_names[1]),
+        batch=importlib.import_module(module_names[2]),
+    )
 
 
 def _job() -> OcrJob:
-    processor = load_contracts().processor("arxiv_glm_ocr")
+    processor = load_ocr_config("arxiv_glm_ocr")
     configuration_hash = config_hash(processor)
     arxiv_id = "2607.00001"
     pdf_sha256 = "d" * 64
@@ -96,7 +98,7 @@ def test_unchanged_batch_skips_model_validation_and_vllm(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    runtime = _runtime_module(monkeypatch)
+    runner = _runner_modules(monkeypatch)
     job = _job()
     reuse = job.documents[0].reuse
     assert reuse is not None
@@ -108,10 +110,10 @@ def test_unchanged_batch_skips_model_validation_and_vllm(
     def pdf_page_count(_path: Path, _maximum: int) -> int:
         return reuse.page_count
 
-    monkeypatch.setattr(runtime, "download_pdf", download_pdf)
-    monkeypatch.setattr(runtime, "pdf_page_count", pdf_page_count)
+    monkeypatch.setattr(runner.documents, "download_pdf", download_pdf)
+    monkeypatch.setattr(runner.documents, "pdf_page_count", pdf_page_count)
 
-    runtime.run(
+    runner.batch.run(
         job,
         tmp_path,
         model_path=tmp_path / "missing-model",
@@ -129,15 +131,16 @@ def test_unexpected_preparation_error_aborts_the_batch(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    runtime = _runtime_module(monkeypatch)
+    runner = _runner_modules(monkeypatch)
+    (tmp_path / "result_manifest.json").write_text("stale", encoding="utf-8")
 
     def fail_preparation(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("runner bug")
 
-    monkeypatch.setattr(runtime, "prepare_document", fail_preparation)
+    monkeypatch.setattr(runner.batch, "prepare_document", fail_preparation)
 
     with pytest.raises(AssertionError, match="runner bug"):
-        runtime.run(
+        runner.batch.run(
             _job(),
             tmp_path,
             model_path=tmp_path / "model",
@@ -150,7 +153,7 @@ def test_changed_pdf_is_prepared_for_inference(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    runtime = _runtime_module(monkeypatch)
+    runner = _runner_modules(monkeypatch)
     job = _job()
     request = job.documents[0]
     work = tmp_path / "work"
@@ -163,19 +166,16 @@ def test_changed_pdf_is_prepared_for_inference(
     def pdf_page_count(_path: Path, _maximum: int) -> int:
         return 4
 
-    monkeypatch.setattr(runtime, "download_pdf", download_pdf)
-    monkeypatch.setattr(runtime, "pdf_page_count", pdf_page_count)
+    monkeypatch.setattr(runner.documents, "download_pdf", download_pdf)
+    monkeypatch.setattr(runner.documents, "pdf_page_count", pdf_page_count)
 
-    prepared = runtime.prepare_document(
+    prepared = runner.documents.prepare_document(
         job,
         request,
         work,
-        document_count=1,
-        document_index=1,
-        started_at=0.0,
     )
 
-    assert isinstance(prepared, runtime.PreparedDocument)
+    assert isinstance(prepared, runner.documents.PreparedDocument)
     assert prepared.pdf_sha256 == "f" * 64
     assert prepared.page_count == 4
 
@@ -184,7 +184,7 @@ def test_compatible_inference_engine_reuses_one_vllm_server(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    runtime = _runtime_module(monkeypatch)
+    runner = _runner_modules(monkeypatch)
     starts: list[object] = []
     stops: list[object] = []
 
@@ -204,12 +204,12 @@ def test_compatible_inference_engine_reuses_one_vllm_server(
 
     process = _Process()
     log_file = object()
-    monkeypatch.setattr(runtime, "GlmOcr", _Parser)
+    monkeypatch.setattr(runner.engine, "GlmOcr", _Parser)
 
     def write_config(*_args: object, **_kwargs: object) -> None:
         pass
 
-    monkeypatch.setattr(runtime, "write_config", write_config)
+    monkeypatch.setattr(runner.engine, "write_config", write_config)
 
     def start(*_args: object, **_kwargs: object) -> tuple[object, object]:
         starts.append(process)
@@ -218,9 +218,9 @@ def test_compatible_inference_engine_reuses_one_vllm_server(
     def stop(*_args: object, **_kwargs: object) -> None:
         stops.append(process)
 
-    monkeypatch.setattr(runtime, "start_vllm", start)
-    monkeypatch.setattr(runtime, "stop_process", stop)
-    engine = runtime.InferenceEngine(tmp_path / "engine")
+    monkeypatch.setattr(runner.engine, "start_vllm", start)
+    monkeypatch.setattr(runner.engine, "stop_process", stop)
+    engine = runner.engine.InferenceEngine(tmp_path / "engine")
     job = _job()
     model_path = tmp_path / "model"
     layout_path = tmp_path / "layout"

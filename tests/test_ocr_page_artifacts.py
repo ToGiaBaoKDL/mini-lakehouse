@@ -2,15 +2,14 @@ import gzip
 from io import BytesIO
 
 import pytest
-
-from mini_lakehouse.processing.ocr.core.protocol import (
+from document_ocr.protocol import (
     ArtifactFile,
     OcrDocumentResult,
     OcrElement,
     OcrPageMarkdown,
     OcrPageMarkdownBundle,
 )
-from mini_lakehouse.processing.ocr.core.text import (
+from document_ocr.text import (
     InvalidPageMarkdownBundleError,
     build_page_markdown_bundle,
     read_page_markdown_bundle,

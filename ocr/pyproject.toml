@@ -1,0 +1,26 @@
+[build-system]
+requires = ["uv_build>=0.11.0,<0.12.0"]
+build-backend = "uv_build"
+
+[project]
+name = "document-ocr"
+version = "1.1.0"
+description = "Provider-neutral document OCR protocol and remote execution adapters."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pydantic>=2.12,<3",
+    "pydantic-settings>=2.12,<3",
+    "pyyaml>=6.0.3,<7",
+]
+
+[project.optional-dependencies]
+kaggle = [
+    "kaggle>=2,<3",
+    "kagglehub>=1,<2",
+]
+modal = ["modal>=1.5.3,<1.6"]
+providers = [
+    "kaggle>=2,<3",
+    "kagglehub>=1,<2",
+    "modal>=1.5.3,<1.6",
+]
