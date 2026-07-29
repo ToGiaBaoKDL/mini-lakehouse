@@ -1,23 +1,10 @@
-# Production migration notes
+# Operational checks
 
-Local defaults deliberately use static AIStor credentials and disable Polaris credential vending
-because this single-node stack does not configure an STS provider. Do not copy that security model
-to cloud deployments.
-
-For a future managed-object-storage deployment:
-
-1. Keep bucket roots separate for lifecycle and IAM boundaries.
-2. Add the target provider deliberately, then configure Polaris storage credentials with workload
-   identity/IAM roles and enable credential vending in Trino/PyIceberg clients.
-3. Preserve separate Polaris principals for direct ingestion and the Trino connector. Enforce
-   dbt and read-only application permissions inside authenticated Trino because one REST-catalog
-   connector has one Polaris OAuth identity.
-4. Require a Polaris realm header and external identity provider where appropriate.
-5. Put TLS and authentication in front of Trino, Polaris, Prefect, and future BI services.
-6. Move PostgreSQL and Redis to backed-up managed services.
-7. Promote tested immutable container digests, configure resource limits, and emit metrics/logs to
-   the platform observability stack.
-8. Use a separate catalog or Polaris deployment per environment; never let CI write to `prod`.
-
-Iceberg retention must be longer than the maximum job retry/backfill window. `remove_orphan_files`
-must not run with aggressive retention while another engine may still be committing files.
+- If a DAG does not parse, check the scheduler and DAG processor logs separately.
+- If an EMR task waits, inspect the linked job run; the Airflow task is deferrable and should not
+  occupy a worker slot.
+- If a Spark job reports a missing table, run contract apply/validate before republishing data.
+- If contract validation reports structural drift, use an explicit migration; never add an
+  automatic fallback that hides schema or partition differences.
+- If Athena cannot read results, verify the workload profile/role, workgroup, KMS grant, and result
+  prefix rather than introducing static credentials.
