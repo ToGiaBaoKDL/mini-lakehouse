@@ -1,1 +1,0 @@
-"""GitHub curated data product."""
