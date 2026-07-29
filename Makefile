@@ -2,183 +2,216 @@ SHELL := /bin/sh
 
 .DEFAULT_GOAL := help
 
-PROJECT_NAME ?= mini-lakehouse
-CORE_COMPOSE := docker compose --project-name $(PROJECT_NAME) -f compose.core.yaml
-CORE_RUN := COMPOSE_IGNORE_ORPHANS=true $(CORE_COMPOSE)
-OCR_REVIEW_COMPOSE := $(CORE_COMPOSE) -f compose.ocr-review.yaml
-OCR_REVIEW_RUN := COMPOSE_IGNORE_ORPHANS=true $(OCR_REVIEW_COMPOSE)
-COMPOSE := $(CORE_COMPOSE) -f compose.prefect.yaml -f compose.ocr-review.yaml
-THIRD_PARTY_SERVICES := postgres object-store object-store-provision polaris-bootstrap polaris trino \
-	redis prefect-server
+PROJECT_NAME ?= lakehouse-platform
+RELEASE ?= $(shell git rev-parse HEAD)
+AIRFLOW_COMPOSE := docker compose --project-name $(PROJECT_NAME)-airflow -f compose.airflow.yaml
+INSPECTOR_COMPOSE := docker compose --project-name $(PROJECT_NAME)-document-inspector -f compose.document-inspector.yaml
+TERRAFORM_DIR := infra/terraform/environments/dev
+TERRAFORM_STATE_DIR := infra/terraform/bootstrap/state
+EMR_BUILD_DIR := dist/emr
+AWS_CONFIG_DIR ?= ./.aws
+AWS_CONFIG_FILE ?= $(AWS_CONFIG_DIR)/config
+AWS_SHARED_CREDENTIALS_FILE ?= $(AWS_CONFIG_DIR)/credentials
+export AWS_CONFIG_FILE
+export AWS_SHARED_CREDENTIALS_FILE
 
-.PHONY: help setup preflight config validate lint test check pull build build-core \
-	build-orchestration build-ocr-review start-core start-ocr-review start up-core \
-	up-ocr-review up down restart clean reset ps ps-all logs logs-follow smoke-core \
-	smoke-prefect smoke-ocr-review smoke wait-prefect-deploy prefect-deployments \
-	prefect-deploy modal-deploy kaggle-runner-deploy platform-bootstrap platform-validate \
-	policy-prune-plan \
-	policy-prune-apply platform-rotate-credentials
+.PHONY: help setup preflight platform-validate lint test check compose-validate \
+	terraform-fmt terraform-state-init terraform-state-plan terraform-state-apply \
+	terraform-init terraform-validate terraform-plan terraform-apply terraform-destroy \
+	build-airflow build-document-inspector \
+	airflow-up airflow-down airflow-logs airflow-dags \
+	document-inspector-up document-inspector-down document-inspector-logs start down ps \
+	catalog-apply catalog-validate dbt-deps dbt-validate dbt-build \
+	emr-jobs-package emr-jobs-publish-preflight emr-jobs-publish
 
-help: ## Show the available project commands.
-	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+help: ## Show available commands.
+	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-28s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-setup: ## Create the local environment file without overwriting an existing one.
+setup: ## Create .env without overwriting an existing file.
 	@test -f .env || cp .env.example .env
-	@printf '%s\n' "Local environment is ready. Place the AIStor license at ./minio.license."
 
-preflight: ## Verify files and tools required for a local deployment.
+preflight: ## Verify local tools and configuration.
 	@test -s .env || { printf '%s\n' "Missing .env; run 'make setup' first."; exit 1; }
-	@test -s minio.license || { printf '%s\n' "Missing or empty minio.license."; exit 1; }
-	@command -v docker >/dev/null || { printf '%s\n' "Docker is required."; exit 1; }
+	@test -d "$(AWS_CONFIG_DIR)" || { printf '%s\n' "Set AWS_CONFIG_DIR to a readable AWS config directory."; exit 1; }
+	@command -v docker >/dev/null
+	@command -v jq >/dev/null
 	@docker compose version >/dev/null
 
-config: ## Render and validate the complete Compose configuration.
-	$(COMPOSE) config --quiet
-
-validate: config ## Validate declarative lakehouse contracts and settings.
-	uv run python -m mini_lakehouse.platform.validate
+platform-validate: ## Validate settings and YAML contracts without AWS I/O.
+	uv run python -m lakehouse_platform.platform.validate
 
 lint: ## Run formatting, linting, and static type checks.
 	uv run ruff format --check .
 	uv run ruff check .
-	uv run pyright
+	uv run --extra orchestration --extra catalog --extra document-inspector --extra ocr \
+		pyright
+	uv run pyright --project jobs/emr
 
-test: ## Run unit tests only.
-	uv run pytest -m "not integration"
+test: ## Run unit tests.
+	uv run --extra catalog --extra document-inspector --extra ocr \
+		pytest -m "not integration"
 
-check: ## Run the same non-integration quality gate as CI.
+compose-validate: ## Validate self-hosted service Compose files.
+	docker compose --env-file .env.example \
+		--project-name $(PROJECT_NAME)-airflow -f compose.airflow.yaml config --quiet
+	docker compose --env-file .env.example \
+		--project-name $(PROJECT_NAME)-document-inspector \
+		-f compose.document-inspector.yaml config --quiet
+
+check: ## Run the local quality gate.
 	uv lock --check
-	uv lock --check --directory runners/glm_ocr
+	uv lock --check --project jobs/emr
+	uv lock --check --directory ocr/runners/glm_ocr
+	$(MAKE) platform-validate
+	$(MAKE) dbt-validate
 	$(MAKE) lint
 	$(MAKE) test
-	uv run dbt parse --project-dir dbt/analytics --profiles-dir dbt/analytics
-	$(MAKE) config
+	$(MAKE) terraform-fmt
+	$(MAKE) terraform-validate
+	$(MAKE) compose-validate
 
-pull: preflight ## Pull all pinned third-party service images.
-	$(COMPOSE) pull $(THIRD_PARTY_SERVICES)
+terraform-fmt: ## Check Terraform formatting.
+	terraform -chdir=infra/terraform fmt -check -recursive
 
-build: ## Build local images sequentially to keep peak resource usage bounded.
-	$(MAKE) build-core
-	$(MAKE) build-orchestration
-	$(MAKE) build-ocr-review
+terraform-state-init: ## Initialize the one-time remote-state bootstrap stack.
+	terraform -chdir=$(TERRAFORM_STATE_DIR) init
 
-build-core: preflight ## Build only the local core runtime image.
-	$(CORE_COMPOSE) build platform-admin
+terraform-state-plan: terraform-state-init ## Plan the remote-state bootstrap stack.
+	terraform -chdir=$(TERRAFORM_STATE_DIR) plan
 
-build-orchestration: preflight ## Build only the local orchestration image.
-	$(COMPOSE) build prefect-worker
+terraform-state-apply: terraform-state-init ## Create the versioned remote-state bucket.
+	terraform -chdir=$(TERRAFORM_STATE_DIR) apply
 
-build-ocr-review: preflight ## Build only the read-only OCR review image.
-	$(OCR_REVIEW_COMPOSE) build ocr-review
+terraform-init: ## Initialize the dev Terraform environment.
+	@test -n "$${TF_STATE_BUCKET:-}" || { printf '%s\n' "TF_STATE_BUCKET is required."; exit 1; }
+	terraform -chdir=$(TERRAFORM_DIR) init -backend-config="bucket=$${TF_STATE_BUCKET}"
 
-start-core: preflight ## Start core services from existing images without building.
-	$(CORE_COMPOSE) up -d --no-build --wait --wait-timeout 300
-	$(MAKE) platform-bootstrap
+terraform-validate: ## Initialize without remote state and validate all Terraform roots.
+	terraform -chdir=$(TERRAFORM_STATE_DIR) init -backend=false -lockfile=readonly
+	terraform -chdir=$(TERRAFORM_STATE_DIR) validate
+	terraform -chdir=$(TERRAFORM_DIR) init -backend=false -lockfile=readonly
+	terraform -chdir=$(TERRAFORM_DIR) validate
 
-start-ocr-review: preflight ## Start core services and OCR Review from existing images.
-	$(MAKE) start-core
-	$(OCR_REVIEW_RUN) up -d --no-build --wait --wait-timeout 300
+terraform-plan: terraform-init ## Plan the AWS dev platform.
+	terraform -chdir=$(TERRAFORM_DIR) plan
 
-start: preflight ## Start all services from existing images without building.
-	$(MAKE) start-core
-	$(COMPOSE) up -d --no-build --remove-orphans --wait --wait-timeout 300
-	$(MAKE) wait-prefect-deploy
+terraform-apply: terraform-init ## Apply the reviewed AWS dev platform plan.
+	terraform -chdir=$(TERRAFORM_DIR) apply
 
-up-core: ## Build and start only the core data plane.
-	$(MAKE) build-core
-	$(MAKE) start-core
+terraform-destroy: terraform-init ## Destroy the AWS dev platform.
+	terraform -chdir=$(TERRAFORM_DIR) destroy
 
-up-ocr-review: ## Build and start the core data plane plus OCR Review.
-	$(MAKE) build-core
-	$(MAKE) build-ocr-review
-	$(MAKE) start-ocr-review
+build-airflow: ## Build the self-hosted Airflow image.
+	$(AIRFLOW_COMPOSE) build
 
-up: ## Build and start the complete local stack.
-	$(MAKE) build
-	$(MAKE) start
+build-document-inspector: ## Build the Document Inspector image.
+	$(INSPECTOR_COMPOSE) build
 
-down: ## Stop the complete stack while preserving named volumes.
-	$(COMPOSE) down --remove-orphans
+airflow-up: preflight ## Start self-hosted Airflow.
+	$(AIRFLOW_COMPOSE) up -d --build --wait --wait-timeout 300
 
-restart: ## Recreate the complete stack while preserving named volumes.
-	$(MAKE) down
-	$(MAKE) start
+airflow-down: ## Stop self-hosted Airflow while preserving metadata.
+	$(AIRFLOW_COMPOSE) down --remove-orphans
 
-clean: ## Destroy the complete local stack, including all named volumes.
-	$(COMPOSE) down --volumes --remove-orphans
+airflow-logs: ## Follow Airflow logs.
+	$(AIRFLOW_COMPOSE) logs --follow --tail=200 $(ARGS)
 
-reset: ## Destroy local state and bootstrap a clean core platform.
-	$(MAKE) clean
-	$(MAKE) pull
-	$(MAKE) build
-	$(MAKE) start-core
+airflow-dags: ## List parsed Airflow DAGs.
+	$(AIRFLOW_COMPOSE) exec -T airflow-scheduler airflow dags list
 
-ps: ## Show the complete stack status.
-	$(COMPOSE) ps
+document-inspector-up: preflight ## Start the read-only Document Inspector.
+	$(INSPECTOR_COMPOSE) up -d --build --wait --wait-timeout 180
 
-ps-all: ## Show running and completed one-shot containers.
-	$(COMPOSE) ps --all
+document-inspector-down: ## Stop Document Inspector.
+	$(INSPECTOR_COMPOSE) down --remove-orphans
 
-logs: ## Print recent stack logs (use ARGS="service").
-	$(COMPOSE) logs --tail=200 $(ARGS)
+document-inspector-logs: ## Follow Document Inspector logs.
+	$(INSPECTOR_COMPOSE) logs --follow --tail=200
 
-logs-follow: ## Follow stack logs (use ARGS="service").
-	$(COMPOSE) logs --follow --tail=200 $(ARGS)
+start: ## Start all self-hosted services.
+	$(MAKE) airflow-up
+	$(MAKE) document-inspector-up
 
-smoke-core: preflight ## Read-only health and catalog verification for the core data plane.
-	@curl --fail --silent http://localhost:9000/minio/health/live >/dev/null
-	@curl --fail --silent http://localhost:8182/q/health/ready >/dev/null
-	@curl --fail --silent http://localhost:8080/v1/info >/dev/null
-	$(CORE_RUN) run --rm --no-deps --entrypoint /bin/sh object-store-provision \
-		/opt/object-store/provision.sh verify
-	$(CORE_COMPOSE) exec -T trino /bin/sh -c \
-		'trino --execute "SHOW SCHEMAS FROM \"$${POLARIS_CATALOG}\""'
+down: ## Stop all self-hosted services.
+	$(MAKE) document-inspector-down
+	$(MAKE) airflow-down
 
-smoke-prefect: preflight ## Verify the optional Prefect control plane.
-	@curl --fail --silent http://localhost:4200/api/health >/dev/null
+ps: ## Show self-hosted service state.
+	$(AIRFLOW_COMPOSE) ps
+	$(INSPECTOR_COMPOSE) ps
 
-smoke-ocr-review: preflight ## Verify the optional OCR Review application.
-	@curl --fail --silent http://localhost:8501/_stcore/health >/dev/null
+catalog-apply: ## Apply Glue/Iceberg YAML contracts with PyIceberg.
+	AWS_PROFILE="$${CATALOG_ADMIN_AWS_PROFILE:-lakehouse-dev-catalog-admin}" \
+		uv run python -m lakehouse_platform.platform.catalog.admin apply
 
-smoke: smoke-core smoke-prefect smoke-ocr-review ## Verify the complete stack.
+catalog-validate: ## Validate Glue/Iceberg state against YAML contracts.
+	AWS_PROFILE="$${CATALOG_ADMIN_AWS_PROFILE:-lakehouse-dev-catalog-admin}" \
+		uv run python -m lakehouse_platform.platform.catalog.admin validate
 
-wait-prefect-deploy: preflight ## Wait for Prefect deployment registration.
-	@container_id="$$( $(COMPOSE) ps --all --quiet prefect-deploy )"; \
-		test -n "$$container_id" || { printf '%s\n' "Prefect deployment container not found."; exit 1; }; \
-		exit_code="$$(docker wait "$$container_id")"; \
-		test "$$exit_code" -eq 0 || { printf 'Prefect deployment failed with exit code %s.\n' "$$exit_code"; exit "$$exit_code"; }
+dbt-deps: ## Install locked dbt packages.
+	uv run --extra analytics dbt deps --project-dir dbt/analytics
 
-prefect-deployments: preflight ## List registered Prefect deployments.
-	$(COMPOSE) exec -T prefect-worker prefect deployment ls
+dbt-validate: dbt-deps ## Parse dbt without accessing AWS data.
+	DBT_QUERY_RESULTS_URI=s3://validation/query-results \
+		DBT_ANALYTICS_URI=s3://validation \
+		AWS_REGION=ap-southeast-1 \
+		uv run --extra analytics dbt parse \
+			--project-dir dbt/analytics \
+			--profiles-dir dbt/analytics \
+			--no-partial-parse \
+			--show-all-deprecations
 
-platform-bootstrap: preflight ## Idempotently create and validate contract-managed platform resources.
-	$(CORE_RUN) run --rm --no-deps platform-admin \
-		python -m mini_lakehouse.platform.catalog.admin bootstrap
+dbt-build: ## Build analytics with runtime references loaded from SSM.
+	@test -d dbt/analytics/dbt_packages/dbt_utils || { \
+		printf '%s\n' "Missing locked dbt packages; run 'make dbt-deps' first."; exit 1; \
+	}
+	@set -eu; \
+		command -v aws >/dev/null; \
+		command -v jq >/dev/null; \
+		AWS_PROFILE_NAME="$${DBT_AWS_PROFILE:-lakehouse-dev-dbt-transformer}"; \
+		PARAMETER_PREFIX="/lakehouse/$${LAKEHOUSE_ENVIRONMENT:-dev}"; \
+		PARAMETERS="$$(aws --profile "$${AWS_PROFILE_NAME}" ssm get-parameters \
+			--names \
+				"$${PARAMETER_PREFIX}/storage/query_results_uri" \
+				"$${PARAMETER_PREFIX}/storage/analytics_uri" \
+			--output json)"; \
+		QUERY_RESULTS_URI="$$(printf '%s' "$${PARAMETERS}" | jq -er \
+			--arg name "$${PARAMETER_PREFIX}/storage/query_results_uri" \
+			'.Parameters[] | select(.Name == $$name) | .Value')"; \
+		ANALYTICS_URI="$$(printf '%s' "$${PARAMETERS}" | jq -er \
+			--arg name "$${PARAMETER_PREFIX}/storage/analytics_uri" \
+			'.Parameters[] | select(.Name == $$name) | .Value')"; \
+		AWS_PROFILE="$${AWS_PROFILE_NAME}" \
+		DBT_QUERY_RESULTS_URI="$${QUERY_RESULTS_URI}" \
+		DBT_ANALYTICS_URI="$${ANALYTICS_URI}" \
+		uv run --extra analytics dbt build \
+			--project-dir dbt/analytics --profiles-dir dbt/analytics
 
-platform-validate: preflight ## Read live platform state and fail on managed drift.
-	$(CORE_RUN) run --rm --no-deps platform-admin \
-		python -m mini_lakehouse.platform.catalog.admin validate
+emr-jobs-package: ## Build EMR artifacts in the matching EMR 7.13 runtime.
+	rm -rf $(EMR_BUILD_DIR)
+	docker build \
+		--platform linux/amd64 \
+		--file jobs/emr/Dockerfile \
+		--target artifacts \
+		--output type=local,dest=$(EMR_BUILD_DIR) \
+		.
 
-platform-rotate-credentials: preflight ## Explicitly rotate Polaris service credentials (use IDENTITIES="name ...").
-	$(CORE_RUN) run --rm --no-deps platform-admin \
-		python -m mini_lakehouse.platform.catalog.admin rotate-credentials $(IDENTITIES)
+emr-jobs-publish-preflight: ## Require a committed release and deployment tools.
+	@test -z "$$(git status --porcelain)" || { \
+		printf '%s\n' "Commit the worktree before publishing an EMR release."; exit 1; \
+	}
+	@command -v aws >/dev/null
+	@command -v terraform >/dev/null
 
-policy-prune-plan: preflight ## Print stale repository-managed Polaris policies.
-	$(CORE_RUN) run --rm --no-deps platform-admin \
-		python -m mini_lakehouse.platform.catalog.policy_prune
-
-policy-prune-apply: preflight ## Apply the exact reviewed plan (requires PLAN_SHA256).
-	@test -n "$(PLAN_SHA256)" || { printf '%s\n' "PLAN_SHA256 is required."; exit 1; }
-	$(CORE_RUN) run --rm --no-deps platform-admin \
-		python -m mini_lakehouse.platform.catalog.policy_prune --apply-plan-sha256 "$(PLAN_SHA256)"
-
-prefect-deploy: preflight ## Register all Prefect flow deployments.
-	$(COMPOSE) run --rm --no-deps prefect-deploy
-
-modal-deploy: ## Deploy the pinned Modal OCR app (requires Modal credentials).
-	@test -s .env || { printf '%s\n' "Missing .env; run 'make setup' first."; exit 1; }
-	uv run --env-file .env --extra orchestration modal deploy runners/modal/glm_ocr/app.py
-
-kaggle-runner-deploy: preflight ## Publish the Kaggle OCR runner Dataset with KaggleHub.
-	$(COMPOSE) run --rm --no-deps prefect-deploy \
-		python runners/kaggle/glm_ocr/deploy.py
+emr-jobs-publish: emr-jobs-publish-preflight emr-jobs-package ## Publish one versioned EMR release selected by RELEASE.
+	@EMR_CODE_URI="$$(terraform -chdir=$(TERRAFORM_DIR) output -raw emr_artifacts_uri)/$(RELEASE)"; \
+		EMR_CODE_PARAMETER="$$(terraform -chdir=$(TERRAFORM_DIR) output -raw emr_code_parameter_name)"; \
+		EMR_DEPLOYER_PROFILE="$${EMR_DEPLOYER_AWS_PROFILE:-lakehouse-dev-emr-deployer}"; \
+		aws --profile "$${EMR_DEPLOYER_PROFILE}" s3 sync \
+			$(EMR_BUILD_DIR)/ "$${EMR_CODE_URI}/" --only-show-errors; \
+		aws --profile "$${EMR_DEPLOYER_PROFILE}" ssm put-parameter \
+			--name "$${EMR_CODE_PARAMETER}" \
+			--type String \
+			--value "$${EMR_CODE_URI}" \
+			--overwrite >/dev/null; \
+		printf '%s\n' "Published EMR release $${EMR_CODE_URI}"

@@ -3,40 +3,49 @@ requires = ["uv_build>=0.11.0,<0.12.0"]
 build-backend = "uv_build"
 
 [project]
-name = "mini-lakehouse"
+name = "lakehouse-platform"
 version = "0.3.0"
-description = "A small production-shaped lakehouse built with Polaris, Iceberg, Trino, dbt, and Prefect."
+description = "A production-shaped AWS lakehouse built with S3, Glue, Iceberg, Athena, EMR Serverless, dbt, and Airflow."
 readme = "README.md"
-requires-python = ">=3.13,<3.14"
+requires-python = ">=3.11,<3.13"
 dependencies = [
-    "fsspec>=2025.12",
-    "pyarrow>=23,<26",
+    "boto3>=1.42,<2",
+    "loguru==0.7.3",
     "pydantic>=2.12,<3",
     "pydantic-settings>=2.12,<3",
-    "pyiceberg[pyarrow,s3fs]>=0.10,<0.12",
     "pyyaml>=6.0.3,<7",
-    "requests>=2.32,<3",
-    "trino>=0.336,<1",
-    "urllib3>=2.5,<3",
-    "zstandard>=0.23,<1",
+    "typer==0.27.0",
 ]
 
 [project.optional-dependencies]
-platform = [
-    "apache-polaris>=1.6,<1.7",
-]
 orchestration = [
-    "dbt-core>=1.10,<1.12",
-    "dbt-trino>=1.10,<1.11",
-    "prefect>=3.7,<4",
-    "prefect-dbt>=0.7,<0.8",
-    "kaggle>=2,<3",
-    "kagglehub>=1,<2",
-    "modal>=1.5.3,<1.6",
+    "apache-airflow==3.3.0",
+    "apache-airflow-providers-amazon[aiobotocore]==9.32.0",
+    "apache-airflow-providers-slack==9.10.2",
+    "apache-airflow-providers-smtp==3.0.2",
 ]
-ocr-review = [
+analytics = [
+    "dbt-athena==1.11.0",
+]
+catalog = [
+    "pyarrow>=23,<26",
+    "pyiceberg[glue,pyarrow,s3fs]>=0.10,<0.12",
+]
+ocr = [
+    "document-ocr[providers]",
+]
+document-inspector = [
+    "awswrangler==3.17.0",
+    "document-ocr",
     "streamlit>=1.60,<1.61",
 ]
+
+[tool.uv.sources]
+document-ocr = { workspace = true }
+
+[tool.uv.workspace]
+members = ["ocr"]
+exclude = ["jobs/emr", "ocr/runners/glm_ocr"]
 
 [dependency-groups]
 dev = [
@@ -44,20 +53,16 @@ dev = [
     "pytest>=9,<10",
     "pytest-cov>=7,<8",
     "ruff>=0.14,<0.16",
-    "types-requests>=2.32,<3",
 ]
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"
 testpaths = ["tests"]
-pythonpath = ["."]
-markers = [
-    "integration: requires the local Compose stack",
-]
+pythonpath = [".", "src", "ocr/src", "jobs/emr/src"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py313"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
@@ -66,10 +71,11 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 quote-style = "double"
 
 [tool.pyright]
-pythonVersion = "3.13"
+pythonVersion = "3.12"
 typeCheckingMode = "strict"
-include = ["src", "orchestration", "apps", "tests"]
+include = ["src", "ocr/src", "orchestration", "apps", "tests"]
 exclude = ["dbt", ".venv"]
+extraPaths = [".", "src", "ocr/src", "jobs/emr/src"]
 venvPath = "."
 venv = ".venv"
 reportMissingTypeStubs = false

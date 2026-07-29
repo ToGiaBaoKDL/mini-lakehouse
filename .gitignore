@@ -13,20 +13,31 @@ node_modules/
 
 # Environment Variables
 .env
+.aws/
 
-# Prefect
-.prefect/
+# Airflow
+airflow/logs/
+airflow/config/
+airflow/plugins/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
 
 # dbt
 dbt/**/target/
 dbt/**/dbt_packages/
-dbt/**/dbt_modules/
 dbt/**/logs/
 
 # License files
 *.license
 
 # Local artifacts and planning notes
+dist/
 plans/
 .agents/
 .codex/

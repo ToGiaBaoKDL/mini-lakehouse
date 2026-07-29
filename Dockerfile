@@ -1,6 +1,8 @@
+ARG AIRFLOW_VERSION=3.3.0
+
 FROM ghcr.io/astral-sh/uv:0.11.30 AS uv
 
-FROM python:3.13.14-slim AS base
+FROM python:3.12.13-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
@@ -10,51 +12,49 @@ WORKDIR /app
 
 COPY --from=uv /uv /uvx /bin/
 COPY pyproject.toml uv.lock .python-version ./
+COPY ocr/pyproject.toml ./ocr/pyproject.toml
 
-FROM base AS project-wheel
+FROM base AS platform-wheel
 COPY README.md ./
 COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv build --wheel --out-dir /dist
+    uv build --wheel --package lakehouse-platform --out-dir /dist
 
-FROM base AS runtime-dependencies
+FROM base AS ocr-wheel
+COPY README.md ./
+COPY ocr/src ./ocr/src
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra platform --no-install-project
+    uv build --wheel --package document-ocr --out-dir /dist
 
-FROM runtime-dependencies AS runtime
-COPY --from=project-wheel /dist /dist
-COPY contracts ./contracts
+FROM base AS document-inspector-dependencies
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --python /app/.venv/bin/python --no-deps /dist/*.whl
+    uv sync --frozen --no-dev --extra document-inspector --no-install-project
 
-CMD ["python", "-m", "mini_lakehouse.platform.validate"]
-
-FROM base AS ocr-review-dependencies
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra ocr-review --no-install-project
-
-FROM ocr-review-dependencies AS ocr-review
-COPY --from=project-wheel /dist /dist
+FROM document-inspector-dependencies AS document-inspector
+COPY --from=platform-wheel /dist /dist
+COPY --from=ocr-wheel /dist /dist
 COPY contracts ./contracts
 COPY apps ./apps
 COPY .streamlit ./.streamlit
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --python /app/.venv/bin/python --no-deps /dist/*.whl
+    uv pip install --python /app/.venv/bin/python --no-deps \
+    /dist/lakehouse_platform-*.whl /dist/document_ocr-*.whl
 
-CMD ["streamlit", "run", "apps/ocr_review/app.py"]
+CMD ["streamlit", "run", "apps/document_inspector/app.py"]
 
-FROM base AS orchestration-dependencies
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra orchestration --extra platform --no-install-project
+FROM apache/airflow:${AIRFLOW_VERSION}-python3.12 AS airflow
+ARG AIRFLOW_VERSION
 
-FROM orchestration-dependencies AS orchestration
-COPY --from=project-wheel /dist /dist
-COPY contracts ./contracts
-COPY dbt ./dbt
-COPY orchestration ./orchestration
-COPY runners ./runners
-COPY prefect.yaml ./prefect.yaml
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --python /app/.venv/bin/python --no-deps /dist/*.whl
+ENV PYTHONPATH=/opt/airflow
 
-CMD ["prefect", "--help"]
+COPY --from=platform-wheel --chown=airflow:0 /dist /tmp/dist
+RUN pip install --no-cache-dir \
+    "apache-airflow==${AIRFLOW_VERSION}" \
+    "apache-airflow-providers-amazon[aiobotocore]==9.32.0" \
+    "apache-airflow-providers-slack==9.10.2" \
+    "apache-airflow-providers-smtp==3.0.2" \
+    /tmp/dist/lakehouse_platform-*.whl
+
+COPY --chown=airflow:0 orchestration /opt/airflow/orchestration
+
+CMD ["airflow", "--help"]
