@@ -1,0 +1,15 @@
+"""Jinja values shared by thin Airflow DAG definitions."""
+
+
+def runtime_value(path: str) -> str:
+    """Resolve one SSM-backed Airflow Variable when a task is rendered."""
+    return f"{{{{ var.value.get('{path}') }}}}"
+
+
+def previous_local_date(timezone: str = "Asia/Ho_Chi_Minh") -> str:
+    """Resolve an optional source date for scheduled and manual DAG runs."""
+    return (
+        "{{ params.source_date or "
+        f"(((dag_run.logical_date or dag_run.run_after).in_timezone('{timezone}')) "
+        "- macros.timedelta(days=1)).strftime('%Y-%m-%d') }}"
+    )

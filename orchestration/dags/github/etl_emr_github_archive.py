@@ -1,0 +1,49 @@
+"""Daily GitHub Archive source-to-curated processing on EMR Serverless."""
+
+import pendulum
+from airflow.sdk import DAG, Param
+from airflow.sdk.definitions.param import ParamsDict
+
+from orchestration.callbacks.notifications import dag_failure_callbacks, dag_success_callbacks
+from orchestration.config.templates import previous_local_date
+from orchestration.operators.emr import emr_source_job
+
+SOURCE_DATE = previous_local_date()
+
+with DAG(
+    dag_id="etl_emr_github_archive",
+    description="Load one UTC GitHub Archive day into landing and curated Iceberg tables.",
+    schedule="0 8 * * *",
+    start_date=pendulum.datetime(2026, 1, 1, tz="Asia/Ho_Chi_Minh"),
+    catchup=False,
+    max_active_runs=1,
+    on_failure_callback=dag_failure_callbacks(),
+    on_success_callback=dag_success_callbacks(),
+    params=ParamsDict(
+        {
+            "source_date": Param(
+                default=None,
+                type=["null", "string"],
+                format="date",
+                description="UTC source day; defaults to the previous local calendar day.",
+            )
+        }
+    ),
+    tags=["github", "etl", "emr", "iceberg"],
+) as dag:
+    emr_source_job(
+        task_id="process_github_archive_day",
+        job_name=f"github-archive-{SOURCE_DATE}",
+        entry_point="entrypoints/github_archive.py",
+        entry_point_arguments=[
+            "--source-date",
+            SOURCE_DATE,
+        ],
+        spark_conf={
+            "spark.driver.cores": "2",
+            "spark.driver.memory": "8g",
+            "spark.executor.cores": "4",
+            "spark.executor.memory": "16g",
+            "spark.dynamicAllocation.maxExecutors": "3",
+        },
+    )

@@ -1,156 +1,113 @@
 import ast
 from pathlib import Path
-from typing import cast
 
-import yaml
-
-ORCHESTRATION_DIR = Path("orchestration")
-FLOWS_DIR = ORCHESTRATION_DIR / "flows"
-ALLOWED_JOB_TYPES = {"etl", "el", "tl", "rpt", "mon", "bk", "gov", "test"}
+ALLOWED_JOB_TYPES = {
+    "etl",
+    "rpt",
+    "mon",
+    "man",
+    "bk",
+    "stm",
+    "cat",
+    "gov",
+    "test",
+}
+ALLOWED_WORKER_TYPES = {"emr", "glue", "k8spod", "afw", "mix"}
 
 
 def _dag_files() -> list[Path]:
-    return sorted(path for path in FLOWS_DIR.rglob("*.py") if not path.name.startswith("_"))
+    return sorted(Path("orchestration/dags").rglob("*.py"))
 
 
-def test_each_dag_lives_in_flows_and_uses_the_job_type_convention() -> None:
+def test_dags_are_domain_scoped_and_follow_worker_aware_naming() -> None:
     dag_files = _dag_files()
+    assert {path.as_posix() for path in dag_files} == {
+        "orchestration/dags/arxiv/etl_emr_arxiv_metadata.py",
+        "orchestration/dags/github/etl_emr_github_archive.py",
+    }
+    assert not list(Path("orchestration").rglob("__init__.py"))
+    assert not Path("orchestration/tasks.py").exists()
 
-    assert dag_files
-    assert not list(FLOWS_DIR.rglob("_*.py"))
-    assert not (ORCHESTRATION_DIR / "__init__.py").exists()
-    assert not (ORCHESTRATION_DIR / "tasks.py").exists()
-    assert (ORCHESTRATION_DIR / "runtime.py").is_file()
-
-    for dag_file in dag_files:
-        job_type, separator, description = dag_file.stem.partition("_")
-        assert separator and description
+    for path in dag_files:
+        job_type, worker_type, description = path.stem.split("_", maxsplit=2)
         assert job_type in ALLOWED_JOB_TYPES
-
-    assert not list(FLOWS_DIR.rglob("__init__.py"))
-    assert not (ORCHESTRATION_DIR / "utils" / "__init__.py").exists()
-    assert not (ORCHESTRATION_DIR / "plugins" / "__init__.py").exists()
+        assert worker_type in ALLOWED_WORKER_TYPES
+        assert description
 
 
-def test_prefect_entrypoints_reference_convention_named_dags() -> None:
-    prefect_config = Path("prefect.yaml").read_text(encoding="utf-8")
+def test_daily_source_dags_are_bounded_and_parameterized() -> None:
+    github = Path("orchestration/dags/github/etl_emr_github_archive.py").read_text(encoding="utf-8")
+    arxiv = Path("orchestration/dags/arxiv/etl_emr_arxiv_metadata.py").read_text(encoding="utf-8")
 
-    for dag_file in _dag_files():
-        expected_entrypoint = f"entrypoint: {dag_file}:{dag_file.stem}"
-        assert expected_entrypoint in prefect_config
-
-
-def test_prefect_deployments_reuse_declared_work_pool_and_concurrency_contracts() -> None:
-    payload = yaml.safe_load(Path("prefect.yaml").read_text(encoding="utf-8"))
-    assert isinstance(payload, dict)
-    config = cast(dict[str, object], payload)
-    definitions = cast(dict[str, object], config["definitions"])
-    deployments = cast(list[dict[str, object]], config["deployments"])
-
-    assert {deployment["name"] for deployment in deployments} == {
-        "el_github_archive",
-        "tl_github_analytics",
-        "etl_arxiv_metadata",
-        "etl_arxiv_ocr",
-        "gov_iceberg_maintenance",
-    }
-    assert set(cast(dict[str, object], definitions["work_pools"])) == {
-        "ingestion",
-        "transformation",
-        "processing",
-        "maintenance",
-    }
-    assert all(
-        deployment["concurrency_limit"] == {"limit": 1, "collision_strategy": "ENQUEUE"}
-        for deployment in deployments
-    )
-    ingestion = next(
-        deployment for deployment in deployments if deployment["name"] == "el_github_archive"
-    )
-    transformation = next(
-        deployment for deployment in deployments if deployment["name"] == "tl_github_analytics"
-    )
-    arxiv_metadata = next(
-        deployment for deployment in deployments if deployment["name"] == "etl_arxiv_metadata"
-    )
-    arxiv_ocr = next(
-        deployment for deployment in deployments if deployment["name"] == "etl_arxiv_ocr"
-    )
-    assert ingestion["parameters"] == {"archive_hour": None}
-    assert transformation["parameters"] == {"archive_hour": None}
-    assert arxiv_metadata["parameters"] == {"datestamp_date": None, "refresh": False}
-    assert arxiv_ocr["parameters"] == {
-        "arxiv_ids": None,
-        "verify_pdf": False,
-        "provider": None,
-    }
-    assert all("triggers" not in deployment for deployment in deployments)
-    assert ingestion["schedules"] == [{"cron": "15 * * * *", "timezone": "UTC", "active": True}]
-    assert transformation["schedules"] == [
-        {"cron": "30 * * * *", "timezone": "UTC", "active": True}
-    ]
+    assert 'schedule="0 8 * * *"' in github
+    assert 'schedule="0 10 * * *"' in arxiv
+    for source in (github, arxiv):
+        assert "source_date" in source
+        assert "catchup=False" in source
+        assert "max_active_runs=1" in source
+        assert "dag_failure_callbacks()" in source
+        assert "dag_success_callbacks()" in source
 
 
-def test_scheduled_dbt_pipeline_serializes_only_mart_writes() -> None:
-    source = (ORCHESTRATION_DIR / "utils" / "dbt.py").read_text(encoding="utf-8")
-    assert '["source", "freshness", "--selector", GITHUB_SOURCE_SELECTOR]' in source
-    assert (
-        '["test", "--selector", GITHUB_SOURCE_SELECTOR, "--indirect-selection", "cautious"]'
-        in source
-    )
-    assert (
-        '["run", "--selector", ENGINEERING_MART_SELECTOR, "--threads", '
-        "SERIAL_DBT_WRITE_THREADS]" in source
-    )
-    assert '["test", "--selector", ENGINEERING_MART_SELECTOR]' in source
-    assert '["build"]' not in source
-    assert '"--select"' not in source
+def test_emr_operator_uses_official_deferrable_lifecycle() -> None:
+    source = Path("orchestration/operators/emr.py").read_text(encoding="utf-8")
+    templates = Path("orchestration/config/templates.py").read_text(encoding="utf-8")
+
+    assert "EmrServerlessStartJobOperator" in source
+    assert "deferrable=True" in source
+    assert "cancel_on_kill=True" in source
+    assert "enable_application_ui_links=True" in source
+    assert "client_request_token=" in source
+    assert "dag_run.run_after" in templates
+    assert '"--archives"' in source
+    assert "python.tar.gz#environment" in source
+    assert '"--py-files"' not in source
+    assert "task_failure_callbacks()" in source
+    assert "boto3" not in source
+    assert "sleep(" not in source
+    assert "def emr_source_job(" in source
+    assert "--landing-uri" in source
+    assert "--contracts-uri" in source
+    assert "--catalog-name" in source
+    assert "lakehouse_source_arguments" not in templates
 
 
-def test_scheduled_archive_hour_uses_prefect_scheduled_start_time() -> None:
-    source = (ORCHESTRATION_DIR / "utils" / "scheduling.py").read_text(encoding="utf-8")
+def test_emr_artifacts_are_built_in_the_pinned_runtime() -> None:
+    dockerfile = Path("jobs/emr/Dockerfile").read_text(encoding="utf-8")
 
-    assert "flow_run.scheduled_start_time" in source
-    assert "datetime.now" not in source
+    assert "amazonlinux:2023-minimal@sha256:" in dockerfile
+    assert "dnf install -y python3.11" in dockerfile
+    assert ":latest" not in dockerfile
+    assert "venv-pack" in dockerfile
+    assert "python.tar.gz" in dockerfile
+
+    makefile = Path("Makefile").read_text(encoding="utf-8")
+    assert "jobs/emr/.venv/lib/python" not in makefile
+    assert "--file jobs/emr/Dockerfile" in makefile
+    assert "lakehouse_jobs.zip" not in makefile
 
 
-def test_all_reusable_prefect_tasks_and_flows_have_failure_hooks() -> None:
-    for path in _dag_files():
+def test_emr_jobs_resolve_storage_and_tables_from_contract_bundle() -> None:
+    contracts = Path("jobs/emr/src/lakehouse_jobs/common/contracts.py").read_text(encoding="utf-8")
+    assert "DataContracts.model_validate_json" in contracts
+    assert "StructType" in contracts
+
+    for path in (
+        Path("jobs/emr/entrypoints/github_archive.py"),
+        Path("jobs/emr/entrypoints/arxiv_metadata.py"),
+    ):
         source = path.read_text(encoding="utf-8")
-        module = ast.parse(source)
-        decorators = [
-            decorator
-            for node in module.body
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            for decorator in node.decorator_list
-            if isinstance(decorator, ast.Call)
-            and isinstance(decorator.func, ast.Name)
-            and decorator.func.id in {"flow", "task"}
-        ]
-        assert decorators
-        for decorator in decorators:
-            keywords = {keyword.arg for keyword in decorator.keywords}
-            assert "on_failure" in keywords
+        ast.parse(source)
+        assert "from lakehouse_jobs." in source
+        assert "typer.run(main)" in source
+        assert "CREATE TABLE" not in source
+        assert "CREATE DATABASE" not in source
 
-
-def test_every_dag_flow_has_lifecycle_notification_hooks() -> None:
-    for path in _dag_files():
-        module = ast.parse(path.read_text(encoding="utf-8"))
-        flow_decorators = [
-            decorator
-            for node in module.body
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            for decorator in node.decorator_list
-            if isinstance(decorator, ast.Call)
-            and isinstance(decorator.func, ast.Name)
-            and decorator.func.id == "flow"
-        ]
-        assert len(flow_decorators) == 1
-        keywords = {keyword.arg for keyword in flow_decorators[0].keywords}
-        assert {
-            "on_running",
-            "on_completion",
-            "on_failure",
-            "on_cancellation",
-            "on_crashed",
-        } <= keywords
+    jobs = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in Path("jobs/emr/src/lakehouse_jobs").rglob("*.py")
+    )
+    assert "ContractBundle" not in jobs
+    assert "ProductBinding" not in jobs
+    assert "CREATE TABLE" not in jobs
+    assert "CREATE DATABASE" not in jobs
