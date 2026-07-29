@@ -69,7 +69,7 @@ def run(
         if changed:
             logger.info("Published {} OAI records from {} pages", len(records), len(pages))
         else:
-            logger.info("Landing checkpoint already matches the OAI manifest")
+            logger.info("Landing publication already matches the OAI manifest")
         publish_curated(
             spark,
             catalog_name=catalog_name,

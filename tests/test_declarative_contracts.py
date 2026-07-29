@@ -22,10 +22,26 @@ def test_repository_contracts_form_one_glue_registry() -> None:
 
 
 def test_primary_keys_compile_to_iceberg_identifier_fields() -> None:
-    table = load_contracts().curated_product("arxiv").table("papers")
-    schema = iceberg_schema(table.columns, table.primary_key)
+    contracts = load_contracts()
+    curated = contracts.curated_product("arxiv").table("papers")
+    landing = contracts.source("arxiv").table("oai_records_raw")
 
-    assert schema.identifier_field_ids == [1]
+    assert iceberg_schema(curated.columns, curated.primary_key).identifier_field_ids == [1]
+    assert iceberg_schema(landing.columns, landing.primary_key).identifier_field_ids == [14, 1]
+
+
+def test_arxiv_publication_marker_has_manifest_lineage() -> None:
+    table = load_contracts().source("arxiv").table("oai_publications")
+
+    assert table.primary_key == ("datestamp_date",)
+    assert {column.name for column in table.columns} == {
+        "datestamp_date",
+        "raw_manifest_key",
+        "raw_manifest_sha256",
+        "page_count",
+        "record_count",
+        "published_at",
+    }
 
 
 def test_contract_layout_excludes_cloud_identity_and_maintenance_policy() -> None:

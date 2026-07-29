@@ -9,15 +9,11 @@ contact:
 description: ArXiv article metadata harvested through OAI-PMH.
 raw_subpath: oai
 
-checkpoint:
-  kind: daily_partition
-  field: datestamp_date
-
 tables:
   - key: oai_records_raw
     name: oai_records_raw
-    description: Parsed immutable OAI records for one ArXiv datestamp checkpoint.
-    schema_version: 1
+    description: Parsed immutable OAI records for one ArXiv datestamp day.
+    primary_key: [datestamp_date, oai_identifier]
     columns:
       - {field_id: 1, name: oai_identifier, data_type: string, required: true, description: Stable OAI identifier.}
       - {field_id: 2, name: arxiv_id, data_type: string, required: true, description: ArXiv article identifier.}
@@ -32,7 +28,7 @@ tables:
       - {field_id: 11, name: comments, data_type: string, required: false, description: Author comments when present.}
       - {field_id: 12, name: created_date, data_type: date, required: false, description: Original submission date.}
       - {field_id: 13, name: updated_date, data_type: date, required: false, description: Latest revision date.}
-      - {field_id: 14, name: datestamp_date, data_type: date, required: true, description: OAI record modification checkpoint.}
+      - {field_id: 14, name: datestamp_date, data_type: date, required: true, description: OAI record modification date.}
       - {field_id: 15, name: set_specs, data_type: string, required: false, description: Space-delimited OAI set memberships.}
       - {field_id: 16, name: pdf_url, data_type: string, required: true, description: Canonical ArXiv PDF URL derived from arxiv_id.}
       - {field_id: 17, name: is_deleted, data_type: boolean, required: true, description: OAI deletion tombstone.}
@@ -46,18 +42,17 @@ tables:
         field: datestamp_date
         transform: identity
 
-  - key: oai_checkpoints
-    name: oai_checkpoints
-    description: Successful ArXiv OAI publication checkpoints and raw-object lineage.
-    schema_version: 1
+  - key: oai_publications
+    name: oai_publications
+    description: Successful ArXiv OAI landing publications and manifest lineage.
+    primary_key: [datestamp_date]
     columns:
       - {field_id: 1, name: datestamp_date, data_type: date, required: true, description: Successfully published OAI datestamp day.}
-      - {field_id: 2, name: raw_object_key, data_type: string, required: true, description: Deterministic raw response archive key.}
-      - {field_id: 3, name: raw_object_sha256, data_type: string, required: true, description: Hash of the complete raw response archive.}
+      - {field_id: 2, name: raw_manifest_key, data_type: string, required: true, description: Deterministic raw response manifest key.}
+      - {field_id: 3, name: raw_manifest_sha256, data_type: string, required: true, description: Hash of the raw response manifest.}
       - {field_id: 4, name: page_count, data_type: long, required: true, description: Number of OAI response pages.}
       - {field_id: 5, name: record_count, data_type: long, required: true, description: Number of records published for the day.}
-      - {field_id: 6, name: schema_version, data_type: string, required: true, description: Landing parser schema version.}
-      - {field_id: 7, name: published_at, data_type: timestamptz, required: true, description: Successful publication timestamp.}
+      - {field_id: 6, name: published_at, data_type: timestamptz, required: true, description: Successful publication timestamp.}
     partitioning:
       - field_id: 1000
         field: datestamp_date

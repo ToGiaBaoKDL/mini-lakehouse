@@ -1,4 +1,4 @@
-"""Archive raw OAI pages and atomically publish a landing checkpoint."""
+"""Archive raw OAI pages and publish one complete landing day."""
 
 import gzip
 import hashlib
@@ -69,21 +69,21 @@ def publish(
     published_at: datetime,
 ) -> tuple[str, bool]:
     records_contract = source.table("oai_records_raw")
-    checkpoint_contract = source.table("oai_checkpoints")
+    publication_contract = source.table("oai_publications")
     records_table = spark_identifier(catalog_name, source.table_identifier("oai_records_raw"))
-    checkpoint_table = spark_identifier(
+    publication_table = spark_identifier(
         catalog_name,
-        source.table_identifier("oai_checkpoints"),
+        source.table_identifier("oai_publications"),
     )
     day_filter = F.col("datestamp_date") == F.lit(source_day)
     current = (
-        spark.table(checkpoint_table)
+        spark.table(publication_table)
         .filter(day_filter)
-        .select("raw_object_sha256")
+        .select("raw_manifest_sha256")
         .limit(1)
         .collect()
     )
-    if current and current[0]["raw_object_sha256"] == manifest_sha256:
+    if current and current[0]["raw_manifest_sha256"] == manifest_sha256:
         return records_table, False
 
     spark.createDataFrame(records, spark_schema(records_contract)).writeTo(records_table).overwrite(
@@ -93,14 +93,13 @@ def publish(
         [
             {
                 "datestamp_date": source_day,
-                "raw_object_key": manifest_key,
-                "raw_object_sha256": manifest_sha256,
+                "raw_manifest_key": manifest_key,
+                "raw_manifest_sha256": manifest_sha256,
                 "page_count": page_count,
                 "record_count": len(records),
-                "schema_version": str(records_contract.schema_version),
                 "published_at": published_at,
             }
         ],
-        spark_schema(checkpoint_contract),
-    ).writeTo(checkpoint_table).overwrite(day_filter)
+        spark_schema(publication_contract),
+    ).writeTo(publication_table).overwrite(day_filter)
     return records_table, True

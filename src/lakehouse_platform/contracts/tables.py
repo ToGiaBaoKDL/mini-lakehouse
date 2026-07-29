@@ -12,6 +12,7 @@ from lakehouse_platform.contracts.base import (
 )
 
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_TEMPORAL_PARTITION_TYPES = frozenset({"date", "timestamptz"})
 
 
 def _validate_identifier(value: str) -> None:
@@ -107,4 +108,19 @@ class ManagedIcebergTableContract(ContractModel):
                 f"Table {self.name!r} partitions by unknown columns "
                 f"{sorted(unknown_partition_fields)!r}"
             )
+        column_types = {column.name: column.data_type for column in self.columns}
+        for partition in self.partitioning:
+            data_type = column_types[partition.field]
+            if partition.transform in {"year", "month", "day"} and (
+                data_type not in _TEMPORAL_PARTITION_TYPES
+            ):
+                raise ValueError(
+                    f"Table {self.name!r} cannot apply {partition.transform!r} "
+                    f"to {data_type!r} column {partition.field!r}"
+                )
+            if partition.transform == "hour" and data_type != "timestamptz":
+                raise ValueError(
+                    f"Table {self.name!r} cannot apply 'hour' to "
+                    f"{data_type!r} column {partition.field!r}"
+                )
         return self

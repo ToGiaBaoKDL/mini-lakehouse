@@ -8,15 +8,11 @@ contact:
   email: bao.to@timo.vn
 description: Public GitHub events published as immutable hourly archives.
 
-checkpoint:
-  kind: hourly_partition
-  field: source_hour
-
 tables:
   - key: events_raw
     name: events_raw
-    description: Parsed immutable GitHub Archive events for one source checkpoint hour.
-    schema_version: 1
+    description: Parsed immutable GitHub Archive events with stable source lineage.
+    primary_key: [event_id]
     columns:
       - {field_id: 1, name: event_id, data_type: string, required: true, description: Stable GitHub event identifier.}
       - {field_id: 2, name: event_type, data_type: string, required: true, description: GitHub event type.}
@@ -28,7 +24,7 @@ tables:
       - {field_id: 8, name: is_public, data_type: boolean, required: true, description: Whether GitHub marked the event public.}
       - {field_id: 9, name: occurred_at, data_type: timestamptz, required: true, description: Event occurrence timestamp.}
       - {field_id: 10, name: source_file, data_type: string, required: true, description: Immutable GitHub Archive filename.}
-      - {field_id: 11, name: source_hour, data_type: timestamptz, required: true, description: UTC archive checkpoint hour.}
+      - {field_id: 11, name: source_hour, data_type: timestamptz, required: true, description: UTC archive hour.}
       - {field_id: 12, name: ingested_at, data_type: timestamptz, required: true, description: Landing ingestion timestamp.}
       - {field_id: 13, name: raw_event_json, data_type: string, required: true, description: Original immutable event JSON.}
     partitioning:

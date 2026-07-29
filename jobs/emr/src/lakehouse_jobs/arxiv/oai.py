@@ -97,6 +97,7 @@ def parse_records(
     ingested_at: datetime,
 ) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
+    identifiers: set[str] = set()
     for page, (raw_object_key, raw_object_sha256) in zip(
         pages,
         page_objects,
@@ -111,6 +112,9 @@ def parse_records(
             datestamp = element_date(header.find(f"{{{OAI_NAMESPACE}}}datestamp"))
             if oai_identifier is None or datestamp != source_day:
                 raise RuntimeError("OAI returned a record outside the requested datestamp day")
+            if oai_identifier in identifiers:
+                raise RuntimeError(f"OAI returned duplicate identifier {oai_identifier!r}")
+            identifiers.add(oai_identifier)
             wrapper = record.find(f"{{{OAI_NAMESPACE}}}metadata")
             metadata = wrapper.find(f"{{{ARXIV_NAMESPACE}}}arXiv") if wrapper is not None else None
             arxiv_id = metadata_value(metadata, "id")

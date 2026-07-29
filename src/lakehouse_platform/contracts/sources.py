@@ -9,25 +9,7 @@ from lakehouse_platform.contracts.base import (
     Identifier,
     validate_relative_prefix,
 )
-from lakehouse_platform.contracts.tables import (
-    ManagedIcebergTableContract,
-    TableIdentifier,
-)
-
-
-class CheckpointContract(ContractModel):
-    kind: Literal[
-        "hourly_partition",
-        "daily_partition",
-        "timestamp",
-        "cursor",
-        "offset",
-    ]
-    field: Identifier
-
-
-class SourceTableContract(ManagedIcebergTableContract):
-    schema_version: int = Field(ge=1)
+from lakehouse_platform.contracts.tables import ManagedIcebergTableContract, TableIdentifier
 
 
 class SourceContract(ContractModel):
@@ -39,8 +21,7 @@ class SourceContract(ContractModel):
     contact: ContactContract
     description: str = Field(min_length=1)
     raw_subpath: str | None = None
-    checkpoint: CheckpointContract
-    tables: tuple[SourceTableContract, ...] = Field(min_length=1)
+    tables: tuple[ManagedIcebergTableContract, ...] = Field(min_length=1)
 
     @property
     def storage_prefix(self) -> str:
@@ -63,7 +44,7 @@ class SourceContract(ContractModel):
             raise ValueError(f"Source {self.name!r} table keys and names must be unique")
         return self
 
-    def table(self, key: str) -> SourceTableContract:
+    def table(self, key: str) -> ManagedIcebergTableContract:
         try:
             return next(table for table in self.tables if table.key == key)
         except StopIteration as error:

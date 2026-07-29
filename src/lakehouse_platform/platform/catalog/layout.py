@@ -36,7 +36,7 @@ def managed_tables(
     for source in contracts.sources:
         for table in source.tables:
             identifier = source.table_identifier(table.key)
-            location = f"{landing_uri.rstrip('/')}/{source.storage_prefix}/tables/{table.key}"
+            location = f"{landing_uri.rstrip('/')}/{source.storage_prefix}/tables/{table.name}"
             if location in seen_locations:
                 raise ValueError("Managed Iceberg table locations must be unique")
             seen_locations.add(location)
@@ -44,7 +44,7 @@ def managed_tables(
     for product in contracts.curated:
         for table in product.tables:
             identifier = product.table_identifier(table.key)
-            location = f"{curated_uri.rstrip('/')}/{product.name}/tables/{table.key}"
+            location = f"{curated_uri.rstrip('/')}/{product.name}/tables/{table.name}"
             if location in seen_locations:
                 raise ValueError("Managed Iceberg table locations must be unique")
             seen_locations.add(location)

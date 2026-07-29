@@ -37,6 +37,33 @@ def test_table_locations_separate_raw_transport_and_iceberg_storage() -> None:
     assert bindings[("curated_github", "events")] == ("s3://test-curated/github/tables/events")
 
 
+def test_table_location_uses_physical_name_instead_of_contract_lookup_key() -> None:
+    contracts = load_contracts()
+    source = contracts.source("github_archive")
+    table = source.table("events_raw").model_copy(update={"key": "events"})
+    renamed_source = source.model_copy(update={"tables": (table,)})
+    updated_contracts = contracts.model_copy(
+        update={
+            "sources": tuple(
+                renamed_source if item.name == source.name else item for item in contracts.sources
+            )
+        }
+    )
+
+    identifier, location, _ = next(
+        binding
+        for binding in managed_tables(
+            updated_contracts,
+            landing_uri="s3://test-landing",
+            curated_uri="s3://test-curated",
+        )
+        if binding[0].iceberg == ("landing_github_archive", "events_raw")
+    )
+
+    assert identifier.name == "events_raw"
+    assert location.endswith("/tables/events_raw")
+
+
 def test_data_jobs_do_not_create_or_evolve_catalog_objects() -> None:
     forbidden = (
         "CREATE TABLE",

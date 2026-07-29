@@ -1,8 +1,9 @@
 """Orchestrate one GitHub Archive source-to-curated job."""
 
-from datetime import date
+from datetime import date, datetime, time, timedelta
 
 from loguru import logger
+from pyspark.sql import functions as F
 
 from lakehouse_jobs.common.contracts import load_contracts, spark_identifier
 from lakehouse_jobs.common.s3 import split_uri
@@ -20,7 +21,7 @@ def run(
     catalog_name: str,
     capture_workers: int,
 ) -> None:
-    date.fromisoformat(source_date)
+    source_day = date.fromisoformat(source_date)
     split_uri(landing_uri)
     split_uri(contracts_uri)
     configure_logging("github_archive", source_date)
@@ -46,7 +47,11 @@ def run(
         logger.info("Captured all {} GitHub Archive hours", len(captures))
         landing = build_frame(spark, captures)
         logger.info("Validated {} landing events", landing.count())
-        landing.writeTo(landing_table).overwritePartitions()
+        day_start = datetime.combine(source_day, time.min)
+        day_end = day_start + timedelta(days=1)
+        landing.writeTo(landing_table).overwrite(
+            (F.col("source_hour") >= F.lit(day_start)) & (F.col("source_hour") < F.lit(day_end))
+        )
         publish(
             spark,
             catalog_name=catalog_name,

@@ -30,8 +30,8 @@ tables:
       - {field_id: 14, name: pull_request_number, data_type: long, required: false, description: Pull request number when present.}
       - {field_id: 15, name: comment_id, data_type: long, required: false, description: Comment identifier when present.}
       - {field_id: 16, name: source_file, data_type: string, required: true, description: Source archive filename.}
-      - {field_id: 17, name: source_hour, data_type: timestamptz, required: true, description: Source archive checkpoint hour.}
-      - {field_id: 18, name: ingested_at, data_type: timestamptz, required: true, description: Landing ingestion timestamp used to break ties within a source checkpoint.}
+      - {field_id: 17, name: source_hour, data_type: timestamptz, required: true, description: Source archive hour.}
+      - {field_id: 18, name: ingested_at, data_type: timestamptz, required: true, description: Landing ingestion timestamp used to break ties within a source archive hour.}
       - {field_id: 19, name: curated_at, data_type: timestamptz, required: true, description: Timestamp of the latest curated mutation.}
     partitioning:
       - field_id: 1000
