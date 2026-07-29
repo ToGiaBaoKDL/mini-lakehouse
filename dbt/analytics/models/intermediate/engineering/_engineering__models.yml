@@ -3,3 +3,64 @@ version: 2
 models:
   - name: int_engineering__events_classified
     description: GitHub events with reusable Engineering activity classifications.
+    columns:
+      - name: event_id
+        description: Stable GitHub event identifier.
+        data_type: varchar
+      - name: event_type
+        description: GitHub event type.
+        data_type: varchar
+      - name: actor_id
+        description: GitHub actor identifier when present.
+        data_type: bigint
+      - name: actor_login
+        description: Normalized actor login.
+        data_type: varchar
+      - name: repository_id
+        description: GitHub repository identifier when present.
+        data_type: bigint
+      - name: repository_name
+        description: Normalized repository full name.
+        data_type: varchar
+      - name: is_public
+        description: Whether GitHub marked the event public.
+        data_type: boolean
+      - name: occurred_at
+        description: Event occurrence timestamp.
+        data_type: timestamp
+      - name: event_date_utc
+        description: UTC event calendar date.
+        data_type: date
+      - name: push_commit_count
+        description: Commit count reported by a push event.
+        data_type: bigint
+      - name: event_action
+        description: Payload action when present.
+        data_type: varchar
+      - name: ref_type
+        description: Git reference type when present.
+        data_type: varchar
+      - name: issue_number
+        description: Issue number when present.
+        data_type: bigint
+      - name: pull_request_number
+        description: Pull request number when present.
+        data_type: bigint
+      - name: comment_id
+        description: Comment identifier when present.
+        data_type: bigint
+      - name: source_hour
+        description: UTC archive hour used for source freshness and lineage.
+        data_type: timestamp
+      - name: is_push_event
+        description: Whether the event contributes to push activity.
+        data_type: boolean
+      - name: is_pull_request_event
+        description: Whether the event contributes to pull-request activity.
+        data_type: boolean
+      - name: is_issue_event
+        description: Whether the event contributes to issue activity.
+        data_type: boolean
+      - name: is_issue_comment_event
+        description: Whether the event contributes to issue-comment activity.
+        data_type: boolean

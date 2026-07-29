@@ -20,7 +20,7 @@ models:
       relation: true
       columns: true
     +meta:
-      owner: analytics-engineering
+      owner: engineering-analytics
       contact: bao.to@timo.vn
 
     staging:

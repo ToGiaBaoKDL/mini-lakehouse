@@ -6,11 +6,81 @@ models:
     columns:
       - name: event_id
         description: Stable GitHub event identifier.
+        data_type: varchar
+      - name: event_type
+        description: GitHub event type.
+        data_type: varchar
+      - name: actor_id
+        description: GitHub actor identifier when present.
+        data_type: bigint
+      - name: actor_login
+        description: Normalized actor login.
+        data_type: varchar
+      - name: repository_id
+        description: GitHub repository identifier when present.
+        data_type: bigint
+      - name: repository_name
+        description: Normalized repository full name.
+        data_type: varchar
+      - name: is_public
+        description: Whether GitHub marked the event public.
+        data_type: boolean
+      - name: occurred_at
+        description: Event occurrence timestamp.
+        data_type: timestamp
       - name: event_date_utc
         description: UTC calendar date derived during curation.
+        data_type: date
+      - name: push_commit_count
+        description: Commit count reported by a push event.
+        data_type: bigint
+      - name: event_action
+        description: Payload action when present.
+        data_type: varchar
+      - name: ref_type
+        description: Git reference type when present.
+        data_type: varchar
+      - name: issue_number
+        description: Issue number when present.
+        data_type: bigint
+      - name: pull_request_number
+        description: Pull request number when present.
+        data_type: bigint
+      - name: comment_id
+        description: Comment identifier when present.
+        data_type: bigint
+      - name: source_hour
+        description: UTC archive hour used for source freshness and lineage.
+        data_type: timestamp
 
   - name: stg_github__actors_current
     description: Analytics-facing projection of current GitHub actor attributes.
+    columns:
+      - name: actor_id
+        description: Stable GitHub actor identifier.
+        data_type: bigint
+      - name: actor_login
+        description: Latest observed actor login.
+        data_type: varchar
+      - name: is_bot
+        description: Heuristic bot classification.
+        data_type: boolean
+      - name: last_observed_at
+        description: Latest event timestamp for this actor.
+        data_type: timestamp
 
   - name: stg_github__repositories_current
     description: Analytics-facing projection of current GitHub repository attributes.
+    columns:
+      - name: repository_id
+        description: Stable GitHub repository identifier.
+        data_type: bigint
+      - name: repository_name
+        description: Latest observed repository full name.
+        data_type: varchar
+      - name: repository_owner
+        description: Owner component of the repository full name.
+        data_type: varchar
+      - name: last_observed_at
+        description: Latest event timestamp for this repository.
+        data_type: timestamp
