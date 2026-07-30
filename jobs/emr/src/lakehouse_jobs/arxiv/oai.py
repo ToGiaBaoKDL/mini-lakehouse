@@ -122,7 +122,7 @@ def parse_records(
                 if not oai_identifier.startswith(OAI_IDENTIFIER_PREFIX):
                     raise RuntimeError(f"Unexpected OAI identifier: {oai_identifier}")
                 arxiv_id = oai_identifier.removeprefix(OAI_IDENTIFIER_PREFIX)
-            categories = (metadata_value(metadata, "categories") or "").split()
+            categories = list(dict.fromkeys((metadata_value(metadata, "categories") or "").split()))
             record_xml = ElementTree.tostring(record, encoding="utf-8")
             records.append(
                 {

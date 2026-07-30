@@ -63,6 +63,8 @@ def test_emr_operator_uses_official_deferrable_lifecycle() -> None:
     assert "python.tar.gz#environment" in source
     assert '"--py-files"' not in source
     assert "task_failure_callbacks()" in source
+    assert 'config={"executionTimeoutMinutes": EMR_JOB_TIMEOUT_MINUTES}' in source
+    assert "execution_timeout=timedelta(" in source
     assert "boto3" not in source
     assert "sleep(" not in source
     assert "def emr_source_job(" in source
@@ -85,6 +87,21 @@ def test_emr_artifacts_are_built_in_the_pinned_runtime() -> None:
     assert "jobs/emr/.venv/lib/python" not in makefile
     assert "--file jobs/emr/Dockerfile" in makefile
     assert "lakehouse_jobs.zip" not in makefile
+
+
+def test_emr_artifact_sources_are_python_311_compatible() -> None:
+    runtime_sources = (
+        *Path("src/lakehouse_platform").rglob("*.py"),
+        *Path("jobs/emr/src").rglob("*.py"),
+        *Path("jobs/emr/entrypoints").glob("*.py"),
+    )
+
+    for path in runtime_sources:
+        ast.parse(
+            path.read_text(encoding="utf-8"),
+            filename=str(path),
+            feature_version=(3, 11),
+        )
 
 
 def test_emr_jobs_resolve_storage_and_tables_from_contract_bundle() -> None:

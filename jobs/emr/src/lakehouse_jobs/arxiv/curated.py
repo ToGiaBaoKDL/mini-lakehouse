@@ -51,7 +51,9 @@ def publish(
            )
         """
     )
-    if spark.table("arxiv_pending").limit(1).count() == 0:
+    spark.catalog.cacheTable("arxiv_pending")
+    if not spark.table("arxiv_pending").take(1):
+        spark.catalog.uncacheTable("arxiv_pending")
         return
     spark.sql(
         f"""
@@ -93,10 +95,10 @@ def publish(
     ).writeTo(authors).append()
     spark.sql(
         """
-        SELECT
+        SELECT DISTINCT
             source.arxiv_id,
-            category,
-            category = source.primary_category AS is_primary,
+            trim(category) AS category,
+            trim(category) = source.primary_category AS is_primary,
             source.datestamp_date AS oai_datestamp,
             current_timestamp() AS curated_at
         FROM arxiv_pending source
@@ -128,7 +130,54 @@ def publish(
             FROM arxiv_pending
         ) source
         ON target.arxiv_id = source.arxiv_id
-        WHEN MATCHED THEN UPDATE SET *
-        WHEN NOT MATCHED THEN INSERT *
+        WHEN MATCHED THEN UPDATE SET
+            oai_identifier = source.oai_identifier,
+            title = source.title,
+            abstract = source.abstract,
+            license_uri = source.license_uri,
+            doi = source.doi,
+            journal_ref = source.journal_ref,
+            comments = source.comments,
+            created_date = source.created_date,
+            updated_date = source.updated_date,
+            oai_datestamp = source.oai_datestamp,
+            pdf_url = source.pdf_url,
+            is_deleted = source.is_deleted,
+            source_record_sha256 = source.source_record_sha256,
+            curated_at = source.curated_at
+        WHEN NOT MATCHED THEN INSERT (
+            arxiv_id,
+            oai_identifier,
+            title,
+            abstract,
+            license_uri,
+            doi,
+            journal_ref,
+            comments,
+            created_date,
+            updated_date,
+            oai_datestamp,
+            pdf_url,
+            is_deleted,
+            source_record_sha256,
+            curated_at
+        ) VALUES (
+            source.arxiv_id,
+            source.oai_identifier,
+            source.title,
+            source.abstract,
+            source.license_uri,
+            source.doi,
+            source.journal_ref,
+            source.comments,
+            source.created_date,
+            source.updated_date,
+            source.oai_datestamp,
+            source.pdf_url,
+            source.is_deleted,
+            source.source_record_sha256,
+            source.curated_at
+        )
         """
     )
+    spark.catalog.uncacheTable("arxiv_pending")

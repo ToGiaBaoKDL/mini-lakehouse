@@ -9,7 +9,6 @@ from lakehouse_jobs.arxiv.landing import archive_pages
 from lakehouse_jobs.arxiv.landing import publish as publish_landing
 from lakehouse_jobs.arxiv.oai import harvest, parse_records
 from lakehouse_jobs.common.contracts import load_contracts, spark_identifier
-from lakehouse_jobs.common.s3 import split_uri
 from lakehouse_jobs.common.spark import configure_logging, require_tables, session
 
 
@@ -22,8 +21,6 @@ def run(
     max_pages: int,
 ) -> None:
     source_day = date.fromisoformat(source_date)
-    split_uri(landing_uri)
-    split_uri(contracts_uri)
     configure_logging("arxiv_metadata", source_date)
 
     contracts = load_contracts(contracts_uri)

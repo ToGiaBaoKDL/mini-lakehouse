@@ -1,19 +1,21 @@
 """Shared primitives for declarative data contracts."""
 
 import re
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
-type Identifier = Annotated[
+Identifier: TypeAlias = Annotated[  # noqa: UP040
     str,
     StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$"),
 ]
-type ContractName = Annotated[
+ContractName: TypeAlias = Annotated[  # noqa: UP040
     str,
     StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$"),
 ]
-type LogicalType = Literal["string", "long", "boolean", "timestamptz", "date"]
+LogicalType: TypeAlias = Literal[  # noqa: UP040
+    "string", "long", "boolean", "timestamptz", "date"
+]
 
 _SAFE_PREFIX = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_./=-]*$")
 

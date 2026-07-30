@@ -1,6 +1,7 @@
 """Resolve contract-owned Glue objects to deterministic S3 locations."""
 
 from collections.abc import Iterator
+from typing import TypeAlias
 
 from lakehouse_platform.contracts import (
     DataContracts,
@@ -19,7 +20,7 @@ def namespace_properties(
     }
 
 
-type ManagedTableBinding = tuple[
+ManagedTableBinding: TypeAlias = tuple[  # noqa: UP040
     TableIdentifier,
     str,
     ManagedIcebergTableContract,

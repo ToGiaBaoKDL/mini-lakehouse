@@ -1,6 +1,7 @@
 import re
 from functools import lru_cache
 from pathlib import Path
+from typing import TypeVar
 
 from pydantic import BaseModel, TypeAdapter
 
@@ -9,6 +10,8 @@ from lakehouse_platform.contracts.curated import CuratedProductContract
 from lakehouse_platform.contracts.domains import DomainContract
 from lakehouse_platform.contracts.registry import DataContracts
 from lakehouse_platform.contracts.sources import SourceContract
+
+ContractT = TypeVar("ContractT", bound=BaseModel)
 
 _SECRET_KEY_PATTERN = re.compile(
     r"(?:^|[-_])(password|secret|token|credential|access[-_]?key|client[-_]?secret)(?:$|[-_])",
@@ -37,7 +40,7 @@ def _read_contract(path: Path) -> dict[str, object]:
     return payload
 
 
-def _load_collection[ContractT: BaseModel](
+def _load_collection(  # noqa: UP047
     root: Path,
     folder: str,
     adapter: TypeAdapter[ContractT],

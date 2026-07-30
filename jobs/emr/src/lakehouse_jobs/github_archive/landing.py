@@ -4,6 +4,40 @@ from datetime import datetime
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
+from pyspark.sql.types import (
+    BooleanType,
+    LongType,
+    StringType,
+    StructField,
+    StructType,
+)
+
+EVENT_SCHEMA = StructType(
+    [
+        StructField("id", StringType()),
+        StructField("type", StringType()),
+        StructField(
+            "actor",
+            StructType(
+                [
+                    StructField("id", LongType()),
+                    StructField("login", StringType()),
+                ]
+            ),
+        ),
+        StructField(
+            "repo",
+            StructType(
+                [
+                    StructField("id", LongType()),
+                    StructField("name", StringType()),
+                ]
+            ),
+        ),
+        StructField("public", BooleanType()),
+        StructField("created_at", StringType()),
+    ]
+)
 
 
 def build_frame(
@@ -19,20 +53,21 @@ def build_frame(
         spark.read.text(paths)
         .withColumn("_input_file", F.input_file_name())
         .withColumn("source_file", F.regexp_extract(F.col("_input_file"), r"([^/]+)$", 1))
+        .withColumn("_event", F.from_json("value", EVENT_SCHEMA))
     )
     source_date = F.regexp_extract(F.col("source_file"), r"^(\d{4}-\d{2}-\d{2})-", 1)
     source_hour = F.regexp_extract(F.col("source_file"), r"-(\d{1,2})\.json\.gz$", 1)
     events = (
         raw.select(
-            F.get_json_object("value", "$.id").alias("event_id"),
-            F.get_json_object("value", "$.type").alias("event_type"),
-            F.get_json_object("value", "$.actor.id").cast("long").alias("actor_id"),
-            F.get_json_object("value", "$.actor.login").alias("actor_login"),
-            F.get_json_object("value", "$.repo.id").cast("long").alias("repository_id"),
-            F.get_json_object("value", "$.repo.name").alias("repository_name"),
+            F.col("_event.id").alias("event_id"),
+            F.col("_event.type").alias("event_type"),
+            F.col("_event.actor.id").alias("actor_id"),
+            F.col("_event.actor.login").alias("actor_login"),
+            F.col("_event.repo.id").alias("repository_id"),
+            F.col("_event.repo.name").alias("repository_name"),
             F.get_json_object("value", "$.payload").alias("payload_json"),
-            F.get_json_object("value", "$.public").cast("boolean").alias("is_public"),
-            F.to_timestamp(F.get_json_object("value", "$.created_at")).alias("occurred_at"),
+            F.col("_event.public").alias("is_public"),
+            F.to_timestamp(F.col("_event.created_at")).alias("occurred_at"),
             F.col("source_file"),
             F.to_timestamp(
                 F.concat(
@@ -65,10 +100,13 @@ def build_frame(
     invalid = events.filter(
         F.col("event_id").isNull()
         | F.col("event_type").isNull()
+        | F.col("payload_json").isNull()
+        | F.col("is_public").isNull()
         | F.col("occurred_at").isNull()
         | F.col("source_hour").isNull()
     ).count()
     if invalid:
+        events.unpersist()
         raise RuntimeError(f"GitHub Archive contains {invalid} invalid required records")
     duplicate = (
         events.groupBy("event_id")
@@ -79,6 +117,7 @@ def build_frame(
         .collect()
     )
     if duplicate:
+        events.unpersist()
         raise RuntimeError(
             "GitHub Archive violates the event_id merge key: "
             f"{duplicate[0]['event_id']} occurs {duplicate[0]['count']} times"

@@ -9,6 +9,9 @@ from airflow.providers.amazon.aws.operators.emr import EmrServerlessStartJobOper
 from orchestration.callbacks.notifications import task_failure_callbacks
 from orchestration.config.templates import runtime_value
 
+EMR_JOB_TIMEOUT_MINUTES = 120
+AIRFLOW_TASK_TIMEOUT_MINUTES = 130
+
 
 def emr_source_job(
     *,
@@ -56,6 +59,7 @@ def emr_source_job(
                 "sparkSubmitParameters": submit_parameters,
             }
         },
+        config={"executionTimeoutMinutes": EMR_JOB_TIMEOUT_MINUTES},
         aws_conn_id="aws_default",
         client_request_token=(
             "{{ dag.dag_id[:28] }}-"
@@ -67,7 +71,8 @@ def emr_source_job(
         cancel_on_kill=True,
         retries=2,
         retry_delay=timedelta(minutes=5),
+        execution_timeout=timedelta(minutes=AIRFLOW_TASK_TIMEOUT_MINUTES),
         waiter_delay=30,
-        waiter_max_attempts=240,
+        waiter_max_attempts=AIRFLOW_TASK_TIMEOUT_MINUTES * 2,
         on_failure_callback=task_failure_callbacks(),
     )

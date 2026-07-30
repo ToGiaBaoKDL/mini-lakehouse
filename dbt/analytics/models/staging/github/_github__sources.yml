@@ -99,6 +99,9 @@ sources:
           - name: curated_at
             description: Timestamp of the latest curated mutation.
             data_type: timestamp
+          - name: last_event_id
+            description: Event ID used as the deterministic observation tie-breaker.
+            data_type: varchar
 
       - name: repositories_current
         description: Latest observed GitHub repository attributes at one row per repository ID.
@@ -119,3 +122,6 @@ sources:
           - name: curated_at
             description: Timestamp of the latest curated mutation.
             data_type: timestamp
+          - name: last_event_id
+            description: Event ID used as the deterministic observation tie-breaker.
+            data_type: varchar

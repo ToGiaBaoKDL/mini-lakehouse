@@ -35,7 +35,7 @@ def test_arxiv_parser_preserves_regular_records_and_deletion_tombstones() -> Non
           <created>2024-01-01</created>
           <title> Example   paper </title>
           <abstract> Example abstract </abstract>
-          <categories>cs.LG cs.AI</categories>
+          <categories>cs.LG cs.AI cs.LG</categories>
           <authors>
             <author><keyname>Doe</keyname><forenames>Jane</forenames></author>
           </authors>
@@ -62,6 +62,7 @@ def test_arxiv_parser_preserves_regular_records_and_deletion_tombstones() -> Non
 
     assert [record["arxiv_id"] for record in records] == ["2401.00001", "2401.00002"]
     assert records[0]["title"] == "Example paper"
+    assert records[0]["categories"] == "cs.LG cs.AI"
     assert records[0]["primary_category"] == "cs.LG"
     assert records[0]["is_deleted"] is False
     assert records[1]["is_deleted"] is True
@@ -98,3 +99,39 @@ def test_github_landing_replay_uses_explicit_day_overwrite() -> None:
     assert ".overwritePartitions()" not in source
     assert ".writeTo(landing_table).overwrite(" in source
     assert 'F.col("source_hour")' in source
+
+
+def test_github_landing_parses_once_and_releases_its_cache() -> None:
+    landing = Path("jobs/emr/src/lakehouse_jobs/github_archive/landing.py").read_text()
+    job = Path("jobs/emr/src/lakehouse_jobs/github_archive/job.py").read_text()
+
+    assert landing.count("F.from_json(") == 1
+    assert landing.count('F.get_json_object("value"') == 1
+    assert "landing.count()" not in job
+    assert "landing.unpersist()" in job
+
+
+def test_github_current_snapshots_use_a_stable_complete_winner_key() -> None:
+    source = Path("jobs/emr/src/lakehouse_jobs/github_archive/curated.py").read_text()
+
+    assert source.count("struct(occurred_at, event_id)") == 2
+    assert source.count("source.last_observed_at, source.last_event_id") == 2
+    assert source.count("target.last_observed_at, target.last_event_id") == 2
+    assert source.count("last_event_id = source.last_event_id") == 2
+    assert "UPDATE SET *" not in source
+    assert "INSERT *" not in source
+
+
+def test_arxiv_child_replacement_is_unique_and_retry_safe() -> None:
+    source = Path("jobs/emr/src/lakehouse_jobs/arxiv/curated.py").read_text()
+    delete_authors = source.index("MERGE INTO {authors}")
+    append_authors = source.index(".writeTo(authors).append()")
+    delete_categories = source.index("MERGE INTO {categories}")
+    append_categories = source.index(".writeTo(categories).append()")
+    merge_papers = source.index("MERGE INTO {papers}")
+
+    assert delete_authors < append_authors < merge_papers
+    assert delete_categories < append_categories < merge_papers
+    assert "SELECT DISTINCT" in source[source.index(".writeTo(authors)") : append_categories]
+    assert "UPDATE SET *" not in source
+    assert "INSERT *" not in source

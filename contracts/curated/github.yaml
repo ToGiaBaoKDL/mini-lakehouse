@@ -48,6 +48,7 @@ tables:
       - {field_id: 3, name: is_bot, data_type: boolean, required: true, description: Heuristic bot classification.}
       - {field_id: 4, name: last_observed_at, data_type: timestamptz, required: true, description: Latest event timestamp for this actor.}
       - {field_id: 5, name: curated_at, data_type: timestamptz, required: true, description: Timestamp of the latest curated mutation.}
+      - {field_id: 6, name: last_event_id, data_type: string, required: true, description: Event ID used as the deterministic observation tie-breaker.}
 
   - key: repositories_current
     name: repositories_current
@@ -59,3 +60,4 @@ tables:
       - {field_id: 3, name: repository_owner, data_type: string, required: false, description: Owner component of the repository full name.}
       - {field_id: 4, name: last_observed_at, data_type: timestamptz, required: true, description: Latest event timestamp for this repository.}
       - {field_id: 5, name: curated_at, data_type: timestamptz, required: true, description: Timestamp of the latest curated mutation.}
+      - {field_id: 6, name: last_event_id, data_type: string, required: true, description: Event ID used as the deterministic observation tie-breaker.}
