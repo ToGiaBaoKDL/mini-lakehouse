@@ -1,6 +1,6 @@
 resource "aws_iam_role" "airflow" {
   name               = "${var.name_prefix}-airflow"
-  assume_role_policy = data.aws_iam_policy_document.operator_trust.json
+  assume_role_policy = data.aws_iam_policy_document.operator_trust["airflow"].json
   tags               = var.tags
 }
 

@@ -6,7 +6,12 @@ document_inspector_access = {
 alert_email   = "data-platform@example.com"
 slack_channel = "#data-platform-alerts"
 
-# Use explicit IAM Identity Center or operator roles.
-trusted_principal_arns = [
-  "arn:aws:iam::123456789012:role/Developer",
-]
+# A single developer role may assume every workload in dev. Use distinct
+# service and operator identities when the workloads run independently.
+trusted_principals = {
+  airflow            = ["arn:aws:iam::123456789012:role/Developer"]
+  catalog_admin      = ["arn:aws:iam::123456789012:role/Developer"]
+  dbt_transformer    = ["arn:aws:iam::123456789012:role/Developer"]
+  document_inspector = ["arn:aws:iam::123456789012:role/Developer"]
+  emr_deployer       = ["arn:aws:iam::123456789012:role/Developer"]
+}

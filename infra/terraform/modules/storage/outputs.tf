@@ -1,11 +1,14 @@
 output "bucket_names" {
-  value = { for name, bucket in aws_s3_bucket.this : name => bucket.id }
+  description = "S3 bucket names keyed by logical storage tier."
+  value       = { for name, bucket in aws_s3_bucket.this : name => bucket.id }
 }
 
 output "bucket_arns" {
-  value = { for name, bucket in aws_s3_bucket.this : name => bucket.arn }
+  description = "S3 bucket ARNs keyed by logical storage tier."
+  value       = { for name, bucket in aws_s3_bucket.this : name => bucket.arn }
 }
 
 output "kms_key_arn" {
-  value = aws_kms_key.lakehouse.arn
+  description = "Customer-managed KMS key used by lakehouse data buckets."
+  value       = aws_kms_key.lakehouse.arn
 }

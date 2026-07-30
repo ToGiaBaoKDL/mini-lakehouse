@@ -43,6 +43,7 @@ make terraform-apply
 ```
 
 Review every plan. Populate Secrets Manager values separately; Terraform deliberately creates no
-secret versions. `trusted_principal_arns` is required and must contain explicit IAM Identity Center
-or operator role ARNs. Dev workload roles use the `tgbao-dev-<workload>` convention; the
-`emr-deployer` role alone publishes immutable job artifacts and advances the SSM release pointer.
+secret versions. `trusted_principals` requires explicit principals per workload; dev may reuse one
+developer role, while independently deployed workloads should use distinct identities. Dev roles
+use the `tgbao-dev-<workload>` convention; the `emr-deployer` role alone publishes immutable job
+artifacts and advances the SSM release pointer.

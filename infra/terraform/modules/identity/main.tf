@@ -1,11 +1,13 @@
 data "aws_partition" "current" {}
 
 data "aws_iam_policy_document" "operator_trust" {
+  for_each = var.trusted_principals
+
   statement {
     actions = ["sts:AssumeRole"]
     principals {
       type        = "AWS"
-      identifiers = var.trusted_principal_arns
+      identifiers = each.value
     }
   }
 }

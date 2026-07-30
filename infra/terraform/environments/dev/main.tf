@@ -56,16 +56,22 @@ module "identity" {
   name_prefix            = local.name_prefix
   account_id             = data.aws_caller_identity.current.account_id
   aws_region             = local.aws_region
-  trusted_principal_arns = var.trusted_principal_arns
-  bucket_arns            = module.storage.bucket_arns
+  trusted_principals     = var.trusted_principals
   parameter_arns         = local.parameter_arns
   kms_key_arn            = module.storage.kms_key_arn
   emr_application_arn    = module.emr_serverless.application_arn
   athena_workgroup_arn   = local.athena_workgroup_arn
   athena_result_prefixes = local.athena_workload_prefixes
-  airflow_connection_secret_arns = [
+  bucket_arns = {
+    landing       = module.storage.bucket_arns.landing
+    curated       = module.storage.bucket_arns.curated
+    analytics     = module.storage.bucket_arns.analytics
+    artifacts     = module.storage.bucket_arns.artifacts
+    query_results = module.storage.bucket_arns["query-results"]
+  }
+  airflow_connection_secret_arns = toset([
     for secret in aws_secretsmanager_secret.airflow_connection : secret.arn
-  ]
+  ])
   document_inspector_access = var.document_inspector_access
   tags                      = local.tags
 }

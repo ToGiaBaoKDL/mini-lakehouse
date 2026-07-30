@@ -39,11 +39,31 @@ locals {
     ]
   }
   parameter_arn_prefix = "arn:${data.aws_partition.current.partition}:ssm:${local.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${local.parameter_prefix}"
+  external_parameter_names = toset([
+    "emr/code_uri",
+  ])
+  managed_parameter_names = toset(keys(local.runtime_parameters))
+  granted_parameter_names = toset(flatten([
+    for names in values(local.parameter_names_by_workload) : tolist(names)
+  ]))
   parameter_arns = {
     for workload, names in local.parameter_names_by_workload :
     workload => toset([
       for name in names : "${local.parameter_arn_prefix}/${name}"
     ])
+  }
+}
+
+check "runtime_parameter_grants" {
+  assert {
+    condition = (
+      length(setsubtract(
+        local.granted_parameter_names,
+        setunion(local.managed_parameter_names, local.external_parameter_names),
+      )) == 0 &&
+      length(setsubtract(local.managed_parameter_names, local.granted_parameter_names)) == 0
+    )
+    error_message = "Runtime parameter grants must reference known parameters, and every managed parameter needs a consumer."
   }
 }
 

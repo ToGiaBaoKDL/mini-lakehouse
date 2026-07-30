@@ -73,7 +73,7 @@ resource "aws_iam_role_policy" "emr_runtime" {
 
 resource "aws_iam_role" "emr_deployer" {
   name               = "${var.name_prefix}-emr-deployer"
-  assume_role_policy = data.aws_iam_policy_document.operator_trust.json
+  assume_role_policy = data.aws_iam_policy_document.operator_trust["emr_deployer"].json
   tags               = var.tags
 }
 

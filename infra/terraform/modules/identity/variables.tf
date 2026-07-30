@@ -1,38 +1,88 @@
 variable "name_prefix" {
-  type = string
+  type        = string
+  description = "Environment-qualified prefix used for workload IAM role names."
+
+  validation {
+    condition     = length(trimspace(var.name_prefix)) > 0
+    error_message = "name_prefix must not be empty."
+  }
 }
 
 variable "account_id" {
-  type = string
+  type        = string
+  description = "AWS account identifier used to build regional Glue resource ARNs."
+
+  validation {
+    condition     = can(regex("^[0-9]{12}$", var.account_id))
+    error_message = "account_id must contain exactly 12 digits."
+  }
 }
 
 variable "aws_region" {
-  type = string
+  type        = string
+  description = "AWS Region containing the workload resources."
 }
 
-variable "trusted_principal_arns" {
-  type = list(string)
+variable "trusted_principals" {
+  type = object({
+    airflow            = set(string)
+    catalog_admin      = set(string)
+    dbt_transformer    = set(string)
+    document_inspector = set(string)
+    emr_deployer       = set(string)
+  })
+  description = "IAM principals allowed to assume each human or self-hosted workload role."
+
+  validation {
+    condition = alltrue([
+      for principals in values(var.trusted_principals) : length(principals) > 0
+    ])
+    error_message = "Every workload role requires at least one explicit trusted principal."
+  }
 }
 
 variable "bucket_arns" {
-  type = map(string)
+  type = object({
+    landing       = string
+    curated       = string
+    analytics     = string
+    artifacts     = string
+    query_results = string
+  })
+  description = "Lakehouse bucket ARNs exposed to workload IAM policies."
 }
 
 variable "parameter_arns" {
-  type        = map(set(string))
+  type = object({
+    airflow            = set(string)
+    catalog_admin      = set(string)
+    dbt_transformer    = set(string)
+    document_inspector = set(string)
+    emr_deployer       = set(string)
+  })
   description = "Exact non-secret Parameter Store resources readable by each workload."
+
+  validation {
+    condition = alltrue([
+      for arns in values(var.parameter_arns) : length(arns) > 0
+    ])
+    error_message = "Every workload must declare at least one runtime parameter ARN."
+  }
 }
 
 variable "kms_key_arn" {
-  type = string
+  type        = string
+  description = "KMS key used to encrypt lakehouse S3 objects."
 }
 
 variable "emr_application_arn" {
-  type = string
+  type        = string
+  description = "EMR Serverless application operated by Airflow."
 }
 
 variable "athena_workgroup_arn" {
-  type = string
+  type        = string
+  description = "Athena workgroup available to query workloads."
 }
 
 variable "athena_result_prefixes" {
@@ -40,18 +90,28 @@ variable "athena_result_prefixes" {
     dbt_transformer    = string
     document_inspector = string
   })
+  description = "Isolated S3 query-result prefixes for each Athena workload."
 
   validation {
-    condition = alltrue([
-      for prefix in values(var.athena_result_prefixes) :
-      length(prefix) > 0 && trim(prefix, "/") == prefix
-    ])
-    error_message = "Athena result prefixes must be non-empty and must not start or end with '/'."
+    condition = (
+      alltrue([
+        for prefix in values(var.athena_result_prefixes) :
+        length(prefix) > 0 && trim(prefix, "/") == prefix
+      ]) &&
+      length(toset(values(var.athena_result_prefixes))) == length(values(var.athena_result_prefixes))
+    )
+    error_message = "Athena result prefixes must be normalized and unique per workload."
   }
 }
 
 variable "airflow_connection_secret_arns" {
-  type = list(string)
+  type        = set(string)
+  description = "Secrets Manager connection containers readable by Airflow."
+
+  validation {
+    condition     = length(var.airflow_connection_secret_arns) > 0
+    error_message = "Airflow requires at least one connection secret."
+  }
 }
 
 variable "document_inspector_access" {
@@ -59,9 +119,27 @@ variable "document_inspector_access" {
     databases        = set(string)
     curated_prefixes = set(string)
   })
+  description = "Glue databases and curated S3 prefixes readable by Document Inspector."
+
+  validation {
+    condition = (
+      length(var.document_inspector_access.databases) > 0 &&
+      length(var.document_inspector_access.curated_prefixes) > 0 &&
+      alltrue([
+        for database in var.document_inspector_access.databases :
+        can(regex("^[a-z_][a-z0-9_]*$", database))
+      ]) &&
+      alltrue([
+        for prefix in var.document_inspector_access.curated_prefixes :
+        length(prefix) > 0 && trim(prefix, "/") == prefix
+      ])
+    )
+    error_message = "Document Inspector databases and curated prefixes must be non-empty and normalized."
+  }
 }
 
 variable "tags" {
-  type    = map(string)
-  default = {}
+  type        = map(string)
+  description = "Tags applied to workload IAM roles."
+  default     = {}
 }

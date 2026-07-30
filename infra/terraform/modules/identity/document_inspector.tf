@@ -1,6 +1,6 @@
 resource "aws_iam_role" "document_inspector" {
   name               = "${var.name_prefix}-document-inspector"
-  assume_role_policy = data.aws_iam_policy_document.operator_trust.json
+  assume_role_policy = data.aws_iam_policy_document.operator_trust["document_inspector"].json
   tags               = var.tags
 }
 
@@ -40,7 +40,7 @@ data "aws_iam_policy_document" "document_inspector" {
   statement {
     sid       = "GetDocumentBucketLocations"
     actions   = ["s3:GetBucketLocation"]
-    resources = [var.bucket_arns.curated, var.bucket_arns["query-results"]]
+    resources = [var.bucket_arns.curated, var.bucket_arns.query_results]
   }
   statement {
     sid       = "ListDocumentData"
@@ -55,7 +55,7 @@ data "aws_iam_policy_document" "document_inspector" {
   statement {
     sid       = "ListAthenaQueryResults"
     actions   = ["s3:ListBucket"]
-    resources = [var.bucket_arns["query-results"]]
+    resources = [var.bucket_arns.query_results]
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
@@ -77,7 +77,7 @@ data "aws_iam_policy_document" "document_inspector" {
       "s3:GetObject",
       "s3:PutObject",
     ]
-    resources = ["${var.bucket_arns["query-results"]}/${var.athena_result_prefixes.document_inspector}/*"]
+    resources = ["${var.bucket_arns.query_results}/${var.athena_result_prefixes.document_inspector}/*"]
   }
   statement {
     sid       = "UseLakehouseKey"

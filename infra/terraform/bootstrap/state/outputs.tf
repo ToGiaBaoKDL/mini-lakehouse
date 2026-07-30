@@ -1,3 +1,4 @@
 output "bucket_name" {
-  value = aws_s3_bucket.state.id
+  description = "Versioned S3 bucket used by Terraform remote state."
+  value       = aws_s3_bucket.state.id
 }

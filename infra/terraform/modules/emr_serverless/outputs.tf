@@ -1,7 +1,9 @@
 output "application_id" {
-  value = aws_emrserverless_application.spark.id
+  description = "EMR Serverless application identifier."
+  value       = aws_emrserverless_application.spark.id
 }
 
 output "application_arn" {
-  value = aws_emrserverless_application.spark.arn
+  description = "EMR Serverless application ARN."
+  value       = aws_emrserverless_application.spark.arn
 }

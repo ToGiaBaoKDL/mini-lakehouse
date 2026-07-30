@@ -1,6 +1,6 @@
 resource "aws_iam_role" "catalog_admin" {
   name               = "${var.name_prefix}-catalog-admin"
-  assume_role_policy = data.aws_iam_policy_document.operator_trust.json
+  assume_role_policy = data.aws_iam_policy_document.operator_trust["catalog_admin"].json
   tags               = var.tags
 }
 

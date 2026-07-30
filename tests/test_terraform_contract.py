@@ -26,6 +26,30 @@ def test_reusable_modules_contain_no_source_specific_identifiers() -> None:
     assert "landing_github_archive" not in modules
 
 
+def test_each_child_module_declares_its_provider_contract() -> None:
+    expected_providers = {
+        "storage": ('source  = "hashicorp/aws"', 'source  = "hashicorp/random"'),
+        "emr_serverless": ('source  = "hashicorp/aws"',),
+        "identity": ('source  = "hashicorp/aws"',),
+    }
+
+    for module, providers in expected_providers.items():
+        versions = Path(f"infra/terraform/modules/{module}/versions.tf").read_text(encoding="utf-8")
+        assert 'required_version = ">= 1.10"' in versions
+        for provider in providers:
+            assert provider in versions
+
+
+def test_all_terraform_inputs_and_outputs_are_documented() -> None:
+    for path in Path("infra/terraform").rglob("variables.tf"):
+        source = path.read_text(encoding="utf-8")
+        assert source.count('variable "') == source.count("description ="), path
+
+    for path in Path("infra/terraform").rglob("outputs.tf"):
+        source = path.read_text(encoding="utf-8")
+        assert source.count('output "') == source.count("description ="), path
+
+
 def test_remote_state_is_versioned_locked_and_bootstrapped_separately() -> None:
     backend = Path("infra/terraform/environments/dev/backend.tf").read_text(encoding="utf-8")
     bootstrap = _terraform_sources(Path("infra/terraform/bootstrap/state"))
@@ -95,3 +119,24 @@ def test_environment_uses_only_domain_modules() -> None:
     modules = {path.name for path in Path("infra/terraform/modules").iterdir() if path.is_dir()}
 
     assert modules == {"emr_serverless", "identity", "storage"}
+
+
+def test_runtime_parameters_and_trust_are_bounded_by_workload() -> None:
+    environment = _terraform_sources(Path("infra/terraform/environments/dev"))
+    identity = _terraform_sources(Path("infra/terraform/modules/identity"))
+
+    assert 'check "runtime_parameter_grants"' in environment
+    assert '"emr/code_uri"' in environment
+    assert "managed_parameter_names" in environment
+    assert "granted_parameter_names" in environment
+
+    assert "for_each = var.trusted_principals" in identity
+    for workload in (
+        "airflow",
+        "catalog_admin",
+        "dbt_transformer",
+        "document_inspector",
+        "emr_deployer",
+    ):
+        assert f'operator_trust["{workload}"]' in identity
+    assert "trusted_principal_arns" not in identity
