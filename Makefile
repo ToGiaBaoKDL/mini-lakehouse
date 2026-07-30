@@ -172,11 +172,11 @@ dbt-build: ## Build analytics with runtime references loaded from SSM.
 		PARAMETER_PREFIX="/lakehouse/$${LAKEHOUSE_ENVIRONMENT:-dev}"; \
 		PARAMETERS="$$(aws --profile "$${AWS_PROFILE_NAME}" ssm get-parameters \
 			--names \
-				"$${PARAMETER_PREFIX}/storage/query_results_uri" \
+				"$${PARAMETER_PREFIX}/athena/dbt_output_uri" \
 				"$${PARAMETER_PREFIX}/storage/analytics_uri" \
 			--output json)"; \
 		QUERY_RESULTS_URI="$$(printf '%s' "$${PARAMETERS}" | jq -er \
-			--arg name "$${PARAMETER_PREFIX}/storage/query_results_uri" \
+			--arg name "$${PARAMETER_PREFIX}/athena/dbt_output_uri" \
 			'.Parameters[] | select(.Name == $$name) | .Value')"; \
 		ANALYTICS_URI="$$(printf '%s' "$${PARAMETERS}" | jq -er \
 			--arg name "$${PARAMETER_PREFIX}/storage/analytics_uri" \

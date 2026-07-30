@@ -94,7 +94,7 @@ def test_dbt_athena_configuration_is_explicit_and_has_no_trino_fallback() -> Non
     assert output["schema"] == domain.database
 
     makefile = Path("Makefile").read_text(encoding="utf-8")
-    assert "/storage/query_results_uri" in makefile
+    assert "/athena/dbt_output_uri" in makefile
     assert "DBT_QUERY_RESULTS_URI" in makefile
     assert "/athena/workgroup" not in makefile
 

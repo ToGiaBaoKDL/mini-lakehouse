@@ -46,15 +46,17 @@ def test_ci_validation_does_not_require_remote_state() -> None:
 
 
 def test_secret_containers_never_manage_secret_values() -> None:
-    module = _terraform_sources(Path("infra/terraform/modules/secrets"))
+    environment = _terraform_sources(Path("infra/terraform/environments/dev"))
 
-    assert 'resource "aws_secretsmanager_secret"' in module
-    assert "aws_secretsmanager_secret_version" not in module
+    assert 'resource "aws_secretsmanager_secret" "airflow_connection"' in environment
+    assert "aws_secretsmanager_secret_version" not in environment
+    assert "ocr/providers" not in environment
 
 
 def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
-    environment = Path("infra/terraform/environments/dev/main.tf").read_text(encoding="utf-8")
-    identity = Path("infra/terraform/modules/identity/main.tf").read_text(encoding="utf-8")
+    environment = _terraform_sources(Path("infra/terraform/environments/dev"))
+    runtime = Path("infra/terraform/environments/dev/runtime.tf").read_text(encoding="utf-8")
+    identity = _terraform_sources(Path("infra/terraform/modules/identity"))
     normalized_environment = " ".join(environment.split())
     normalized_identity = " ".join(identity.split())
 
@@ -65,8 +67,12 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
     )
     assert 'parameter_prefix = "/lakehouse/${local.environment}"' in normalized_environment
     assert 'athena_workgroup = "primary"' in normalized_environment
-    assert 'athena_query_results_prefix = "athena/primary"' in normalized_environment
-    assert '"storage/query_results_uri"' in environment
+    assert 'dbt_transformer = "dbt"' in normalized_environment
+    assert 'document_inspector = "document-inspector"' in normalized_environment
+    assert '"athena/dbt_output_uri"' in environment
+    assert '"athena/document_inspector_output_uri"' in environment
+    assert "athena/primary" not in environment
+    assert "storage/query_results_uri" not in runtime
     assert "athena/workgroups/" not in environment
     for role in (
         "emr-runtime",
@@ -75,9 +81,17 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
         "catalog-admin",
         "dbt-transformer",
         "document-inspector",
-        "lightdash-reader",
     ):
         assert f'name = "${{var.name_prefix}}-{role}"' in normalized_identity
 
-    assert identity.count("resources = [var.athena_workgroup_arn]") == 3
-    assert '${var.athena_query_results_prefix}/*"' in identity
+    assert identity.count("resources = [var.athena_workgroup_arn]") == 2
+    assert "lightdash" not in identity.lower()
+    assert "document_inspector_curated_object_arns" in identity
+    assert "athena_result_prefixes.dbt_transformer" in identity
+    assert "athena_result_prefixes.document_inspector" in identity
+
+
+def test_environment_uses_only_domain_modules() -> None:
+    modules = {path.name for path in Path("infra/terraform/modules").iterdir() if path.is_dir()}
+
+    assert modules == {"emr_serverless", "identity", "storage"}

@@ -76,14 +76,14 @@ def test_athena_reader_uses_primary_with_explicit_query_output(
     )
     reader = AthenaReader(
         workgroup="primary",
-        s3_output="s3://query-results/athena/primary",
+        s3_output="s3://query-results/document-inspector",
         region_name="ap-southeast-1",
     )
 
     reader.query("SELECT 1", database="curated_arxiv")
 
     assert captured["workgroup"] == "primary"
-    assert captured["s3_output"] == "s3://query-results/athena/primary"
+    assert captured["s3_output"] == "s3://query-results/document-inspector"
 
 
 def _run(manifest_sha256: str) -> OcrDocumentRun:

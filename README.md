@@ -57,7 +57,8 @@ s3://<project>-<env>-artifacts-<suffix>/
   emr/jobs/<release>/
 
 s3://<project>-<env>-query-results-<suffix>/
-  athena/
+  dbt/
+  document-inspector/
 ```
 
 Glue database names are explicit contract fields, such as `landing_<source>`,

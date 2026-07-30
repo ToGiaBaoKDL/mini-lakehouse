@@ -21,7 +21,3 @@ output "document_inspector_role_arn" {
 output "dbt_transformer_role_arn" {
   value = aws_iam_role.dbt_transformer.arn
 }
-
-output "lightdash_reader_role_arn" {
-  value = aws_iam_role.lightdash_reader.arn
-}

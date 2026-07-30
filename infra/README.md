@@ -5,7 +5,8 @@ Terraform owns AWS infrastructure only:
 - five encrypted S3 buckets with stable random suffixes;
 - a KMS key;
 - an EMR Serverless Spark application;
-- a shared encrypted Athena query-result location for the built-in `primary` workgroup;
+- one encrypted query-result bucket with workload-isolated prefixes for the built-in `primary`
+  Athena workgroup;
 - environment-prefixed workload IAM roles;
 - empty Secrets Manager containers;
 - non-secret AWS resource references in Systems Manager Parameter Store.
@@ -23,12 +24,11 @@ terraform/
     storage/
     emr_serverless/
     identity/
-    parameters/
-    secrets/
 ```
 
-Modules contain no source-specific identifiers. Environment inputs define bucket tiers, application
-database grants, capacity, and trusted principals.
+Modules contain no source-specific identifiers. The environment root owns concrete SSM parameters
+and Secrets Manager containers; reusable modules retain only cohesive storage, compute, and
+identity boundaries.
 
 ```bash
 cp infra/terraform/bootstrap/state/terraform.tfvars.example \

@@ -46,7 +46,7 @@ class ArxivDocumentRepository:
             workgroup="primary",
             s3_output=get_runtime_parameter(
                 settings.environment,
-                "storage/query_results_uri",
+                "athena/document_inspector_output_uri",
             ),
             region_name=settings.aws_region,
             profile_name=settings.aws_profile,

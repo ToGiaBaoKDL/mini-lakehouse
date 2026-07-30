@@ -1,8 +1,3 @@
-variable "aws_region" {
-  type    = string
-  default = "ap-southeast-1"
-}
-
 variable "aws_profile" {
   type    = string
   default = null
@@ -18,16 +13,23 @@ variable "trusted_principal_arns" {
   }
 }
 
-variable "document_inspector_database_names" {
-  type        = set(string)
-  description = "Glue databases readable by the self-hosted Document Inspector."
+variable "document_inspector_access" {
+  type = object({
+    databases        = set(string)
+    curated_prefixes = set(string)
+  })
+  description = "Glue databases and curated S3 prefixes readable by Document Inspector."
 
   validation {
-    condition = alltrue([
-      for name in var.document_inspector_database_names :
-      can(regex("^[a-z_][a-z0-9_]*$", name))
-    ])
-    error_message = "Document Inspector database names must be valid Glue identifiers."
+    condition = alltrue(
+      [for name in var.document_inspector_access.databases : can(regex("^[a-z_][a-z0-9_]*$", name))]
+      ) && alltrue(
+      [
+        for prefix in var.document_inspector_access.curated_prefixes :
+        length(prefix) > 0 && trim(prefix, "/") == prefix
+      ]
+    )
+    error_message = "Document Inspector databases and curated prefixes must be normalized identifiers."
   }
 }
 
