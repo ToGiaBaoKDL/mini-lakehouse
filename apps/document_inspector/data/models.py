@@ -2,14 +2,9 @@
 
 from datetime import date, datetime
 from enum import StrEnum
-from typing import Self
 from urllib.parse import quote
 
-from document_ocr.protocol import (
-    ArtifactFile,
-    validate_document_artifact_paths,
-)
-from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 class OcrRunState(StrEnum):
@@ -45,7 +40,7 @@ class OcrDocumentSummary(DocumentInspectorModel):
     arxiv_id: str
     title: str | None = None
     state: OcrRunState
-    attempt_count: int = Field(ge=1)
+    attempt: int = Field(ge=1)
     page_count: int | None = Field(default=None, ge=1)
     processing_id: str | None = None
     model_repository: str
@@ -55,15 +50,15 @@ class OcrDocumentSummary(DocumentInspectorModel):
 
 
 class OcrDocumentRun(DocumentInspectorModel):
+    run_id: str
     request_id: str
-    batch_id: str
     arxiv_id: str
     title: str | None = None
     abstract: str | None = None
     pdf_url: str
     oai_datestamp: date
     state: OcrRunState
-    attempt_count: int = Field(ge=1)
+    attempt: int = Field(ge=1)
     processing_id: str | None = None
     artifact_uri: str | None = None
     manifest_sha256: str | None = None
@@ -82,11 +77,6 @@ class OcrDocumentRun(DocumentInspectorModel):
 
     @computed_field
     @property
-    def run_key(self) -> str:
-        return f"{self.batch_id}:{self.request_id}"
-
-    @computed_field
-    @property
     def artifacts_available(self) -> bool:
         return (
             self.state == OcrRunState.IMPORTED
@@ -99,36 +89,3 @@ class OcrDocumentRun(DocumentInspectorModel):
     @property
     def paper_url(self) -> str:
         return f"https://arxiv.org/abs/{quote(self.arxiv_id, safe='/')}"
-
-
-class OcrPageElement(DocumentInspectorModel):
-    element_id: str
-    page_number: int = Field(ge=1)
-    reading_order: int = Field(ge=0)
-    element_type: str
-    bbox_json: str | None = None
-    text_content: str
-    markdown_content: str | None = None
-    parent_element_id: str | None = None
-    raw_attributes_json: str | None = None
-
-
-class PublishedOcrManifest(DocumentInspectorModel):
-    arxiv_id: str
-    files: tuple[ArtifactFile, ...]
-    page_count: int = Field(ge=1)
-    pdf_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    pdf_size_bytes: int = Field(ge=0)
-    processing_id: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-    @model_validator(mode="after")
-    def validate_artifact_set(self) -> Self:
-        paths = [file.relative_path for file in self.files]
-        validate_document_artifact_paths(paths, page_count=self.page_count)
-        return self
-
-    def file(self, relative_path: str) -> ArtifactFile:
-        try:
-            return next(file for file in self.files if file.relative_path == relative_path)
-        except StopIteration as error:
-            raise FileNotFoundError(f"OCR artifact is not declared: {relative_path}") from error

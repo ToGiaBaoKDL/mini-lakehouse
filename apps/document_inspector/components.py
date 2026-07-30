@@ -4,11 +4,11 @@ from datetime import datetime
 from html import escape
 
 import streamlit as st
+from document_ocr.protocol import OcrElement
 
 from apps.document_inspector.data import (
     OcrDocumentRun,
     OcrDocumentSummary,
-    OcrPageElement,
     OcrRunState,
 )
 
@@ -36,7 +36,7 @@ def document_label(document: OcrDocumentSummary) -> str:
 def run_label(run: OcrDocumentRun) -> str:
     timestamp = _display_datetime(run.completed_at or run.prepared_at)
     revision = run.model_revision[:8]
-    return f"{timestamp} · {run.state.replace('_', ' ')} · {revision} · attempt {run.attempt_count}"
+    return f"{timestamp} · {run.state.replace('_', ' ')} · {revision} · attempt {run.attempt}"
 
 
 def render_run_header(run: OcrDocumentRun) -> None:
@@ -61,7 +61,7 @@ def render_run_header(run: OcrDocumentRun) -> None:
     st.caption(" · ".join(metadata))
 
 
-def render_elements(elements: tuple[OcrPageElement, ...]) -> None:
+def render_elements(elements: tuple[OcrElement, ...]) -> None:
     if not elements:
         st.info("No canonical elements were published for this page.")
         return

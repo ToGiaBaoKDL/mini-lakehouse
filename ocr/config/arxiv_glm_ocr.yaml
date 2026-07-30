@@ -1,8 +1,7 @@
 version: 1
 name: arxiv_glm_ocr
 adapter: glm_ocr
-adapter_version: 1.0.0
-output_schema_version: 1.1.0
+adapter_version: 1.1.0
 
 model:
   repository: zai-org/GLM-OCR
@@ -12,8 +11,7 @@ layout_model:
   repository: PaddlePaddle/PP-DocLayoutV3_safetensors
   revision: 97d101e6db2642e162a1d05392d1b0231c91033e
 
-batch:
-  max_documents: 2
+limits:
   max_pdf_bytes: 104857600
   max_pages_per_document: 500
   max_output_bytes: 1073741824

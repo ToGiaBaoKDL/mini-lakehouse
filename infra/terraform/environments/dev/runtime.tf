@@ -14,6 +14,7 @@ locals {
   parameter_names_by_workload = {
     airflow = [
       "storage/landing_uri",
+      "storage/curated_uri",
       "catalog/name",
       "emr/application_id",
       "emr/execution_role_arn",

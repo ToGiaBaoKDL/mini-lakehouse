@@ -8,8 +8,10 @@ development simple.
 flowchart LR
     S[Sources] --> A[Self-hosted Airflow]
     A --> E[EMR Serverless / Spark]
+    A --> R[Remote GPU document processing]
     E --> L[(S3 landing)]
     E --> C[(S3 curated)]
+    R --> C
     L & C -. Iceberg metadata .-> G[Glue Data Catalog]
     C --> Q[Athena + dbt]
     Q --> N[(S3 analytics)]
@@ -49,6 +51,7 @@ s3://<project>-<env>-landing-<suffix>/
 
 s3://<project>-<env>-curated-<suffix>/
   <product>/tables/<table>/...
+  <product>/artifacts/<processor>/<document>/<processing-id>/...
 
 s3://<project>-<env>-analytics-<suffix>/
   tables/<analytics database and table>/...
@@ -97,6 +100,16 @@ make document-inspector-up
 `make emr-jobs-publish` requires a clean commit. It uploads entrypoints, locked dependencies, and
 the exact contract bundle to `emr/jobs/<commit-sha>/`, then atomically updates
 `/lakehouse/<env>/emr/code_uri` in SSM.
+
+Terraform creates empty `kaggle_default` and `modal_default` Airflow connection secrets; credential
+values are populated out of band. The manual `etl_mix_arxiv_document_ocr` DAG requires one exact
+`arxiv_id` and one provider. A run downloads its PDF only inside the remote temporary workspace,
+publishes validated OCR artifacts to curated S3, and commits one Iceberg run row last.
+
+Kaggle runner source is a release asset, not a per-document payload. Run
+`make ocr-kaggle-runner-publish` only when runner code or its lockfile changes, then pin the
+published Dataset version in the OCR configuration. Each document run submits only its validated
+job and a small launcher; provider SDKs own remote execution and log streaming.
 
 ## Add a source
 

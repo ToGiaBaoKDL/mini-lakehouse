@@ -4,7 +4,7 @@ from io import BytesIO
 import pytest
 from document_ocr.protocol import (
     ArtifactFile,
-    OcrDocumentResult,
+    OcrDocumentManifest,
     OcrElement,
     OcrPageMarkdown,
     OcrPageMarkdownBundle,
@@ -109,22 +109,18 @@ def test_successful_result_rejects_stale_or_redundant_artifacts(
     )
 
     with pytest.raises(ValueError, match="Unsupported OCR document artifact path"):
-        OcrDocumentResult(
-            request_id="4" * 64,
-            arxiv_id="2607.00001",
-            state="succeeded",
+        OcrDocumentManifest(
+            document_id="2607.00001",
             pdf_sha256="5" * 64,
             pdf_size_bytes=100,
             page_count=1,
             processing_id="6" * 64,
-            manifest_sha256="7" * 64,
             files=files,
         )
 
 
 def test_page_markdown_bundle_is_bounded_and_requires_consecutive_pages() -> None:
     bundle = OcrPageMarkdownBundle(
-        schema_version="1.0.0",
         pages=(
             OcrPageMarkdown(page_number=1, markdown="# One"),
             OcrPageMarkdown(page_number=2, markdown="# Two"),
@@ -145,6 +141,5 @@ def test_page_markdown_bundle_is_bounded_and_requires_consecutive_pages() -> Non
         )
     with pytest.raises(ValueError, match="consecutive"):
         OcrPageMarkdownBundle(
-            schema_version="1.0.0",
             pages=(OcrPageMarkdown(page_number=2, markdown="# Two"),),
         )

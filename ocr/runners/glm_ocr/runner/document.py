@@ -12,17 +12,16 @@ from typing import Any
 import fitz
 import requests
 from document_ocr.identity import (
+    canonical_json_bytes,
     canonical_json_sha256,
     file_sha256,
     processing_id,
-    successful_document_manifest_sha256,
-)
-from document_ocr.paths import (
-    PAGE_MARKDOWN_BUNDLE_PATH,
-    runner_document_path,
 )
 from document_ocr.protocol import (
+    DOCUMENT_MANIFEST_PATH,
+    PAGE_MARKDOWN_BUNDLE_PATH,
     ArtifactFile,
+    OcrDocumentManifest,
     OcrDocumentRequest,
     OcrDocumentResult,
     OcrElement,
@@ -175,7 +174,7 @@ def prepare_document(
             )
         return OcrDocumentResult(
             request_id=request.request_id,
-            arxiv_id=request.arxiv_id,
+            document_id=request.document_id,
             state="reused",
             pdf_sha256=pdf_sha256,
             pdf_size_bytes=pdf_size_bytes,
@@ -410,7 +409,7 @@ def process_document(
 ) -> OcrDocumentResult:
     request = prepared.request
     current_processing_id = processing_id(
-        arxiv_id=request.arxiv_id,
+        document_id=request.document_id,
         pdf_sha256=prepared.pdf_sha256,
         configuration_hash=job.config_hash,
     )
@@ -438,28 +437,34 @@ def process_document(
     except (OSError, ValueError) as error:
         raise DocumentError("artifact_generation_failed", str(error), retryable=True) from error
 
-    serialized_files = [file.model_dump(mode="json") for file in files]
+    manifest = OcrDocumentManifest(
+        document_id=request.document_id,
+        files=files,
+        page_count=prepared.page_count,
+        pdf_sha256=prepared.pdf_sha256,
+        pdf_size_bytes=prepared.pdf_size_bytes,
+        processing_id=current_processing_id,
+    )
+    manifest_bytes = canonical_json_bytes(manifest.model_dump(mode="json"))
+    if sum(file.size_bytes for file in files) + len(manifest_bytes) > job.limits.max_output_bytes:
+        raise DocumentError(
+            "ocr_output_too_large",
+            f"OCR output exceeds the {job.limits.max_output_bytes}-byte limit",
+            retryable=False,
+        )
+    manifest_path = document_root.joinpath(*DOCUMENT_MANIFEST_PATH.parts)
+    manifest_path.write_bytes(manifest_bytes)
     result = OcrDocumentResult(
         request_id=request.request_id,
-        arxiv_id=request.arxiv_id,
+        document_id=request.document_id,
         state="succeeded",
         pdf_sha256=prepared.pdf_sha256,
         pdf_size_bytes=prepared.pdf_size_bytes,
         page_count=prepared.page_count,
         processing_id=current_processing_id,
-        manifest_sha256=successful_document_manifest_sha256(
-            arxiv_id=request.arxiv_id,
-            pdf_sha256=prepared.pdf_sha256,
-            pdf_size_bytes=prepared.pdf_size_bytes,
-            page_count=prepared.page_count,
-            processing_id=current_processing_id,
-            files=serialized_files,
-        ),
-        files=files,
+        manifest_sha256=file_sha256(manifest_path),
     )
-    destination = output_root.joinpath(
-        *runner_document_path(request.arxiv_id, request.request_id).parts
-    )
+    destination = output_root
     destination.parent.mkdir(parents=True, exist_ok=True)
     document_root.replace(destination)
     return result
@@ -471,7 +476,7 @@ def failed_result(
 ) -> OcrDocumentResult:
     return OcrDocumentResult(
         request_id=request.request_id,
-        arxiv_id=request.arxiv_id,
+        document_id=request.document_id,
         state="retryable_failed" if error.retryable else "terminal_failed",
         error_code=error.code,
         error_message=str(error)[:ERROR_MESSAGE_CHARACTERS],

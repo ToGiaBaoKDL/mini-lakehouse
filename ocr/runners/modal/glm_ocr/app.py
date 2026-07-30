@@ -65,24 +65,14 @@ app = modal.App(RUNNER.app_name)
 
 
 def _committed_result(job: Any, target: Path) -> dict[str, str] | None:
-    from document_ocr.identity import file_sha256
-    from document_ocr.protocol import OcrBatchManifest
+    from document_ocr.archive import InvalidOcrArchiveError, validate_ocr_output
 
     try:
-        manifest = OcrBatchManifest.model_validate_json(
-            (target / "result_manifest.json").read_bytes()
-        )
-        archive = target / "result.tar.zst"
-        if (
-            manifest.batch_id != job.batch_id
-            or manifest.archive_size_bytes != archive.stat().st_size
-            or manifest.archive_sha256 != file_sha256(archive)
-        ):
-            return None
-    except (OSError, ValueError):
+        validate_ocr_output(target, expected_run_id=job.run_id)
+    except InvalidOcrArchiveError:
         return None
     return {
-        "batch_id": job.batch_id,
+        "run_id": job.run_id,
         "output_prefix": target.relative_to(OUTPUT_ROOT).as_posix(),
         "state": "complete",
     }
@@ -97,20 +87,20 @@ def _committed_result(job: Any, target: Path) -> dict[str, str] | None:
     scaledown_window=RUNNER.scaledown_window_seconds,
 )
 def run_ocr(job_json: str) -> dict[str, str]:
-    """Execute one idempotent batch and commit its provider output manifest last."""
+    """Execute one idempotent document run and commit its manifest last."""
     global _engine
     sys.path.insert(0, str(RUNNER_ROOT))
     from document_ocr.protocol import OcrJob
-    from runner.batch import run
     from runner.engine import InferenceEngine
+    from runner.job import run
 
     job = OcrJob.model_validate_json(job_json)
-    target = OUTPUT_ROOT / "runs" / job.batch_id
+    target = OUTPUT_ROOT / "runs" / job.run_id
     committed = _committed_result(job, target)
     if committed is not None:
         print(
             json.dumps(
-                {"event": "batch_reused", "batch_id": job.batch_id},
+                {"event": "run_reused", "run_id": job.run_id},
                 separators=(",", ":"),
             ),
             flush=True,

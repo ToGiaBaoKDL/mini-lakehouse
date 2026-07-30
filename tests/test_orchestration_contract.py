@@ -23,6 +23,7 @@ def test_dags_are_domain_scoped_and_follow_worker_aware_naming() -> None:
     dag_files = _dag_files()
     assert {path.as_posix() for path in dag_files} == {
         "orchestration/dags/arxiv/etl_emr_arxiv_metadata.py",
+        "orchestration/dags/arxiv/etl_mix_arxiv_document_ocr.py",
         "orchestration/dags/github/etl_emr_github_archive.py",
     }
     assert not list(Path("orchestration").rglob("__init__.py"))
@@ -47,6 +48,18 @@ def test_daily_source_dags_are_bounded_and_parameterized() -> None:
         assert "max_active_runs=1" in source
         assert "dag_failure_callbacks()" in source
         assert "dag_success_callbacks()" in source
+
+
+def test_arxiv_ocr_dag_accepts_exactly_one_document() -> None:
+    source = Path("orchestration/dags/arxiv/etl_mix_arxiv_document_ocr.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "schedule=None" in source
+    assert "arxiv_id" in source
+    assert "max_active_runs=1" in source
+    assert "batch" not in source.lower()
+    assert "list[str]" not in source
 
 
 def test_emr_operator_uses_official_deferrable_lifecycle() -> None:

@@ -77,7 +77,8 @@ def test_all_container_images_are_immutable() -> None:
     assert "python:3.12.13-slim" in dockerfile
     assert "ARG AIRFLOW_VERSION=3.3.0" in dockerfile
     assert "apache/airflow:${AIRFLOW_VERSION}-python3.12" in dockerfile
-    assert '"apache-airflow==${AIRFLOW_VERSION}"' in dockerfile
+    assert '"$platform_wheel[orchestration]"' in dockerfile
+    assert '"apache-airflow==3.3.0"' in Path("pyproject.toml").read_text(encoding="utf-8")
     assert "postgres:17.10" in compose
     assert ":latest" not in f"{dockerfile}\n{compose}"
     assert "COPY apps/document_inspector/.streamlit ./.streamlit" in dockerfile
@@ -97,6 +98,7 @@ def test_makefile_exposes_owned_operational_entrypoints() -> None:
         "catalog-validate:",
         "emr-jobs-package:",
         "emr-jobs-publish:",
+        "ocr-kaggle-runner-publish:",
     ):
         assert target in makefile
 

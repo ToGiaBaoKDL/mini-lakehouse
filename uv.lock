@@ -1062,17 +1062,26 @@ wheels = [
 
 [[package]]
 name = "document-ocr"
-version = "1.1.0"
+version = "2.0.0"
 source = { editable = "ocr" }
 dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
+    { name = "zstandard" },
 ]
 
 [package.optional-dependencies]
+aws = [
+    { name = "boto3" },
+    { name = "loguru" },
+    { name = "pyarrow" },
+    { name = "pyiceberg", extra = ["glue", "pyarrow", "s3fs"] },
+]
 kaggle = [
     { name = "kaggle" },
+]
+kaggle-publish = [
     { name = "kagglehub" },
 ]
 modal = [
@@ -1080,23 +1089,26 @@ modal = [
 ]
 providers = [
     { name = "kaggle" },
-    { name = "kagglehub" },
     { name = "modal" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "kaggle", marker = "extra == 'kaggle'", specifier = ">=2,<3" },
-    { name = "kaggle", marker = "extra == 'providers'", specifier = ">=2,<3" },
-    { name = "kagglehub", marker = "extra == 'kaggle'", specifier = ">=1,<2" },
-    { name = "kagglehub", marker = "extra == 'providers'", specifier = ">=1,<2" },
+    { name = "boto3", marker = "extra == 'aws'", specifier = ">=1.42,<2" },
+    { name = "kaggle", marker = "extra == 'kaggle'", specifier = ">=2.2.3,<3" },
+    { name = "kaggle", marker = "extra == 'providers'", specifier = ">=2.2.3,<3" },
+    { name = "kagglehub", marker = "extra == 'kaggle-publish'", specifier = ">=1,<2" },
+    { name = "loguru", marker = "extra == 'aws'", specifier = "==0.7.3" },
     { name = "modal", marker = "extra == 'modal'", specifier = ">=1.5.3,<1.6" },
     { name = "modal", marker = "extra == 'providers'", specifier = ">=1.5.3,<1.6" },
+    { name = "pyarrow", marker = "extra == 'aws'", specifier = ">=23,<26" },
     { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "pydantic-settings", specifier = ">=2.12,<3" },
+    { name = "pyiceberg", extras = ["glue", "pyarrow", "s3fs"], marker = "extra == 'aws'", specifier = ">=0.10,<0.12" },
     { name = "pyyaml", specifier = ">=6.0.3,<7" },
+    { name = "zstandard", specifier = ">=0.23,<1" },
 ]
-provides-extras = ["kaggle", "modal", "providers"]
+provides-extras = ["aws", "kaggle", "kaggle-publish", "modal", "providers"]
 
 [[package]]
 name = "email-validator"
@@ -1602,7 +1614,6 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
-    { name = "typer" },
 ]
 
 [package.optional-dependencies]
@@ -1612,6 +1623,10 @@ analytics = [
 catalog = [
     { name = "pyarrow" },
     { name = "pyiceberg", extra = ["glue", "pyarrow", "s3fs"] },
+    { name = "typer" },
+]
+cli = [
+    { name = "typer" },
 ]
 document-inspector = [
     { name = "awswrangler" },
@@ -1619,13 +1634,14 @@ document-inspector = [
     { name = "streamlit" },
 ]
 ocr = [
-    { name = "document-ocr", extra = ["providers"] },
+    { name = "document-ocr", extra = ["aws", "providers"] },
 ]
 orchestration = [
     { name = "apache-airflow" },
     { name = "apache-airflow-providers-amazon", extra = ["aiobotocore"] },
     { name = "apache-airflow-providers-slack" },
     { name = "apache-airflow-providers-smtp" },
+    { name = "document-ocr", extra = ["aws", "providers"] },
 ]
 
 [package.dev-dependencies]
@@ -1646,7 +1662,8 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.42,<2" },
     { name = "dbt-athena", marker = "extra == 'analytics'", specifier = "==1.11.0" },
     { name = "document-ocr", marker = "extra == 'document-inspector'", editable = "ocr" },
-    { name = "document-ocr", extras = ["providers"], marker = "extra == 'ocr'", editable = "ocr" },
+    { name = "document-ocr", extras = ["aws", "providers"], marker = "extra == 'ocr'", editable = "ocr" },
+    { name = "document-ocr", extras = ["aws", "providers"], marker = "extra == 'orchestration'", editable = "ocr" },
     { name = "loguru", specifier = "==0.7.3" },
     { name = "pyarrow", marker = "extra == 'catalog'", specifier = ">=23,<26" },
     { name = "pydantic", specifier = ">=2.12,<3" },
@@ -1654,9 +1671,10 @@ requires-dist = [
     { name = "pyiceberg", extras = ["glue", "pyarrow", "s3fs"], marker = "extra == 'catalog'", specifier = ">=0.10,<0.12" },
     { name = "pyyaml", specifier = ">=6.0.3,<7" },
     { name = "streamlit", marker = "extra == 'document-inspector'", specifier = ">=1.60,<1.61" },
-    { name = "typer", specifier = "==0.27.0" },
+    { name = "typer", marker = "extra == 'catalog'", specifier = "==0.27.0" },
+    { name = "typer", marker = "extra == 'cli'", specifier = "==0.27.0" },
 ]
-provides-extras = ["orchestration", "analytics", "catalog", "ocr", "document-inspector"]
+provides-extras = ["cli", "orchestration", "analytics", "catalog", "ocr", "document-inspector"]
 
 [package.metadata.requires-dev]
 dev = [

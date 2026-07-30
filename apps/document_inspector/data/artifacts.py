@@ -8,17 +8,15 @@ from typing import Protocol
 from urllib.parse import urlparse
 
 import boto3
-from document_ocr.paths import PAGE_MARKDOWN_BUNDLE_PATH
 from document_ocr.protocol import (
+    PAGE_MARKDOWN_BUNDLE_PATH,
     ArtifactFile,
+    OcrDocumentManifest,
     OcrPageMarkdownBundle,
 )
 from document_ocr.text import read_page_markdown_bundle
 
-from apps.document_inspector.data.models import (
-    OcrDocumentRun,
-    PublishedOcrManifest,
-)
+from apps.document_inspector.data.models import OcrDocumentRun
 
 MANIFEST_MAX_BYTES = 2 * 1024 * 1024
 MARKDOWN_MAX_BYTES = 64 * 1024 * 1024
@@ -76,7 +74,7 @@ class OcrArtifactReader:
         self._object_store = object_store
         self._curated_root = curated_uri.rstrip("/")
 
-    def manifest(self, run: OcrDocumentRun) -> PublishedOcrManifest:
+    def manifest(self, run: OcrDocumentRun) -> OcrDocumentManifest:
         artifact_uri = self._validated_artifact_uri(run)
         assert run.manifest_sha256 is not None
         payload = self._object_store.read_bytes(
@@ -85,9 +83,9 @@ class OcrArtifactReader:
         )
         if hashlib.sha256(payload).hexdigest() != run.manifest_sha256:
             raise RuntimeError("Published OCR manifest checksum does not match Iceberg state")
-        manifest = PublishedOcrManifest.model_validate_json(payload)
+        manifest = OcrDocumentManifest.model_validate_json(payload)
         if (
-            manifest.arxiv_id != run.arxiv_id
+            manifest.document_id != run.arxiv_id
             or manifest.processing_id != run.processing_id
             or manifest.page_count != run.page_count
             or manifest.pdf_sha256 != run.pdf_sha256
@@ -99,7 +97,7 @@ class OcrArtifactReader:
     def page_image(
         self,
         run: OcrDocumentRun,
-        manifest: PublishedOcrManifest,
+        manifest: OcrDocumentManifest,
         *,
         page_number: int,
     ) -> OcrArtifactContent:
@@ -121,7 +119,7 @@ class OcrArtifactReader:
     def page_markdowns(
         self,
         run: OcrDocumentRun,
-        manifest: PublishedOcrManifest,
+        manifest: OcrDocumentManifest,
     ) -> OcrPageMarkdownBundle:
         relative_path = PAGE_MARKDOWN_BUNDLE_PATH.as_posix()
         content = self._read_declared(

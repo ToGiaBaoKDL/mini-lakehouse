@@ -34,7 +34,6 @@ def build_page_markdown_bundle(
                 f"OCR element page {element.page_number} exceeds page_count {page_count}"
             ) from error
     return OcrPageMarkdownBundle(
-        schema_version="1.0.0",
         pages=tuple(
             OcrPageMarkdown(
                 page_number=page_number,

@@ -22,7 +22,8 @@ export AWS_SHARED_CREDENTIALS_FILE
 	airflow-up airflow-down airflow-logs airflow-dags \
 	document-inspector-up document-inspector-down document-inspector-logs start down ps \
 	catalog-apply catalog-validate dbt-deps dbt-validate dbt-build \
-	emr-jobs-package emr-jobs-publish-preflight emr-jobs-publish
+	emr-jobs-package emr-jobs-publish-preflight emr-jobs-publish \
+	ocr-kaggle-runner-publish
 
 help: ## Show available commands.
 	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-28s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -38,7 +39,7 @@ preflight: ## Verify local tools and configuration.
 	@docker compose version >/dev/null
 
 platform-validate: ## Validate settings and YAML contracts without AWS I/O.
-	uv run python -m lakehouse_platform.platform.validate
+	uv run --extra cli python -m lakehouse_platform.platform.validate
 
 lint: ## Run formatting, linting, and static type checks.
 	uv run ruff format --check .
@@ -142,11 +143,15 @@ ps: ## Show self-hosted service state.
 
 catalog-apply: ## Apply Glue/Iceberg YAML contracts with PyIceberg.
 	AWS_PROFILE="$${CATALOG_ADMIN_AWS_PROFILE:-lakehouse-dev-catalog-admin}" \
-		uv run python -m lakehouse_platform.platform.catalog.admin apply
+		uv run --extra catalog python -m lakehouse_platform.platform.catalog.admin apply
 
 catalog-validate: ## Validate Glue/Iceberg state against YAML contracts.
 	AWS_PROFILE="$${CATALOG_ADMIN_AWS_PROFILE:-lakehouse-dev-catalog-admin}" \
-		uv run python -m lakehouse_platform.platform.catalog.admin validate
+		uv run --extra catalog python -m lakehouse_platform.platform.catalog.admin validate
+
+ocr-kaggle-runner-publish: ## Publish a new immutable Kaggle OCR runner Dataset version.
+	uv run --project ocr --extra kaggle-publish \
+		python ocr/runners/kaggle/glm_ocr/publish.py
 
 dbt-deps: ## Install locked dbt packages.
 	uv run --extra analytics dbt deps --project-dir dbt/analytics

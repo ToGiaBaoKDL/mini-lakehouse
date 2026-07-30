@@ -1,5 +1,7 @@
 locals {
   airflow_connection_names = toset([
+    "kaggle_default",
+    "modal_default",
     "slack_api_default",
     "smtp_default",
   ])

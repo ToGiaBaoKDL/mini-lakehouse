@@ -4,13 +4,13 @@ from collections.abc import Mapping
 from typing import Any, Protocol
 
 import pandas as pd
+from document_ocr.protocol import OcrElement
 
 from apps.document_inspector.data.athena import AthenaReader
 from apps.document_inspector.data.models import (
     OcrDocumentFilter,
     OcrDocumentRun,
     OcrDocumentSummary,
-    OcrPageElement,
 )
 from lakehouse_platform.aws import get_runtime_parameter
 from lakehouse_platform.config.settings import Settings
@@ -67,7 +67,7 @@ class ArxivDocumentRepository:
                 SELECT
                     document.arxiv_id,
                     document.state,
-                    document.attempt_count,
+                    document.attempt,
                     document.page_count,
                     document.processing_id,
                     document.model_repository,
@@ -75,13 +75,13 @@ class ArxivDocumentRepository:
                     document.completed_at,
                     document.error_code,
                     document.prepared_at,
-                    document.batch_id,
+                    document.run_id,
                     row_number() OVER (
                         PARTITION BY document.arxiv_id
                         ORDER BY
                             document.prepared_at DESC,
-                            document.attempt_count DESC,
-                            document.batch_id DESC
+                            document.attempt DESC,
+                            document.run_id DESC
                     ) AS run_rank
                 FROM {self._relation("ocr_document_runs")} AS document
             )
@@ -89,7 +89,7 @@ class ArxivDocumentRepository:
                 run.arxiv_id,
                 paper.title,
                 run.state,
-                run.attempt_count,
+                run.attempt,
                 run.page_count,
                 run.processing_id,
                 run.model_repository,
@@ -119,14 +119,14 @@ class ArxivDocumentRepository:
             f"""
             SELECT
                 document.request_id,
-                document.batch_id,
+                document.run_id,
                 document.arxiv_id,
                 paper.title,
                 paper.abstract,
                 document.pdf_url,
                 document.oai_datestamp,
                 document.state,
-                document.attempt_count,
+                document.attempt,
                 document.processing_id,
                 document.artifact_uri,
                 document.manifest_sha256,
@@ -148,8 +148,8 @@ class ArxivDocumentRepository:
             WHERE document.arxiv_id = :arxiv_id
             ORDER BY
                 document.prepared_at DESC,
-                document.attempt_count DESC,
-                document.batch_id DESC
+                document.attempt DESC,
+                document.run_id DESC
             LIMIT 100
             """,
             database=self._database,
@@ -162,7 +162,7 @@ class ArxivDocumentRepository:
         *,
         processing_id: str,
         page_number: int,
-    ) -> tuple[OcrPageElement, ...]:
+    ) -> tuple[OcrElement, ...]:
         if page_number < 1:
             raise ValueError("page_number must be positive")
         frame = self._reader.query(
@@ -188,4 +188,4 @@ class ArxivDocumentRepository:
                 "page_number": page_number,
             },
         )
-        return tuple(OcrPageElement.model_validate(record) for record in _records(frame))
+        return tuple(OcrElement.model_validate(record) for record in _records(frame))

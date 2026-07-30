@@ -4,10 +4,8 @@ from apps.document_inspector.data.models import (
     OcrDocumentFilter,
     OcrDocumentRun,
     OcrDocumentSummary,
-    OcrPageElement,
     OcrRunState,
     OcrStateFilter,
-    PublishedOcrManifest,
 )
 from apps.document_inspector.data.service import ArxivDocumentService
 
@@ -16,8 +14,6 @@ __all__ = [
     "OcrDocumentFilter",
     "OcrDocumentRun",
     "OcrDocumentSummary",
-    "OcrPageElement",
     "OcrRunState",
     "OcrStateFilter",
-    "PublishedOcrManifest",
 ]

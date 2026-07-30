@@ -14,15 +14,16 @@ dependencies = [
     "pydantic>=2.12,<3",
     "pydantic-settings>=2.12,<3",
     "pyyaml>=6.0.3,<7",
-    "typer==0.27.0",
 ]
 
 [project.optional-dependencies]
+cli = ["typer==0.27.0"]
 orchestration = [
     "apache-airflow==3.3.0",
     "apache-airflow-providers-amazon[aiobotocore]==9.32.0",
     "apache-airflow-providers-slack==9.10.2",
     "apache-airflow-providers-smtp==3.0.2",
+    "document-ocr[aws,providers]",
 ]
 analytics = [
     "dbt-athena==1.11.0",
@@ -30,9 +31,10 @@ analytics = [
 catalog = [
     "pyarrow>=23,<26",
     "pyiceberg[glue,pyarrow,s3fs]>=0.10,<0.12",
+    "typer==0.27.0",
 ]
 ocr = [
-    "document-ocr[providers]",
+    "document-ocr[aws,providers]",
 ]
 document-inspector = [
     "awswrangler==3.17.0",

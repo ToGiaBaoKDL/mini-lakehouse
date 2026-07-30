@@ -6,13 +6,12 @@ from tempfile import TemporaryDirectory
 from typing import Any, Literal
 
 from document_ocr.config import OcrConfig
-from document_ocr.protocol import OcrJob
+from document_ocr.protocol import OcrJob, OcrRunManifest
 from document_ocr.providers.base import (
-    OCR_RESULT_FILES,
+    OcrLogSink,
     OcrProviderError,
-    OcrProviderState,
+    OcrProviderRunFailedError,
     OcrRunNotFoundError,
-    OcrRunStatus,
 )
 from document_ocr.settings import KaggleSettings
 
@@ -52,9 +51,6 @@ class KaggleProvider:
         *,
         api: Any | None = None,
     ) -> None:
-        if not settings.configured:
-            raise ValueError("Kaggle OCR requires KAGGLE_USERNAME and KAGGLE_API_TOKEN")
-        assert settings.username is not None
         if api is None:
             from kaggle.api.kaggle_api_extended import KaggleApi
 
@@ -69,6 +65,21 @@ class KaggleProvider:
         self._runner_dataset_attachment = f"{dataset}/{runner.runner_dataset_version}"
 
     def submit(self, job: OcrJob) -> str:
+        try:
+            current = self._status(self.reference)
+        except OcrRunNotFoundError:
+            current = None
+        if current is not None and current[0] in {"QUEUED", "NEW_SCRIPT", "RUNNING"}:
+            raise OcrProviderError(
+                f"Kaggle kernel {self.reference!r} already has an active OCR run"
+            )
+        if (
+            current is not None
+            and current[0] == "COMPLETE"
+            and self._completed_run_id() == job.run_id
+        ):
+            return self.reference
+
         with TemporaryDirectory(prefix="arxiv-ocr-kaggle-") as temporary_directory:
             submission = Path(temporary_directory)
             (submission / "launcher.py").write_text(
@@ -122,7 +133,27 @@ class KaggleProvider:
                 raise OcrProviderError(f"Kaggle rejected the kernel submission: {detail}")
         return self.reference
 
-    def status(self, provider_run_id: str) -> OcrRunStatus:
+    def _completed_run_id(self) -> str:
+        with TemporaryDirectory(prefix="document-ocr-kaggle-output-") as temporary_directory:
+            destination = Path(temporary_directory)
+            try:
+                self._api.kernels_output(
+                    self.reference,
+                    str(destination),
+                    file_pattern=r"^result_manifest\.json$",
+                    force=True,
+                    quiet=True,
+                )
+                manifest = OcrRunManifest.model_validate_json(
+                    (destination / "result_manifest.json").read_bytes()
+                )
+            except Exception as error:
+                raise OcrProviderError(
+                    f"Cannot validate completed Kaggle output for {self.reference!r}: {error}"
+                ) from error
+            return manifest.run_id
+
+    def _status(self, provider_run_id: str) -> tuple[str, str | None]:
         self._validate_run_id(provider_run_id)
         try:
             response = self._api.kernels_status(provider_run_id)
@@ -134,34 +165,48 @@ class KaggleProvider:
             raise OcrProviderError(
                 f"Cannot inspect Kaggle kernel {provider_run_id!r}: {error}"
             ) from error
-        states = {
-            "QUEUED": OcrProviderState.QUEUED,
-            "NEW_SCRIPT": OcrProviderState.QUEUED,
-            "RUNNING": OcrProviderState.RUNNING,
-            "COMPLETE": OcrProviderState.COMPLETE,
-            "ERROR": OcrProviderState.FAILED,
-            "CANCEL_REQUESTED": OcrProviderState.FAILED,
-            "CANCEL_ACKNOWLEDGED": OcrProviderState.FAILED,
+        supported_states = {
+            "QUEUED",
+            "NEW_SCRIPT",
+            "RUNNING",
+            "COMPLETE",
+            "ERROR",
+            "CANCEL_REQUESTED",
+            "CANCEL_ACKNOWLEDGED",
         }
         raw_state = response.status.name
-        try:
-            state = states[raw_state]
-        except KeyError as error:
-            raise OcrProviderError(f"Unsupported Kaggle kernel state {raw_state!r}") from error
-        return OcrRunStatus(
-            provider_run_id=provider_run_id,
-            state=state,
-            failure_message=response.failure_message or None,
-        )
+        if raw_state not in supported_states:
+            raise OcrProviderError(f"Unsupported Kaggle kernel state {raw_state!r}")
+        return raw_state, response.failure_message or None
 
-    def logs(self, provider_run_id: str) -> str:
+    def wait(
+        self,
+        provider_run_id: str,
+        log: OcrLogSink,
+    ) -> None:
         self._validate_run_id(provider_run_id)
-        try:
-            return self._api.kernels_logs(provider_run_id)
-        except Exception as error:
-            raise OcrProviderError(
-                f"Cannot read Kaggle logs for {provider_run_id!r}: {error}"
-            ) from error
+        while True:
+            try:
+                for event in self._api.kernels_logs_stream(provider_run_id):
+                    message = event.get("data")
+                    if isinstance(message, str) and message:
+                        log(message)
+            except Exception as error:
+                if _status_code(error) == 404:
+                    raise OcrRunNotFoundError(
+                        f"Kaggle kernel {provider_run_id!r} does not exist"
+                    ) from error
+                raise OcrProviderError(
+                    f"Cannot stream Kaggle logs for {provider_run_id!r}: {error}"
+                ) from error
+            state, failure_message = self._status(provider_run_id)
+            if state in {"QUEUED", "NEW_SCRIPT", "RUNNING"}:
+                continue
+            if state == "COMPLETE":
+                return
+            raise OcrProviderRunFailedError(
+                failure_message or f"Kaggle kernel ended in state {state}"
+            )
 
     def download_output(self, provider_run_id: str, destination: Path) -> None:
         self._validate_run_id(provider_run_id)
@@ -178,9 +223,6 @@ class KaggleProvider:
             raise OcrProviderError(
                 f"Cannot download Kaggle output for {provider_run_id!r}: {error}"
             ) from error
-        missing = sorted(name for name in OCR_RESULT_FILES if not (destination / name).is_file())
-        if missing:
-            raise OcrProviderError(f"Kaggle output is missing: {', '.join(missing)}")
 
     def _validate_run_id(self, provider_run_id: str) -> None:
         if provider_run_id != self.reference:

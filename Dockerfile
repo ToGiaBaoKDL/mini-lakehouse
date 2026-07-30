@@ -48,13 +48,15 @@ ARG AIRFLOW_VERSION
 ENV PYTHONPATH=/opt/airflow
 
 COPY --from=platform-wheel --chown=airflow:0 /dist /tmp/dist
-RUN pip install --no-cache-dir \
-    "apache-airflow==${AIRFLOW_VERSION}" \
-    "apache-airflow-providers-amazon[aiobotocore]==9.32.0" \
-    "apache-airflow-providers-slack==9.10.2" \
-    "apache-airflow-providers-smtp==3.0.2" \
-    /tmp/dist/lakehouse_platform-*.whl
+COPY --from=ocr-wheel --chown=airflow:0 /dist /tmp/dist
+RUN set -eu; \
+    platform_wheel="$(find /tmp/dist -name 'lakehouse_platform-*.whl' -print -quit)"; \
+    ocr_wheel="$(find /tmp/dist -name 'document_ocr-*.whl' -print -quit)"; \
+    pip install --no-cache-dir \
+        "$ocr_wheel" \
+        "$platform_wheel[orchestration]"
 
 COPY --chown=airflow:0 orchestration /opt/airflow/orchestration
+COPY --chown=airflow:0 ocr/config /opt/airflow/ocr/config
 
 CMD ["airflow", "--help"]

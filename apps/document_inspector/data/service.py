@@ -1,6 +1,10 @@
 """Application service for read-only ArXiv document inspection."""
 
-from document_ocr.protocol import OcrPageMarkdownBundle
+from document_ocr.protocol import (
+    OcrDocumentManifest,
+    OcrElement,
+    OcrPageMarkdownBundle,
+)
 
 from apps.document_inspector.data.artifacts import (
     OcrArtifactContent,
@@ -11,8 +15,6 @@ from apps.document_inspector.data.models import (
     OcrDocumentFilter,
     OcrDocumentRun,
     OcrDocumentSummary,
-    OcrPageElement,
-    PublishedOcrManifest,
 )
 from apps.document_inspector.data.repository import ArxivDocumentRepository
 from lakehouse_platform.aws import get_runtime_parameter
@@ -46,19 +48,19 @@ class ArxivDocumentService:
         *,
         processing_id: str,
         page_number: int,
-    ) -> tuple[OcrPageElement, ...]:
+    ) -> tuple[OcrElement, ...]:
         return self._repository.page_elements(
             processing_id=processing_id,
             page_number=page_number,
         )
 
-    def manifest(self, run: OcrDocumentRun) -> PublishedOcrManifest:
+    def manifest(self, run: OcrDocumentRun) -> OcrDocumentManifest:
         return self._artifacts.manifest(run)
 
     def page_image(
         self,
         run: OcrDocumentRun,
-        manifest: PublishedOcrManifest,
+        manifest: OcrDocumentManifest,
         *,
         page_number: int,
     ) -> OcrArtifactContent:
@@ -67,6 +69,6 @@ class ArxivDocumentService:
     def page_markdowns(
         self,
         run: OcrDocumentRun,
-        manifest: PublishedOcrManifest,
+        manifest: OcrDocumentManifest,
     ) -> OcrPageMarkdownBundle:
         return self._artifacts.page_markdowns(run, manifest)

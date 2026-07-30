@@ -10,7 +10,7 @@ class SessionKey(StrEnum):
     STATE_FILTER = "document_inspector.state_filter"
     RESULT_LIMIT = "document_inspector.result_limit"
     DOCUMENT_ID = "document_inspector.document_id"
-    RUN_KEY = "document_inspector.run_key"
+    RUN_ID = "document_inspector.run_id"
     PAGE_NUMBER = "document_inspector.page_number"
 
 
@@ -19,7 +19,7 @@ DEFAULTS: dict[SessionKey, object] = {
     SessionKey.STATE_FILTER: "all",
     SessionKey.RESULT_LIMIT: 50,
     SessionKey.DOCUMENT_ID: "",
-    SessionKey.RUN_KEY: "",
+    SessionKey.RUN_ID: "",
     SessionKey.PAGE_NUMBER: 1,
 }
 
@@ -39,7 +39,7 @@ def initialize(state: SessionState) -> None:
 
 
 def reset_run(state: SessionState) -> None:
-    state[SessionKey.RUN_KEY] = ""
+    state[SessionKey.RUN_ID] = ""
     state[SessionKey.PAGE_NUMBER] = 1
 
 
@@ -75,13 +75,13 @@ def reconcile_run(
     available_keys: Sequence[str],
 ) -> str | None:
     if not available_keys:
-        state[SessionKey.RUN_KEY] = ""
+        state[SessionKey.RUN_ID] = ""
         reset_page(state)
         return None
-    current = str(_get(state, SessionKey.RUN_KEY, ""))
+    current = str(_get(state, SessionKey.RUN_ID, ""))
     if current not in available_keys:
         current = available_keys[0]
-        state[SessionKey.RUN_KEY] = current
+        state[SessionKey.RUN_ID] = current
         reset_page(state)
     return current
 

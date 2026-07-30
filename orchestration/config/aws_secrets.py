@@ -1,9 +1,7 @@
 """Use AWS-native stores for Airflow connections and runtime variables."""
 
 from airflow.providers.amazon.aws.secrets.secrets_manager import SecretsManagerBackend
-from airflow.providers.amazon.aws.secrets.systems_manager import (
-    SystemsManagerParameterStoreBackend,
-)
+from airflow.providers.amazon.aws.secrets.systems_manager import SystemsManagerParameterStoreBackend
 from airflow.secrets import BaseSecretsBackend
 
 

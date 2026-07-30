@@ -529,7 +529,7 @@ wheels = [
 
 [[package]]
 name = "document-ocr-glm-runner"
-version = "1.1.0"
+version = "2.0.0"
 source = { virtual = "." }
 dependencies = [
     { name = "glmocr", extra = ["selfhosted"] },

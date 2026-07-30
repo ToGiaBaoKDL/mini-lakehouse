@@ -1,7 +1,11 @@
 """Read-only Streamlit application for inspecting document processing outputs."""
 
 import streamlit as st
-from document_ocr.protocol import OcrPageMarkdownBundle
+from document_ocr.protocol import (
+    OcrDocumentManifest,
+    OcrElement,
+    OcrPageMarkdownBundle,
+)
 from loguru import logger
 
 from apps.document_inspector import state
@@ -17,10 +21,8 @@ from apps.document_inspector.data import (
     OcrDocumentFilter,
     OcrDocumentRun,
     OcrDocumentSummary,
-    OcrPageElement,
     OcrRunState,
     OcrStateFilter,
-    PublishedOcrManifest,
 )
 from apps.document_inspector.data.artifacts import OcrArtifactContent
 from apps.document_inspector.theme import apply_theme
@@ -61,14 +63,14 @@ def load_runs(arxiv_id: str) -> tuple[OcrDocumentRun, ...]:
 
 
 @st.cache_data(ttl=300, max_entries=64, show_spinner=False)
-def load_manifest(run: OcrDocumentRun) -> PublishedOcrManifest:
+def load_manifest(run: OcrDocumentRun) -> OcrDocumentManifest:
     return document_service().manifest(run)
 
 
 @st.cache_data(ttl=300, max_entries=24, show_spinner=False)
 def load_page_image(
     run: OcrDocumentRun,
-    manifest: PublishedOcrManifest,
+    manifest: OcrDocumentManifest,
     page_number: int,
 ) -> OcrArtifactContent:
     return document_service().page_image(run, manifest, page_number=page_number)
@@ -77,13 +79,13 @@ def load_page_image(
 @st.cache_data(ttl=300, max_entries=12, show_spinner=False)
 def load_page_markdowns(
     run: OcrDocumentRun,
-    manifest: PublishedOcrManifest,
+    manifest: OcrDocumentManifest,
 ) -> OcrPageMarkdownBundle:
     return document_service().page_markdowns(run, manifest)
 
 
 @st.cache_data(ttl=300, max_entries=64, show_spinner=False)
-def load_page_elements(processing_id: str, page_number: int) -> tuple[OcrPageElement, ...]:
+def load_page_elements(processing_id: str, page_number: int) -> tuple[OcrElement, ...]:
     return document_service().page_elements(
         processing_id=processing_id,
         page_number=page_number,
@@ -170,19 +172,19 @@ def select_document(
 
 
 def select_run(runs: tuple[OcrDocumentRun, ...]) -> OcrDocumentRun | None:
-    run_by_key = {run.run_key: run for run in runs}
-    selected_key = state.reconcile_run(st.session_state, tuple(run_by_key))
-    if selected_key is None:
+    run_by_id = {run.run_id: run for run in runs}
+    selected_id = state.reconcile_run(st.session_state, tuple(run_by_id))
+    if selected_id is None:
         return None
     with st.sidebar:
         st.selectbox(
             "Processing run",
-            tuple(run_by_key),
-            format_func=lambda run_key: run_label(run_by_key[run_key]),
-            key=state.SessionKey.RUN_KEY,
+            tuple(run_by_id),
+            format_func=lambda run_id: run_label(run_by_id[run_id]),
+            key=state.SessionKey.RUN_ID,
             on_change=on_run_change,
         )
-    return run_by_key[str(st.session_state[state.SessionKey.RUN_KEY])]
+    return run_by_id[str(st.session_state[state.SessionKey.RUN_ID])]
 
 
 def select_page(page_count: int) -> int:

@@ -4,16 +4,16 @@ from pathlib import Path
 from typing import Literal
 
 import modal
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from document_ocr.archive import OCR_RESULT_FILES
 from document_ocr.config import OcrConfig
 from document_ocr.protocol import OcrJob
 from document_ocr.providers.base import (
-    OCR_RESULT_FILES,
+    OcrLogSink,
     OcrProviderError,
-    OcrProviderState,
+    OcrProviderRunFailedError,
     OcrRunNotFoundError,
-    OcrRunStatus,
 )
 from document_ocr.settings import ModalSettings
 
@@ -21,7 +21,7 @@ from document_ocr.settings import ModalSettings
 class ModalRunResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    batch_id: str
+    run_id: str = Field(pattern=r"^[0-9a-f]{64}$")
     output_prefix: str
     state: Literal["complete"]
 
@@ -36,14 +36,10 @@ class ModalProvider:
         *,
         client: modal.Client | None = None,
     ) -> None:
-        if not settings.configured:
-            raise ValueError("Modal OCR requires MODAL_TOKEN_ID and MODAL_TOKEN_SECRET")
         runner = processor.runner.modal
         self._runner = runner
         self.reference = f"{runner.app_name}/{runner.function_name}"
         if client is None:
-            assert settings.token_id is not None
-            assert settings.token_secret is not None
             client = modal.Client.from_credentials(
                 settings.token_id.get_secret_value(),
                 settings.token_secret.get_secret_value(),
@@ -70,7 +66,7 @@ class ModalProvider:
         call = self._function(self._runner.function_name).spawn(job.model_dump_json())
         return call.object_id
 
-    def _result(self, provider_run_id: str, *, timeout: float) -> ModalRunResult:
+    def _result(self, provider_run_id: str, *, timeout: float | None) -> ModalRunResult:
         call = self._call(provider_run_id)
         try:
             value = call.get(timeout=timeout)
@@ -87,39 +83,30 @@ class ModalProvider:
         except ValidationError as error:
             raise OcrProviderError("Modal OCR returned an invalid result") from error
 
-    def status(self, provider_run_id: str) -> OcrRunStatus:
+    def wait(
+        self,
+        provider_run_id: str,
+        log: OcrLogSink,
+    ) -> None:
+        call = self._call(provider_run_id)
         try:
-            self._result(provider_run_id, timeout=0)
-        except modal.exception.TimeoutError:
-            return OcrRunStatus(
-                provider_run_id=provider_run_id,
-                state=OcrProviderState.RUNNING,
-            )
+            for entry in call.logs.stream():
+                if entry.message:
+                    log(entry.message)
+            self._result(provider_run_id, timeout=None)
+        except modal.exception.NotFoundError as error:
+            raise OcrRunNotFoundError(
+                f"Modal function call {provider_run_id!r} does not exist"
+            ) from error
+        except modal.exception.Error as error:
+            raise OcrProviderError(f"Cannot stream Modal logs: {error}") from error
         except OcrRunNotFoundError:
             raise
         except OcrProviderError as error:
-            return OcrRunStatus(
-                provider_run_id=provider_run_id,
-                state=OcrProviderState.FAILED,
-                failure_message=str(error)[:2000],
-            )
-        return OcrRunStatus(
-            provider_run_id=provider_run_id,
-            state=OcrProviderState.COMPLETE,
-        )
-
-    def logs(self, provider_run_id: str) -> str:
-        try:
-            return "".join(entry.message for entry in self._call(provider_run_id).logs.tail(100))
-        except modal.exception.NotFoundError as error:
-            raise OcrRunNotFoundError(
-                f"Modal logs for {provider_run_id!r} no longer exist"
-            ) from error
-        except modal.exception.Error as error:
-            raise OcrProviderError(f"Cannot read Modal logs: {error}") from error
+            raise OcrProviderRunFailedError(str(error)[:2000]) from error
 
     def download_output(self, provider_run_id: str, destination: Path) -> None:
-        result = self._result(provider_run_id, timeout=0)
+        result = self._result(provider_run_id, timeout=None)
         destination.mkdir(parents=True, exist_ok=False)
         try:
             volume = modal.Volume.from_name(
@@ -134,5 +121,5 @@ class ModalProvider:
                         output.write(chunk)
         except (OSError, modal.exception.Error) as error:
             raise OcrProviderError(
-                f"Cannot download Modal output for {result.batch_id}: {error}"
+                f"Cannot download Modal output for {result.run_id}: {error}"
             ) from error

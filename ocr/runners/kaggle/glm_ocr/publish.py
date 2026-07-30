@@ -1,4 +1,4 @@
-"""Publish the Kaggle runner Dataset used by the OCR kernel."""
+"""Publish an immutable Kaggle runner Dataset release."""
 
 import shutil
 from pathlib import Path
@@ -6,12 +6,13 @@ from tempfile import TemporaryDirectory
 
 import kagglehub
 from document_ocr.config import load_ocr_config
+from document_ocr.protocol import OCR_PROTOCOL_VERSION
 from document_ocr.settings import KaggleSettings
 
 RUNNER_FILES = ("runtime.py", "pyproject.toml", "uv.lock")
 
 
-def build_runner(
+def build_runner_bundle(
     destination: Path,
     *,
     runner_source: Path = Path("ocr/runners/glm_ocr"),
@@ -46,20 +47,17 @@ def build_runner(
 
 def main() -> None:
     settings = KaggleSettings()
-    if not settings.configured:
-        raise ValueError("Kaggle runner deployment requires KAGGLE_USERNAME and KAGGLE_API_TOKEN")
-    assert settings.username is not None
     processor = load_ocr_config("arxiv_glm_ocr")
     handle = f"{settings.username}/{processor.runner.kaggle.runner_dataset_name}"
     with TemporaryDirectory(prefix="document-ocr-kaggle-runner-") as temporary_directory:
         bundle = Path(temporary_directory) / "runner"
-        build_runner(bundle)
+        build_runner_bundle(bundle)
         kagglehub.dataset_upload(
             handle,
             str(bundle),
             version_notes=(
                 f"GLM-OCR adapter {processor.adapter_version}; "
-                f"output protocol {processor.output_schema_version}"
+                f"document OCR protocol {OCR_PROTOCOL_VERSION}"
             ),
         )
     print(

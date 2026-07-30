@@ -89,13 +89,13 @@ def test_athena_reader_uses_primary_with_explicit_query_output(
 def _run(manifest_sha256: str) -> OcrDocumentRun:
     return OcrDocumentRun(
         request_id="1" * 64,
-        batch_id="2" * 64,
+        run_id="2" * 64,
         arxiv_id="2607.20571",
         title="A paper",
         pdf_url="https://arxiv.org/pdf/2607.20571",
         oai_datestamp=date(2026, 7, 25),
         state=OcrRunState.IMPORTED,
-        attempt_count=1,
+        attempt=1,
         processing_id="3" * 64,
         artifact_uri=f"s3://curated/arxiv/ocr/papers/2607.20571/{'3' * 64}",
         manifest_sha256=manifest_sha256,
@@ -119,7 +119,7 @@ def test_document_repository_keeps_search_and_state_parameterized() -> None:
                 "arxiv_id": "2607.20571",
                 "title": "A paper",
                 "state": "imported",
-                "attempt_count": 1,
+                "attempt": 1,
                 "page_count": 3,
                 "processing_id": "3" * 64,
                 "model_repository": "zai-org/GLM-OCR",
@@ -149,7 +149,6 @@ def test_artifact_reader_uses_verified_manifest_and_declared_page_path() -> None
     image = b"annotated-page"
     page_markdown = gzip.compress(
         OcrPageMarkdownBundle(
-            schema_version="1.0.0",
             pages=(OcrPageMarkdown(page_number=1, markdown="# Page one\n"),),
         )
         .model_dump_json()
@@ -178,7 +177,8 @@ def test_artifact_reader_uses_verified_manifest_and_declared_page_path() -> None
     )
     manifest_payload = canonical_json_bytes(
         {
-            "arxiv_id": "2607.20571",
+            "schema_version": "2.0.0",
+            "document_id": "2607.20571",
             "files": [file.model_dump(mode="json") for file in files],
             "page_count": 1,
             "pdf_sha256": "4" * 64,
@@ -250,11 +250,11 @@ def test_document_session_resets_dependent_selection_consistently() -> None:
     state.initialize(session)
 
     assert state.reconcile_document(session, ("paper-a", "paper-b")) == "paper-a"
-    session[state.SessionKey.RUN_KEY] = "old-run"
+    session[state.SessionKey.RUN_ID] = "old-run"
     session[state.SessionKey.PAGE_NUMBER] = 7
 
     assert state.reconcile_document(session, ("paper-b",)) == "paper-b"
-    assert session[state.SessionKey.RUN_KEY] == ""
+    assert session[state.SessionKey.RUN_ID] == ""
     assert session[state.SessionKey.PAGE_NUMBER] == 1
     assert state.reconcile_run(session, ("new-run",)) == "new-run"
     session[state.SessionKey.PAGE_NUMBER] = 99

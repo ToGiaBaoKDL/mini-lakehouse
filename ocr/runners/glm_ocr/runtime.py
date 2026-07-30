@@ -5,7 +5,7 @@ from typing import Annotated
 
 import typer
 from document_ocr.protocol import OcrJob
-from runner.batch import run
+from runner.job import run
 
 
 def main(
