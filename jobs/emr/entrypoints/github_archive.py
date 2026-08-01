@@ -3,7 +3,7 @@
 from typing import Annotated
 
 import typer
-from lakehouse_jobs.github_archive.job import run
+from emr_jobs.github_archive.job import run
 
 
 def main(

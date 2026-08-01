@@ -1,13 +1,15 @@
 [project]
-name = "lakehouse-platform-emr-jobs"
+name = "emr-jobs"
 version = "0.1.0"
 requires-python = ">=3.11,<3.12"
 dependencies = [
     "boto3>=1.42,<2",
-    "lakehouse-platform",
+    "botocore>=1.42,<2",
+    "lakehouse",
     "loguru==0.7.3",
     "requests>=2.32,<3",
     "typer==0.27.0",
+    "urllib3>=2.6,<3",
 ]
 
 [build-system]
@@ -15,10 +17,10 @@ requires = ["uv_build>=0.11.0,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv.sources]
-lakehouse-platform = { path = "../..", editable = false }
+lakehouse = { path = "../../platform", editable = false }
 
 [tool.uv.build-backend]
-module-name = "lakehouse_jobs"
+module-name = "emr_jobs"
 
 [dependency-groups]
 build = ["venv-pack==0.2.0"]
@@ -27,7 +29,7 @@ build = ["venv-pack==0.2.0"]
 pythonVersion = "3.11"
 typeCheckingMode = "strict"
 include = ["src", "entrypoints"]
-extraPaths = ["src", "../..", "../../src"]
+extraPaths = ["src", "../../platform/src"]
 reportMissingImports = false
 reportMissingModuleSource = false
 reportMissingTypeStubs = false

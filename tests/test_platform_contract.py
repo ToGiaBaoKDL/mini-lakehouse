@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from lakehouse_platform.contracts import load_contracts
-from lakehouse_platform.platform.catalog.layout import managed_tables, namespace_properties
+from lakehouse.catalog.layout import managed_tables, namespace_properties
+from lakehouse.contracts import load_contracts
 
 
 def test_glue_databases_are_derived_from_owned_contracts() -> None:

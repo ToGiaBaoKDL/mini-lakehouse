@@ -1,4 +1,4 @@
-lakehouse_platform:
+analytics:
   target: dev
   outputs:
     dev:

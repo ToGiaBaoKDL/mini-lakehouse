@@ -1,12 +1,11 @@
 import pytest
-from pyiceberg.transforms import HourTransform
-
-from lakehouse_platform.contracts import (
+from lakehouse.catalog.schema import partition_spec
+from lakehouse.contracts import (
     ManagedIcebergTableContract,
     TableIdentifier,
     load_contracts,
 )
-from lakehouse_platform.platform.catalog.schema import partition_spec
+from pyiceberg.transforms import HourTransform
 
 
 def test_github_archive_partition_spec_uses_named_hour_transform() -> None:

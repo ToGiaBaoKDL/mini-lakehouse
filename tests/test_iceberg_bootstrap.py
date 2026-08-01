@@ -2,14 +2,13 @@ from typing import Any, cast
 from unittest.mock import create_autospec
 
 import pytest
+from lakehouse.catalog.layout import managed_tables
+from lakehouse.catalog.schema import iceberg_schema, partition_spec
+from lakehouse.catalog.tables import TABLE_PROPERTIES, apply_table
+from lakehouse.contracts import ManagedIcebergTableContract, load_contracts
 from pyiceberg.catalog import Catalog
 from pyiceberg.partitioning import PartitionSpec
 from pyiceberg.table import Table
-
-from lakehouse_platform.contracts import ManagedIcebergTableContract, load_contracts
-from lakehouse_platform.platform.catalog.layout import managed_tables
-from lakehouse_platform.platform.catalog.schema import iceberg_schema, partition_spec
-from lakehouse_platform.platform.catalog.tables import TABLE_PROPERTIES, apply_table
 
 
 def _binding(identifier: tuple[str, ...]):

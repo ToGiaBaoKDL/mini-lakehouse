@@ -2,9 +2,8 @@ from typing import Any, cast
 
 import pytest
 from document_ocr.settings import KaggleSettings, ModalSettings
+from lakehouse.config.settings import Settings
 from pydantic import ValidationError
-
-from lakehouse_platform.config.settings import Settings
 
 
 def test_runtime_settings_only_contain_process_configuration() -> None:
@@ -28,14 +27,14 @@ def test_aws_environment_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_modal_credentials_must_be_configured_as_a_pair() -> None:
     with pytest.raises(ValidationError, match="token_secret"):
-        cast(Any, ModalSettings)(token_id="ak-incomplete", _env_file=None)
+        cast(Any, ModalSettings)(token_id="ak-incomplete")
 
 
 def test_kaggle_uses_sdk_standard_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KAGGLE_USERNAME", "owner")
     monkeypatch.setenv("KAGGLE_API_TOKEN", "secret")
 
-    settings: KaggleSettings = cast(Any, KaggleSettings)(_env_file=None)
+    settings: KaggleSettings = cast(Any, KaggleSettings)()
 
     assert settings.username == "owner"
     assert settings.api_token.get_secret_value() == "secret"

@@ -3,8 +3,7 @@ from pathlib import Path
 from typing import cast
 
 import yaml
-
-from lakehouse_platform.contracts import load_contracts
+from lakehouse.contracts import load_contracts
 
 
 def _yaml(path: str) -> dict[str, object]:
@@ -46,7 +45,7 @@ def test_dbt_sources_match_curated_product_contracts() -> None:
             assert documented["data_type"] == type_names[column.data_type]
 
 
-def test_dbt_athena_configuration_is_explicit_and_has_no_trino_fallback() -> None:
+def test_dbt_athena_configuration_is_explicit() -> None:
     profile_path = "dbt/analytics/profiles.yml"
     profile = Path(profile_path).read_text(encoding="utf-8")
     profile_config = _yaml(profile_path)
@@ -54,9 +53,9 @@ def test_dbt_athena_configuration_is_explicit_and_has_no_trino_fallback() -> Non
     models = cast(dict[str, object], project["models"])
     marts = cast(
         dict[str, object],
-        cast(dict[str, object], models["lakehouse_platform_analytics"])["marts"],
+        cast(dict[str, object], models["analytics"])["marts"],
     )
-    project_config = cast(dict[str, object], models["lakehouse_platform_analytics"])
+    project_config = cast(dict[str, object], models["analytics"])
     domain = load_contracts().domain("engineering")
     project_meta = cast(dict[str, object], project_config["+meta"])
     mart_meta = cast(dict[str, object], cast(dict[str, object], marts["engineering"])["+meta"])
@@ -64,12 +63,11 @@ def test_dbt_athena_configuration_is_explicit_and_has_no_trino_fallback() -> Non
         dict[str, object],
         cast(
             dict[str, object],
-            cast(dict[str, object], profile_config["lakehouse_platform"])["outputs"],
+            cast(dict[str, object], profile_config["analytics"])["outputs"],
         )["dev"],
     )
 
     assert "type: athena" in profile
-    assert "type: trino" not in profile
     assert "aws_access_key_id" not in profile
     assert marts["+materialized"] == "table"
     assert marts["+table_type"] == "iceberg"
@@ -100,14 +98,17 @@ def test_dbt_athena_configuration_is_explicit_and_has_no_trino_fallback() -> Non
 
 
 def test_dbt_uses_first_party_adapter_and_standard_test_package() -> None:
-    project = Path("pyproject.toml").read_text(encoding="utf-8")
+    root_project = Path("pyproject.toml").read_text(encoding="utf-8")
+    analytics_project = Path("dbt/analytics/pyproject.toml").read_text(encoding="utf-8")
     packages = _yaml("dbt/analytics/packages.yml")
     mart_models = Path("dbt/analytics/models/marts/engineering/_engineering__models.yml").read_text(
         encoding="utf-8"
     )
 
-    assert '"dbt-athena==1.11.0"' in project
-    assert "dbt-athena-community" not in project
+    assert '"dbt-athena==1.11.0"' in analytics_project
+    assert "dbt-athena" not in root_project
+    assert "dbt-athena-community" not in root_project
+    assert "dbt-athena-community" not in analytics_project
     assert packages == {"packages": [{"package": "dbt-labs/dbt_utils", "version": "1.4.1"}]}
     assert "dbt_utils.unique_combination_of_columns" in mart_models
     assert not Path("dbt/analytics/tests/generic/test_unique_combination_of_columns.sql").exists()

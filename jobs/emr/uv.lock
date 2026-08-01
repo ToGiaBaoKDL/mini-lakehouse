@@ -107,58 +107,17 @@ wheels = [
 ]
 
 [[package]]
-name = "lakehouse-platform"
-version = "0.3.0"
-source = { directory = "../../" }
-dependencies = [
-    { name = "boto3" },
-    { name = "loguru" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "pyyaml" },
-    { name = "typer" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "apache-airflow", marker = "extra == 'orchestration'", specifier = "==3.3.0" },
-    { name = "apache-airflow-providers-amazon", extras = ["aiobotocore"], marker = "extra == 'orchestration'", specifier = "==9.32.0" },
-    { name = "apache-airflow-providers-slack", marker = "extra == 'orchestration'", specifier = "==9.10.2" },
-    { name = "apache-airflow-providers-smtp", marker = "extra == 'orchestration'", specifier = "==3.0.2" },
-    { name = "awswrangler", marker = "extra == 'document-inspector'", specifier = "==3.17.0" },
-    { name = "boto3", specifier = ">=1.42,<2" },
-    { name = "dbt-athena", marker = "extra == 'analytics'", specifier = "==1.11.0" },
-    { name = "document-ocr", marker = "extra == 'document-inspector'", editable = "../../ocr" },
-    { name = "document-ocr", extras = ["providers"], marker = "extra == 'ocr'", editable = "../../ocr" },
-    { name = "loguru", specifier = "==0.7.3" },
-    { name = "pyarrow", marker = "extra == 'catalog'", specifier = ">=23,<26" },
-    { name = "pydantic", specifier = ">=2.12,<3" },
-    { name = "pydantic-settings", specifier = ">=2.12,<3" },
-    { name = "pyiceberg", extras = ["glue", "pyarrow", "s3fs"], marker = "extra == 'catalog'", specifier = ">=0.10,<0.12" },
-    { name = "pyyaml", specifier = ">=6.0.3,<7" },
-    { name = "streamlit", marker = "extra == 'document-inspector'", specifier = ">=1.60,<1.61" },
-    { name = "typer", specifier = "==0.27.0" },
-]
-provides-extras = ["orchestration", "analytics", "catalog", "ocr", "document-inspector"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pyright", specifier = ">=1.1.408,<2" },
-    { name = "pytest", specifier = ">=9,<10" },
-    { name = "pytest-cov", specifier = ">=7,<8" },
-    { name = "ruff", specifier = ">=0.14,<0.16" },
-]
-
-[[package]]
-name = "lakehouse-platform-emr-jobs"
+name = "emr-jobs"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },
-    { name = "lakehouse-platform" },
+    { name = "botocore" },
+    { name = "lakehouse" },
     { name = "loguru" },
     { name = "requests" },
     { name = "typer" },
+    { name = "urllib3" },
 ]
 
 [package.dev-dependencies]
@@ -169,14 +128,40 @@ build = [
 [package.metadata]
 requires-dist = [
     { name = "boto3", specifier = ">=1.42,<2" },
-    { name = "lakehouse-platform", directory = "../../" },
+    { name = "botocore", specifier = ">=1.42,<2" },
+    { name = "lakehouse", directory = "../../platform" },
     { name = "loguru", specifier = "==0.7.3" },
     { name = "requests", specifier = ">=2.32,<3" },
     { name = "typer", specifier = "==0.27.0" },
+    { name = "urllib3", specifier = ">=2.6,<3" },
 ]
 
 [package.metadata.requires-dev]
 build = [{ name = "venv-pack", specifier = "==0.2.0" }]
+
+[[package]]
+name = "lakehouse"
+version = "0.3.0"
+source = { directory = "../../platform" }
+dependencies = [
+    { name = "boto3" },
+    { name = "loguru" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "boto3", specifier = ">=1.42,<2" },
+    { name = "loguru", specifier = "==0.7.3" },
+    { name = "pydantic", specifier = ">=2.12,<3" },
+    { name = "pydantic-settings", specifier = ">=2.12,<3" },
+    { name = "pyiceberg", extras = ["glue", "pyarrow"], marker = "extra == 'catalog'", specifier = ">=0.10,<0.12" },
+    { name = "pyyaml", specifier = ">=6.0.3,<7" },
+    { name = "typer", marker = "extra == 'cli'", specifier = "==0.25.1" },
+]
+provides-extras = ["cli", "catalog"]
 
 [[package]]
 name = "loguru"

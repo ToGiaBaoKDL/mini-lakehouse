@@ -26,9 +26,8 @@ from document_ocr.protocol import (
 from document_ocr.providers.base import (
     OcrRunNotFoundError,
 )
-
-from lakehouse_platform.contracts import load_contracts
-from lakehouse_platform.platform.catalog.schema import iceberg_schema
+from lakehouse.catalog.schema import iceberg_schema
+from lakehouse.contracts import load_contracts
 
 
 class _Scan:

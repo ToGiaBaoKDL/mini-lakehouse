@@ -1,0 +1,11 @@
+[project]
+name = "analytics"
+version = "0.1.0"
+description = "dbt analytics transformations executed through Amazon Athena."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "dbt-athena==1.11.0",
+]
+
+[tool.uv]
+package = false

@@ -3,8 +3,8 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
-from lakehouse_jobs.arxiv.oai import parse_records
-from lakehouse_jobs.github_archive.extract import has_checksum
+from emr_jobs.arxiv.oai import parse_records
+from emr_jobs.github_archive.extract import has_checksum
 
 
 def test_github_archive_reuses_only_nonempty_objects_with_sha256_metadata() -> None:
@@ -94,7 +94,7 @@ def test_arxiv_parser_rejects_duplicate_oai_identifiers() -> None:
 
 
 def test_github_landing_replay_uses_explicit_day_overwrite() -> None:
-    source = Path("jobs/emr/src/lakehouse_jobs/github_archive/job.py").read_text()
+    source = Path("jobs/emr/src/emr_jobs/github_archive/job.py").read_text()
 
     assert ".overwritePartitions()" not in source
     assert ".writeTo(landing_table).overwrite(" in source
@@ -102,8 +102,8 @@ def test_github_landing_replay_uses_explicit_day_overwrite() -> None:
 
 
 def test_github_landing_parses_once_and_releases_its_cache() -> None:
-    landing = Path("jobs/emr/src/lakehouse_jobs/github_archive/landing.py").read_text()
-    job = Path("jobs/emr/src/lakehouse_jobs/github_archive/job.py").read_text()
+    landing = Path("jobs/emr/src/emr_jobs/github_archive/landing.py").read_text()
+    job = Path("jobs/emr/src/emr_jobs/github_archive/job.py").read_text()
 
     assert landing.count("F.from_json(") == 1
     assert landing.count('F.get_json_object("value"') == 1
@@ -112,7 +112,7 @@ def test_github_landing_parses_once_and_releases_its_cache() -> None:
 
 
 def test_github_current_snapshots_use_a_stable_complete_winner_key() -> None:
-    source = Path("jobs/emr/src/lakehouse_jobs/github_archive/curated.py").read_text()
+    source = Path("jobs/emr/src/emr_jobs/github_archive/curated.py").read_text()
 
     assert source.count("struct(occurred_at, event_id)") == 2
     assert source.count("source.last_observed_at, source.last_event_id") == 2
@@ -123,7 +123,7 @@ def test_github_current_snapshots_use_a_stable_complete_winner_key() -> None:
 
 
 def test_arxiv_child_replacement_is_unique_and_retry_safe() -> None:
-    source = Path("jobs/emr/src/lakehouse_jobs/arxiv/curated.py").read_text()
+    source = Path("jobs/emr/src/emr_jobs/arxiv/curated.py").read_text()
     delete_authors = source.index("MERGE INTO {authors}")
     append_authors = source.index(".writeTo(authors).append()")
     delete_categories = source.index("MERGE INTO {categories}")
