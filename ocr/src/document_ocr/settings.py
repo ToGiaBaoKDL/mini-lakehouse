@@ -6,8 +6,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class KaggleSettings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
         env_prefix="KAGGLE_",
         extra="ignore",
     )
@@ -18,8 +16,6 @@ class KaggleSettings(BaseSettings):
 
 class ModalSettings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
         env_prefix="MODAL_",
         extra="ignore",
     )

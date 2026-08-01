@@ -13,17 +13,14 @@ class AwsSecretsBackend(BaseSecretsBackend):
         *,
         connections_prefix: str,
         variables_prefix: str,
-        profile_name: str | None = None,
         region_name: str | None = None,
     ) -> None:
         self._connections = SecretsManagerBackend(
             connections_prefix=connections_prefix,
-            profile_name=profile_name,
             region_name=region_name,
         )
         self._variables = SystemsManagerParameterStoreBackend(
             variables_prefix=variables_prefix,
-            profile_name=profile_name,
             region_name=region_name,
         )
 

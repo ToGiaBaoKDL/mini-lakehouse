@@ -60,7 +60,7 @@ def emr_source_job(
             }
         },
         config={"executionTimeoutMinutes": EMR_JOB_TIMEOUT_MINUTES},
-        aws_conn_id="aws_default",
+        aws_conn_id=None,
         client_request_token=(
             "{{ dag.dag_id[:28] }}-"
             "{{ dag_run.run_after.strftime('%Y%m%dT%H%M%S%f') }}-"

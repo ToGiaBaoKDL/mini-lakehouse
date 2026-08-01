@@ -1,0 +1,33 @@
+[project]
+name = "airflow-orchestration"
+version = "0.1.0"
+description = "Self-hosted Airflow DAGs and runtime integration for the lakehouse."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "apache-airflow==3.3.0",
+    "apache-airflow-providers-amazon[aiobotocore]==9.31.0",
+    "apache-airflow-providers-docker==4.5.7",
+    "apache-airflow-providers-slack==9.10.2",
+    "apache-airflow-providers-smtp==3.0.1",
+    "docker>=7.1,<8",
+    "pendulum>=3.1,<4",
+]
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = ["pyright>=1.1.408,<2"]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+include = ["callbacks", "config", "dags", "operators"]
+extraPaths = [".."]
+venvPath = "."
+venv = ".venv"
+reportMissingTypeStubs = false
+reportUnknownArgumentType = false
+reportUnknownMemberType = false
+reportUnknownParameterType = false
+reportUnknownVariableType = false

@@ -12,7 +12,7 @@ ALLOWED_JOB_TYPES = {
     "gov",
     "test",
 }
-ALLOWED_WORKER_TYPES = {"emr", "glue", "k8spod", "afw", "mix"}
+ALLOWED_WORKER_TYPES = {"emr", "glue", "k8spod", "afw", "docker", "mix"}
 
 
 def _dag_files() -> list[Path]:
@@ -23,10 +23,11 @@ def test_dags_are_domain_scoped_and_follow_worker_aware_naming() -> None:
     dag_files = _dag_files()
     assert {path.as_posix() for path in dag_files} == {
         "orchestration/dags/arxiv/etl_emr_arxiv_metadata.py",
-        "orchestration/dags/arxiv/etl_mix_arxiv_document_ocr.py",
+        "orchestration/dags/arxiv/etl_docker_arxiv_document_ocr.py",
         "orchestration/dags/github/etl_emr_github_archive.py",
     }
-    assert not list(Path("orchestration").rglob("__init__.py"))
+    for directory in ("callbacks", "config", "dags", "operators"):
+        assert not list(Path("orchestration", directory).rglob("__init__.py"))
     assert not Path("orchestration/tasks.py").exists()
 
     for path in dag_files:
@@ -51,15 +52,26 @@ def test_daily_source_dags_are_bounded_and_parameterized() -> None:
 
 
 def test_arxiv_ocr_dag_accepts_exactly_one_document() -> None:
-    source = Path("orchestration/dags/arxiv/etl_mix_arxiv_document_ocr.py").read_text(
+    source = Path("orchestration/dags/arxiv/etl_docker_arxiv_document_ocr.py").read_text(
         encoding="utf-8"
     )
 
     assert "schedule=None" in source
     assert "arxiv_id" in source
     assert "max_active_runs=1" in source
+    assert "DockerOperator" in source
+    assert 'OCR_IMAGE = "ocr-worker:runtime"' in source
+    assert 'os.environ["OCR_AWS_PROFILE"]' in source
+    assert 'os.environ["TASK_AWS_CONFIG_DIR"]' in source
+    assert "OCR_TASK_IMAGE" not in source
+    assert "force_pull=False" in source
+    assert 'auto_remove="force"' in source
+    assert 'command=[\n            "--arxiv-id",' in source
+    assert "from document_ocr" not in source
+    assert "import document_ocr" not in source
     assert "batch" not in source.lower()
     assert "list[str]" not in source
+    assert not Path("orchestration/runtime/ocr.py").exists()
 
 
 def test_emr_operator_uses_official_deferrable_lifecycle() -> None:
@@ -91,7 +103,7 @@ def test_emr_artifacts_are_built_in_the_pinned_runtime() -> None:
     dockerfile = Path("jobs/emr/Dockerfile").read_text(encoding="utf-8")
 
     assert "amazonlinux:2023-minimal@sha256:" in dockerfile
-    assert "dnf install -y python3.11" in dockerfile
+    assert "dnf install -y --setopt=install_weak_deps=0 python3.11" in dockerfile
     assert ":latest" not in dockerfile
     assert "venv-pack" in dockerfile
     assert "python.tar.gz" in dockerfile
@@ -99,12 +111,12 @@ def test_emr_artifacts_are_built_in_the_pinned_runtime() -> None:
     makefile = Path("Makefile").read_text(encoding="utf-8")
     assert "jobs/emr/.venv/lib/python" not in makefile
     assert "--file jobs/emr/Dockerfile" in makefile
-    assert "lakehouse_jobs.zip" not in makefile
+    assert "emr_jobs.zip" not in makefile
 
 
 def test_emr_artifact_sources_are_python_311_compatible() -> None:
     runtime_sources = (
-        *Path("src/lakehouse_platform").rglob("*.py"),
+        *Path("platform/src/lakehouse").rglob("*.py"),
         *Path("jobs/emr/src").rglob("*.py"),
         *Path("jobs/emr/entrypoints").glob("*.py"),
     )
@@ -118,7 +130,7 @@ def test_emr_artifact_sources_are_python_311_compatible() -> None:
 
 
 def test_emr_jobs_resolve_storage_and_tables_from_contract_bundle() -> None:
-    contracts = Path("jobs/emr/src/lakehouse_jobs/common/contracts.py").read_text(encoding="utf-8")
+    contracts = Path("jobs/emr/src/emr_jobs/common/contracts.py").read_text(encoding="utf-8")
     assert "DataContracts.model_validate_json" in contracts
     assert "StructType" in contracts
 
@@ -128,14 +140,13 @@ def test_emr_jobs_resolve_storage_and_tables_from_contract_bundle() -> None:
     ):
         source = path.read_text(encoding="utf-8")
         ast.parse(source)
-        assert "from lakehouse_jobs." in source
+        assert "from emr_jobs." in source
         assert "typer.run(main)" in source
         assert "CREATE TABLE" not in source
         assert "CREATE DATABASE" not in source
 
     jobs = "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in Path("jobs/emr/src/lakehouse_jobs").rglob("*.py")
+        path.read_text(encoding="utf-8") for path in Path("jobs/emr/src/emr_jobs").rglob("*.py")
     )
     assert "ContractBundle" not in jobs
     assert "ProductBinding" not in jobs
