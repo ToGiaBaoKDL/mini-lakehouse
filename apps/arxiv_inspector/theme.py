@@ -1,4 +1,4 @@
-"""Document Inspector style layer using Streamlit theme variables."""
+"""ArXiv Inspector style layer using Streamlit theme variables."""
 
 import streamlit as st
 

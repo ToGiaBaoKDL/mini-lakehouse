@@ -6,12 +6,12 @@ from typing import Any, Protocol
 
 
 class SessionKey(StrEnum):
-    SEARCH = "document_inspector.search"
-    STATE_FILTER = "document_inspector.state_filter"
-    RESULT_LIMIT = "document_inspector.result_limit"
-    DOCUMENT_ID = "document_inspector.document_id"
-    RUN_ID = "document_inspector.run_id"
-    PAGE_NUMBER = "document_inspector.page_number"
+    SEARCH = "arxiv_inspector.search"
+    STATE_FILTER = "arxiv_inspector.state_filter"
+    RESULT_LIMIT = "arxiv_inspector.result_limit"
+    DOCUMENT_ID = "arxiv_inspector.document_id"
+    RUN_ID = "arxiv_inspector.run_id"
+    PAGE_NUMBER = "arxiv_inspector.page_number"
 
 
 DEFAULTS: dict[SessionKey, object] = {

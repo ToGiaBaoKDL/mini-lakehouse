@@ -6,7 +6,7 @@ from html import escape
 import streamlit as st
 from document_ocr.protocol import OcrElement
 
-from apps.document_inspector.data import (
+from apps.arxiv_inspector.data import (
     OcrDocumentRun,
     OcrDocumentSummary,
     OcrRunState,
@@ -18,7 +18,7 @@ def render_hero() -> None:
         """
         <section class="ocr-hero">
           <div class="ocr-eyebrow">ArXiv · GLM-OCR</div>
-          <h1>Document Inspector</h1>
+          <h1>ArXiv Inspector</h1>
           <p>Inspect immutable OCR outputs, annotated pages, and extracted content.</p>
         </section>
         """,

@@ -1,4 +1,4 @@
-"""Document Inspector's read-only Athena boundary."""
+"""ArXiv Inspector's read-only Athena boundary."""
 
 from collections.abc import Mapping
 from typing import Any

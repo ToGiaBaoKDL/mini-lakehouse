@@ -16,7 +16,7 @@ from document_ocr.protocol import (
 )
 from document_ocr.text import read_page_markdown_bundle
 
-from apps.document_inspector.data.models import OcrDocumentRun
+from apps.arxiv_inspector.data.models import OcrDocumentRun
 
 MANIFEST_MAX_BYTES = 2 * 1024 * 1024
 MARKDOWN_MAX_BYTES = 64 * 1024 * 1024

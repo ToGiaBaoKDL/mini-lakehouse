@@ -1,13 +1,13 @@
-"""Document Inspector data-access boundary."""
+"""ArXiv Inspector data-access boundary."""
 
-from apps.document_inspector.data.models import (
+from apps.arxiv_inspector.data.models import (
     OcrDocumentFilter,
     OcrDocumentRun,
     OcrDocumentSummary,
     OcrRunState,
     OcrStateFilter,
 )
-from apps.document_inspector.data.service import ArxivDocumentService
+from apps.arxiv_inspector.data.service import ArxivDocumentService
 
 __all__ = [
     "ArxivDocumentService",

@@ -5,16 +5,16 @@ from typing import Any, Protocol
 
 import pandas as pd
 from document_ocr.protocol import OcrElement
+from lakehouse.aws import get_runtime_parameter
+from lakehouse.config.settings import Settings
+from lakehouse.contracts import DataContracts, load_contracts
 
-from apps.document_inspector.data.athena import AthenaReader
-from apps.document_inspector.data.models import (
+from apps.arxiv_inspector.data.athena import AthenaReader
+from apps.arxiv_inspector.data.models import (
     OcrDocumentFilter,
     OcrDocumentRun,
     OcrDocumentSummary,
 )
-from lakehouse_platform.aws import get_runtime_parameter
-from lakehouse_platform.config.settings import Settings
-from lakehouse_platform.contracts import DataContracts, load_contracts
 
 
 class QueryReader(Protocol):
@@ -46,7 +46,7 @@ class ArxivDocumentRepository:
             workgroup="primary",
             s3_output=get_runtime_parameter(
                 settings.environment,
-                "athena/document_inspector_output_uri",
+                "athena/arxiv_inspector_output_uri",
             ),
             region_name=settings.aws_region,
             profile_name=settings.aws_profile,

@@ -5,20 +5,20 @@ from document_ocr.protocol import (
     OcrElement,
     OcrPageMarkdownBundle,
 )
+from lakehouse.aws import get_runtime_parameter
+from lakehouse.config.settings import Settings
 
-from apps.document_inspector.data.artifacts import (
+from apps.arxiv_inspector.data.artifacts import (
     OcrArtifactContent,
     OcrArtifactReader,
     S3ObjectReader,
 )
-from apps.document_inspector.data.models import (
+from apps.arxiv_inspector.data.models import (
     OcrDocumentFilter,
     OcrDocumentRun,
     OcrDocumentSummary,
 )
-from apps.document_inspector.data.repository import ArxivDocumentRepository
-from lakehouse_platform.aws import get_runtime_parameter
-from lakehouse_platform.config.settings import Settings
+from apps.arxiv_inspector.data.repository import ArxivDocumentRepository
 
 
 class ArxivDocumentService:

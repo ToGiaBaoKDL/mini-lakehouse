@@ -1,4 +1,4 @@
-"""Typed read models owned by Document Inspector."""
+"""Typed read models owned by ArXiv Inspector."""
 
 from datetime import date, datetime
 from enum import StrEnum

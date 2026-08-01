@@ -1,4 +1,4 @@
-"""Read-only Streamlit application for inspecting document processing outputs."""
+"""Read-only Streamlit application for inspecting ArXiv OCR outputs."""
 
 import streamlit as st
 from document_ocr.protocol import (
@@ -6,17 +6,19 @@ from document_ocr.protocol import (
     OcrElement,
     OcrPageMarkdownBundle,
 )
+from lakehouse.config.settings import get_settings
+from lakehouse.logging import configure_logging
 from loguru import logger
 
-from apps.document_inspector import state
-from apps.document_inspector.components import (
+from apps.arxiv_inspector import state
+from apps.arxiv_inspector.components import (
     document_label,
     render_elements,
     render_hero,
     render_run_header,
     run_label,
 )
-from apps.document_inspector.data import (
+from apps.arxiv_inspector.data import (
     ArxivDocumentService,
     OcrDocumentFilter,
     OcrDocumentRun,
@@ -24,21 +26,19 @@ from apps.document_inspector.data import (
     OcrRunState,
     OcrStateFilter,
 )
-from apps.document_inspector.data.artifacts import OcrArtifactContent
-from apps.document_inspector.theme import apply_theme
-from lakehouse_platform.config.settings import get_settings
-from lakehouse_platform.logging import configure_logging
+from apps.arxiv_inspector.data.artifacts import OcrArtifactContent
+from apps.arxiv_inspector.theme import apply_theme
 
 SETTINGS = get_settings()
 configure_logging(
     SETTINGS.log_level,
     json_logs=SETTINGS.environment == "production",
 )
-LOGGER = logger.bind(component="document-inspector")
+LOGGER = logger.bind(component="arxiv-inspector")
 STATE_OPTIONS = tuple(item.value for item in OcrStateFilter)
 
 st.set_page_config(
-    page_title="Document Inspector · Lakehouse Platform",
+    page_title="ArXiv Inspector",
     page_icon=":material/document_scanner:",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -108,7 +108,7 @@ def refresh_document_data() -> None:
 
 def render_sidebar() -> OcrDocumentFilter:
     with st.sidebar:
-        st.markdown("### Document Inspector")
+        st.markdown("### ArXiv Inspector")
         st.caption("Read-only inspection of curated ArXiv outputs")
         if st.button(
             "Refresh data",

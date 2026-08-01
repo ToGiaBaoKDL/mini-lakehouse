@@ -1,0 +1,26 @@
+# Self-hosted read-only ArXiv OCR inspection surface.
+
+services:
+  arxiv-inspector:
+    image: "${ARXIV_INSPECTOR_IMAGE:-arxiv-inspector:local}"
+    user: "${LOCAL_UID}:0"
+    environment:
+      LAKEHOUSE_ENVIRONMENT: ${LAKEHOUSE_ENVIRONMENT}
+      AWS_PROFILE: ${ARXIV_INSPECTOR_AWS_PROFILE}
+    volumes:
+      - ${AWS_CONFIG_DIR}:/tmp/.aws:ro
+    ports:
+      - "127.0.0.1:8501:8501"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request as u; u.urlopen('http://localhost:8501/_stcore/health', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped

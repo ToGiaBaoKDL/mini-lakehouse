@@ -14,18 +14,18 @@ from document_ocr.protocol import (
     OcrPageMarkdown,
     OcrPageMarkdownBundle,
 )
+from lakehouse.config.settings import Settings
 
-from apps.document_inspector import components, state
-from apps.document_inspector.data.artifacts import OcrArtifactReader, S3ObjectReader
-from apps.document_inspector.data.athena import AthenaReader
-from apps.document_inspector.data.models import (
+from apps.arxiv_inspector import components, state
+from apps.arxiv_inspector.data.artifacts import OcrArtifactReader, S3ObjectReader
+from apps.arxiv_inspector.data.athena import AthenaReader
+from apps.arxiv_inspector.data.models import (
     OcrDocumentFilter,
     OcrDocumentRun,
     OcrRunState,
     OcrStateFilter,
 )
-from apps.document_inspector.data.repository import ArxivDocumentRepository
-from lakehouse_platform.config.settings import Settings
+from apps.arxiv_inspector.data.repository import ArxivDocumentRepository
 
 
 class _QueryReader:
@@ -71,19 +71,19 @@ def test_athena_reader_uses_primary_with_explicit_query_output(
         return pd.DataFrame()
 
     monkeypatch.setattr(
-        "apps.document_inspector.data.athena.wr.athena.read_sql_query",
+        "apps.arxiv_inspector.data.athena.wr.athena.read_sql_query",
         read_sql_query,
     )
     reader = AthenaReader(
         workgroup="primary",
-        s3_output="s3://query-results/document-inspector",
+        s3_output="s3://query-results/arxiv-inspector",
         region_name="ap-southeast-1",
     )
 
     reader.query("SELECT 1", database="curated_arxiv")
 
     assert captured["workgroup"] == "primary"
-    assert captured["s3_output"] == "s3://query-results/document-inspector"
+    assert captured["s3_output"] == "s3://query-results/arxiv-inspector"
 
 
 def _run(manifest_sha256: str) -> OcrDocumentRun:
@@ -287,7 +287,7 @@ def test_s3_reader_uses_one_bounded_get_request(monkeypatch: pytest.MonkeyPatch)
         return Session(client)
 
     monkeypatch.setattr(
-        "apps.document_inspector.data.artifacts.boto3.Session",
+        "apps.arxiv_inspector.data.artifacts.boto3.Session",
         session_factory,
     )
 
@@ -298,10 +298,10 @@ def test_s3_reader_uses_one_bounded_get_request(monkeypatch: pytest.MonkeyPatch)
     assert client.body.closed
 
 
-def test_document_inspector_owns_config_and_bounded_caches() -> None:
-    source = Path("apps/document_inspector/app.py").read_text(encoding="utf-8")
+def test_arxiv_inspector_owns_config_and_bounded_caches() -> None:
+    source = Path("apps/arxiv_inspector/app.py").read_text(encoding="utf-8")
 
-    assert Path("apps/document_inspector/.streamlit/config.toml").is_file()
+    assert Path("apps/arxiv_inspector/.streamlit/config.toml").is_file()
     assert not Path(".streamlit/config.toml").exists()
     assert 'st.form("document-filters"' in source
     assert "max_entries=24" in source
