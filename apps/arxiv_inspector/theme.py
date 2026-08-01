@@ -79,11 +79,8 @@ div[data-testid="stLayoutWrapper"]:has(> .st-key-ocr-markdown-panel) {
     padding: .28rem .65rem;
 }
 .ocr-status--imported { color: var(--primary-color); }
-.ocr-status--running { color: #59d5ff; }
-.ocr-status--submitted { color: #8da8ff; }
-.ocr-status--prepared { color: #b7a4f8; }
-.ocr-status--retryable_failed { color: #ffbf5b; }
-.ocr-status--terminal_failed { color: #ff7385; }
+.ocr-status--processing { color: #59d5ff; }
+.ocr-status--failed { color: #ff7385; }
 .ocr-muted {
     color: color-mix(in srgb, var(--text-color) 58%, transparent);
     font-size: .82rem;

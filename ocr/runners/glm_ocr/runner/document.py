@@ -18,7 +18,6 @@ from document_ocr.identity import (
     processing_id,
 )
 from document_ocr.protocol import (
-    DOCUMENT_MANIFEST_PATH,
     PAGE_MARKDOWN_BUNDLE_PATH,
     ArtifactFile,
     OcrDocumentManifest,
@@ -30,10 +29,7 @@ from document_ocr.protocol import (
 )
 from document_ocr.text import build_page_markdown_bundle
 from glmocr import GlmOcr
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
-ERROR_MESSAGE_CHARACTERS = 2_000
 MEDIA_TYPES = {
     ".gz": "application/gzip",
     ".jpg": "image/jpeg",
@@ -43,10 +39,8 @@ MEDIA_TYPES = {
 
 
 class DocumentError(RuntimeError):
-    def __init__(self, code: str, message: str, *, retryable: bool) -> None:
-        super().__init__(message)
-        self.code = code
-        self.retryable = retryable
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(f"{code}: {message}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,17 +54,8 @@ class PreparedDocument:
 
 
 def _pdf_session() -> requests.Session:
-    retry = Retry(
-        total=4,
-        backoff_factor=1,
-        status_forcelist=(429, 500, 502, 503, 504),
-        allowed_methods=frozenset({"GET"}),
-        respect_retry_after_header=True,
-        raise_on_status=False,
-    )
     session = requests.Session()
     session.headers["User-Agent"] = "document-ocr-arxiv/1.0"
-    session.mount("https://", HTTPAdapter(max_retries=retry))
     return session
 
 
@@ -85,26 +70,23 @@ def download_pdf(
     try:
         with PDF_SESSION.get(request.pdf_url, stream=True, timeout=(30, 180)) as response:
             if response.status_code == 404:
-                raise DocumentError("pdf_not_found", "ArXiv returned HTTP 404", retryable=False)
+                raise DocumentError("pdf_not_found", "ArXiv returned HTTP 404")
             if response.status_code == 429 or response.status_code >= 500:
                 raise DocumentError(
                     "pdf_source_unavailable",
                     f"ArXiv returned HTTP {response.status_code}",
-                    retryable=True,
                 )
             response.raise_for_status()
             if not response.url.startswith("https://"):
                 raise DocumentError(
                     "unsafe_pdf_redirect",
                     "ArXiv redirected the PDF to a non-HTTPS URL",
-                    retryable=False,
                 )
             declared_size = int(response.headers.get("content-length", "0"))
             if declared_size > max_bytes:
                 raise DocumentError(
                     "pdf_too_large",
                     f"PDF declares {declared_size} bytes; maximum is {max_bytes}",
-                    retryable=False,
                 )
             digest = hashlib.sha256()
             size = 0
@@ -117,17 +99,16 @@ def download_pdf(
                         raise DocumentError(
                             "pdf_too_large",
                             f"PDF exceeds the {max_bytes}-byte limit",
-                            retryable=False,
                         )
                     digest.update(chunk)
                     output.write(chunk)
     except DocumentError:
         raise
     except (OSError, requests.RequestException) as error:
-        raise DocumentError("pdf_download_failed", str(error), retryable=True) from error
+        raise DocumentError("pdf_download_failed", str(error)) from error
     with destination.open("rb") as source:
         if source.read(5) != b"%PDF-":
-            raise DocumentError("invalid_pdf", "Downloaded content is not a PDF", retryable=False)
+            raise DocumentError("invalid_pdf", "Downloaded content is not a PDF")
     return digest.hexdigest(), size
 
 
@@ -136,23 +117,22 @@ def pdf_page_count(path: Path, maximum: int) -> int:
         with fitz.open(path) as document:
             pages = document.page_count
     except Exception as error:
-        raise DocumentError("invalid_pdf", str(error), retryable=False) from error
+        raise DocumentError("invalid_pdf", str(error)) from error
     if pages < 1:
-        raise DocumentError("empty_pdf", "PDF has no pages", retryable=False)
+        raise DocumentError("empty_pdf", "PDF has no pages")
     if pages > maximum:
         raise DocumentError(
             "pdf_too_many_pages",
             f"PDF has {pages} pages; maximum is {maximum}",
-            retryable=False,
         )
     return pages
 
 
 def prepare_document(
     job: OcrJob,
-    request: OcrDocumentRequest,
     work_root: Path,
 ) -> PreparedDocument | OcrDocumentResult:
+    request = job.document
     pdf_path = work_root / "source.pdf"
     pdf_sha256, pdf_size_bytes = download_pdf(
         request,
@@ -170,7 +150,6 @@ def prepare_document(
             raise DocumentError(
                 "reuse_lineage_mismatch",
                 "Previously imported OCR lineage disagrees with unchanged PDF content",
-                retryable=False,
             )
         return OcrDocumentResult(
             request_id=request.request_id,
@@ -197,18 +176,16 @@ def _normalized_layout(value: Any, expected_pages: int) -> list[list[dict[str, A
         try:
             value = json.loads(value)
         except json.JSONDecodeError as error:
-            raise DocumentError("invalid_model_output", str(error), retryable=True) from error
+            raise DocumentError("invalid_model_output", str(error)) from error
     if not isinstance(value, list):
         raise DocumentError(
             "invalid_model_output",
             "GLM-OCR JSON output must be a list of pages",
-            retryable=True,
         )
     if len(value) != expected_pages:
         raise DocumentError(
             "incomplete_model_output",
             f"GLM-OCR returned {len(value)} pages for a {expected_pages}-page PDF",
-            retryable=True,
         )
     pages: list[list[dict[str, Any]]] = []
     for page_index, raw_page in enumerate(value, start=1):
@@ -216,13 +193,11 @@ def _normalized_layout(value: Any, expected_pages: int) -> list[list[dict[str, A
             raise DocumentError(
                 "invalid_model_output",
                 f"GLM-OCR page {page_index} is not a list",
-                retryable=True,
             )
         if not all(isinstance(block, dict) for block in raw_page):
             raise DocumentError(
                 "invalid_model_output",
                 f"GLM-OCR page {page_index} contains a non-object block",
-                retryable=True,
             )
         pages.append(raw_page)
     return pages
@@ -257,7 +232,6 @@ def _canonical_elements(
                 raise DocumentError(
                     "invalid_model_output",
                     f"Invalid GLM-OCR block {page_index}:{reading_order}",
-                    retryable=True,
                 )
             markdown_content = content or None
             if label == "image":
@@ -269,7 +243,6 @@ def _canonical_elements(
                         raise DocumentError(
                             "invalid_model_output",
                             str(error),
-                            retryable=True,
                         ) from error
                     markdown_content = (
                         f"![Image {page_index - 1}-{image_counter}](../{image_path.as_posix()})"
@@ -319,7 +292,6 @@ def _canonical_elements(
         raise DocumentError(
             "empty_model_output",
             "GLM-OCR produced no canonical elements",
-            retryable=True,
         )
     return tuple(elements)
 
@@ -352,7 +324,6 @@ def _save_sdk_images(parsed: Any, destination: Path, expected_pages: int) -> Non
             "incomplete_model_output",
             f"GLM-OCR produced visualizations for pages {sorted(visualizations)}, "
             f"expected {sorted(expected)}",
-            retryable=True,
         )
     layout_target = destination / "layout_vis"
     layout_target.mkdir()
@@ -370,7 +341,6 @@ def _save_sdk_images(parsed: Any, destination: Path, expected_pages: int) -> Non
             raise DocumentError(
                 "invalid_model_output",
                 f"Unsafe GLM-OCR image filename: {name!r}",
-                retryable=True,
             )
         image.save(image_target / name)
 
@@ -385,7 +355,6 @@ def _artifact_files(root: Path, maximum_bytes: int) -> tuple[ArtifactFile, ...]:
             raise DocumentError(
                 "ocr_output_too_large",
                 f"OCR output exceeds the {maximum_bytes}-byte limit",
-                retryable=False,
             )
         files.append(
             ArtifactFile(
@@ -406,7 +375,7 @@ def process_document(
     prepared: PreparedDocument,
     parser: GlmOcr,
     output_root: Path,
-) -> OcrDocumentResult:
+) -> tuple[OcrDocumentResult, OcrDocumentManifest]:
     request = prepared.request
     current_processing_id = processing_id(
         document_id=request.document_id,
@@ -416,7 +385,7 @@ def process_document(
     try:
         parsed = parser.parse(prepared.pdf_path, save_layout_visualization=True)
     except Exception as error:
-        raise DocumentError("ocr_inference_failed", str(error), retryable=True) from error
+        raise DocumentError("ocr_inference_failed", str(error)) from error
 
     document_root = prepared.work_root / "committed-output"
     document_root.mkdir()
@@ -435,7 +404,7 @@ def process_document(
     except DocumentError:
         raise
     except (OSError, ValueError) as error:
-        raise DocumentError("artifact_generation_failed", str(error), retryable=True) from error
+        raise DocumentError("artifact_generation_failed", str(error)) from error
 
     manifest = OcrDocumentManifest(
         document_id=request.document_id,
@@ -445,15 +414,15 @@ def process_document(
         pdf_size_bytes=prepared.pdf_size_bytes,
         processing_id=current_processing_id,
     )
-    manifest_bytes = canonical_json_bytes(manifest.model_dump(mode="json"))
-    if sum(file.size_bytes for file in files) + len(manifest_bytes) > job.limits.max_output_bytes:
+    if (
+        sum(file.size_bytes for file in files)
+        + len(canonical_json_bytes(manifest.model_dump(mode="json")))
+        > job.limits.max_output_bytes
+    ):
         raise DocumentError(
             "ocr_output_too_large",
             f"OCR output exceeds the {job.limits.max_output_bytes}-byte limit",
-            retryable=False,
         )
-    manifest_path = document_root.joinpath(*DOCUMENT_MANIFEST_PATH.parts)
-    manifest_path.write_bytes(manifest_bytes)
     result = OcrDocumentResult(
         request_id=request.request_id,
         document_id=request.document_id,
@@ -462,22 +431,9 @@ def process_document(
         pdf_size_bytes=prepared.pdf_size_bytes,
         page_count=prepared.page_count,
         processing_id=current_processing_id,
-        manifest_sha256=file_sha256(manifest_path),
+        manifest_sha256=canonical_json_sha256(manifest.model_dump(mode="json")),
     )
     destination = output_root
     destination.parent.mkdir(parents=True, exist_ok=True)
     document_root.replace(destination)
-    return result
-
-
-def failed_result(
-    request: OcrDocumentRequest,
-    error: DocumentError,
-) -> OcrDocumentResult:
-    return OcrDocumentResult(
-        request_id=request.request_id,
-        document_id=request.document_id,
-        state="retryable_failed" if error.retryable else "terminal_failed",
-        error_code=error.code,
-        error_message=str(error)[:ERROR_MESSAGE_CHARACTERS],
-    )
+    return result, manifest

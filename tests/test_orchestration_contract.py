@@ -62,7 +62,7 @@ def test_arxiv_ocr_dag_accepts_exactly_one_document() -> None:
     assert "DockerOperator" in source
     assert 'OCR_IMAGE = "ocr-worker:runtime"' in source
     assert 'os.environ["OCR_AWS_PROFILE"]' in source
-    assert 'os.environ["TASK_AWS_CONFIG_DIR"]' in source
+    assert 'os.environ["HOST_AWS_CONFIG_DIR"]' in source
     assert "OCR_TASK_IMAGE" not in source
     assert "force_pull=False" in source
     assert 'auto_remove="force"' in source
@@ -71,6 +71,8 @@ def test_arxiv_ocr_dag_accepts_exactly_one_document() -> None:
     assert "import document_ocr" not in source
     assert "batch" not in source.lower()
     assert "list[str]" not in source
+    assert "retries=" not in source
+    assert "retry_delay" not in source
     assert not Path("orchestration/runtime/ocr.py").exists()
 
 

@@ -7,7 +7,7 @@ from typing import Any, cast
 import modal
 import pytest
 from document_ocr.config import load_ocr_config
-from document_ocr.protocol import OcrDocumentResult, OcrRunManifest
+from document_ocr.protocol import OcrDocumentResult, OcrRunResult
 from document_ocr.providers.base import OcrProviderRunFailedError
 from document_ocr.providers.modal import ModalProvider
 from document_ocr.settings import ModalSettings
@@ -67,13 +67,7 @@ def test_modal_provider_submits_and_waits_for_the_exact_function_call(
     monkeypatch: Any,
     tmp_path: Path,
 ) -> None:
-    completed_call = _FakeCall(
-        {
-            "run_id": "b" * 64,
-            "output_prefix": f"runs/{'b' * 64}",
-            "state": "complete",
-        }
-    )
+    completed_call = _FakeCall(f"runs/{'b' * 64}")
     function = _FakeFunction(completed_call)
     monkeypatch.setattr(
         modal,
@@ -111,7 +105,7 @@ def test_modal_provider_downloads_only_the_committed_protocol_files(
     run_id = "b" * 64
     archive = b"committed archive"
     manifest = (
-        OcrRunManifest(
+        OcrRunResult(
             run_id=run_id,
             created_at=datetime(2026, 7, 30, tzinfo=UTC),
             archive_sha256=hashlib.sha256(archive).hexdigest(),
@@ -119,21 +113,18 @@ def test_modal_provider_downloads_only_the_committed_protocol_files(
             result=OcrDocumentResult(
                 request_id="a" * 64,
                 document_id="2607.00001",
-                state="terminal_failed",
-                error_code="invalid_pdf",
-                error_message="test",
+                state="reused",
+                pdf_sha256="c" * 64,
+                pdf_size_bytes=100,
+                page_count=1,
+                processing_id="d" * 64,
+                manifest_sha256="e" * 64,
             ),
         )
         .model_dump_json()
         .encode()
     )
-    completed_call = _FakeCall(
-        {
-            "run_id": run_id,
-            "output_prefix": f"runs/{run_id}",
-            "state": "complete",
-        }
-    )
+    completed_call = _FakeCall(f"runs/{run_id}")
     monkeypatch.setattr(
         modal,
         "FunctionCall",
@@ -153,8 +144,8 @@ def test_modal_provider_downloads_only_the_committed_protocol_files(
                 "from_name": staticmethod(
                     lambda *_args, **_kwargs: _FakeVolume(
                         {
-                            f"runs/{run_id}/result_manifest.json": manifest,
-                            f"runs/{run_id}/result.tar.zst": archive,
+                            f"runs/{run_id}/result.json": manifest,
+                            f"runs/{run_id}/artifacts.tar.zst": archive,
                         }
                     )
                 )
@@ -165,8 +156,8 @@ def test_modal_provider_downloads_only_the_committed_protocol_files(
 
     _provider().download_output("fc-test", destination)
 
-    assert (destination / "result_manifest.json").read_bytes() == manifest
-    assert (destination / "result.tar.zst").read_bytes() == archive
+    assert (destination / "result.json").read_bytes() == manifest
+    assert (destination / "artifacts.tar.zst").read_bytes() == archive
 
 
 def test_modal_provider_maps_an_invalid_remote_result_to_failed(monkeypatch: Any) -> None:
@@ -178,5 +169,5 @@ def test_modal_provider_maps_an_invalid_remote_result_to_failed(monkeypatch: Any
 
     monkeypatch.setattr(provider, "_call", find_call)
 
-    with pytest.raises(OcrProviderRunFailedError, match="invalid result"):
+    with pytest.raises(OcrProviderRunFailedError, match="invalid output prefix"):
         provider.wait("fc-test", lambda _message: None)

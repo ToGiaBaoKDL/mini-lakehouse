@@ -48,7 +48,7 @@ def test_airflow_uses_local_executor_and_deferrable_runtime_components() -> None
     assert "/var/run/docker.sock:/var/run/docker.sock" in scheduler["volumes"]
     assert scheduler["group_add"] == ["${DOCKER_GID}"]
     assert environment["OCR_AWS_PROFILE"] == "${OCR_AWS_PROFILE}"
-    assert environment["TASK_AWS_CONFIG_DIR"] == "${AWS_CONFIG_DIR}"
+    assert environment["HOST_AWS_CONFIG_DIR"] == "${AWS_CONFIG_DIR}"
     assert "OCR_TASK_IMAGE" not in environment
     assert "DOCKER_TASK_USER" not in environment
     assert "AIRFLOW_CONN_AWS_DEFAULT" not in environment

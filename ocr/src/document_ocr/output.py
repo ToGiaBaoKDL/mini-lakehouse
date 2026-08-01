@@ -1,4 +1,4 @@
-"""Safe extraction and validation of one committed OCR run."""
+"""Validate and materialize one committed remote OCR output."""
 
 import gzip
 import tarfile
@@ -6,22 +6,23 @@ from pathlib import Path, PurePosixPath
 
 import zstandard
 
-from document_ocr.identity import file_sha256, processing_id
+from document_ocr.identity import canonical_json_bytes, file_sha256, processing_id
 from document_ocr.protocol import (
     DOCUMENT_MANIFEST_PATH,
     PAGE_MARKDOWN_BUNDLE_PATH,
     OcrDocumentManifest,
-    OcrDocumentResult,
     OcrElement,
     OcrJob,
-    OcrRunManifest,
+    OcrRunResult,
 )
 from document_ocr.text import (
     InvalidPageMarkdownBundleError,
     read_page_markdown_bundle,
 )
 
-OCR_RESULT_FILES = ("result_manifest.json", "result.tar.zst")
+OCR_RESULT_FILE = "result.json"
+OCR_ARCHIVE_FILE = "artifacts.tar.zst"
+OCR_RESULT_FILES = (OCR_RESULT_FILE, OCR_ARCHIVE_FILE)
 
 
 class InvalidOcrArchiveError(ValueError):
@@ -32,24 +33,22 @@ def validate_ocr_output(
     directory: Path,
     *,
     expected_run_id: str | None = None,
-) -> OcrRunManifest:
+) -> OcrRunResult:
     missing = sorted(name for name in OCR_RESULT_FILES if not (directory / name).is_file())
     if missing:
         raise InvalidOcrArchiveError(f"OCR output is missing: {', '.join(missing)}")
     try:
-        manifest = OcrRunManifest.model_validate_json(
-            (directory / "result_manifest.json").read_bytes()
-        )
-        archive = directory / "result.tar.zst"
-        if manifest.archive_size_bytes != archive.stat().st_size:
-            raise ValueError("archive size does not match its manifest")
-        if manifest.archive_sha256 != file_sha256(archive):
-            raise ValueError("archive checksum does not match its manifest")
-        if expected_run_id is not None and manifest.run_id != expected_run_id:
-            raise ValueError(f"expected run {expected_run_id}, received {manifest.run_id}")
+        result = OcrRunResult.model_validate_json((directory / OCR_RESULT_FILE).read_bytes())
+        archive = directory / OCR_ARCHIVE_FILE
+        if result.archive_size_bytes != archive.stat().st_size:
+            raise ValueError("archive size does not match its result")
+        if result.archive_sha256 != file_sha256(archive):
+            raise ValueError("archive checksum does not match its result")
+        if expected_run_id is not None and result.run_id != expected_run_id:
+            raise ValueError(f"expected run {expected_run_id}, received {result.run_id}")
     except (OSError, ValueError) as error:
         raise InvalidOcrArchiveError(f"Invalid OCR output: {error}") from error
-    return manifest
+    return result
 
 
 def _member_path(name: str) -> PurePosixPath:
@@ -118,23 +117,21 @@ def extract_ocr_output(
     destination: Path,
     *,
     job: OcrJob,
-) -> OcrRunManifest:
-    manifest = validate_ocr_output(
+) -> OcrRunResult:
+    output = validate_ocr_output(
         output_directory,
         expected_run_id=job.run_id,
     )
     request = job.document
-    result = manifest.result
+    result = output.result
     if result.request_id != request.request_id or result.document_id != request.document_id:
         raise InvalidOcrArchiveError("OCR result does not match its job")
-    if result.state in {"succeeded", "reused"}:
-        assert result.pdf_sha256 is not None
-        if result.processing_id != processing_id(
-            document_id=result.document_id,
-            pdf_sha256=result.pdf_sha256,
-            configuration_hash=job.config_hash,
-        ):
-            raise InvalidOcrArchiveError("OCR processing identity does not match its job")
+    if result.processing_id != processing_id(
+        document_id=result.document_id,
+        pdf_sha256=result.pdf_sha256,
+        configuration_hash=job.config_hash,
+    ):
+        raise InvalidOcrArchiveError("OCR processing identity does not match its job")
     if result.state == "reused":
         reuse = request.reuse
         if reuse is None or (
@@ -159,20 +156,13 @@ def extract_ocr_output(
         raise InvalidOcrArchiveError("OCR reran unchanged content")
 
     _extract(
-        output_directory / "result.tar.zst",
+        output_directory / OCR_ARCHIVE_FILE,
         destination,
         max_bytes=job.limits.max_output_bytes,
     )
-    document_manifest = (
-        _validate_document(destination, result, job.limits.max_output_bytes)
-        if result.state == "succeeded"
-        else None
-    )
+    document_manifest = output.document
     expected_paths = (
-        {
-            DOCUMENT_MANIFEST_PATH,
-            *(PurePosixPath(file.relative_path) for file in document_manifest.files),
-        }
+        {PurePosixPath(file.relative_path) for file in document_manifest.files}
         if document_manifest is not None
         else set()
     )
@@ -181,42 +171,41 @@ def extract_ocr_output(
     }
     if actual_paths != expected_paths:
         raise InvalidOcrArchiveError("OCR archive contains untracked or missing files")
-    return manifest
+    if document_manifest is not None:
+        manifest_bytes = canonical_json_bytes(document_manifest.model_dump(mode="json"))
+        _validate_document(
+            destination,
+            document_manifest,
+            manifest_bytes,
+            job.limits.max_output_bytes,
+        )
+        destination.joinpath(*DOCUMENT_MANIFEST_PATH.parts).write_bytes(manifest_bytes)
+    return output
 
 
 def _validate_document(
     root: Path,
-    result: OcrDocumentResult,
+    manifest: OcrDocumentManifest,
+    manifest_bytes: bytes,
     max_uncompressed_bytes: int,
-) -> OcrDocumentManifest:
-    manifest_path = root.joinpath(*DOCUMENT_MANIFEST_PATH.parts)
-    try:
-        manifest = OcrDocumentManifest.model_validate_json(manifest_path.read_bytes())
-    except (OSError, ValueError) as error:
-        raise InvalidOcrArchiveError(
-            f"Invalid document manifest for request {result.request_id}: {error}"
-        ) from error
-    if file_sha256(manifest_path) != result.manifest_sha256:
-        raise InvalidOcrArchiveError(
-            f"Document manifest checksum is invalid for request {result.request_id}"
-        )
+) -> None:
     if (
-        manifest.document_id != result.document_id
-        or manifest.page_count != result.page_count
-        or manifest.pdf_sha256 != result.pdf_sha256
-        or manifest.pdf_size_bytes != result.pdf_size_bytes
-        or manifest.processing_id != result.processing_id
+        sum(file.size_bytes for file in manifest.files) + len(manifest_bytes)
+        > max_uncompressed_bytes
     ):
-        raise InvalidOcrArchiveError(
-            f"Document manifest lineage is invalid for request {result.request_id}"
-        )
+        raise InvalidOcrArchiveError("OCR document exceeds its extracted-size limit")
     for artifact in manifest.files:
         path = root.joinpath(*PurePosixPath(artifact.relative_path).parts)
-        if path.stat().st_size != artifact.size_bytes or file_sha256(path) != artifact.sha256:
-            raise InvalidOcrArchiveError(
-                f"Artifact checksum is invalid for request {result.request_id}: "
-                f"{artifact.relative_path}"
+        try:
+            valid = (
+                path.stat().st_size == artifact.size_bytes and file_sha256(path) == artifact.sha256
             )
+        except OSError as error:
+            raise InvalidOcrArchiveError(
+                f"Cannot read OCR artifact {artifact.relative_path}: {error}"
+            ) from error
+        if not valid:
+            raise InvalidOcrArchiveError(f"Artifact checksum is invalid: {artifact.relative_path}")
     try:
         with root.joinpath(*PAGE_MARKDOWN_BUNDLE_PATH.parts).open("rb") as source:
             page_bundle = read_page_markdown_bundle(
@@ -225,11 +214,8 @@ def _validate_document(
             )
     except (OSError, InvalidPageMarkdownBundleError) as error:
         raise InvalidOcrArchiveError(str(error)) from error
-    if len(page_bundle.pages) != result.page_count:
-        raise InvalidOcrArchiveError(
-            f"OCR page Markdown count does not match request {result.request_id}"
-        )
-    return manifest
+    if len(page_bundle.pages) != manifest.page_count:
+        raise InvalidOcrArchiveError("OCR page Markdown count does not match its manifest")
 
 
 def read_elements(

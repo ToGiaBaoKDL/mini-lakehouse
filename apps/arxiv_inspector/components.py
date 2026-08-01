@@ -34,7 +34,7 @@ def document_label(document: OcrDocumentSummary) -> str:
 
 
 def run_label(run: OcrDocumentRun) -> str:
-    timestamp = _display_datetime(run.completed_at or run.prepared_at)
+    timestamp = _display_datetime(run.completed_at or run.started_at)
     revision = run.model_revision[:8]
     return f"{timestamp} · {run.state.replace('_', ' ')} · {revision} · attempt {run.attempt}"
 

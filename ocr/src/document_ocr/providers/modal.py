@@ -1,13 +1,13 @@
 """Modal execution adapter backed by the public Modal SDK."""
 
-from pathlib import Path
+import re
+from pathlib import Path, PurePosixPath
 from typing import Literal
 
 import modal
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from document_ocr.archive import OCR_RESULT_FILES
 from document_ocr.config import OcrConfig
+from document_ocr.output import OCR_RESULT_FILES
 from document_ocr.protocol import OcrJob
 from document_ocr.providers.base import (
     OcrLogSink,
@@ -16,14 +16,6 @@ from document_ocr.providers.base import (
     OcrRunNotFoundError,
 )
 from document_ocr.settings import ModalSettings
-
-
-class ModalRunResult(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    run_id: str = Field(pattern=r"^[0-9a-f]{64}$")
-    output_prefix: str
-    state: Literal["complete"]
 
 
 class ModalProvider:
@@ -66,7 +58,7 @@ class ModalProvider:
         call = self._function(self._runner.function_name).spawn(job.model_dump_json())
         return call.object_id
 
-    def _result(self, provider_run_id: str, *, timeout: float | None) -> ModalRunResult:
+    def _output_prefix(self, provider_run_id: str, *, timeout: float | None) -> str:
         call = self._call(provider_run_id)
         try:
             value = call.get(timeout=timeout)
@@ -78,10 +70,17 @@ class ModalProvider:
             ) from error
         except modal.exception.Error as error:
             raise OcrProviderError(str(error)) from error
-        try:
-            return ModalRunResult.model_validate(value)
-        except ValidationError as error:
-            raise OcrProviderError("Modal OCR returned an invalid result") from error
+        if not isinstance(value, str):
+            raise OcrProviderError("Modal OCR returned an invalid output prefix")
+        path = PurePosixPath(value)
+        if (
+            path.is_absolute()
+            or len(path.parts) != 2
+            or path.parts[0] != "runs"
+            or re.fullmatch(r"[0-9a-f]{64}", path.parts[1]) is None
+        ):
+            raise OcrProviderError("Modal OCR returned an invalid output prefix")
+        return value
 
     def wait(
         self,
@@ -93,7 +92,7 @@ class ModalProvider:
             for entry in call.logs.stream():
                 if entry.message:
                     log(entry.message)
-            self._result(provider_run_id, timeout=None)
+            self._output_prefix(provider_run_id, timeout=None)
         except modal.exception.NotFoundError as error:
             raise OcrRunNotFoundError(
                 f"Modal function call {provider_run_id!r} does not exist"
@@ -106,7 +105,7 @@ class ModalProvider:
             raise OcrProviderRunFailedError(str(error)[:2000]) from error
 
     def download_output(self, provider_run_id: str, destination: Path) -> None:
-        result = self._result(provider_run_id, timeout=None)
+        output_prefix = self._output_prefix(provider_run_id, timeout=None)
         destination.mkdir(parents=True, exist_ok=False)
         try:
             volume = modal.Volume.from_name(
@@ -117,9 +116,9 @@ class ModalProvider:
             for filename in OCR_RESULT_FILES:
                 target = destination / filename
                 with target.open("xb") as output:
-                    for chunk in volume.read_file(f"{result.output_prefix}/{filename}"):
+                    for chunk in volume.read_file(f"{output_prefix}/{filename}"):
                         output.write(chunk)
         except (OSError, modal.exception.Error) as error:
             raise OcrProviderError(
-                f"Cannot download Modal output for {result.run_id}: {error}"
+                f"Cannot download Modal output for {provider_run_id}: {error}"
             ) from error

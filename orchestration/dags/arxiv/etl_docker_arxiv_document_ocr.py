@@ -17,7 +17,7 @@ from orchestration.callbacks.notifications import (
 
 OCR_IMAGE = "ocr-worker:runtime"
 OCR_AWS_PROFILE = os.environ["OCR_AWS_PROFILE"]
-TASK_AWS_CONFIG_DIR = os.environ["TASK_AWS_CONFIG_DIR"]
+HOST_AWS_CONFIG_DIR = os.environ["HOST_AWS_CONFIG_DIR"]
 
 with DAG(
     dag_id="etl_docker_arxiv_document_ocr",
@@ -62,7 +62,7 @@ with DAG(
         },
         mounts=[
             Mount(
-                source=TASK_AWS_CONFIG_DIR,
+                source=HOST_AWS_CONFIG_DIR,
                 target="/tmp/.aws",
                 type="bind",
                 read_only=True,
@@ -72,8 +72,6 @@ with DAG(
         force_pull=False,
         auto_remove="force",
         mount_tmp_dir=False,
-        retries=2,
-        retry_delay=timedelta(minutes=5),
         execution_timeout=timedelta(hours=5),
         on_failure_callback=task_failure_callbacks(),
     )

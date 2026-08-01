@@ -73,13 +73,12 @@ class ArxivDocumentRepository:
                     document.model_repository,
                     document.model_revision,
                     document.completed_at,
-                    document.error_code,
-                    document.prepared_at,
+                    document.started_at,
                     document.run_id,
                     row_number() OVER (
                         PARTITION BY document.arxiv_id
                         ORDER BY
-                            document.prepared_at DESC,
+                            document.started_at DESC,
                             document.attempt DESC,
                             document.run_id DESC
                     ) AS run_rank
@@ -94,8 +93,7 @@ class ArxivDocumentRepository:
                 run.processing_id,
                 run.model_repository,
                 run.model_revision,
-                run.completed_at,
-                run.error_code
+                run.completed_at
             FROM ranked_runs AS run
             LEFT JOIN {self._relation("papers")} AS paper
               ON paper.arxiv_id = run.arxiv_id
@@ -106,7 +104,7 @@ class ArxivDocumentRepository:
                     OR strpos(lower(run.arxiv_id), :search) > 0
                     OR strpos(lower(coalesce(paper.title, '')), :search) > 0
               )
-            ORDER BY coalesce(run.completed_at, run.prepared_at) DESC, run.arxiv_id
+            ORDER BY coalesce(run.completed_at, run.started_at) DESC, run.arxiv_id
             LIMIT {filters.limit}
             """,
             database=self._database,
@@ -138,16 +136,14 @@ class ArxivDocumentRepository:
                 document.layout_model_repository,
                 document.layout_model_revision,
                 document.adapter_version,
-                document.error_code,
-                document.error_message,
-                document.prepared_at,
+                document.started_at,
                 document.completed_at
             FROM {self._relation("ocr_document_runs")} AS document
             LEFT JOIN {self._relation("papers")} AS paper
               ON paper.arxiv_id = document.arxiv_id
             WHERE document.arxiv_id = :arxiv_id
             ORDER BY
-                document.prepared_at DESC,
+                document.started_at DESC,
                 document.attempt DESC,
                 document.run_id DESC
             LIMIT 100

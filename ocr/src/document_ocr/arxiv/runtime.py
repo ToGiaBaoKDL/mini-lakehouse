@@ -1,4 +1,4 @@
-"""Compose the ArXiv OCR application from AWS-managed runtime resources."""
+"""Compose the ArXiv OCR workflow from AWS-managed runtime resources."""
 
 import json
 from typing import cast
@@ -11,8 +11,8 @@ from lakehouse.iceberg import load_iceberg_catalog
 from pyiceberg.table import Table
 
 from document_ocr import OcrConfig, OcrProvider, OcrProviderName, load_ocr_config
-from document_ocr.application.arxiv import ArxivOcrPipeline
-from document_ocr.application.lakehouse import ArxivOcrStore
+from document_ocr.arxiv.store import ArxivOcrStore
+from document_ocr.arxiv.workflow import ArxivOcrWorkflow
 from document_ocr.providers.kaggle import KaggleProvider
 from document_ocr.providers.modal import ModalProvider
 from document_ocr.settings import KaggleSettings, ModalSettings
@@ -71,7 +71,7 @@ def run_arxiv_ocr(arxiv_id: str, provider_name: str) -> dict[str, object]:
         product_name=product.name,
         s3_client=boto3.client("s3"),
     )
-    result = ArxivOcrPipeline(
+    result = ArxivOcrWorkflow(
         store=store,
         processor=processor,
         provider=provider,

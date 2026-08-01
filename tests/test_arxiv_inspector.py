@@ -107,7 +107,7 @@ def _run(manifest_sha256: str) -> OcrDocumentRun:
         layout_model_repository="PaddlePaddle/PP-DocLayoutV3_safetensors",
         layout_model_revision="6" * 40,
         adapter_version="1.0.0",
-        prepared_at=datetime(2026, 7, 26, tzinfo=UTC),
+        started_at=datetime(2026, 7, 26, tzinfo=UTC),
         completed_at=datetime(2026, 7, 26, 1, tzinfo=UTC),
     )
 
@@ -125,7 +125,6 @@ def test_document_repository_keeps_search_and_state_parameterized() -> None:
                 "model_repository": "zai-org/GLM-OCR",
                 "model_revision": "5" * 40,
                 "completed_at": datetime(2026, 7, 26, tzinfo=UTC),
-                "error_code": None,
             }
         ]
     )
@@ -177,7 +176,7 @@ def test_artifact_reader_uses_verified_manifest_and_declared_page_path() -> None
     )
     manifest_payload = canonical_json_bytes(
         {
-            "schema_version": "2.0.0",
+            "schema_version": "3.0.0",
             "document_id": "2607.20571",
             "files": [file.model_dump(mode="json") for file in files],
             "page_count": 1,
@@ -240,7 +239,7 @@ def test_run_header_shows_page_count_only_for_imported_output(
     assert captions == ["arXiv:2607.20571 · OAI 2026-07-25 · PDF 100.0 B · Pages 1"]
 
     captions.clear()
-    failed = _run("9" * 64).model_copy(update={"state": OcrRunState.RETRYABLE_FAILED})
+    failed = _run("9" * 64).model_copy(update={"state": OcrRunState.FAILED})
     components.render_run_header(failed)
     assert captions == ["arXiv:2607.20571 · OAI 2026-07-25 · PDF 100.0 B"]
 

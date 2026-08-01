@@ -8,22 +8,16 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 class OcrRunState(StrEnum):
-    PREPARED = "prepared"
-    SUBMITTED = "submitted"
-    RUNNING = "running"
+    PROCESSING = "processing"
     IMPORTED = "imported"
-    RETRYABLE_FAILED = "retryable_failed"
-    TERMINAL_FAILED = "terminal_failed"
+    FAILED = "failed"
 
 
 class OcrStateFilter(StrEnum):
     ALL = "all"
+    PROCESSING = OcrRunState.PROCESSING.value
     IMPORTED = OcrRunState.IMPORTED.value
-    RUNNING = OcrRunState.RUNNING.value
-    SUBMITTED = OcrRunState.SUBMITTED.value
-    PREPARED = OcrRunState.PREPARED.value
-    RETRYABLE_FAILED = OcrRunState.RETRYABLE_FAILED.value
-    TERMINAL_FAILED = OcrRunState.TERMINAL_FAILED.value
+    FAILED = OcrRunState.FAILED.value
 
 
 class DocumentInspectorModel(BaseModel):
@@ -46,7 +40,6 @@ class OcrDocumentSummary(DocumentInspectorModel):
     model_repository: str
     model_revision: str
     completed_at: datetime | None = None
-    error_code: str | None = None
 
 
 class OcrDocumentRun(DocumentInspectorModel):
@@ -70,9 +63,7 @@ class OcrDocumentRun(DocumentInspectorModel):
     layout_model_repository: str
     layout_model_revision: str
     adapter_version: str
-    error_code: str | None = None
-    error_message: str | None = None
-    prepared_at: datetime
+    started_at: datetime
     completed_at: datetime | None = None
 
     @computed_field

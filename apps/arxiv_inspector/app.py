@@ -277,11 +277,10 @@ def main() -> None:
     if run.artifacts_available:
         render_artifacts(run)
     else:
-        message = run.error_message or "This run has not published OCR artifacts."
-        if run.state in {OcrRunState.RETRYABLE_FAILED, OcrRunState.TERMINAL_FAILED}:
-            st.error(f"{run.error_code or 'ocr_failed'}: {message}")
+        if run.state == OcrRunState.FAILED:
+            st.error("OCR failed. Check the Airflow task log for the provider traceback.")
         else:
-            st.info(message)
+            st.info("This run has not published OCR artifacts.")
 
 
 main()

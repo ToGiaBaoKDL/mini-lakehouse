@@ -5,18 +5,18 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
-from document_ocr.archive import extract_ocr_output
 from document_ocr.config import load_ocr_config
 from document_ocr.identity import (
+    canonical_json_bytes,
     processing_id,
     request_id,
 )
+from document_ocr.output import extract_ocr_output
 from document_ocr.protocol import (
-    OcrDocumentManifest,
     OcrDocumentRequest,
     OcrJob,
     OcrReuseReference,
-    OcrRunManifest,
+    OcrRunResult,
 )
 
 
@@ -100,30 +100,32 @@ def test_unchanged_document_skips_model_validation_and_vllm(
         layout_model_path=tmp_path / "missing-layout-model",
     )
 
-    manifest = OcrRunManifest.model_validate_json((tmp_path / "result_manifest.json").read_bytes())
-    assert manifest.result.state == "reused"
+    result = OcrRunResult.model_validate_json((tmp_path / "result.json").read_bytes())
+    assert result.result.state == "reused"
 
 
-def test_unexpected_preparation_error_aborts_the_run(
+def test_document_error_aborts_without_committed_output(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     runner = _runner_modules(monkeypatch)
-    (tmp_path / "result_manifest.json").write_text("stale", encoding="utf-8")
+    (tmp_path / "result.json").write_text("stale", encoding="utf-8")
+    (tmp_path / "artifacts.tar.zst").write_text("stale", encoding="utf-8")
 
     def fail_preparation(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("runner bug")
+        raise runner.document.DocumentError("invalid_pdf", "test failure")
 
     monkeypatch.setattr(runner.job, "prepare_document", fail_preparation)
 
-    with pytest.raises(AssertionError, match="runner bug"):
+    with pytest.raises(runner.document.DocumentError, match="invalid_pdf: test failure"):
         runner.job.run(
             _job(),
             tmp_path,
             model_path=tmp_path / "model",
             layout_model_path=tmp_path / "layout-model",
         )
-    assert not (tmp_path / "result_manifest.json").exists()
+    assert not (tmp_path / "result.json").exists()
+    assert not (tmp_path / "artifacts.tar.zst").exists()
 
 
 def test_changed_pdf_is_prepared_for_inference(
@@ -132,7 +134,6 @@ def test_changed_pdf_is_prepared_for_inference(
 ) -> None:
     runner = _runner_modules(monkeypatch)
     job = _job()
-    request = job.document
     work = tmp_path / "work"
     work.mkdir()
 
@@ -148,7 +149,6 @@ def test_changed_pdf_is_prepared_for_inference(
 
     prepared = runner.document.prepare_document(
         job,
-        request,
         work,
     )
 
@@ -201,31 +201,33 @@ def test_successful_document_publishes_the_shared_manifest(
     parser = SimpleNamespace(parse=parse)
 
     output_root = tmp_path / "output"
-    result = runner.document.process_document(
+    result, manifest = runner.document.process_document(
         job,
         prepared,
         parser,
         output_root,
     )
 
-    manifest_path = tmp_path / "output" / "manifest.json"
-    manifest = OcrDocumentManifest.model_validate_json(manifest_path.read_bytes())
     assert manifest.document_id == request.document_id
     assert manifest.processing_id == result.processing_id
     assert manifest.file("pages.json.gz").size_bytes > 0
-    assert result.manifest_sha256 == runner.document.file_sha256(manifest_path)
+    assert not (output_root / "manifest.json").exists()
+    assert result.manifest_sha256 == runner.document.canonical_json_sha256(
+        manifest.model_dump(mode="json")
+    )
 
     provider_output = tmp_path / "provider-output"
     provider_output.mkdir()
-    archive = provider_output / "result.tar.zst"
+    archive = provider_output / "artifacts.tar.zst"
     runner.job._create_archive(output_root, archive)
-    (provider_output / "result_manifest.json").write_text(
-        OcrRunManifest(
+    (provider_output / "result.json").write_text(
+        OcrRunResult(
             run_id=job.run_id,
             created_at=datetime(2026, 7, 30, tzinfo=UTC),
             archive_sha256=runner.document.file_sha256(archive),
             archive_size_bytes=archive.stat().st_size,
             result=result,
+            document=manifest,
         ).model_dump_json(),
         encoding="utf-8",
     )
@@ -236,6 +238,9 @@ def test_successful_document_publishes_the_shared_manifest(
         job=job,
     )
     assert imported.result == result
+    assert (tmp_path / "extracted" / "manifest.json").read_bytes() == canonical_json_bytes(
+        manifest.model_dump(mode="json")
+    )
 
 
 def test_compatible_inference_engine_reuses_one_vllm_server(

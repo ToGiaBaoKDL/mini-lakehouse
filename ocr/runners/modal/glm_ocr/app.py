@@ -9,6 +9,7 @@ from typing import Any
 
 import modal
 from document_ocr.config import load_ocr_config
+from document_ocr.output import OCR_RESULT_FILES
 
 PROCESSOR = load_ocr_config("arxiv_glm_ocr")
 RUNNER = PROCESSOR.runner.modal
@@ -56,7 +57,6 @@ image = (
             PROCESSOR.layout_model.revision,
         ),
     )
-    .add_local_file("ocr/runners/glm_ocr/runtime.py", str(RUNNER_ROOT / "runtime.py"))
     .add_local_dir("ocr/runners/glm_ocr/runner", str(RUNNER_ROOT / "runner"))
     .add_local_dir("ocr/src/document_ocr", str(RUNNER_ROOT / "document_ocr"))
 )
@@ -64,18 +64,14 @@ output_volume = modal.Volume.from_name(RUNNER.output_volume, create_if_missing=T
 app = modal.App(RUNNER.app_name)
 
 
-def _committed_result(job: Any, target: Path) -> dict[str, str] | None:
-    from document_ocr.archive import InvalidOcrArchiveError, validate_ocr_output
+def _committed_output(job: Any, target: Path) -> str | None:
+    from document_ocr.output import InvalidOcrArchiveError, validate_ocr_output
 
     try:
         validate_ocr_output(target, expected_run_id=job.run_id)
     except InvalidOcrArchiveError:
         return None
-    return {
-        "run_id": job.run_id,
-        "output_prefix": target.relative_to(OUTPUT_ROOT).as_posix(),
-        "state": "complete",
-    }
+    return target.relative_to(OUTPUT_ROOT).as_posix()
 
 
 @app.function(
@@ -86,7 +82,7 @@ def _committed_result(job: Any, target: Path) -> dict[str, str] | None:
     max_containers=1,
     scaledown_window=RUNNER.scaledown_window_seconds,
 )
-def run_ocr(job_json: str) -> dict[str, str]:
+def run_ocr(job_json: str) -> str:
     """Execute one idempotent document run and commit its manifest last."""
     global _engine
     sys.path.insert(0, str(RUNNER_ROOT))
@@ -96,7 +92,7 @@ def run_ocr(job_json: str) -> dict[str, str]:
 
     job = OcrJob.model_validate_json(job_json)
     target = OUTPUT_ROOT / "runs" / job.run_id
-    committed = _committed_result(job, target)
+    committed = _committed_output(job, target)
     if committed is not None:
         print(
             json.dumps(
@@ -121,10 +117,10 @@ def run_ocr(job_json: str) -> dict[str, str]:
             engine=_engine,
         )
         target.mkdir(parents=True)
-        shutil.copy2(temporary / "result.tar.zst", target / "result.tar.zst")
-        shutil.copy2(temporary / "result_manifest.json", target / "result_manifest.json")
+        for filename in OCR_RESULT_FILES:
+            shutil.copy2(temporary / filename, target / filename)
         output_volume.commit()
-    committed = _committed_result(job, target)
+    committed = _committed_output(job, target)
     if committed is None:
         raise RuntimeError("Modal OCR output failed its post-commit validation")
     return committed

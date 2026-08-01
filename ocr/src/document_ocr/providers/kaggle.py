@@ -1,12 +1,14 @@
 """Kaggle execution adapter backed only by the public Kaggle API."""
 
 import json
+import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Literal
 
 from document_ocr.config import OcrConfig
-from document_ocr.protocol import OcrJob, OcrRunManifest
+from document_ocr.output import OCR_ARCHIVE_FILE, OCR_RESULT_FILE
+from document_ocr.protocol import OcrJob, OcrRunResult
 from document_ocr.providers.base import (
     OcrLogSink,
     OcrProviderError,
@@ -140,12 +142,12 @@ class KaggleProvider:
                 self._api.kernels_output(
                     self.reference,
                     str(destination),
-                    file_pattern=r"^result_manifest\.json$",
+                    file_pattern=rf"^{re.escape(OCR_RESULT_FILE)}$",
                     force=True,
                     quiet=True,
                 )
-                manifest = OcrRunManifest.model_validate_json(
-                    (destination / "result_manifest.json").read_bytes()
+                manifest = OcrRunResult.model_validate_json(
+                    (destination / OCR_RESULT_FILE).read_bytes()
                 )
             except Exception as error:
                 raise OcrProviderError(
@@ -215,7 +217,7 @@ class KaggleProvider:
             self._api.kernels_output(
                 provider_run_id,
                 str(destination),
-                file_pattern=r"^result(?:_manifest\.json|\.tar\.zst)$",
+                file_pattern=(rf"^(?:{re.escape(OCR_RESULT_FILE)}|{re.escape(OCR_ARCHIVE_FILE)})$"),
                 force=True,
                 quiet=True,
             )

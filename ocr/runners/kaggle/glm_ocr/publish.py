@@ -9,7 +9,7 @@ from document_ocr.config import load_ocr_config
 from document_ocr.protocol import OCR_PROTOCOL_VERSION
 from document_ocr.settings import KaggleSettings
 
-RUNNER_FILES = ("runtime.py", "pyproject.toml", "uv.lock")
+RUNNER_FILES = ("pyproject.toml", "uv.lock")
 
 
 def build_runner_bundle(

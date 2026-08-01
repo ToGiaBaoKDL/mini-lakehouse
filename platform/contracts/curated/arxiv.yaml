@@ -80,16 +80,13 @@ tables:
       - {field_id: 18, name: manifest_sha256, data_type: string, required: false, description: Per-document content manifest hash.}
       - {field_id: 19, name: state, data_type: string, required: true, description: Canonical document state.}
       - {field_id: 20, name: attempt, data_type: long, required: true, description: Attempt ordinal for this source mutation and processor configuration.}
-      - {field_id: 21, name: error_code, data_type: string, required: false, description: Typed document error code.}
-      - {field_id: 22, name: error_message, data_type: string, required: false, description: Bounded diagnostic message.}
-      - {field_id: 23, name: prepared_at, data_type: timestamptz, required: true, description: Durable attempt preparation timestamp.}
-      - {field_id: 24, name: submitted_at, data_type: timestamptz, required: false, description: First confirmed remote submission timestamp.}
-      - {field_id: 25, name: completed_at, data_type: timestamptz, required: false, description: Terminal import timestamp.}
-      - {field_id: 26, name: curated_at, data_type: timestamptz, required: true, description: Latest state publication timestamp.}
-      - {field_id: 27, name: provider, data_type: string, required: true, description: Remote execution provider.}
-      - {field_id: 28, name: provider_reference, data_type: string, required: true, description: Provider-owned application or job reference.}
-      - {field_id: 29, name: provider_run_id, data_type: string, required: false, description: "Exact provider execution identifier used for status, logs, and output retrieval."}
-      - {field_id: 30, name: job_json, data_type: string, required: true, description: Immutable validated runner request used to resume this run safely.}
+      - {field_id: 21, name: started_at, data_type: timestamptz, required: true, description: Durable attempt start timestamp.}
+      - {field_id: 22, name: completed_at, data_type: timestamptz, required: false, description: Terminal attempt timestamp.}
+      - {field_id: 23, name: curated_at, data_type: timestamptz, required: true, description: Latest state publication timestamp.}
+      - {field_id: 24, name: provider, data_type: string, required: true, description: Remote execution provider.}
+      - {field_id: 25, name: provider_reference, data_type: string, required: true, description: Provider-owned application or job reference.}
+      - {field_id: 26, name: provider_run_id, data_type: string, required: false, description: Exact provider execution identifier used for logs and output retrieval.}
+      - {field_id: 27, name: job_json, data_type: string, required: true, description: Immutable validated runner request used to resume this run safely.}
 
   - key: ocr_document_elements
     name: ocr_document_elements

@@ -13,17 +13,15 @@ from pydantic import (
     model_validator,
 )
 
-from document_ocr.identity import processing_id, request_id, run_id
+from document_ocr.identity import canonical_json_sha256, processing_id, request_id, run_id
 
-OCR_PROTOCOL_VERSION = "2.0.0"
+OCR_PROTOCOL_VERSION = "3.0.0"
 DOCUMENT_MANIFEST_PATH = PurePosixPath("manifest.json")
 PAGE_MARKDOWN_BUNDLE_PATH = PurePosixPath("pages.json.gz")
 type Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 DocumentState = Literal[
     "succeeded",
     "reused",
-    "retryable_failed",
-    "terminal_failed",
 ]
 
 
@@ -80,7 +78,7 @@ class OcrInference(ProtocolModel):
 
 
 class OcrJob(ProtocolModel):
-    schema_version: Literal["2.0.0"] = OCR_PROTOCOL_VERSION
+    schema_version: Literal["3.0.0"] = OCR_PROTOCOL_VERSION
     run_id: Sha256
     attempt: int = Field(ge=1)
     model: OcrModel
@@ -152,7 +150,7 @@ class OcrPageMarkdown(ProtocolModel):
 
 
 class OcrPageMarkdownBundle(ProtocolModel):
-    schema_version: Literal["2.0.0"] = OCR_PROTOCOL_VERSION
+    schema_version: Literal["3.0.0"] = OCR_PROTOCOL_VERSION
     pages: tuple[OcrPageMarkdown, ...] = Field(min_length=1, max_length=2000)
 
     @model_validator(mode="after")
@@ -206,7 +204,7 @@ def validate_document_artifact_paths(paths: list[str], *, page_count: int) -> No
 
 
 class OcrDocumentManifest(ProtocolModel):
-    schema_version: Literal["2.0.0"] = OCR_PROTOCOL_VERSION
+    schema_version: Literal["3.0.0"] = OCR_PROTOCOL_VERSION
     document_id: str = Field(min_length=1, max_length=255)
     files: tuple[ArtifactFile, ...]
     page_count: int = Field(ge=1)
@@ -233,53 +231,21 @@ class OcrDocumentResult(ProtocolModel):
     request_id: Sha256
     document_id: str = Field(min_length=1, max_length=255)
     state: DocumentState
-    pdf_sha256: Sha256 | None = None
-    pdf_size_bytes: int | None = Field(default=None, ge=1)
-    page_count: int | None = Field(default=None, ge=1)
-    processing_id: Sha256 | None = None
-    manifest_sha256: Sha256 | None = None
-    error_code: str | None = Field(default=None, max_length=100)
-    error_message: str | None = Field(default=None, max_length=2000)
-
-    @model_validator(mode="after")
-    def validate_outcome(self) -> Self:
-        if self.state in {"succeeded", "reused"}:
-            required = (
-                self.pdf_sha256,
-                self.pdf_size_bytes,
-                self.page_count,
-                self.processing_id,
-                self.manifest_sha256,
-            )
-            if any(value is None for value in required):
-                raise ValueError("Successful OCR results require complete content lineage")
-            assert self.page_count is not None
-            if self.error_code is not None or self.error_message is not None:
-                raise ValueError("Successful OCR results cannot contain an error")
-        else:
-            if self.error_code is None or self.error_message is None:
-                raise ValueError("Failed OCR results require a typed error")
-            if any(
-                value is not None
-                for value in (
-                    self.pdf_sha256,
-                    self.pdf_size_bytes,
-                    self.page_count,
-                    self.processing_id,
-                    self.manifest_sha256,
-                )
-            ):
-                raise ValueError("Failed OCR results cannot publish content lineage")
-        return self
+    pdf_sha256: Sha256
+    pdf_size_bytes: int = Field(ge=1)
+    page_count: int = Field(ge=1)
+    processing_id: Sha256
+    manifest_sha256: Sha256
 
 
-class OcrRunManifest(ProtocolModel):
-    schema_version: Literal["2.0.0"] = OCR_PROTOCOL_VERSION
+class OcrRunResult(ProtocolModel):
+    schema_version: Literal["3.0.0"] = OCR_PROTOCOL_VERSION
     run_id: Sha256
     created_at: datetime
     archive_sha256: Sha256
     archive_size_bytes: int = Field(ge=1)
     result: OcrDocumentResult
+    document: OcrDocumentManifest | None = None
 
     @field_validator("created_at")
     @classmethod
@@ -287,3 +253,25 @@ class OcrRunManifest(ProtocolModel):
         if value.tzinfo is None:
             raise ValueError("Run timestamps must include a timezone")
         return value.astimezone(UTC)
+
+    @model_validator(mode="after")
+    def validate_document(self) -> Self:
+        result = self.result
+        document = self.document
+        if result.state != "succeeded":
+            if document is not None:
+                raise ValueError("Only a newly succeeded run can publish a document manifest")
+            return self
+        if document is None:
+            raise ValueError("A succeeded run requires a document manifest")
+        if (
+            document.document_id != result.document_id
+            or document.page_count != result.page_count
+            or document.pdf_sha256 != result.pdf_sha256
+            or document.pdf_size_bytes != result.pdf_size_bytes
+            or document.processing_id != result.processing_id
+        ):
+            raise ValueError("OCR document manifest lineage does not match its result")
+        if canonical_json_sha256(document.model_dump(mode="json")) != result.manifest_sha256:
+            raise ValueError("OCR document manifest checksum does not match its result")
+        return self

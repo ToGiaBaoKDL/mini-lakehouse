@@ -1,4 +1,4 @@
-"""Iceberg state and immutable S3 publication for ArXiv OCR."""
+"""Own ArXiv OCR state in Iceberg and immutable artifacts in S3."""
 
 from datetime import UTC, datetime
 from pathlib import Path
@@ -11,8 +11,8 @@ from pyiceberg.expressions import EqualTo, Reference
 from pyiceberg.expressions.literals import literal
 from pyiceberg.table import Table
 
-from document_ocr.archive import read_elements
 from document_ocr.identity import file_sha256
+from document_ocr.output import read_elements
 from document_ocr.protocol import OcrDocumentResult, OcrJob
 
 IMPORTED_STATE = "imported"
@@ -112,8 +112,6 @@ class ArxivOcrStore:
         result: OcrDocumentResult,
     ) -> None:
         processing_id = result.processing_id
-        if not isinstance(processing_id, str):
-            raise RuntimeError("Successful OCR result has no processing identity")
         artifact_uri = self._artifact_uri(result.document_id, processing_id)
         if result.state == "reused":
             existing = next(
@@ -133,7 +131,6 @@ class ArxivOcrStore:
             for source in sorted(path for path in extracted.rglob("*") if path.is_file()):
                 relative_path = source.relative_to(extracted).as_posix()
                 self._publish_file(source, f"{artifact_uri}/{relative_path}")
-            assert result.page_count is not None
             elements = read_elements(
                 extracted / "elements.jsonl.gz",
                 max_uncompressed_bytes=job.limits.max_output_bytes,
@@ -175,8 +172,6 @@ class ArxivOcrStore:
             artifact_uri=artifact_uri,
             manifest_sha256=result.manifest_sha256,
             state=IMPORTED_STATE,
-            error_code=None,
-            error_message=None,
             completed_at=datetime.now(UTC),
         )
         self.save_run(run)

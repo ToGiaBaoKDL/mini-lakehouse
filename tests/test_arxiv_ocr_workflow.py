@@ -1,3 +1,5 @@
+"""ArXiv OCR workflow and persistence tests."""
+
 import gzip
 import hashlib
 import io
@@ -10,7 +12,7 @@ import pyarrow as pa
 import pytest
 import zstandard
 from botocore.exceptions import ClientError
-from document_ocr.application import ArxivOcrPipeline, ArxivOcrStore, RetryableOcrError
+from document_ocr.arxiv import ArxivOcrStore, ArxivOcrWorkflow, OcrError
 from document_ocr.config import load_ocr_config
 from document_ocr.identity import canonical_json_bytes, processing_id
 from document_ocr.protocol import (
@@ -21,7 +23,7 @@ from document_ocr.protocol import (
     OcrJob,
     OcrPageMarkdown,
     OcrPageMarkdownBundle,
-    OcrRunManifest,
+    OcrRunResult,
 )
 from document_ocr.providers.base import (
     OcrRunNotFoundError,
@@ -184,9 +186,9 @@ class _Provider:
                 processing_id=process,
             ).model_dump(mode="json")
         )
-        artifacts["manifest.json"] = document_manifest
         archive = _archive(artifacts)
-        run_manifest = OcrRunManifest(
+        document = OcrDocumentManifest.model_validate_json(document_manifest)
+        run_result = OcrRunResult(
             run_id=self.job.run_id,
             created_at=datetime.now(UTC),
             archive_sha256=hashlib.sha256(archive).hexdigest(),
@@ -201,11 +203,12 @@ class _Provider:
                 processing_id=process,
                 manifest_sha256=hashlib.sha256(document_manifest).hexdigest(),
             ),
+            document=document,
         )
         destination.mkdir()
-        (destination / "result.tar.zst").write_bytes(archive)
-        (destination / "result_manifest.json").write_text(
-            run_manifest.model_dump_json(),
+        (destination / "artifacts.tar.zst").write_bytes(archive)
+        (destination / "result.json").write_text(
+            run_result.model_dump_json(),
             encoding="utf-8",
         )
 
@@ -215,10 +218,10 @@ class _MissingProvider(_Provider):
         raise OcrRunNotFoundError(f"{provider_run_id} is missing")
 
 
-def _pipeline(
+def _workflow(
     provider_type: type[_Provider] = _Provider,
 ) -> tuple[
-    ArxivOcrPipeline,
+    ArxivOcrWorkflow,
     _Provider,
     dict[tuple[str, ...], _Table],
     Any,
@@ -271,19 +274,19 @@ def _pipeline(
         product_name=product.name,
         s3_client=s3,
     )
-    pipeline = ArxivOcrPipeline(
+    workflow = ArxivOcrWorkflow(
         store=store,
         processor=processor,
         provider=cast(Any, provider),
     )
-    return pipeline, provider, tables, product, s3
+    return workflow, provider, tables, product, s3
 
 
-def test_arxiv_pipeline_runs_and_publishes_exactly_one_document() -> None:
-    pipeline, provider, tables, product, s3 = _pipeline()
+def test_arxiv_workflow_runs_and_publishes_exactly_one_document() -> None:
+    workflow, provider, tables, product, s3 = _workflow()
 
-    first = pipeline.run("2607.00001")
-    second = pipeline.run("2607.00001")
+    first = workflow.run("2607.00001")
+    second = workflow.run("2607.00001")
 
     assert first["state"] == "imported"
     assert second["run_id"] == first["run_id"]
@@ -298,13 +301,12 @@ def test_arxiv_pipeline_runs_and_publishes_exactly_one_document() -> None:
     assert not any(key.endswith(".pdf") for key in keys)
 
 
-def test_arxiv_pipeline_marks_a_missing_remote_run_retryable() -> None:
-    pipeline, _, tables, product, _ = _pipeline(_MissingProvider)
+def test_arxiv_workflow_fails_a_missing_remote_run() -> None:
+    workflow, _, tables, product, _ = _workflow(_MissingProvider)
 
-    with pytest.raises(RetryableOcrError, match="is missing"):
-        pipeline.run("2607.00001")
+    with pytest.raises(OcrError, match="is missing"):
+        workflow.run("2607.00001")
 
     runs = tables[product.table_identifier("ocr_document_runs").iceberg]
     assert len(runs.rows) == 1
-    assert runs.rows[0]["state"] == "retryable_failed"
-    assert runs.rows[0]["error_code"] == "provider_run_not_found"
+    assert runs.rows[0]["state"] == "failed"

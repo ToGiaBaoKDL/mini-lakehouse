@@ -19,7 +19,7 @@ x-airflow-common: &airflow-common
     AWS_PROFILE: "${AIRFLOW_AWS_PROFILE}"
     LAKEHOUSE_ENVIRONMENT: "${LAKEHOUSE_ENVIRONMENT}"
     OCR_AWS_PROFILE: "${OCR_AWS_PROFILE}"
-    TASK_AWS_CONFIG_DIR: "${AWS_CONFIG_DIR}"
+    HOST_AWS_CONFIG_DIR: "${AWS_CONFIG_DIR}"
   secrets: &airflow-secrets
     - airflow_db_password
     - airflow_fernet_key

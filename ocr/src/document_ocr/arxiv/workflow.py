@@ -1,4 +1,4 @@
-"""Run one curated ArXiv PDF through a remote OCR provider."""
+"""Coordinate one curated ArXiv document across a remote OCR provider."""
 
 from datetime import UTC, datetime
 from pathlib import Path
@@ -7,10 +7,10 @@ from typing import Any
 
 from loguru import logger
 
-from document_ocr.application.lakehouse import IMPORTED_STATE, ArxivOcrStore
-from document_ocr.archive import extract_ocr_output
+from document_ocr.arxiv.store import IMPORTED_STATE, ArxivOcrStore
 from document_ocr.config import OcrConfig
 from document_ocr.identity import request_id
+from document_ocr.output import extract_ocr_output
 from document_ocr.protocol import OcrDocumentRequest, OcrJob, OcrReuseReference
 from document_ocr.providers.base import (
     OcrProvider,
@@ -19,18 +19,14 @@ from document_ocr.providers.base import (
     OcrRunNotFoundError,
 )
 
-ACTIVE_STATES = frozenset({"prepared", "submitted"})
+PROCESSING_STATE = "processing"
 
 
-class RetryableOcrError(RuntimeError):
+class OcrError(RuntimeError):
     pass
 
 
-class TerminalOcrError(RuntimeError):
-    pass
-
-
-class ArxivOcrPipeline:
+class ArxivOcrWorkflow:
     """Own one crash-safe ArXiv PDF execution."""
 
     def __init__(
@@ -50,7 +46,7 @@ class ArxivOcrPipeline:
             rows,
             key=lambda row: (
                 row.get("attempt") or 0,
-                row.get("prepared_at") or datetime.min.replace(tzinfo=UTC),
+                row.get("started_at") or datetime.min.replace(tzinfo=UTC),
                 row.get("run_id") or "",
             ),
             default=None,
@@ -95,9 +91,9 @@ class ArxivOcrPipeline:
         try:
             paper = self._store.paper(arxiv_id)
         except ValueError as error:
-            raise TerminalOcrError(str(error)) from error
+            raise OcrError(str(error)) from error
         if paper["is_deleted"]:
-            raise TerminalOcrError(f"ArXiv paper {arxiv_id!r} is deleted")
+            raise OcrError(f"ArXiv paper {arxiv_id!r} is deleted")
         rows = self._store.runs(arxiv_id)
         request_key = request_id(
             document_id=arxiv_id,
@@ -108,19 +104,15 @@ class ArxivOcrPipeline:
         latest = self._latest(attempts)
         if latest is not None and latest["state"] == IMPORTED_STATE:
             return None, latest
-        if latest is not None and latest["state"] in ACTIVE_STATES:
+        if latest is not None and latest["state"] == PROCESSING_STATE:
             job = OcrJob.model_validate_json(latest["job_json"])
             if (
                 job.run_id != latest["run_id"]
                 or latest["provider"] != self._provider.name
                 or latest["provider_reference"] != self._provider.reference
             ):
-                raise TerminalOcrError("Persisted OCR execution ownership has drifted")
+                raise OcrError("Persisted OCR execution ownership has drifted")
             return job, latest
-        if latest is not None and latest["state"] == "terminal_failed":
-            raise TerminalOcrError(
-                latest.get("error_message") or f"OCR request for {arxiv_id!r} failed permanently"
-            )
 
         attempt = max((int(row["attempt"]) for row in attempts), default=0) + 1
         request = OcrDocumentRequest(
@@ -152,12 +144,9 @@ class ArxivOcrPipeline:
             "config_hash": job.config_hash,
             "artifact_uri": None,
             "manifest_sha256": None,
-            "state": "prepared",
+            "state": PROCESSING_STATE,
             "attempt": attempt,
-            "error_code": None,
-            "error_message": None,
-            "prepared_at": now,
-            "submitted_at": None,
+            "started_at": now,
             "completed_at": None,
             "curated_at": now,
             "provider": self._provider.name,
@@ -168,18 +157,9 @@ class ArxivOcrPipeline:
         self._store.save_run(run)
         return job, run
 
-    def _mark_failed(
-        self,
-        run: dict[str, Any],
-        *,
-        code: str,
-        message: str,
-        terminal: bool,
-    ) -> None:
+    def _mark_failed(self, run: dict[str, Any]) -> None:
         run.update(
-            state="terminal_failed" if terminal else "retryable_failed",
-            error_code=code,
-            error_message=message[:2000],
+            state="failed",
             completed_at=datetime.now(UTC),
         )
         self._store.save_run(run)
@@ -196,23 +176,13 @@ class ArxivOcrPipeline:
         try:
             self._provider.wait(provider_run_id, self._log)
         except OcrRunNotFoundError as error:
-            self._mark_failed(
-                run,
-                code="provider_run_not_found",
-                message=str(error),
-                terminal=False,
-            )
-            raise RetryableOcrError(str(error)) from error
+            self._mark_failed(run)
+            raise OcrError(str(error)) from error
         except OcrProviderRunFailedError as error:
-            self._mark_failed(
-                run,
-                code="provider_run_failed",
-                message=str(error),
-                terminal=False,
-            )
-            raise RetryableOcrError(str(error)) from error
+            self._mark_failed(run)
+            raise OcrError(str(error)) from error
         except OcrProviderError as error:
-            raise RetryableOcrError(str(error)) from error
+            raise OcrError(str(error)) from error
 
     def run(self, arxiv_id: str) -> dict[str, Any]:
         job, run = self._job(arxiv_id)
@@ -223,8 +193,6 @@ class ArxivOcrPipeline:
             provider_run_id = self._provider.submit(job)
             run.update(
                 provider_run_id=provider_run_id,
-                state="submitted",
-                submitted_at=datetime.now(UTC),
             )
             self._store.save_run(run)
         self._wait(run)
@@ -237,18 +205,8 @@ class ArxivOcrPipeline:
                 raise RuntimeError("Submitted OCR run has no provider execution ID")
             self._provider.download_output(provider_run_id, output)
             extracted = temporary / "artifacts"
-            manifest = extract_ocr_output(output, extracted, job=job)
-            result = manifest.result
-            if result.state in {"retryable_failed", "terminal_failed"}:
-                terminal = result.state == "terminal_failed"
-                self._mark_failed(
-                    run,
-                    code=result.error_code or "ocr_failed",
-                    message=result.error_message or "OCR runner failed",
-                    terminal=terminal,
-                )
-                error_type = TerminalOcrError if terminal else RetryableOcrError
-                raise error_type(result.error_message or "OCR runner failed")
+            output_result = extract_ocr_output(output, extracted, job=job)
+            result = output_result.result
             self._store.publish(job=job, run=run, extracted=extracted, result=result)
         logger.info("Imported OCR for ArXiv {} as {}", arxiv_id, run["processing_id"])
         return run

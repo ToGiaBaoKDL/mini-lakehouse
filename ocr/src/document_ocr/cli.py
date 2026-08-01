@@ -9,8 +9,8 @@ from lakehouse.config.settings import get_settings
 from lakehouse.logging import configure_logging
 from loguru import logger
 
-from document_ocr.application import RetryableOcrError, TerminalOcrError
-from document_ocr.application.runtime import run_arxiv_ocr
+from document_ocr.arxiv import OcrError
+from document_ocr.arxiv.runtime import run_arxiv_ocr
 
 
 class Provider(StrEnum):
@@ -30,10 +30,7 @@ def run(
     configure_logging(settings.log_level)
     try:
         result = run_arxiv_ocr(arxiv_id, provider.value)
-    except TerminalOcrError as error:
-        logger.error("{}", error)
-        raise typer.Exit(code=2) from error
-    except RetryableOcrError as error:
+    except OcrError as error:
         logger.error("{}", error)
         raise typer.Exit(code=1) from error
     typer.echo(json.dumps(result, separators=(",", ":"), sort_keys=True))

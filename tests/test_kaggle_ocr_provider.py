@@ -6,7 +6,7 @@ from typing import Any, cast
 
 import pytest
 from document_ocr.config import load_ocr_config
-from document_ocr.protocol import OcrDocumentResult, OcrRunManifest
+from document_ocr.protocol import OcrDocumentResult, OcrRunResult
 from document_ocr.providers.base import OcrProviderError
 from document_ocr.providers.kaggle import KaggleProvider
 from document_ocr.settings import KaggleSettings
@@ -14,7 +14,7 @@ from document_ocr.settings import KaggleSettings
 
 def _output(run_id: str) -> dict[str, bytes]:
     archive = b"archive"
-    manifest = OcrRunManifest(
+    manifest = OcrRunResult(
         run_id=run_id,
         created_at=datetime(2026, 7, 30, tzinfo=UTC),
         archive_sha256=hashlib.sha256(archive).hexdigest(),
@@ -22,14 +22,17 @@ def _output(run_id: str) -> dict[str, bytes]:
         result=OcrDocumentResult(
             request_id="a" * 64,
             document_id="2607.00001",
-            state="terminal_failed",
-            error_code="invalid_pdf",
-            error_message="test",
+            state="reused",
+            pdf_sha256="c" * 64,
+            pdf_size_bytes=100,
+            page_count=1,
+            processing_id="d" * 64,
+            manifest_sha256="e" * 64,
         ),
     )
     return {
-        "result_manifest.json": manifest.model_dump_json().encode(),
-        "result.tar.zst": archive,
+        "result.json": manifest.model_dump_json().encode(),
+        "artifacts.tar.zst": archive,
     }
 
 
@@ -57,9 +60,9 @@ class _KaggleApi:
         self.output_patterns.append(file_pattern)
         destination = Path(path)
         names = (
-            ("result_manifest.json",)
-            if file_pattern == r"^result_manifest\.json$"
-            else ("result_manifest.json", "result.tar.zst")
+            ("result.json",)
+            if file_pattern == r"^result\.json$"
+            else ("result.json", "artifacts.tar.zst")
         )
         for name in names:
             payload = self.output.get(name)
@@ -96,7 +99,7 @@ def _job(run_id: str) -> Any:
         Any,
         SimpleNamespace(
             run_id=run_id,
-            model_dump_json=lambda: '{"schema_version":"2.0.0"}',
+            model_dump_json=lambda: '{"schema_version":"3.0.0"}',
         ),
     )
 
@@ -118,7 +121,7 @@ def test_kaggle_provider_reuses_the_committed_run() -> None:
 
     assert provider_run_id == "test-user/document-ocr-arxiv-glm-ocr"
     assert api.pushes == 0
-    assert api.output_patterns == [r"^result_manifest\.json$"]
+    assert api.output_patterns == [r"^result\.json$"]
 
 
 def test_kaggle_provider_submits_after_a_different_run_completes() -> None:
