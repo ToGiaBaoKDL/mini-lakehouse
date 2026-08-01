@@ -1,10 +1,11 @@
-ARG AIRFLOW_VERSION=3.3.0
+# syntax=docker/dockerfile:1
 
-FROM ghcr.io/astral-sh/uv:0.11.30 AS uv
+FROM ghcr.io/astral-sh/uv:0.11.30@sha256:93b61e21202b1dab861092748e46bbd6e0e41dd84f59b9174efd2353186e1b47 AS uv
 
-FROM python:3.12.13-slim AS base
+FROM python:3.12.13-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de AS base
 
 ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
     UV_LINK_MODE=copy \
     PATH="/app/.venv/bin:$PATH"
 
@@ -12,51 +13,70 @@ WORKDIR /app
 
 COPY --from=uv /uv /uvx /bin/
 COPY pyproject.toml uv.lock .python-version ./
+COPY apps/arxiv_inspector/pyproject.toml ./apps/arxiv_inspector/pyproject.toml
+COPY dbt/analytics/pyproject.toml ./dbt/analytics/pyproject.toml
 COPY ocr/pyproject.toml ./ocr/pyproject.toml
+COPY platform/pyproject.toml ./platform/pyproject.toml
 
 FROM base AS platform-wheel
-COPY README.md ./
-COPY src ./src
+COPY platform/src ./platform/src
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv build --wheel --package lakehouse-platform --out-dir /dist
+    uv build --wheel --package lakehouse --out-dir /dist
 
 FROM base AS ocr-wheel
-COPY README.md ./
 COPY ocr/src ./ocr/src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv build --wheel --package document-ocr --out-dir /dist
 
-FROM base AS document-inspector-dependencies
+FROM base AS arxiv-inspector-dependencies
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra document-inspector --no-install-project
+    uv sync --frozen --no-dev --package arxiv-inspector \
+    --no-install-workspace
 
-FROM document-inspector-dependencies AS document-inspector
+FROM base AS ocr-worker-dependencies
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --package document-ocr \
+    --extra worker \
+    --no-install-workspace
+
+FROM arxiv-inspector-dependencies AS arxiv-inspector
+ENV HOME=/tmp
+RUN groupadd --gid 10001 inspector \
+    && useradd --uid 10001 --gid inspector --create-home --shell /usr/sbin/nologin inspector
 COPY --from=platform-wheel /dist /dist
 COPY --from=ocr-wheel /dist /dist
-COPY contracts ./contracts
-COPY apps/document_inspector ./apps/document_inspector
-COPY apps/document_inspector/.streamlit ./.streamlit
+COPY --chown=inspector:inspector platform/contracts ./platform/contracts
+COPY --chown=inspector:inspector apps/arxiv_inspector ./apps/arxiv_inspector
+COPY --chown=inspector:inspector apps/arxiv_inspector/.streamlit ./.streamlit
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /app/.venv/bin/python --no-deps \
-    /dist/lakehouse_platform-*.whl /dist/document_ocr-*.whl
+    /dist/lakehouse-*.whl /dist/document_ocr-*.whl \
+    && rm -rf /dist
 
-CMD ["streamlit", "run", "apps/document_inspector/app.py"]
+USER inspector
+CMD ["streamlit", "run", "apps/arxiv_inspector/app.py"]
 
-FROM apache/airflow:${AIRFLOW_VERSION}-python3.12 AS airflow
-ARG AIRFLOW_VERSION
+FROM ocr-worker-dependencies AS ocr-worker
+ENV HOME=/tmp
+RUN groupadd --gid 10001 worker \
+    && useradd --uid 10001 --gid worker --create-home --shell /usr/sbin/nologin worker
+COPY --from=platform-wheel /dist /dist
+COPY --from=ocr-wheel /dist /dist
+COPY --chown=worker:worker platform/contracts ./platform/contracts
+COPY --chown=worker:worker ocr/config ./ocr/config
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python /app/.venv/bin/python --no-deps \
+    /dist/lakehouse-*.whl /dist/document_ocr-*.whl \
+    && rm -rf /dist
+
+USER worker
+ENTRYPOINT ["document-ocr"]
+CMD ["--help"]
+
+FROM apache/airflow:3.3.0-python3.12@sha256:96e99f25815f533b298a4d53f283adf5c84c27334ea16ef232777cb800bddf10 AS airflow
 
 ENV PYTHONPATH=/opt/airflow
 
-COPY --from=platform-wheel --chown=airflow:0 /dist /tmp/dist
-COPY --from=ocr-wheel --chown=airflow:0 /dist /tmp/dist
-RUN set -eu; \
-    platform_wheel="$(find /tmp/dist -name 'lakehouse_platform-*.whl' -print -quit)"; \
-    ocr_wheel="$(find /tmp/dist -name 'document_ocr-*.whl' -print -quit)"; \
-    pip install --no-cache-dir \
-        "$ocr_wheel" \
-        "$platform_wheel[orchestration]"
-
 COPY --chown=airflow:0 orchestration /opt/airflow/orchestration
-COPY --chown=airflow:0 ocr/config /opt/airflow/ocr/config
 
 CMD ["airflow", "--help"]

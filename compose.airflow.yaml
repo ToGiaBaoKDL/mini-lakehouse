@@ -1,62 +1,65 @@
 x-airflow-common: &airflow-common
-  image: lakehouse-platform-airflow:local
-  build:
-    context: .
-    target: airflow
-  env_file:
-    - .env
+  image: "${AIRFLOW_IMAGE:-airflow:local}"
+  user: "${LOCAL_UID}:0"
   environment: &airflow-environment
     AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/orchestration/dags
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-    AIRFLOW__CORE__PARALLELISM: "${AIRFLOW_PARALLELISM:-4}"
-    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "${AIRFLOW_USERS:-admin:admin}"
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://${AIRFLOW_DB_USER:-airflow}:${AIRFLOW_DB_PASSWORD:?Set AIRFLOW_DB_PASSWORD in .env}@airflow-postgres:5432/airflow"
-    AIRFLOW__API_AUTH__JWT_SECRET: "${AIRFLOW_JWT_SECRET:?Set AIRFLOW_JWT_SECRET in .env}"
+    AIRFLOW__CORE__PARALLELISM: "4"
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "admin:admin"
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD: >-
+      python -c "from pathlib import Path; from urllib.parse import quote_plus;
+      password = quote_plus(Path('/run/secrets/airflow_db_password').read_text().strip());
+      print('postgresql+psycopg2://airflow:' + password + '@airflow-postgres:5432/airflow')"
+    AIRFLOW__API_AUTH__JWT_SECRET_CMD: cat /run/secrets/airflow_jwt_secret
     AIRFLOW__API__BASE_URL: "http://localhost:8080"
-    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
-    AIRFLOW__CORE__FERNET_KEY: "${AIRFLOW_FERNET_KEY:?Set AIRFLOW_FERNET_KEY in .env}"
+    AIRFLOW__CORE__FERNET_KEY_CMD: cat /run/secrets/airflow_fernet_key
     AIRFLOW__SECRETS__BACKEND: orchestration.config.aws_secrets.AwsSecretsBackend
-    AIRFLOW__SECRETS__BACKEND_KWARGS: '{"connections_prefix":"${AIRFLOW_CONNECTIONS_PREFIX:-lakehouse/dev/airflow/connections}","variables_prefix":"${AIRFLOW_VARIABLES_PREFIX:-/lakehouse/dev}","profile_name":"${AIRFLOW_AWS_PROFILE:-lakehouse-dev-airflow}","region_name":"${AWS_REGION:-ap-southeast-1}"}'
-    AIRFLOW_CONN_AWS_DEFAULT: "aws://?region_name=${AWS_REGION:-ap-southeast-1}"
-    AWS_PROFILE: "${AIRFLOW_AWS_PROFILE:-lakehouse-dev-airflow}"
-    AWS_REGION: "${AWS_REGION:-ap-southeast-1}"
+    AIRFLOW__SECRETS__BACKEND_KWARGS: '{"connections_prefix":"lakehouse/${LAKEHOUSE_ENVIRONMENT}/airflow/connections","variables_prefix":"/lakehouse/${LAKEHOUSE_ENVIRONMENT}"}'
+    AWS_PROFILE: "${AIRFLOW_AWS_PROFILE}"
+    LAKEHOUSE_ENVIRONMENT: "${LAKEHOUSE_ENVIRONMENT}"
+    OCR_AWS_PROFILE: "${OCR_AWS_PROFILE}"
+    TASK_AWS_CONFIG_DIR: "${AWS_CONFIG_DIR}"
+  secrets: &airflow-secrets
+    - airflow_db_password
+    - airflow_fernet_key
+    - airflow_jwt_secret
   volumes:
     - airflow-logs:/opt/airflow/logs
-    - ./orchestration:/opt/airflow/orchestration:ro
-    - ${AWS_CONFIG_DIR:-./.aws}:/home/airflow/.aws:ro
+    - ${AWS_CONFIG_DIR}:/home/airflow/.aws:ro
   depends_on:
     airflow-postgres:
       condition: service_healthy
     airflow-init:
       condition: service_completed_successfully
   restart: unless-stopped
+  stop_grace_period: 60s
 
 services:
   airflow-postgres:
-    image: postgres:17.10
+    image: postgres:17.10@sha256:a426e44bac0b759c95894d68e1a0ac03ecc20b619f498a91aae373bf06d8508d
     environment:
-      POSTGRES_USER: "${AIRFLOW_DB_USER:-airflow}"
-      POSTGRES_PASSWORD: "${AIRFLOW_DB_PASSWORD:?Set AIRFLOW_DB_PASSWORD in .env}"
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD_FILE: /run/secrets/airflow_db_password
       POSTGRES_DB: airflow
+    secrets:
+      - airflow_db_password
     volumes:
       - airflow-postgres-data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${AIRFLOW_DB_USER:-airflow} -d airflow"]
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
       interval: 5s
       timeout: 5s
       retries: 12
+      start_period: 10s
     restart: unless-stopped
 
   airflow-init:
-    image: lakehouse-platform-airflow:local
-    build:
-      context: .
-      target: airflow
-    env_file:
-      - .env
+    image: "${AIRFLOW_IMAGE:-airflow:local}"
+    user: "${LOCAL_UID}:0"
     environment:
       <<: *airflow-environment
+    secrets: *airflow-secrets
     volumes:
       - airflow-logs:/opt/airflow/logs
     depends_on:
@@ -76,7 +79,7 @@ services:
           "CMD",
           "python",
           "-c",
-          "import urllib.request as u; u.urlopen('http://localhost:8080/api/v2/monitor/health', timeout=2)",
+          "import urllib.request as u; u.urlopen('http://localhost:8080/api/v2/version', timeout=2)",
         ]
       interval: 15s
       timeout: 5s
@@ -86,6 +89,12 @@ services:
   airflow-scheduler:
     <<: *airflow-common
     command: airflow scheduler
+    group_add:
+      - "${DOCKER_GID}"
+    volumes:
+      - airflow-logs:/opt/airflow/logs
+      - ${AWS_CONFIG_DIR}:/home/airflow/.aws:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\""]
       interval: 30s
@@ -96,6 +105,16 @@ services:
   airflow-dag-processor:
     <<: *airflow-common
     command: airflow dag-processor
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "airflow jobs check --job-type DagProcessorJob --hostname \"$${HOSTNAME}\"",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   airflow-triggerer:
     <<: *airflow-common
@@ -110,3 +129,11 @@ services:
 volumes:
   airflow-logs:
   airflow-postgres-data:
+
+secrets:
+  airflow_db_password:
+    environment: AIRFLOW_DB_PASSWORD
+  airflow_fernet_key:
+    environment: AIRFLOW_FERNET_KEY
+  airflow_jwt_secret:
+    environment: AIRFLOW_JWT_SECRET

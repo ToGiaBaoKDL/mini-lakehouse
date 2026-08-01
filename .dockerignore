@@ -1,8 +1,9 @@
-.env
+.env*
 .aws
+.agents
+.codex
 .git
 .github
-.mypy_cache
 .pytest_cache
 .ruff_cache
 .venv
@@ -14,5 +15,9 @@ dbt/**/logs
 dbt/**/target
 dist
 docs
+infra
+ocr/runners
 plans
 tests
+compose*.yaml
+Makefile
