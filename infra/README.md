@@ -5,6 +5,7 @@ Terraform owns AWS infrastructure only:
 - five encrypted S3 buckets with stable random suffixes;
 - a KMS key;
 - an EMR Serverless Spark application;
+- immutable ECR repositories for local services and task workers;
 - one encrypted query-result bucket with workload-isolated prefixes for the built-in `primary`
   Athena workgroup;
 - environment-prefixed workload IAM roles;
@@ -43,7 +44,7 @@ make terraform-apply
 ```
 
 Review every plan. Populate Secrets Manager values separately; Terraform deliberately creates no
-secret versions. `trusted_principals` requires explicit principals per workload; dev may reuse one
+secret versions. `role_trust` requires explicit principals per workload; dev may reuse one
 developer role, while independently deployed workloads should use distinct identities. Dev roles
 use the `tgbao-dev-<workload>` convention; the `emr-deployer` role alone publishes immutable job
 artifacts and advances the SSM release pointer.

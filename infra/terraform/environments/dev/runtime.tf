@@ -1,25 +1,28 @@
 locals {
   runtime_parameters = {
-    "storage/landing_uri"                  = "s3://${module.storage.bucket_names.landing}"
-    "storage/curated_uri"                  = "s3://${module.storage.bucket_names.curated}"
-    "storage/analytics_uri"                = "s3://${module.storage.bucket_names.analytics}"
-    "athena/dbt_output_uri"                = "s3://${module.storage.bucket_names["query-results"]}/${local.athena_workload_prefixes.dbt_transformer}"
-    "athena/document_inspector_output_uri" = "s3://${module.storage.bucket_names["query-results"]}/${local.athena_workload_prefixes.document_inspector}"
-    "catalog/name"                         = local.catalog_alias
-    "emr/application_id"                   = module.emr_serverless.application_id
-    "emr/execution_role_arn"               = module.identity.emr_runtime_role_arn
-    "notifications/alert_email"            = var.alert_email
-    "notifications/slack_channel"          = var.slack_channel
+    "storage/landing_uri"               = "s3://${module.storage.bucket_names.landing}"
+    "storage/curated_uri"               = "s3://${module.storage.bucket_names.curated}"
+    "storage/analytics_uri"             = "s3://${module.storage.bucket_names.analytics}"
+    "athena/dbt_output_uri"             = "s3://${module.storage.bucket_names["query-results"]}/${local.athena_workload_prefixes.dbt_transformer}"
+    "athena/arxiv_inspector_output_uri" = "s3://${module.storage.bucket_names["query-results"]}/${local.athena_workload_prefixes.arxiv_inspector}"
+    "catalog/name"                      = local.catalog_alias
+    "emr/application_id"                = module.emr_serverless.application_id
+    "emr/execution_role_arn"            = module.identity.emr_runtime_role_arn
+    "notifications/alert_email"         = var.alert_email
+    "notifications/slack_channel"       = var.slack_channel
+    "ocr/providers/kaggle_secret_id"    = aws_secretsmanager_secret.ocr["kaggle"].name
+    "ocr/providers/modal_secret_id"     = aws_secretsmanager_secret.ocr["modal"].name
+    "secrets/airflow_bootstrap_id"      = aws_secretsmanager_secret.airflow["bootstrap"].name
   }
   parameter_names_by_workload = {
     airflow = [
       "storage/landing_uri",
-      "storage/curated_uri",
       "catalog/name",
       "emr/application_id",
       "emr/execution_role_arn",
       "notifications/alert_email",
       "notifications/slack_channel",
+      "secrets/airflow_bootstrap_id",
       "emr/code_uri",
     ]
     catalog_admin = [
@@ -34,9 +37,15 @@ locals {
       "storage/analytics_uri",
       "athena/dbt_output_uri",
     ]
-    document_inspector = [
+    arxiv_inspector = [
       "storage/curated_uri",
-      "athena/document_inspector_output_uri",
+      "athena/arxiv_inspector_output_uri",
+    ]
+    ocr_worker = [
+      "storage/curated_uri",
+      "catalog/name",
+      "ocr/providers/kaggle_secret_id",
+      "ocr/providers/modal_secret_id",
     ]
   }
   parameter_arn_prefix = "arn:${data.aws_partition.current.partition}:ssm:${local.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${local.parameter_prefix}"

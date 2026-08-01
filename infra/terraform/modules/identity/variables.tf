@@ -23,22 +23,9 @@ variable "aws_region" {
   description = "AWS Region containing the workload resources."
 }
 
-variable "trusted_principals" {
-  type = object({
-    airflow            = set(string)
-    catalog_admin      = set(string)
-    dbt_transformer    = set(string)
-    document_inspector = set(string)
-    emr_deployer       = set(string)
-  })
-  description = "IAM principals allowed to assume each human or self-hosted workload role."
-
-  validation {
-    condition = alltrue([
-      for principals in values(var.trusted_principals) : length(principals) > 0
-    ])
-    error_message = "Every workload role requires at least one explicit trusted principal."
-  }
+variable "role_trust" {
+  type        = map(set(string))
+  description = "IAM principals allowed to assume each workload role."
 }
 
 variable "bucket_arns" {
@@ -53,13 +40,7 @@ variable "bucket_arns" {
 }
 
 variable "parameter_arns" {
-  type = object({
-    airflow            = set(string)
-    catalog_admin      = set(string)
-    dbt_transformer    = set(string)
-    document_inspector = set(string)
-    emr_deployer       = set(string)
-  })
+  type        = map(set(string))
   description = "Exact non-secret Parameter Store resources readable by each workload."
 
   validation {
@@ -87,8 +68,8 @@ variable "athena_workgroup_arn" {
 
 variable "athena_result_prefixes" {
   type = object({
-    dbt_transformer    = string
-    document_inspector = string
+    dbt_transformer = string
+    arxiv_inspector = string
   })
   description = "Isolated S3 query-result prefixes for each Athena workload."
 
@@ -104,37 +85,52 @@ variable "athena_result_prefixes" {
   }
 }
 
-variable "airflow_connection_secret_arns" {
+variable "airflow_secret_arns" {
   type        = set(string)
-  description = "Secrets Manager connection containers readable by Airflow."
+  description = "Domain-scoped Secrets Manager resources readable by Airflow."
 
   validation {
-    condition     = length(var.airflow_connection_secret_arns) > 0
-    error_message = "Airflow requires at least one connection secret."
+    condition     = length(var.airflow_secret_arns) > 0
+    error_message = "Airflow requires at least one managed secret."
   }
 }
 
-variable "document_inspector_access" {
+variable "ocr_secret_arns" {
+  type        = set(string)
+  description = "Remote-provider credentials readable by the OCR worker."
+}
+
+variable "container_repository_arns" {
+  type        = set(string)
+  description = "Service image repositories writable by the image publisher."
+
+  validation {
+    condition     = length(var.container_repository_arns) > 0
+    error_message = "The image publisher requires at least one ECR repository."
+  }
+}
+
+variable "arxiv_inspector_access" {
   type = object({
     databases        = set(string)
     curated_prefixes = set(string)
   })
-  description = "Glue databases and curated S3 prefixes readable by Document Inspector."
+  description = "Glue databases and curated S3 prefixes readable by ArXiv Inspector."
 
   validation {
     condition = (
-      length(var.document_inspector_access.databases) > 0 &&
-      length(var.document_inspector_access.curated_prefixes) > 0 &&
+      length(var.arxiv_inspector_access.databases) > 0 &&
+      length(var.arxiv_inspector_access.curated_prefixes) > 0 &&
       alltrue([
-        for database in var.document_inspector_access.databases :
+        for database in var.arxiv_inspector_access.databases :
         can(regex("^[a-z_][a-z0-9_]*$", database))
       ]) &&
       alltrue([
-        for prefix in var.document_inspector_access.curated_prefixes :
+        for prefix in var.arxiv_inspector_access.curated_prefixes :
         length(prefix) > 0 && trim(prefix, "/") == prefix
       ])
     )
-    error_message = "Document Inspector databases and curated prefixes must be non-empty and normalized."
+    error_message = "ArXiv Inspector databases and curated prefixes must be non-empty and normalized."
   }
 }
 

@@ -1,10 +1,10 @@
-resource "aws_iam_role" "document_inspector" {
-  name               = "${var.name_prefix}-document-inspector"
-  assume_role_policy = data.aws_iam_policy_document.operator_trust["document_inspector"].json
+resource "aws_iam_role" "arxiv_inspector" {
+  name               = "${var.name_prefix}-arxiv-inspector"
+  assume_role_policy = data.aws_iam_policy_document.operator_trust["arxiv_inspector"].json
   tags               = var.tags
 }
 
-data "aws_iam_policy_document" "document_inspector" {
+data "aws_iam_policy_document" "arxiv_inspector" {
   statement {
     sid = "RunAthenaQueries"
     actions = [
@@ -28,14 +28,14 @@ data "aws_iam_policy_document" "document_inspector" {
     ]
     resources = concat(
       [local.glue_catalog_arn],
-      local.document_inspector_database_arns,
-      local.document_inspector_table_arns,
+      local.arxiv_inspector_database_arns,
+      local.arxiv_inspector_table_arns,
     )
   }
   statement {
     sid       = "ReadRuntimeParameters"
     actions   = ["ssm:GetParameter"]
-    resources = var.parameter_arns.document_inspector
+    resources = var.parameter_arns.arxiv_inspector
   }
   statement {
     sid       = "GetDocumentBucketLocations"
@@ -49,7 +49,7 @@ data "aws_iam_policy_document" "document_inspector" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = local.document_inspector_curated_prefixes
+      values   = local.arxiv_inspector_curated_prefixes
     }
   }
   statement {
@@ -60,15 +60,15 @@ data "aws_iam_policy_document" "document_inspector" {
       test     = "StringLike"
       variable = "s3:prefix"
       values = [
-        var.athena_result_prefixes.document_inspector,
-        "${var.athena_result_prefixes.document_inspector}/*",
+        var.athena_result_prefixes.arxiv_inspector,
+        "${var.athena_result_prefixes.arxiv_inspector}/*",
       ]
     }
   }
   statement {
     sid       = "ReadDocumentObjects"
     actions   = ["s3:GetObject"]
-    resources = local.document_inspector_curated_object_arns
+    resources = local.arxiv_inspector_curated_object_arns
   }
   statement {
     sid = "ManageQueryResults"
@@ -77,7 +77,7 @@ data "aws_iam_policy_document" "document_inspector" {
       "s3:GetObject",
       "s3:PutObject",
     ]
-    resources = ["${var.bucket_arns.query_results}/${var.athena_result_prefixes.document_inspector}/*"]
+    resources = ["${var.bucket_arns.query_results}/${var.athena_result_prefixes.arxiv_inspector}/*"]
   }
   statement {
     sid       = "UseLakehouseKey"
@@ -86,7 +86,7 @@ data "aws_iam_policy_document" "document_inspector" {
   }
 }
 
-resource "aws_iam_role_policy" "document_inspector" {
-  role   = aws_iam_role.document_inspector.id
-  policy = data.aws_iam_policy_document.document_inspector.json
+resource "aws_iam_role_policy" "arxiv_inspector" {
+  role   = aws_iam_role.arxiv_inspector.id
+  policy = data.aws_iam_policy_document.arxiv_inspector.json
 }

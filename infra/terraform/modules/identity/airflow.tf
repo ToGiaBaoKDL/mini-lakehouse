@@ -33,50 +33,9 @@ data "aws_iam_policy_document" "airflow" {
     resources = var.parameter_arns.airflow
   }
   statement {
-    sid       = "ReadAirflowConnections"
+    sid       = "ReadAirflowSecrets"
     actions   = ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"]
-    resources = var.airflow_connection_secret_arns
-  }
-  statement {
-    sid = "UpdateCuratedIceberg"
-    actions = [
-      "glue:GetDatabase",
-      "glue:GetDatabases",
-      "glue:GetTable",
-      "glue:GetTables",
-      "glue:UpdateTable",
-    ]
-    resources = concat(
-      [local.glue_catalog_arn],
-      local.curated_database_arns,
-      local.curated_table_arns,
-    )
-  }
-  statement {
-    sid       = "ListCuratedStorage"
-    actions   = ["s3:GetBucketLocation", "s3:ListBucket"]
-    resources = [var.bucket_arns.curated]
-  }
-  statement {
-    sid = "UpdateCuratedStorage"
-    actions = [
-      "s3:AbortMultipartUpload",
-      "s3:DeleteObject",
-      "s3:GetObject",
-      "s3:ListMultipartUploadParts",
-      "s3:PutObject",
-    ]
-    resources = ["${var.bucket_arns.curated}/*"]
-  }
-  statement {
-    sid = "UseStorageKey"
-    actions = [
-      "kms:Decrypt",
-      "kms:DescribeKey",
-      "kms:Encrypt",
-      "kms:GenerateDataKey",
-    ]
-    resources = [var.kms_key_arn]
+    resources = var.airflow_secret_arns
   }
 }
 

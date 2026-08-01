@@ -4,23 +4,17 @@ variable "aws_profile" {
   default     = null
 }
 
-variable "trusted_principals" {
-  type = object({
-    airflow            = set(string)
-    catalog_admin      = set(string)
-    dbt_transformer    = set(string)
-    document_inspector = set(string)
-    emr_deployer       = set(string)
-  })
-  description = "Explicit IAM principals trusted by each self-hosted or operator workload."
+variable "role_trust" {
+  type        = map(set(string))
+  description = "Explicit IAM principals trusted by each workload role."
 }
 
-variable "document_inspector_access" {
+variable "arxiv_inspector_access" {
   type = object({
     databases        = set(string)
     curated_prefixes = set(string)
   })
-  description = "Glue databases and curated S3 prefixes readable by Document Inspector."
+  description = "Glue databases and curated S3 prefixes readable by ArXiv Inspector."
 }
 
 variable "alert_email" {

@@ -23,12 +23,27 @@ output "catalog_admin_role_arn" {
   value       = module.identity.catalog_admin_role_arn
 }
 
-output "document_inspector_role_arn" {
-  description = "IAM role used by Document Inspector."
-  value       = module.identity.document_inspector_role_arn
+output "arxiv_inspector_role_arn" {
+  description = "IAM role used by ArXiv Inspector."
+  value       = module.identity.arxiv_inspector_role_arn
 }
 
 output "dbt_transformer_role_arn" {
   description = "IAM role used by dbt analytics transformations."
   value       = module.identity.dbt_transformer_role_arn
+}
+
+output "container_repository_urls" {
+  description = "Immutable ECR repositories keyed by local deployable service."
+  value       = module.container_registry.repository_urls
+}
+
+output "image_publisher_role_arn" {
+  description = "IAM role used to publish and pull local service images."
+  value       = module.identity.image_publisher_role_arn
+}
+
+output "ocr_worker_role_arn" {
+  description = "IAM role used by the local OCR task container."
+  value       = module.identity.ocr_worker_role_arn
 }

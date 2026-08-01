@@ -1,5 +1,5 @@
 aws_profile = "your-aws-profile"
-document_inspector_access = {
+arxiv_inspector_access = {
   databases        = ["curated_arxiv"]
   curated_prefixes = ["arxiv"]
 }
@@ -8,10 +8,12 @@ slack_channel = "#data-platform-alerts"
 
 # A single developer role may assume every workload in dev. Use distinct
 # service and operator identities when the workloads run independently.
-trusted_principals = {
+role_trust = {
   airflow            = ["arn:aws:iam::123456789012:role/Developer"]
   catalog_admin      = ["arn:aws:iam::123456789012:role/Developer"]
   dbt_transformer    = ["arn:aws:iam::123456789012:role/Developer"]
-  document_inspector = ["arn:aws:iam::123456789012:role/Developer"]
+  arxiv_inspector = ["arn:aws:iam::123456789012:role/Developer"]
   emr_deployer       = ["arn:aws:iam::123456789012:role/Developer"]
+  image_publisher    = ["arn:aws:iam::123456789012:role/Developer"]
+  ocr_worker         = ["arn:aws:iam::123456789012:role/Developer"]
 }

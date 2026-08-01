@@ -1,7 +1,7 @@
 data "aws_partition" "current" {}
 
 data "aws_iam_policy_document" "operator_trust" {
-  for_each = var.trusted_principals
+  for_each = var.role_trust
 
   statement {
     actions = ["sts:AssumeRole"]
@@ -42,22 +42,22 @@ locals {
   analytics_table_arns = [
     "arn:${data.aws_partition.current.partition}:glue:${var.aws_region}:${var.account_id}:table/analytics_*/*",
   ]
-  document_inspector_database_arns = [
-    for database in var.document_inspector_access.databases :
+  arxiv_inspector_database_arns = [
+    for database in var.arxiv_inspector_access.databases :
     "arn:${data.aws_partition.current.partition}:glue:${var.aws_region}:${var.account_id}:database/${database}"
   ]
-  document_inspector_table_arns = [
-    for database in var.document_inspector_access.databases :
+  arxiv_inspector_table_arns = [
+    for database in var.arxiv_inspector_access.databases :
     "arn:${data.aws_partition.current.partition}:glue:${var.aws_region}:${var.account_id}:table/${database}/*"
   ]
-  document_inspector_curated_prefixes = flatten([
-    for prefix in var.document_inspector_access.curated_prefixes : [
+  arxiv_inspector_curated_prefixes = flatten([
+    for prefix in var.arxiv_inspector_access.curated_prefixes : [
       prefix,
       "${prefix}/*",
     ]
   ])
-  document_inspector_curated_object_arns = [
-    for prefix in var.document_inspector_access.curated_prefixes :
+  arxiv_inspector_curated_object_arns = [
+    for prefix in var.arxiv_inspector_access.curated_prefixes :
     "${var.bucket_arns.curated}/${prefix}/*"
   ]
   ingestion_bucket_arns = [

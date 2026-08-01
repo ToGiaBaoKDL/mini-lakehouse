@@ -10,8 +10,8 @@ locals {
   parameter_prefix = "/lakehouse/${local.environment}"
   athena_workgroup = "primary"
   athena_workload_prefixes = {
-    dbt_transformer    = "dbt"
-    document_inspector = "document-inspector"
+    dbt_transformer = "dbt"
+    arxiv_inspector = "arxiv-inspector"
   }
   athena_workgroup_arn = "arn:${data.aws_partition.current.partition}:athena:${local.aws_region}:${data.aws_caller_identity.current.account_id}:workgroup/${local.athena_workgroup}"
   tags = {
@@ -32,6 +32,15 @@ module "storage" {
   }
   force_destroy = true
   tags          = local.tags
+}
+
+module "container_registry" {
+  source               = "../../modules/container_registry"
+  name_prefix          = local.name_prefix
+  repositories         = ["airflow", "arxiv-inspector", "ocr-worker"]
+  retained_image_count = 20
+  force_delete         = true
+  tags                 = local.tags
 }
 
 module "emr_serverless" {
@@ -56,7 +65,7 @@ module "identity" {
   name_prefix            = local.name_prefix
   account_id             = data.aws_caller_identity.current.account_id
   aws_region             = local.aws_region
-  trusted_principals     = var.trusted_principals
+  role_trust             = var.role_trust
   parameter_arns         = local.parameter_arns
   kms_key_arn            = module.storage.kms_key_arn
   emr_application_arn    = module.emr_serverless.application_arn
@@ -69,9 +78,11 @@ module "identity" {
     artifacts     = module.storage.bucket_arns.artifacts
     query_results = module.storage.bucket_arns["query-results"]
   }
-  airflow_connection_secret_arns = toset([
-    for secret in aws_secretsmanager_secret.airflow_connection : secret.arn
+  airflow_secret_arns = toset([
+    for secret in aws_secretsmanager_secret.airflow : secret.arn
   ])
-  document_inspector_access = var.document_inspector_access
+  ocr_secret_arns           = toset([for secret in aws_secretsmanager_secret.ocr : secret.arn])
+  container_repository_arns = toset(values(module.container_registry.repository_arns))
+  arxiv_inspector_access    = var.arxiv_inspector_access
   tags                      = local.tags
 }
