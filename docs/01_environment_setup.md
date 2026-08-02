@@ -50,15 +50,18 @@ one JSON object:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "database_password": "<random password>",
   "fernet_key": "<Airflow Fernet key>",
-  "jwt_secret": "<random JWT secret>"
+  "jwt_secret": "<random JWT secret>",
+  "admin_password": "<random UI admin password>"
 }
 ```
 
 `make airflow-up` reads this object using the services deployer identity and passes it to Compose
-as three service-scoped files. Repeating the command is read-only and idempotent. Initialize the
+as service-scoped files. The init container writes the SimpleAuthManager password file before
+Airflow starts, so Airflow never generates or logs a UI password. Repeating the command is
+read-only and idempotent. Initialize the
 value once without printing it or storing it in Terraform state:
 
 ```bash

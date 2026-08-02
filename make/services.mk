@@ -1,5 +1,5 @@
 AIRFLOW_COMPOSE := docker compose --project-name airflow -f compose.airflow.yaml
-AIRFLOW_COMPOSE_CONFIG := AIRFLOW_DB_PASSWORD=unused AIRFLOW_FERNET_KEY=unused AIRFLOW_JWT_SECRET=unused AIRFLOW_REMOTE_LOG_URI=s3://validation/airflow $(AIRFLOW_COMPOSE)
+AIRFLOW_COMPOSE_CONFIG := AIRFLOW_DB_PASSWORD=unused AIRFLOW_FERNET_KEY=unused AIRFLOW_JWT_SECRET=unused AIRFLOW_ADMIN_PASSWORDS='{"admin":"unused"}' AIRFLOW_REMOTE_LOG_URI=s3://validation/airflow $(AIRFLOW_COMPOSE)
 INSPECTOR_COMPOSE := docker compose --project-name arxiv-inspector -f compose.arxiv-inspector.yaml
 SERVICES_DEPLOYER_AWS_CONFIG := $(AWS_IDENTITY_DIR)/services-deployer/host-config
 
@@ -21,15 +21,19 @@ airflow-bootstrap-init: preflight ## Initialize the Airflow bootstrap secret exa
 		BOOTSTRAP_ID="$$(aws --profile "$${AWS_PROFILE}" ssm get-parameter \
 			--name "$(RUNTIME_PARAMETER_PREFIX)/secrets/airflow_bootstrap_id" \
 			--query Parameter.Value --output text)"; \
-		if aws --profile "$${AWS_PROFILE}" secretsmanager get-secret-value \
-			--secret-id "$${BOOTSTRAP_ID}" --query VersionId --output text >/dev/null 2>&1; then \
+		if CURRENT="$$(aws --profile "$${AWS_PROFILE}" secretsmanager get-secret-value \
+			--secret-id "$${BOOTSTRAP_ID}" --query SecretString --output text 2>/dev/null)"; then \
+			printf '%s' "$${CURRENT}" | jq -e \
+				'.version == 2 and ([.database_password, .fernet_key, .jwt_secret, .admin_password] | all(type == "string" and length > 0))' >/dev/null || { \
+				printf '%s\n' "Existing Airflow bootstrap secret is not schema version 2."; exit 1; \
+			}; \
 			printf '%s\n' "Airflow bootstrap secret is already initialized."; exit 0; \
 		fi; \
 		SECRET_FILE="$$(mktemp)"; \
 		trap 'rm -f "$${SECRET_FILE}"' EXIT HUP INT TERM; \
 		umask 077; \
 		uv run python -c \
-			'import base64,json,secrets; print(json.dumps({"version":1,"database_password":secrets.token_urlsafe(32),"fernet_key":base64.urlsafe_b64encode(secrets.token_bytes(32)).decode(),"jwt_secret":secrets.token_urlsafe(48)}))' \
+			'import base64,json,secrets; print(json.dumps({"version":2,"database_password":secrets.token_urlsafe(32),"fernet_key":base64.urlsafe_b64encode(secrets.token_bytes(32)).decode(),"jwt_secret":secrets.token_urlsafe(48),"admin_password":secrets.token_urlsafe(32)}))' \
 			> "$${SECRET_FILE}"; \
 		CLIENT_TOKEN="$$(sha256sum "$${SECRET_FILE}" | cut -d ' ' -f 1)"; \
 		aws --profile "$${AWS_PROFILE}" secretsmanager put-secret-value \
@@ -55,10 +59,11 @@ airflow-up: preflight ## Start self-hosted Airflow.
 			secretsmanager get-secret-value --secret-id "$${BOOTSTRAP_ID}" \
 			--query SecretString --output text)"; \
 		printf '%s' "$${BOOTSTRAP}" | jq -e \
-			'.version == 1 and ([.database_password, .fernet_key, .jwt_secret] | all(type == "string" and length > 0))' >/dev/null; \
+			'.version == 2 and ([.database_password, .fernet_key, .jwt_secret, .admin_password] | all(type == "string" and length > 0))' >/dev/null; \
 		AIRFLOW_DB_PASSWORD="$$(printf '%s' "$${BOOTSTRAP}" | jq -r '.database_password')" \
 		AIRFLOW_FERNET_KEY="$$(printf '%s' "$${BOOTSTRAP}" | jq -r '.fernet_key')" \
 		AIRFLOW_JWT_SECRET="$$(printf '%s' "$${BOOTSTRAP}" | jq -r '.jwt_secret')" \
+		AIRFLOW_ADMIN_PASSWORDS="$$(printf '%s' "$${BOOTSTRAP}" | jq -c '{admin: .admin_password}')" \
 		AIRFLOW_REMOTE_LOG_URI="$${REMOTE_LOG_URI}" \
 			$(AIRFLOW_COMPOSE) up -d --wait --wait-timeout 300
 

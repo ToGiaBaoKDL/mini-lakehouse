@@ -41,7 +41,10 @@ def test_airflow_uses_local_executor_and_deferrable_runtime_components() -> None
     assert "profile_name" not in environment["AIRFLOW__SECRETS__BACKEND_KWARGS"]
     assert payload["services"]["airflow-triggerer"]["command"] == "airflow triggerer"
     assert payload["services"]["airflow-dag-processor"]["command"] == "airflow dag-processor"
-    assert payload["services"]["airflow-init"]["command"] == "airflow db migrate"
+    init_command = payload["services"]["airflow-init"]["command"]
+    assert init_command[:2] == ["bash", "-ec"]
+    assert "install -m 0600 /run/secrets/airflow_admin_passwords" in init_command[-1]
+    assert "exec airflow db migrate" in init_command[-1]
     assert all("./orchestration:" not in volume for volume in common["volumes"])
     assert all("dist/" not in volume for volume in common["volumes"])
     scheduler = payload["services"]["airflow-scheduler"]
@@ -60,6 +63,9 @@ def test_airflow_uses_local_executor_and_deferrable_runtime_components() -> None
     assert environment["AIRFLOW__LOGGING__DELETE_LOCAL_LOGS"] == "false"
     assert environment["AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE"].startswith(
         "/opt/airflow/auth/"
+    )
+    assert not environment["AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE"].endswith(
+        ".generated"
     )
     assert "airflow-auth:/opt/airflow/auth" in common["volumes"]
 
@@ -84,8 +90,15 @@ def test_airflow_bootstrap_secrets_are_service_scoped_files() -> None:
         "airflow_db_password",
         "airflow_fernet_key",
         "airflow_jwt_secret",
+        "airflow_admin_passwords",
     }
     assert all("environment" in secret for secret in payload["secrets"].values())
+
+    services_makefile = Path("make/services.mk").read_text(encoding="utf-8")
+    assert '"version":2' in services_makefile
+    assert ".version == 2" in services_makefile
+    assert "admin_password" in services_makefile
+    assert "AIRFLOW_ADMIN_PASSWORDS" in services_makefile
 
 
 def test_airflow_runtime_components_have_role_appropriate_healthchecks() -> None:

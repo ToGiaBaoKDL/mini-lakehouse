@@ -7,7 +7,7 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__CORE__PARALLELISM: "4"
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "admin:admin"
-    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/auth/simple_auth_manager_passwords.json.generated
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/auth/simple_auth_manager_passwords.json
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD: >-
       python -c "from pathlib import Path; from urllib.parse import quote_plus;
       password = quote_plus(Path('/run/secrets/airflow_db_password').read_text().strip());
@@ -28,6 +28,7 @@ x-airflow-common: &airflow-common
     - airflow_db_password
     - airflow_fernet_key
     - airflow_jwt_secret
+    - airflow_admin_passwords
   volumes:
     - airflow-auth:/opt/airflow/auth
     - airflow-logs:/opt/airflow/logs
@@ -72,7 +73,13 @@ services:
     depends_on:
       airflow-postgres:
         condition: service_healthy
-    command: airflow db migrate
+    command:
+      - bash
+      - -ec
+      - >-
+        install -m 0600 /run/secrets/airflow_admin_passwords
+        /opt/airflow/auth/simple_auth_manager_passwords.json;
+        exec airflow db migrate
     restart: "no"
 
   airflow-api-server:
@@ -146,3 +153,5 @@ secrets:
     environment: AIRFLOW_FERNET_KEY
   airflow_jwt_secret:
     environment: AIRFLOW_JWT_SECRET
+  airflow_admin_passwords:
+    environment: AIRFLOW_ADMIN_PASSWORDS

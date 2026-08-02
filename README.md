@@ -135,8 +135,9 @@ and its locked providers are packaged together in the Airflow image; the worktre
 
 Terraform creates separate OCR provider secrets and Airflow notification connection secrets;
 credential values are populated out of band. It also creates one domain-level Airflow bootstrap
-secret containing the metadata database password, Fernet key, and JWT secret. `make airflow-up`
-reads that secret without mutating it and mounts the values as service-scoped Compose secrets.
+secret containing the metadata database password, Fernet key, JWT secret, and UI administrator
+password. `make airflow-up` reads that secret without mutating it and mounts the values as
+service-scoped Compose secrets; SimpleAuthManager never generates or logs a password.
 
 Producer tasks emit centrally declared logical assets only after successful completion. The GitHub
 curated asset triggers the dbt task DAG, which runs source freshness before `dbt build`; ArXiv
