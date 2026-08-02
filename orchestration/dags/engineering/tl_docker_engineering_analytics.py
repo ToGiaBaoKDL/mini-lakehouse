@@ -22,7 +22,7 @@ DBT_ENVIRONMENT = {
 
 
 with DAG(
-    dag_id="etl_docker_engineering_analytics",
+    dag_id="tl_docker_engineering_analytics",
     description="Validate curated freshness and build engineering analytics with dbt.",
     schedule=[CURATED_GITHUB],
     start_date=pendulum.datetime(2026, 1, 1, tz="Asia/Ho_Chi_Minh"),

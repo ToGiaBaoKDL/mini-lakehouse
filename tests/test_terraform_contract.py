@@ -96,7 +96,7 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
     normalized_identity = " ".join(identity.split())
 
     assert 'name_prefix = "${local.project}-${local.environment}"' in normalized_environment
-    for tier in ("landing", "curated", "analytics", "artifacts", "query-results"):
+    for tier in ("landing", "curated", "analytics", "artifacts", "logs", "query-results"):
         assert f"${{local.name_prefix}}-{tier}-" in normalized_environment
     assert "hashicorp/random" not in environment
     assert 'parameter_prefix = "/lakehouse/${local.environment}"' in normalized_environment
@@ -105,6 +105,11 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
     assert 'arxiv_inspector = "arxiv-inspector"' in normalized_environment
     assert '"athena/dbt_output_uri"' in environment
     assert '"athena/arxiv_inspector_output_uri"' in environment
+    assert '"airflow/remote_log_uri"' in environment
+    assert '"deployment/release_manifest"' in environment
+    assert "workload_data_access         = local.workload_data_access" in environment
+    assert "local.notification_destinations.alert_email" in environment
+    assert "local.notification_destinations.slack_channel" in environment
     assert '"catalog/name"' not in environment
     assert "athena/primary" not in environment
     assert "storage/query_results_uri" not in runtime
@@ -124,7 +129,8 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
 
     assert identity.count("resources = [var.athena_workgroup_arn]") == 2
     assert "lightdash" not in identity.lower()
-    assert "arxiv_inspector_curated_object_arns" in identity
+    assert "curated_object_arns_by_workload" in identity
+    assert "analytics_object_arns_by_workload" in identity
     assert "athena_result_prefixes.dbt_transformer" in identity
     assert "athena_result_prefixes.arxiv_inspector" in identity
 
@@ -146,9 +152,9 @@ def test_runtime_parameters_and_trust_are_bounded_by_workload() -> None:
     assert "managed_parameter_names" in environment
     assert "granted_parameter_names" in environment
 
-    assert "identifiers = var.operator_principals" in identity
+    assert "identifiers = var.operator_principal_arns" in identity
     assert "role_trust" not in identity
-    assert "source_policy_documents" in identity
+    assert "source_policy_documents" not in identity
     assert "external_runtime_trust" in identity
     assert "rolesanywhere.amazonaws.com" in identity
     assert "aws:PrincipalTag/x509Subject/CN" in identity
@@ -185,6 +191,25 @@ def test_airflow_and_ocr_worker_have_separate_data_permissions() -> None:
     assert "UpdateCuratedIceberg" in ocr
     assert "UpdateCuratedStorage" in ocr
     assert "ReadProviderCredentials" in ocr
+    assert "local.curated_database_arns_by_workload.ocr_worker" in ocr
+    assert "local.curated_object_arns_by_workload.ocr_worker" in ocr
+    assert '"${var.bucket_arns.curated}/*"' not in ocr
+
+
+def test_data_consumers_use_reviewed_database_and_prefix_entitlements() -> None:
+    dbt = Path("infra/terraform/aws/modules/identity/dbt.tf").read_text(encoding="utf-8")
+    inspector = Path("infra/terraform/aws/modules/identity/arxiv_inspector.tf").read_text(
+        encoding="utf-8"
+    )
+
+    assert "local.curated_database_arns_by_workload.dbt_transformer" in dbt
+    assert "local.analytics_database_arns_by_workload.dbt_transformer" in dbt
+    assert "local.curated_prefixes_by_workload.dbt_transformer" in dbt
+    assert "local.analytics_prefixes_by_workload.dbt_transformer" in dbt
+    assert '"${var.bucket_arns.curated}/*"' not in dbt
+    assert '"${var.bucket_arns.analytics}/*"' not in dbt
+    assert "local.curated_database_arns_by_workload.arxiv_inspector" in inspector
+    assert "local.curated_prefixes_by_workload.arxiv_inspector" in inspector
 
 
 def test_cloud_roots_have_isolated_state_and_private_services_host() -> None:
@@ -195,6 +220,8 @@ def test_cloud_roots_have_isolated_state_and_private_services_host() -> None:
     assert 'key          = "lakehouse/oci/dev/terraform.tfstate"' in oci
     assert 'key          = "lakehouse/tailscale/dev/terraform.tfstate"' in tailscale
     assert 'shape = "VM.Standard.A1.Flex"' in normalized_oci
+    assert "source_id               = var.image_ocid" in oci
+    assert 'data "oci_core_images"' not in oci
     assert "prohibit_internet_ingress  = true" in oci
     assert "ingress_security_rules" not in oci
     assert 'version = "~> 8.23.0"' in oci
@@ -206,3 +233,40 @@ def test_cloud_roots_have_isolated_state_and_private_services_host() -> None:
     assert 'services_tag = "tag:tgbao-dev-services"' in tailscale
     assert 'name = "tgbao-dev-services"' in normalized_oci
     assert 'dns_label                  = "services"' in oci
+
+
+def test_provider_authentication_is_not_a_terraform_input() -> None:
+    aws_environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
+    aws_bootstrap = _terraform_sources(Path("infra/terraform/aws/bootstrap/state"))
+    oci_environment = _terraform_sources(Path("infra/terraform/oci/environments/dev"))
+    examples = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in Path("infra/terraform").rglob("terraform.tfvars.example")
+    )
+
+    assert 'variable "aws_profile"' not in aws_environment + aws_bootstrap
+    assert "profile = var.aws_profile" not in aws_environment + aws_bootstrap
+    assert 'variable "oci_profile"' not in oci_environment
+    assert "config_file_profile = var.oci_profile" not in oci_environment
+    assert "aws_profile" not in examples
+    assert "oci_profile" not in examples
+
+
+def test_reviewable_policy_is_not_hidden_in_tfvars() -> None:
+    environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
+    example = Path("infra/terraform/aws/environments/dev/terraform.tfvars.example").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'databases = ["curated_arxiv"]' in environment
+    assert 'databases = ["curated_github"]' in environment
+    assert 'databases = ["analytics_engineering"]' in environment
+    assert 'prefixes  = ["arxiv"]' in environment
+    assert 'prefixes  = ["github"]' in environment
+    assert 'prefixes  = ["tables"]' in environment
+    assert 'alert_email   = "data-platform@example.com"' in environment
+    assert 'slack_channel = "#data-platform-alerts"' in environment
+    assert "arxiv_inspector_access" not in example
+    assert "workload_data_access" not in example
+    assert "alert_email" not in example
+    assert "slack_channel" not in example

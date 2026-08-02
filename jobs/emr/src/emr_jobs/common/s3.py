@@ -61,3 +61,19 @@ def put_if_changed(
     if content_encoding:
         arguments["ContentEncoding"] = content_encoding
     client().put_object(**arguments)
+
+
+def delete_unlisted(*, bucket: str, prefix: str, retained_keys: set[str]) -> None:
+    """Delete stale objects below one authoritative prefix in bounded batches."""
+    paginator = client().get_paginator("list_objects_v2")
+    stale = [
+        item["Key"]
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix)
+        for item in page.get("Contents", [])
+        if item["Key"] not in retained_keys
+    ]
+    for offset in range(0, len(stale), 1000):
+        client().delete_objects(
+            Bucket=bucket,
+            Delete={"Objects": [{"Key": key} for key in stale[offset : offset + 1000]]},
+        )

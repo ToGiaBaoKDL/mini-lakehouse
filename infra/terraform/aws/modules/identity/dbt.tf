@@ -28,8 +28,8 @@ data "aws_iam_policy_document" "dbt_transformer" {
     ]
     resources = concat(
       [local.glue_catalog_arn],
-      local.curated_database_arns,
-      local.curated_table_arns,
+      local.curated_database_arns_by_workload.dbt_transformer,
+      local.curated_table_arns_by_workload.dbt_transformer,
     )
   }
   statement {
@@ -46,8 +46,8 @@ data "aws_iam_policy_document" "dbt_transformer" {
     ]
     resources = concat(
       [local.glue_catalog_arn],
-      local.analytics_database_arns,
-      local.analytics_table_arns,
+      local.analytics_database_arns_by_workload.dbt_transformer,
+      local.analytics_table_arns_by_workload.dbt_transformer,
     )
   }
   statement {
@@ -65,12 +65,24 @@ data "aws_iam_policy_document" "dbt_transformer" {
     ]
   }
   statement {
-    sid     = "ListTransformerDataBuckets"
-    actions = ["s3:ListBucket"]
-    resources = [
-      var.bucket_arns.curated,
-      var.bucket_arns.analytics,
-    ]
+    sid       = "ListCuratedData"
+    actions   = ["s3:ListBucket"]
+    resources = [var.bucket_arns.curated]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = local.curated_prefixes_by_workload.dbt_transformer
+    }
+  }
+  statement {
+    sid       = "ListAnalyticsData"
+    actions   = ["s3:ListBucket"]
+    resources = [var.bucket_arns.analytics]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = local.analytics_prefixes_by_workload.dbt_transformer
+    }
   }
   statement {
     sid       = "ListAthenaQueryResults"
@@ -88,11 +100,11 @@ data "aws_iam_policy_document" "dbt_transformer" {
   statement {
     sid     = "ReadTransformerObjects"
     actions = ["s3:GetObject"]
-    resources = [
-      "${var.bucket_arns.curated}/*",
-      "${var.bucket_arns.analytics}/*",
-      "${var.bucket_arns.query_results}/${var.athena_result_prefixes.dbt_transformer}/*",
-    ]
+    resources = concat(
+      local.curated_object_arns_by_workload.dbt_transformer,
+      local.analytics_object_arns_by_workload.dbt_transformer,
+      ["${var.bucket_arns.query_results}/${var.athena_result_prefixes.dbt_transformer}/*"],
+    )
   }
   statement {
     sid = "ManageAnalyticsObjects"
@@ -101,7 +113,7 @@ data "aws_iam_policy_document" "dbt_transformer" {
       "s3:DeleteObject",
       "s3:PutObject",
     ]
-    resources = ["${var.bucket_arns.analytics}/*"]
+    resources = local.analytics_object_arns_by_workload.dbt_transformer
   }
   statement {
     sid       = "WriteQueryResults"

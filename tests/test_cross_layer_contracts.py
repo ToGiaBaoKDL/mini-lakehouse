@@ -93,7 +93,7 @@ def test_dbt_athena_configuration_is_explicit() -> None:
     assert output["schema"] == domain.database
 
     data_operations = Path("make/data.mk").read_text(encoding="utf-8")
-    assert '"athena/dbt_output_uri"' in data_operations
+    assert "/athena/dbt_output_uri" in data_operations
     assert "DBT_QUERY_RESULTS_URI" in data_operations
     assert "athena/workgroup" not in data_operations
 

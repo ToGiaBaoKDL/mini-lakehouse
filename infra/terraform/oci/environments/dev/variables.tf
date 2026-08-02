@@ -1,9 +1,3 @@
-variable "oci_profile" {
-  type        = string
-  description = "Profile name in the OCI CLI configuration file used by Terraform."
-  default     = "DEFAULT"
-}
-
 variable "tenancy_ocid" {
   type        = string
   description = "OCI tenancy OCID used to discover availability domains."
@@ -17,6 +11,16 @@ variable "compartment_ocid" {
 variable "region" {
   type        = string
   description = "OCI region where the dev services host runs."
+}
+
+variable "image_ocid" {
+  type        = string
+  description = "Pinned Canonical Ubuntu 24.04 AArch64 image OCID for the services host."
+
+  validation {
+    condition     = startswith(var.image_ocid, "ocid1.image.")
+    error_message = "image_ocid must be an OCI image OCID."
+  }
 }
 
 variable "ssh_authorized_key" {

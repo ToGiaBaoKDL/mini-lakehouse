@@ -37,6 +37,34 @@ data "aws_iam_policy_document" "airflow" {
     actions   = ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"]
     resources = var.airflow_secret_arns
   }
+  statement {
+    sid       = "GetRemoteLogBucketLocation"
+    actions   = ["s3:GetBucketLocation"]
+    resources = [var.bucket_arns.logs]
+  }
+  statement {
+    sid       = "ListRemoteLogs"
+    actions   = ["s3:ListBucket"]
+    resources = [var.bucket_arns.logs]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["airflow/task-logs", "airflow/task-logs/*"]
+    }
+  }
+  statement {
+    sid = "ManageRemoteLogs"
+    actions = [
+      "s3:GetObject",
+      "s3:PutObject",
+    ]
+    resources = ["${var.bucket_arns.logs}/airflow/task-logs/*"]
+  }
+  statement {
+    sid       = "UseRemoteLogKey"
+    actions   = ["kms:Decrypt", "kms:DescribeKey", "kms:Encrypt", "kms:GenerateDataKey"]
+    resources = [var.kms_key_arn]
+  }
 }
 
 resource "aws_iam_role_policy" "airflow" {

@@ -24,10 +24,6 @@ class Settings(BaseSettings):
         default="ap-southeast-1",
         validation_alias=AliasChoices("AWS_REGION", "LAKEHOUSE_AWS_REGION"),
     )
-    aws_profile: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("AWS_PROFILE", "LAKEHOUSE_AWS_PROFILE"),
-    )
 
 
 @lru_cache(maxsize=1)

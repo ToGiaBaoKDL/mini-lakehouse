@@ -7,6 +7,7 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__CORE__PARALLELISM: "4"
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "admin:admin"
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/auth/simple_auth_manager_passwords.json.generated
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD: >-
       python -c "from pathlib import Path; from urllib.parse import quote_plus;
       password = quote_plus(Path('/run/secrets/airflow_db_password').read_text().strip());
@@ -16,6 +17,9 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__FERNET_KEY_CMD: cat /run/secrets/airflow_fernet_key
     AIRFLOW__SECRETS__BACKEND: orchestration.config.aws_secrets.AwsSecretsBackend
     AIRFLOW__SECRETS__BACKEND_KWARGS: '{"connections_prefix":"lakehouse/${LAKEHOUSE_ENVIRONMENT}/airflow/connections","variables_prefix":"/lakehouse/${LAKEHOUSE_ENVIRONMENT}"}'
+    AIRFLOW__LOGGING__REMOTE_LOGGING: "true"
+    AIRFLOW__LOGGING__REMOTE_BASE_LOG_FOLDER: "${AIRFLOW_REMOTE_LOG_URI}"
+    AIRFLOW__LOGGING__DELETE_LOCAL_LOGS: "false"
     AWS_CONFIG_FILE: /run/aws/config
     AWS_EC2_METADATA_DISABLED: "true"
     LAKEHOUSE_ENVIRONMENT: "${LAKEHOUSE_ENVIRONMENT}"
@@ -25,6 +29,7 @@ x-airflow-common: &airflow-common
     - airflow_fernet_key
     - airflow_jwt_secret
   volumes:
+    - airflow-auth:/opt/airflow/auth
     - airflow-logs:/opt/airflow/logs
     - ${AWS_IDENTITY_DIR}/airflow:/run/aws:ro
   depends_on:
@@ -61,6 +66,7 @@ services:
       <<: *airflow-environment
     secrets: *airflow-secrets
     volumes:
+      - airflow-auth:/opt/airflow/auth
       - airflow-logs:/opt/airflow/logs
       - ${AWS_IDENTITY_DIR}/airflow:/run/aws:ro
     depends_on:
@@ -93,6 +99,7 @@ services:
     group_add:
       - "${DOCKER_GID}"
     volumes:
+      - airflow-auth:/opt/airflow/auth
       - airflow-logs:/opt/airflow/logs
       - ${AWS_IDENTITY_DIR}/airflow:/run/aws:ro
       - /var/run/docker.sock:/var/run/docker.sock
@@ -128,6 +135,7 @@ services:
       start_period: 30s
 
 volumes:
+  airflow-auth:
   airflow-logs:
   airflow-postgres-data:
 

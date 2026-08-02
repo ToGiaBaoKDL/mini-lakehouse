@@ -49,7 +49,6 @@ class ArxivDocumentRepository:
                 "athena/arxiv_inspector_output_uri",
             ),
             region_name=settings.aws_region,
-            profile_name=settings.aws_profile,
         )
 
     def _relation(self, key: str) -> str:

@@ -23,13 +23,15 @@ variable "aws_region" {
   description = "AWS Region containing the workload resources."
 }
 
-variable "operator_principals" {
+variable "operator_principal_arns" {
   type        = set(string)
-  description = "IAM principals allowed to assume human or CI operator roles."
+  description = "Existing IAM principal ARNs allowed to assume human or CI operator roles."
 
   validation {
-    condition     = length(var.operator_principals) > 0
-    error_message = "At least one operator principal is required."
+    condition = length(var.operator_principal_arns) > 0 && alltrue([
+      for arn in var.operator_principal_arns : startswith(arn, "arn:")
+    ])
+    error_message = "At least one valid operator principal ARN is required."
   }
 }
 
@@ -44,6 +46,7 @@ variable "bucket_arns" {
     curated       = string
     analytics     = string
     artifacts     = string
+    logs          = string
     query_results = string
   })
   description = "Lakehouse bucket ARNs exposed to workload IAM policies."
@@ -125,27 +128,50 @@ variable "container_repository_arns" {
   }
 }
 
-variable "arxiv_inspector_access" {
+variable "workload_data_access" {
   type = object({
-    databases        = set(string)
-    curated_prefixes = set(string)
+    curated = map(object({
+      databases = set(string)
+      prefixes  = set(string)
+    }))
+    analytics = map(object({
+      databases = set(string)
+      prefixes  = set(string)
+    }))
   })
-  description = "Glue databases and curated S3 prefixes readable by ArXiv Inspector."
+  description = "Reviewed Glue database and S3 prefix entitlements for data-consuming workloads."
 
   validation {
     condition = (
-      length(var.arxiv_inspector_access.databases) > 0 &&
-      length(var.arxiv_inspector_access.curated_prefixes) > 0 &&
       alltrue([
-        for database in var.arxiv_inspector_access.databases :
-        can(regex("^[a-z_][a-z0-9_]*$", database))
+        for workload in ["arxiv_inspector", "dbt_transformer", "ocr_worker"] :
+        contains(keys(var.workload_data_access.curated), workload)
       ]) &&
+      contains(keys(var.workload_data_access.analytics), "dbt_transformer") &&
       alltrue([
-        for prefix in var.arxiv_inspector_access.curated_prefixes :
-        length(prefix) > 0 && trim(prefix, "/") == prefix
-      ])
+        for access in concat(
+          values(var.workload_data_access.curated),
+          values(var.workload_data_access.analytics),
+        ) : length(access.databases) > 0 && length(access.prefixes) > 0
+      ]) &&
+      alltrue(flatten([
+        for access in concat(
+          values(var.workload_data_access.curated),
+          values(var.workload_data_access.analytics),
+          ) : [for database in access.databases :
+          can(regex("^[a-z_][a-z0-9_]*$", database))
+        ]
+      ])) &&
+      alltrue(flatten([
+        for access in concat(
+          values(var.workload_data_access.curated),
+          values(var.workload_data_access.analytics),
+          ) : [for prefix in access.prefixes :
+          length(prefix) > 0 && trim(prefix, "/") == prefix
+        ]
+      ]))
     )
-    error_message = "ArXiv Inspector databases and curated prefixes must be non-empty and normalized."
+    error_message = "Workload data access must cover each consumer with non-empty normalized databases and prefixes."
   }
 }
 

@@ -28,8 +28,8 @@ data "aws_iam_policy_document" "arxiv_inspector" {
     ]
     resources = concat(
       [local.glue_catalog_arn],
-      local.arxiv_inspector_database_arns,
-      local.arxiv_inspector_table_arns,
+      local.curated_database_arns_by_workload.arxiv_inspector,
+      local.curated_table_arns_by_workload.arxiv_inspector,
     )
   }
   statement {
@@ -49,7 +49,7 @@ data "aws_iam_policy_document" "arxiv_inspector" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = local.arxiv_inspector_curated_prefixes
+      values   = local.curated_prefixes_by_workload.arxiv_inspector
     }
   }
   statement {
@@ -68,7 +68,7 @@ data "aws_iam_policy_document" "arxiv_inspector" {
   statement {
     sid       = "ReadDocumentObjects"
     actions   = ["s3:GetObject"]
-    resources = local.arxiv_inspector_curated_object_arns
+    resources = local.curated_object_arns_by_workload.arxiv_inspector
   }
   statement {
     sid = "ManageQueryResults"

@@ -27,8 +27,8 @@ with DAG(
     params=ParamsDict(
         {
             "arxiv_id": Param(
-                default=None,
-                type=["null", "string"],
+                type="string",
+                minLength=1,
                 maxLength=255,
                 description="One exact ArXiv ID. This DAG never selects additional documents.",
             ),
@@ -47,7 +47,7 @@ with DAG(
         image=OCR_IMAGE,
         command=[
             "--arxiv-id",
-            "{{ params.arxiv_id or '' }}",
+            "{{ params.arxiv_id }}",
             "--provider",
             "{{ params.provider }}",
         ],

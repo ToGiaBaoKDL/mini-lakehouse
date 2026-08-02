@@ -46,7 +46,12 @@ issue_certificate() {
     if [ ! -f "$private_key" ]; then
         openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$private_key"
     fi
-    if [ -f "$certificate" ] && openssl x509 -checkend 2592000 -noout -in "$certificate"; then
+    if [ -f "$certificate" ] && \
+        openssl x509 -checkend 2592000 -noout -in "$certificate" >/dev/null 2>&1 && \
+        openssl verify -CAfile "$ca_certificate" "$certificate" >/dev/null 2>&1 && \
+        [ "$(openssl x509 -in "$certificate" -noout -subject -nameopt RFC2253)" = "subject=CN=$common_name" ] && \
+        [ "$(openssl x509 -in "$certificate" -pubkey -noout | openssl pkey -pubin -outform DER | openssl dgst -sha256)" = \
+          "$(openssl pkey -in "$private_key" -pubout -outform DER | openssl dgst -sha256)" ]; then
         return
     fi
 
@@ -97,14 +102,12 @@ render_configs() {
             "credential_process = /usr/local/bin/aws_signing_helper credential-process --certificate /run/aws/certificate.pem --private-key /run/aws/private-key.pem --trust-anchor-arn $trust_anchor_arn --profile-arn $profile_arn --role-arn $role_arn" \
             >"$bundle/config"
 
-        if [ "$workload_key" = "services_deployer" ]; then
-            printf '%s\n' \
-                "[default]" \
-                "region = $region" \
-                "credential_process = /usr/local/bin/aws_signing_helper credential-process --certificate $bundle/certificate.pem --private-key $bundle/private-key.pem --trust-anchor-arn $trust_anchor_arn --profile-arn $profile_arn --role-arn $role_arn" \
-                >"$bundle/host-config"
-            chmod 0600 "$bundle/host-config"
-        fi
+        printf '%s\n' \
+            "[default]" \
+            "region = $region" \
+            "credential_process = /usr/local/bin/aws_signing_helper credential-process --certificate $bundle/certificate.pem --private-key $bundle/private-key.pem --trust-anchor-arn $trust_anchor_arn --profile-arn $profile_arn --role-arn $role_arn" \
+            >"$bundle/host-config"
+        chmod 0600 "$bundle/host-config"
         chmod 0600 "$bundle/config" "$bundle/private-key.pem"
         chmod 0644 "$bundle/certificate.pem"
     done

@@ -21,6 +21,7 @@ RUN uv pip install --system --no-cache \
         --requirement /tmp/orchestration-requirements.txt \
     && python -c "from airflow.providers.amazon.aws.operators.emr import EmrServerlessStartJobOperator; from airflow.providers.docker.operators.docker import DockerOperator" \
     && /tmp/install-aws-signing-helper "$TARGETARCH" \
+    && install -d -o airflow -g 0 -m 0770 /opt/airflow/auth \
     && rm /tmp/install-aws-signing-helper /tmp/orchestration-requirements.txt /usr/local/bin/uv
 
 COPY --chown=airflow:0 orchestration /opt/airflow/orchestration

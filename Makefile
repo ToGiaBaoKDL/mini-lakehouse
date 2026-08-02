@@ -8,6 +8,7 @@ LOCAL_UID ?= $(shell id -u)
 DOCKER_GID ?= $(shell stat -c '%g' /var/run/docker.sock 2>/dev/null || printf '0')
 AWS_IDENTITY_DIR ?= $(HOME)/.config/lakehouse/$(LAKEHOUSE_ENVIRONMENT)/aws
 HOST_BIND_ADDRESS ?= 127.0.0.1
+RUNTIME_PARAMETER_PREFIX := /lakehouse/$(LAKEHOUSE_ENVIRONMENT)
 
 AWS_TERRAFORM_DIR := infra/terraform/aws/environments/$(LAKEHOUSE_ENVIRONMENT)
 
@@ -37,7 +38,7 @@ platform-validate: ## Validate settings and YAML contracts without AWS I/O.
 	uv run --package lakehouse --extra cli python -m lakehouse.validate
 
 lint: ## Run formatting, linting, and static type checks.
-	sh -n infra/runtime/install-aws-signing-helper infra/runtime/workload-identities
+	sh -n infra/runtime/deploy-release infra/runtime/install-aws-signing-helper infra/runtime/workload-identities
 	uv run ruff format --check .
 	uv run ruff check .
 	uv run --all-packages --all-extras pyright

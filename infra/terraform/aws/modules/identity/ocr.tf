@@ -26,14 +26,24 @@ data "aws_iam_policy_document" "ocr_worker" {
     ]
     resources = concat(
       [local.glue_catalog_arn],
-      local.curated_database_arns,
-      local.curated_table_arns,
+      local.curated_database_arns_by_workload.ocr_worker,
+      local.curated_table_arns_by_workload.ocr_worker,
     )
   }
   statement {
-    sid       = "ListCuratedStorage"
-    actions   = ["s3:GetBucketLocation", "s3:ListBucket"]
+    sid       = "GetCuratedBucketLocation"
+    actions   = ["s3:GetBucketLocation"]
     resources = [var.bucket_arns.curated]
+  }
+  statement {
+    sid       = "ListCuratedStorage"
+    actions   = ["s3:ListBucket"]
+    resources = [var.bucket_arns.curated]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = local.curated_prefixes_by_workload.ocr_worker
+    }
   }
   statement {
     sid = "UpdateCuratedStorage"
@@ -44,7 +54,7 @@ data "aws_iam_policy_document" "ocr_worker" {
       "s3:ListMultipartUploadParts",
       "s3:PutObject",
     ]
-    resources = ["${var.bucket_arns.curated}/*"]
+    resources = local.curated_object_arns_by_workload.ocr_worker
   }
   statement {
     sid = "UseStorageKey"

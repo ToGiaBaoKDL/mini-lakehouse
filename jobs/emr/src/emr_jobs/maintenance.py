@@ -128,7 +128,7 @@ def maintain_table(
 
 def run(*, contracts_uri: str) -> None:
     from emr_jobs.common.contracts import load_contracts
-    from emr_jobs.common.iceberg import qualified_name, require_tables
+    from emr_jobs.common.iceberg import require_tables
     from emr_jobs.common.spark import configure_logging, session
 
     configure_logging("iceberg_maintenance", "all")
@@ -140,11 +140,11 @@ def run(*, contracts_uri: str) -> None:
         require_tables(spark, identifiers)
         as_of = datetime.now(UTC)
         for tier, identifier, _, table in declared:
-            table_name = qualified_name(identifier)
+            table_name = ".".join(identifier.iceberg)
             logger.info("Maintaining {} table {}", tier, table_name)
             maintain_table(
                 spark,
-                table_name=".".join(identifier.iceberg),
+                table_name=table_name,
                 table=table,
                 policy=POLICIES[tier],
                 as_of=as_of,

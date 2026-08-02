@@ -27,10 +27,7 @@ class ArxivDocumentService:
     def __init__(self, settings: Settings) -> None:
         self._repository = ArxivDocumentRepository(settings)
         self._artifacts = OcrArtifactReader(
-            S3ObjectReader(
-                region_name=settings.aws_region,
-                profile_name=settings.aws_profile,
-            ),
+            S3ObjectReader(region_name=settings.aws_region),
             curated_uri=get_runtime_parameter(
                 settings.environment,
                 "storage/curated_uri",

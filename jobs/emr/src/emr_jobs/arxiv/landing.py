@@ -11,7 +11,7 @@ from pyspark.sql import functions as F
 
 from emr_jobs.common.contracts import spark_schema
 from emr_jobs.common.iceberg import qualified_name
-from emr_jobs.common.s3 import join_key, put_if_changed, split_uri
+from emr_jobs.common.s3 import delete_unlisted, join_key, put_if_changed, split_uri
 
 
 def archive_pages(
@@ -53,6 +53,11 @@ def archive_pages(
         body=manifest,
         sha256=manifest_sha256,
         content_type="application/json",
+    )
+    delete_unlisted(
+        bucket=bucket,
+        prefix=f"{prefix}/",
+        retained_keys={manifest_key, *(key for key, _ in page_objects)},
     )
     return page_objects, manifest_key, manifest_sha256
 

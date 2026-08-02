@@ -55,6 +55,13 @@ def test_airflow_uses_local_executor_and_deferrable_runtime_components() -> None
     assert "AIRFLOW_CONN_AWS_DEFAULT" not in environment
     assert "AIRFLOW_BOOTSTRAP_VERSION" not in environment
     assert "AWS_REGION" not in environment
+    assert environment["AIRFLOW__LOGGING__REMOTE_LOGGING"] == "true"
+    assert environment["AIRFLOW__LOGGING__REMOTE_BASE_LOG_FOLDER"] == ("${AIRFLOW_REMOTE_LOG_URI}")
+    assert environment["AIRFLOW__LOGGING__DELETE_LOCAL_LOGS"] == "false"
+    assert environment["AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE"].startswith(
+        "/opt/airflow/auth/"
+    )
+    assert "airflow-auth:/opt/airflow/auth" in common["volumes"]
 
 
 def test_airflow_bootstrap_secrets_are_service_scoped_files() -> None:
@@ -266,6 +273,7 @@ def test_makefile_exposes_owned_operational_entrypoints() -> None:
         "emr-jobs-package:",
         "emr-jobs-publish:",
         "ocr-kaggle-runner-publish:",
+        "workload-identities-install:",
     ):
         assert target in makefile
 
@@ -274,6 +282,7 @@ def test_makefile_exposes_owned_operational_entrypoints() -> None:
     assert "--push" in makefile
     assert "ecr describe-images" in makefile
     assert "already published" in makefile
+    assert "deployment/release_manifest" in makefile
     assert 'imageTag="$(RELEASE)"' in makefile
     assert "ocr-worker:runtime" in makefile
     assert "AIRFLOW_PARALLELISM ?=" not in makefile

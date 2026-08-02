@@ -1,5 +1,5 @@
 AIRFLOW_COMPOSE := docker compose --project-name airflow -f compose.airflow.yaml
-AIRFLOW_COMPOSE_CONFIG := AIRFLOW_DB_PASSWORD=unused AIRFLOW_FERNET_KEY=unused AIRFLOW_JWT_SECRET=unused $(AIRFLOW_COMPOSE)
+AIRFLOW_COMPOSE_CONFIG := AIRFLOW_DB_PASSWORD=unused AIRFLOW_FERNET_KEY=unused AIRFLOW_JWT_SECRET=unused AIRFLOW_REMOTE_LOG_URI=s3://validation/airflow $(AIRFLOW_COMPOSE)
 INSPECTOR_COMPOSE := docker compose --project-name arxiv-inspector -f compose.arxiv-inspector.yaml
 SERVICES_DEPLOYER_AWS_CONFIG := $(AWS_IDENTITY_DIR)/services-deployer/host-config
 
@@ -8,42 +8,19 @@ SERVICES_DEPLOYER_AWS_CONFIG := $(AWS_IDENTITY_DIR)/services-deployer/host-confi
 	services-up services-down services-ps
 
 release-deploy: release-preflight ## Deploy RELEASE on the Tailscale-enrolled services host.
-	@test -r "$(SERVICES_DEPLOYER_AWS_CONFIG)" || { \
-		printf '%s\n' "Run 'make workload-identities-render' first."; exit 1; \
-	}
 	@command -v tailscale >/dev/null
-	@set -eu; \
-		REPOSITORIES="$$(terraform -chdir=$(AWS_TERRAFORM_DIR) output -json container_repository_urls)"; \
-		REGISTRY="$$(printf '%s' "$${REPOSITORIES}" | jq -er '.airflow' | cut -d/ -f1)"; \
-		env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
-			AWS_CONFIG_FILE="$(SERVICES_DEPLOYER_AWS_CONFIG)" AWS_PROFILE=default \
-			aws ecr get-login-password \
-			| docker login --username AWS --password-stdin "$${REGISTRY}" >/dev/null; \
-		AIRFLOW_RELEASE="$$(printf '%s' "$${REPOSITORIES}" | jq -er '.airflow'):$(RELEASE)"; \
-		INSPECTOR_RELEASE="$$(printf '%s' "$${REPOSITORIES}" | jq -er '."arxiv-inspector"'):$(RELEASE)"; \
-		DBT_RELEASE="$$(printf '%s' "$${REPOSITORIES}" | jq -er '."dbt-task"'):$(RELEASE)"; \
-		OCR_RELEASE="$$(printf '%s' "$${REPOSITORIES}" | jq -er '."ocr-worker"'):$(RELEASE)"; \
-		for IMAGE in "$${AIRFLOW_RELEASE}" "$${INSPECTOR_RELEASE}" "$${DBT_RELEASE}" "$${OCR_RELEASE}"; do \
-			docker pull "$${IMAGE}"; \
-		done; \
-		docker tag "$${DBT_RELEASE}" dbt-task:runtime; \
-		docker tag "$${OCR_RELEASE}" ocr-worker:runtime; \
-		$(MAKE) services-up \
-			HOST_BIND_ADDRESS="$$(tailscale ip -4)" \
-			AIRFLOW_IMAGE="$${AIRFLOW_RELEASE}" \
-			ARXIV_INSPECTOR_IMAGE="$${INSPECTOR_RELEASE}"
+	infra/runtime/deploy-release \
+		"$(LAKEHOUSE_ENVIRONMENT)" "$(AWS_IDENTITY_DIR)" "$(RELEASE)" "$$(tailscale ip -4)"
 
 airflow-bootstrap-init: preflight ## Initialize the Airflow bootstrap secret exactly once.
 	@test -n "$${AWS_PROFILE:-}" || { \
 		printf '%s\n' "Set AWS_PROFILE to the Terraform administrator profile."; exit 1; \
 	}
 	@command -v sha256sum >/dev/null
-	@command -v terraform >/dev/null
 	@set -eu; \
-		PARAMETERS="$$(terraform -chdir=$(AWS_TERRAFORM_DIR) output -json runtime_parameter_names)"; \
-		BOOTSTRAP_PARAMETER="$$(printf '%s' "$${PARAMETERS}" | jq -er '."secrets/airflow_bootstrap_id"')"; \
 		BOOTSTRAP_ID="$$(aws --profile "$${AWS_PROFILE}" ssm get-parameter \
-			--name "$${BOOTSTRAP_PARAMETER}" --query Parameter.Value --output text)"; \
+			--name "$(RUNTIME_PARAMETER_PREFIX)/secrets/airflow_bootstrap_id" \
+			--query Parameter.Value --output text)"; \
 		if aws --profile "$${AWS_PROFILE}" secretsmanager get-secret-value \
 			--secret-id "$${BOOTSTRAP_ID}" --query VersionId --output text >/dev/null 2>&1; then \
 			printf '%s\n' "Airflow bootstrap secret is already initialized."; exit 0; \
@@ -64,13 +41,15 @@ airflow-up: preflight ## Start self-hosted Airflow.
 	@test -r "$(SERVICES_DEPLOYER_AWS_CONFIG)" || { \
 		printf '%s\n' "Run 'make workload-identities-render' first."; exit 1; \
 	}
-	@command -v terraform >/dev/null
 	@set -eu; \
-		PARAMETERS="$$(terraform -chdir=$(AWS_TERRAFORM_DIR) output -json runtime_parameter_names)"; \
-		BOOTSTRAP_PARAMETER="$$(printf '%s' "$${PARAMETERS}" | jq -er '."secrets/airflow_bootstrap_id"')"; \
 		BOOTSTRAP_ID="$$(env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
 			AWS_CONFIG_FILE="$(SERVICES_DEPLOYER_AWS_CONFIG)" AWS_PROFILE=default aws ssm get-parameter \
-			--name "$${BOOTSTRAP_PARAMETER}" --query Parameter.Value --output text)"; \
+			--name "$(RUNTIME_PARAMETER_PREFIX)/secrets/airflow_bootstrap_id" \
+			--query Parameter.Value --output text)"; \
+		REMOTE_LOG_URI="$$(env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+			AWS_CONFIG_FILE="$(SERVICES_DEPLOYER_AWS_CONFIG)" AWS_PROFILE=default aws ssm get-parameter \
+			--name "$(RUNTIME_PARAMETER_PREFIX)/airflow/remote_log_uri" \
+			--query Parameter.Value --output text)"; \
 		BOOTSTRAP="$$(env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
 			AWS_CONFIG_FILE="$(SERVICES_DEPLOYER_AWS_CONFIG)" AWS_PROFILE=default aws \
 			secretsmanager get-secret-value --secret-id "$${BOOTSTRAP_ID}" \
@@ -80,6 +59,7 @@ airflow-up: preflight ## Start self-hosted Airflow.
 		AIRFLOW_DB_PASSWORD="$$(printf '%s' "$${BOOTSTRAP}" | jq -r '.database_password')" \
 		AIRFLOW_FERNET_KEY="$$(printf '%s' "$${BOOTSTRAP}" | jq -r '.fernet_key')" \
 		AIRFLOW_JWT_SECRET="$$(printf '%s' "$${BOOTSTRAP}" | jq -r '.jwt_secret')" \
+		AIRFLOW_REMOTE_LOG_URI="$${REMOTE_LOG_URI}" \
 			$(AIRFLOW_COMPOSE) up -d --wait --wait-timeout 300
 
 airflow-down: ## Stop self-hosted Airflow while preserving metadata.

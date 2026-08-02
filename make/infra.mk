@@ -2,13 +2,16 @@ AWS_TERRAFORM_STATE_DIR := infra/terraform/aws/bootstrap/state
 OCI_TERRAFORM_DIR := infra/terraform/oci/environments/$(LAKEHOUSE_ENVIRONMENT)
 TAILSCALE_TERRAFORM_DIR := infra/terraform/tailscale/environments/$(LAKEHOUSE_ENVIRONMENT)
 TERRAFORM_VALIDATE_DATA_DIR := /tmp/lakehouse-terraform-validate-$(LOCAL_UID)
+SERVICES_HOST ?= tgbao-dev-services
+SERVICES_HOST_USER ?= ubuntu
 
 .PHONY: terraform-fmt terraform-validate \
 	aws-state-init aws-state-plan aws-state-apply \
 	aws-init aws-plan aws-apply aws-destroy \
 	tailscale-init tailscale-plan tailscale-apply \
 	oci-init oci-plan oci-apply oci-destroy \
-	workload-pki-init workload-identities-render
+	workload-pki-init workload-identities-render \
+	workload-identities-install
 
 terraform-fmt: ## Check Terraform formatting.
 	terraform -chdir=infra/terraform fmt -check -recursive
@@ -83,3 +86,21 @@ workload-pki-init: ## Create the local workload CA outside the repository.
 
 workload-identities-render: ## Issue certificates and render configs from applied AWS outputs.
 	infra/runtime/workload-identities render "$(AWS_IDENTITY_DIR)" "$(AWS_TERRAFORM_DIR)"
+
+workload-identities-install: ## Install leaf workload identities on the private services host.
+	@command -v tailscale >/dev/null
+	@for WORKLOAD in airflow arxiv-inspector dbt-transformer ocr-worker services-deployer; do \
+		test -r "$(AWS_IDENTITY_DIR)/$${WORKLOAD}/config" || { \
+			printf '%s\n' "Missing rendered identity for $${WORKLOAD}."; exit 1; \
+		}; \
+	done
+	@tar -C "$(AWS_IDENTITY_DIR)" -cf - \
+		airflow arxiv-inspector dbt-transformer ocr-worker services-deployer \
+		| tailscale ssh "$(SERVICES_HOST_USER)@$(SERVICES_HOST)" \
+			'set -eu; target="$$HOME/.config/lakehouse/$(LAKEHOUSE_ENVIRONMENT)/aws"; \
+			install -d -m 0700 "$$target"; tar -C "$$target" -xf -; \
+			chmod 0700 "$$target"/*; chmod 0600 "$$target"/*/private-key.pem "$$target"/*/config; \
+			rm -f "$$target"/*/host-config; \
+			sed "s#/run/aws/#$$target/services-deployer/#g" \
+				"$$target/services-deployer/config" >"$$target/services-deployer/host-config"; \
+			chmod 0600 "$$target/services-deployer/host-config"'

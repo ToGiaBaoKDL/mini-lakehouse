@@ -10,11 +10,11 @@ from airflow.providers.amazon.aws.operators.emr import EmrServerlessStartJobOper
 from airflow.providers.docker.operators.docker import DockerOperator
 from airflow.sdk import DAG
 
-ALLOWED_JOB_TYPES = {"etl", "rpt", "mon", "man", "bk", "stm", "cat", "gov", "test"}
+ALLOWED_JOB_TYPES = {"etl", "tl", "rpt", "mon", "man", "bk", "stm", "cat", "gov", "test"}
 ALLOWED_WORKER_TYPES = {"emr", "glue", "k8spod", "afw", "docker", "mix"}
 EXPECTED_DAGS = {
     "etl_docker_arxiv_document_ocr",
-    "etl_docker_engineering_analytics",
+    "tl_docker_engineering_analytics",
     "etl_emr_arxiv_metadata",
     "etl_emr_github_archive",
     "man_emr_iceberg_maintenance",
@@ -81,7 +81,7 @@ def test_source_dags_are_bounded_parameterized_deferrable_emr_jobs() -> None:
 def test_github_asset_triggers_freshness_before_the_dbt_build() -> None:
     bag = _bag()
     producer = _dag(bag, "etl_emr_github_archive")
-    analytics = _dag(bag, "etl_docker_engineering_analytics")
+    analytics = _dag(bag, "tl_docker_engineering_analytics")
 
     produced_asset = producer.tasks[0].outlets[0]
     assert produced_asset.uri == "lakehouse://curated/github"
@@ -114,7 +114,7 @@ def test_manual_ocr_dag_processes_exactly_one_requested_document() -> None:
     assert task.image == "ocr-worker:runtime"
     assert task.command == [
         "--arxiv-id",
-        "{{ params.arxiv_id or '' }}",
+        "{{ params.arxiv_id }}",
         "--provider",
         "{{ params.provider }}",
     ]

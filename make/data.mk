@@ -1,8 +1,8 @@
 CATALOG_ADMIN_AWS_PROFILE ?= lakehouse-$(LAKEHOUSE_ENVIRONMENT)-catalog-admin
-DBT_AWS_PROFILE ?= lakehouse-$(LAKEHOUSE_ENVIRONMENT)-dbt-transformer
 EMR_DEPLOYER_AWS_PROFILE ?= lakehouse-$(LAKEHOUSE_ENVIRONMENT)-emr-deployer
-OCR_AWS_PROFILE ?= lakehouse-$(LAKEHOUSE_ENVIRONMENT)-ocr-worker
 EMR_BUILD_DIR := dist/emr
+DBT_AWS_CONFIG := $(AWS_IDENTITY_DIR)/dbt-transformer/host-config
+OCR_AWS_CONFIG := $(AWS_IDENTITY_DIR)/ocr-worker/host-config
 
 .PHONY: catalog-apply catalog-validate ocr-kaggle-runner-publish \
 	dbt-deps dbt-validate dbt-build \
@@ -17,13 +17,14 @@ catalog-validate: ## Validate Glue/Iceberg state against YAML contracts.
 		uv run --package lakehouse --extra catalog --extra cli python -m lakehouse.catalog.admin validate
 
 ocr-kaggle-runner-publish: preflight ## Publish an immutable Kaggle OCR runner Dataset version.
-	@command -v terraform >/dev/null
+	@test -r "$(OCR_AWS_CONFIG)" || { printf '%s\n' "Render the ocr-worker identity first."; exit 1; }
 	@set -eu; \
-		PARAMETERS="$$(terraform -chdir=$(AWS_TERRAFORM_DIR) output -json runtime_parameter_names)"; \
-		SECRET_PARAMETER="$$(printf '%s' "$${PARAMETERS}" | jq -er '."ocr/providers/kaggle_secret_id"')"; \
-		SECRET_ID="$$(aws --profile "$(OCR_AWS_PROFILE)" ssm get-parameter \
-			--name "$${SECRET_PARAMETER}" --query Parameter.Value --output text)"; \
-		CREDENTIALS="$$(aws --profile "$(OCR_AWS_PROFILE)" secretsmanager get-secret-value \
+		SECRET_ID="$$(env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+			AWS_CONFIG_FILE="$(OCR_AWS_CONFIG)" AWS_PROFILE=default aws ssm get-parameter \
+			--name "$(RUNTIME_PARAMETER_PREFIX)/ocr/providers/kaggle_secret_id" \
+			--query Parameter.Value --output text)"; \
+		CREDENTIALS="$$(env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+			AWS_CONFIG_FILE="$(OCR_AWS_CONFIG)" AWS_PROFILE=default aws secretsmanager get-secret-value \
 			--secret-id "$${SECRET_ID}" --query SecretString --output text)"; \
 		KAGGLE_USERNAME="$$(printf '%s' "$${CREDENTIALS}" | jq -er '.username | select(type == "string" and length > 0)')" \
 		KAGGLE_API_TOKEN="$$(printf '%s' "$${CREDENTIALS}" | jq -er '.api_token | select(type == "string" and length > 0)')" \
@@ -42,18 +43,19 @@ dbt-build: ## Build analytics with runtime references loaded from SSM.
 	@test -d dbt/analytics/dbt_packages/dbt_utils || { \
 		printf '%s\n' "Missing locked dbt packages; run 'make dbt-deps' first."; exit 1; \
 	}
-	@command -v terraform >/dev/null
+	@test -r "$(DBT_AWS_CONFIG)" || { printf '%s\n' "Render the dbt-transformer identity first."; exit 1; }
 	@set -eu; \
-		PARAMETER_NAMES="$$(terraform -chdir=$(AWS_TERRAFORM_DIR) output -json runtime_parameter_names)"; \
-		QUERY_RESULTS_NAME="$$(printf '%s' "$${PARAMETER_NAMES}" | jq -er '."athena/dbt_output_uri"')"; \
-		ANALYTICS_NAME="$$(printf '%s' "$${PARAMETER_NAMES}" | jq -er '."storage/analytics_uri"')"; \
-		PARAMETERS="$$(aws --profile "$(DBT_AWS_PROFILE)" ssm get-parameters \
+		QUERY_RESULTS_NAME="$(RUNTIME_PARAMETER_PREFIX)/athena/dbt_output_uri"; \
+		ANALYTICS_NAME="$(RUNTIME_PARAMETER_PREFIX)/storage/analytics_uri"; \
+		PARAMETERS="$$(env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+			AWS_CONFIG_FILE="$(DBT_AWS_CONFIG)" AWS_PROFILE=default aws ssm get-parameters \
 			--names "$${QUERY_RESULTS_NAME}" "$${ANALYTICS_NAME}" --output json)"; \
 		QUERY_RESULTS_URI="$$(printf '%s' "$${PARAMETERS}" | jq -er --arg name "$${QUERY_RESULTS_NAME}" \
 			'.Parameters[] | select(.Name == $$name) | .Value')"; \
 		ANALYTICS_URI="$$(printf '%s' "$${PARAMETERS}" | jq -er --arg name "$${ANALYTICS_NAME}" \
 			'.Parameters[] | select(.Name == $$name) | .Value')"; \
-		AWS_PROFILE="$(DBT_AWS_PROFILE)" DBT_QUERY_RESULTS_URI="$${QUERY_RESULTS_URI}" \
+		AWS_CONFIG_FILE="$(DBT_AWS_CONFIG)" AWS_PROFILE=default \
+		DBT_QUERY_RESULTS_URI="$${QUERY_RESULTS_URI}" \
 		DBT_ANALYTICS_URI="$${ANALYTICS_URI}" uv run --project dbt/analytics dbt build \
 			--project-dir dbt/analytics --profiles-dir dbt/analytics
 

@@ -21,8 +21,6 @@ network access. Each root has an isolated state key and can be planned independe
 
 ```bash
 # 1. Create the remote-state bucket once.
-cp infra/terraform/aws/bootstrap/state/terraform.tfvars.example \
-  infra/terraform/aws/bootstrap/state/terraform.tfvars
 make aws-state-apply
 export TF_STATE_BUCKET="$(terraform -chdir=infra/terraform/aws/bootstrap/state output -raw bucket_name)"
 
@@ -51,18 +49,28 @@ export TF_VAR_tailscale_auth_key="$(terraform -chdir=infra/terraform/tailscale/e
 make oci-plan
 make oci-apply
 unset TF_VAR_tailscale_auth_key
+make workload-identities-install
 ```
 
-Authenticate the Tailscale provider with scoped OAuth environment variables. The OCI provider
-uses the named profile in `~/.oci/config`; private keys and OCIDs are not copied into Terraform
-source. The Tailscale enrollment key is single-use and expires after one hour. OCI cloud-init
+Authenticate the Tailscale provider with scoped OAuth environment variables. AWS and OCI providers
+use their standard SDK credential chains; select non-default operator profiles with `AWS_PROFILE`
+and `OCI_CONFIG_FILE_PROFILE` at the command boundary. Private keys and OCIDs are not copied into
+Terraform source. The Tailscale enrollment key is single-use and expires after one hour. OCI cloud-init
 deletes it after enrollment.
 
-IAM Roles Anywhere trusts the public workload CA only. The CA private key stays outside the
+Pin `image_ocid` in OCI tfvars to one reviewed Ubuntu 24.04 AArch64 image; Terraform never moves
+the host to a newly published image implicitly. IAM Roles Anywhere trusts the public workload CA only. The CA private key stays outside the
 repository; containers receive only their own leaf certificate, private key, and generated AWS
-config. The services deployer can pull ECR images and read the Airflow bootstrap secret but
+config. `make workload-identities-install` transfers only leaf bundles over Tailscale SSH and never
+copies the CA. The services deployer can pull ECR images and read the Airflow bootstrap secret,
+remote-log URI, and release manifest but
 cannot access lakehouse data. Airflow, dbt, OCR, and Inspector retain separate least-privilege
-roles.
+roles. Checked-in workload entitlements bind dbt to `curated_github`/`analytics_engineering`, OCR
+and Inspector to `curated_arxiv`, and each workload to its matching S3 prefix. Only the shared EMR
+processor and catalog administrator retain tier-wide landing/curated access by design.
+
+Airflow task logs use a dedicated KMS-encrypted S3 bucket with 30-day dev retention. Its generated
+dev-auth password file and PostgreSQL data remain persistent Docker volumes on the single dev host.
 
 Review every plan. Dev remains rebuildable; production should disable destructive bucket/ECR
 flags, use managed certificate issuance, and keep the same ownership boundaries.

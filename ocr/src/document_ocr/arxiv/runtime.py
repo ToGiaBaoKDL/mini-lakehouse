@@ -53,10 +53,7 @@ def run_arxiv_ocr(arxiv_id: str, provider_name: str) -> dict[str, object]:
     processor = load_ocr_config("arxiv_glm_ocr")
     provider = _provider(cast(OcrProviderName, provider_name), processor)
     curated_uri = get_runtime_parameter(settings.environment, "storage/curated_uri")
-    catalog = load_iceberg_catalog(
-        region_name=settings.aws_region,
-        profile_name=settings.aws_profile,
-    )
+    catalog = load_iceberg_catalog(region_name=settings.aws_region)
     product = load_contracts(settings.contracts_dir).curated_product("arxiv")
 
     def table(key: str) -> Table:

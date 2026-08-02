@@ -5,7 +5,7 @@ data "aws_iam_policy_document" "operator_trust" {
     actions = ["sts:AssumeRole"]
     principals {
       type        = "AWS"
-      identifiers = var.operator_principals
+      identifiers = var.operator_principal_arns
     }
   }
 }
@@ -22,8 +22,6 @@ locals {
 
 data "aws_iam_policy_document" "external_runtime_trust" {
   for_each = local.external_runtime_workloads
-
-  source_policy_documents = [data.aws_iam_policy_document.operator_trust.json]
 
   statement {
     sid = "AssumeWithWorkloadCertificate"
@@ -79,24 +77,50 @@ locals {
   analytics_table_arns = [
     "arn:${data.aws_partition.current.partition}:glue:${var.aws_region}:${var.account_id}:table/analytics_*/*",
   ]
-  arxiv_inspector_database_arns = [
-    for database in var.arxiv_inspector_access.databases :
-    "arn:${data.aws_partition.current.partition}:glue:${var.aws_region}:${var.account_id}:database/${database}"
-  ]
-  arxiv_inspector_table_arns = [
-    for database in var.arxiv_inspector_access.databases :
-    "arn:${data.aws_partition.current.partition}:glue:${var.aws_region}:${var.account_id}:table/${database}/*"
-  ]
-  arxiv_inspector_curated_prefixes = flatten([
-    for prefix in var.arxiv_inspector_access.curated_prefixes : [
-      prefix,
-      "${prefix}/*",
+  curated_database_arns_by_workload = {
+    for workload, access in var.workload_data_access.curated : workload => [
+      for database in access.databases :
+      "arn:${data.aws_partition.current.partition}:glue:${var.aws_region}:${var.account_id}:database/${database}"
     ]
-  ])
-  arxiv_inspector_curated_object_arns = [
-    for prefix in var.arxiv_inspector_access.curated_prefixes :
-    "${var.bucket_arns.curated}/${prefix}/*"
-  ]
+  }
+  curated_table_arns_by_workload = {
+    for workload, access in var.workload_data_access.curated : workload => [
+      for database in access.databases :
+      "arn:${data.aws_partition.current.partition}:glue:${var.aws_region}:${var.account_id}:table/${database}/*"
+    ]
+  }
+  curated_prefixes_by_workload = {
+    for workload, access in var.workload_data_access.curated : workload => flatten([
+      for prefix in access.prefixes : [prefix, "${prefix}/*"]
+    ])
+  }
+  curated_object_arns_by_workload = {
+    for workload, access in var.workload_data_access.curated : workload => [
+      for prefix in access.prefixes : "${var.bucket_arns.curated}/${prefix}/*"
+    ]
+  }
+  analytics_database_arns_by_workload = {
+    for workload, access in var.workload_data_access.analytics : workload => [
+      for database in access.databases :
+      "arn:${data.aws_partition.current.partition}:glue:${var.aws_region}:${var.account_id}:database/${database}"
+    ]
+  }
+  analytics_table_arns_by_workload = {
+    for workload, access in var.workload_data_access.analytics : workload => [
+      for database in access.databases :
+      "arn:${data.aws_partition.current.partition}:glue:${var.aws_region}:${var.account_id}:table/${database}/*"
+    ]
+  }
+  analytics_prefixes_by_workload = {
+    for workload, access in var.workload_data_access.analytics : workload => flatten([
+      for prefix in access.prefixes : [prefix, "${prefix}/*"]
+    ])
+  }
+  analytics_object_arns_by_workload = {
+    for workload, access in var.workload_data_access.analytics : workload => [
+      for prefix in access.prefixes : "${var.bucket_arns.analytics}/${prefix}/*"
+    ]
+  }
   ingestion_bucket_arns = [
     var.bucket_arns.landing,
     var.bucket_arns.curated,

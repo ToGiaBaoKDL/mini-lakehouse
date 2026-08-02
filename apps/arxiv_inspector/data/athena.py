@@ -15,14 +15,10 @@ class AthenaReader:
         workgroup: str,
         s3_output: str,
         region_name: str,
-        profile_name: str | None = None,
     ) -> None:
         self._workgroup = workgroup
         self._s3_output = s3_output
-        self._session = boto3.Session(
-            region_name=region_name,
-            profile_name=profile_name,
-        )
+        self._session = boto3.Session(region_name=region_name)
 
     def query(
         self,

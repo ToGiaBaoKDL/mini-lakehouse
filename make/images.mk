@@ -1,7 +1,7 @@
 IMAGE_PUBLISHER_AWS_PROFILE ?= lakehouse-$(LAKEHOUSE_ENVIRONMENT)-image-publisher
 
 .PHONY: images-check airflow-build arxiv-inspector-build dbt-task-build ocr-worker-build images-build \
-	release-preflight images-login images-publish
+	release-preflight images-publish-preflight images-login images-publish
 
 images-check: ## Validate every Dockerfile without building image layers.
 	docker buildx build --check --file orchestration/Dockerfile .
@@ -24,10 +24,12 @@ ocr-worker-build: ## Build the isolated OCR task image.
 
 images-build: airflow-build arxiv-inspector-build dbt-task-build ocr-worker-build ## Build all local images.
 
-release-preflight: preflight ## Require a committed release and initialized AWS Terraform state.
+release-preflight: preflight ## Require an immutable committed release.
 	@test -z "$$(git status --porcelain)" || { \
 		printf '%s\n' "Commit the worktree before publishing or deploying a release."; exit 1; \
 	}
+
+images-publish-preflight: release-preflight ## Require initialized AWS image registry state.
 	@command -v terraform >/dev/null
 	@terraform -chdir=$(AWS_TERRAFORM_DIR) output -json container_repository_urls >/dev/null
 
@@ -40,7 +42,7 @@ images-login: preflight ## Authenticate Docker to the environment ECR registry.
 			| docker login --username AWS --password-stdin "$${REGISTRY}" >/dev/null; \
 		printf '%s\n' "Authenticated Docker to $${REGISTRY}."
 
-images-publish: release-preflight images-login ## Publish immutable multi-architecture images for RELEASE.
+images-publish: images-publish-preflight images-login ## Publish immutable multi-architecture images for RELEASE.
 	@set -eu; \
 		REPOSITORIES="$$(terraform -chdir=$(AWS_TERRAFORM_DIR) output -json container_repository_urls)"; \
 		printf '%s' "$${REPOSITORIES}" | jq -er 'keys[]' | while read -r SERVICE; do \
@@ -58,4 +60,10 @@ images-publish: release-preflight images-login ## Publish immutable multi-archit
 			esac; \
 			docker buildx build --platform linux/amd64,linux/arm64 \
 				--file "$${DOCKERFILE}" --tag "$${REPOSITORY}:$(RELEASE)" --push .; \
-		done
+		done; \
+		MANIFEST="$$(printf '%s' "$${REPOSITORIES}" | jq -c --arg release "$(RELEASE)" \
+			'{version: 1, release: $$release, images: with_entries(.value = (.value + ":" + $$release))}')"; \
+		aws --profile "$(IMAGE_PUBLISHER_AWS_PROFILE)" ssm put-parameter \
+			--name "$(RUNTIME_PARAMETER_PREFIX)/deployment/release_manifest" \
+			--type String --value "$${MANIFEST}" --overwrite >/dev/null; \
+		printf '%s\n' "Published release manifest for $(RELEASE)."

@@ -135,3 +135,10 @@ def test_arxiv_child_replacement_is_unique_and_retry_safe() -> None:
     assert "SELECT DISTINCT" in source[source.index(".writeTo(authors)") : append_categories]
     assert "UPDATE SET *" not in source
     assert "INSERT *" not in source
+
+
+def test_arxiv_raw_archive_prunes_pages_not_in_the_latest_manifest() -> None:
+    source = Path("jobs/emr/src/emr_jobs/arxiv/landing.py").read_text()
+
+    assert source.index('content_type="application/json"') < source.index("delete_unlisted(")
+    assert "retained_keys={manifest_key" in source

@@ -38,10 +38,7 @@ def _run(*, apply: bool) -> None:
 
     landing_uri = get_runtime_parameter(settings.environment, "storage/landing_uri")
     curated_uri = get_runtime_parameter(settings.environment, "storage/curated_uri")
-    catalog = load_iceberg_catalog(
-        region_name=settings.aws_region,
-        profile_name=settings.aws_profile,
-    )
+    catalog = load_iceberg_catalog(region_name=settings.aws_region)
     if apply:
         logger.info("Applying Glue/Iceberg contracts")
         apply_table_contracts(

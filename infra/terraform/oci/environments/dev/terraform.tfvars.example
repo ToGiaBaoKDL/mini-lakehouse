@@ -1,7 +1,7 @@
-oci_profile       = "DEFAULT"
 tenancy_ocid      = "ocid1.tenancy.oc1..example"
 compartment_ocid  = "ocid1.compartment.oc1..example"
 region            = "ap-singapore-1"
+image_ocid        = "ocid1.image.oc1.ap-singapore-1.example"
 ssh_authorized_key = "ssh-ed25519 AAAA..."
 
 # Pass this at apply time instead of storing it in tfvars:

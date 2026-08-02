@@ -1,14 +1,19 @@
 locals {
+  notification_destinations = {
+    alert_email   = "data-platform@example.com"
+    slack_channel = "#data-platform-alerts"
+  }
   runtime_parameters = {
     "storage/landing_uri"               = "s3://${module.storage.bucket_names.landing}"
     "storage/curated_uri"               = "s3://${module.storage.bucket_names.curated}"
     "storage/analytics_uri"             = "s3://${module.storage.bucket_names.analytics}"
     "athena/dbt_output_uri"             = "s3://${module.storage.bucket_names["query-results"]}/${local.athena_workload_prefixes.dbt_transformer}"
     "athena/arxiv_inspector_output_uri" = "s3://${module.storage.bucket_names["query-results"]}/${local.athena_workload_prefixes.arxiv_inspector}"
+    "airflow/remote_log_uri"            = "s3://${module.storage.bucket_names.logs}/airflow/task-logs"
     "emr/application_id"                = module.emr_serverless.application_id
     "emr/execution_role_arn"            = module.identity.emr_runtime_role_arn
-    "notifications/alert_email"         = var.alert_email
-    "notifications/slack_channel"       = var.slack_channel
+    "notifications/alert_email"         = local.notification_destinations.alert_email
+    "notifications/slack_channel"       = local.notification_destinations.slack_channel
     "ocr/providers/kaggle_secret_id"    = aws_secretsmanager_secret.ocr["kaggle"].name
     "ocr/providers/modal_secret_id"     = aws_secretsmanager_secret.ocr["modal"].name
     "secrets/airflow_bootstrap_id"      = aws_secretsmanager_secret.airflow["bootstrap"].name
@@ -31,6 +36,11 @@ locals {
     ]
     services_deployer = [
       "secrets/airflow_bootstrap_id",
+      "airflow/remote_log_uri",
+      "deployment/release_manifest",
+    ]
+    image_publisher = [
+      "deployment/release_manifest",
     ]
     emr_deployer = [
       "emr/code_uri",
@@ -51,6 +61,7 @@ locals {
   }
   parameter_arn_prefix = "arn:${data.aws_partition.current.partition}:ssm:${local.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${local.parameter_prefix}"
   external_parameter_names = toset([
+    "deployment/release_manifest",
     "emr/code_uri",
   ])
   managed_parameter_names = toset(keys(local.runtime_parameters))

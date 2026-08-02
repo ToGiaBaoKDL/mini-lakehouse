@@ -13,11 +13,34 @@ locals {
     curated         = "${local.name_prefix}-curated-za7rju"
     analytics       = "${local.name_prefix}-analytics-vt77zs"
     artifacts       = "${local.name_prefix}-artifacts-uhiv2y"
+    logs            = "${local.name_prefix}-logs-71k0oc"
     "query-results" = "${local.name_prefix}-query-results-q2034x"
   }
   athena_workload_prefixes = {
     dbt_transformer = "dbt"
     arxiv_inspector = "arxiv-inspector"
+  }
+  workload_data_access = {
+    curated = {
+      arxiv_inspector = {
+        databases = ["curated_arxiv"]
+        prefixes  = ["arxiv"]
+      }
+      dbt_transformer = {
+        databases = ["curated_github"]
+        prefixes  = ["github"]
+      }
+      ocr_worker = {
+        databases = ["curated_arxiv"]
+        prefixes  = ["arxiv"]
+      }
+    }
+    analytics = {
+      dbt_transformer = {
+        databases = ["analytics_engineering"]
+        prefixes  = ["tables"]
+      }
+    }
   }
   athena_workgroup_arn = "arn:${data.aws_partition.current.partition}:athena:${local.aws_region}:${data.aws_caller_identity.current.account_id}:workgroup/${local.athena_workgroup}"
   tags = {
@@ -34,6 +57,7 @@ module "storage" {
   versioned_tiers = ["artifacts"]
   expiration_days = {
     "query-results" = 7
+    logs            = 30
   }
   force_destroy = true
   tags          = local.tags
@@ -69,7 +93,7 @@ module "identity" {
   name_prefix                     = local.name_prefix
   account_id                      = data.aws_caller_identity.current.account_id
   aws_region                      = local.aws_region
-  operator_principals             = var.operator_principals
+  operator_principal_arns         = var.operator_principal_arns
   roles_anywhere_trust_anchor_arn = aws_rolesanywhere_trust_anchor.workloads.arn
   parameter_arns                  = local.parameter_arns
   kms_key_arn                     = module.storage.kms_key_arn
@@ -81,6 +105,7 @@ module "identity" {
     curated       = module.storage.bucket_arns.curated
     analytics     = module.storage.bucket_arns.analytics
     artifacts     = module.storage.bucket_arns.artifacts
+    logs          = module.storage.bucket_arns.logs
     query_results = module.storage.bucket_arns["query-results"]
   }
   airflow_secret_arns = toset([
@@ -89,6 +114,6 @@ module "identity" {
   airflow_bootstrap_secret_arn = aws_secretsmanager_secret.airflow["bootstrap"].arn
   ocr_secret_arns              = toset([for secret in aws_secretsmanager_secret.ocr : secret.arn])
   container_repository_arns    = toset(values(module.container_registry.repository_arns))
-  arxiv_inspector_access       = var.arxiv_inspector_access
+  workload_data_access         = local.workload_data_access
   tags                         = local.tags
 }

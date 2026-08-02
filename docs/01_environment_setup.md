@@ -14,7 +14,9 @@ Only Airflow, Postgres, and ArXiv Inspector are composed on the OCI services hos
 Serverless, Athena, KMS, IAM, and Secrets Manager remain AWS services. OCI exposes no public
 ingress; Tailscale carries SSH and application traffic.
 
-Operator commands default to the `lakehouse-dev-*` assume-role profiles. Runtime containers do
+Operator commands default to the `lakehouse-dev-*` assume-role profiles. Terraform itself follows
+the standard AWS/OCI provider credential chains instead of accepting profile names as variables.
+Runtime containers do
 not inherit these profiles or mount `$HOME/.aws`; each receives a certificate-backed bundle from
 `AWS_IDENTITY_DIR`:
 
@@ -23,16 +25,24 @@ make workload-pki-init
 make aws-apply
 make workload-identities-render
 CATALOG_ADMIN_AWS_PROFILE=custom-catalog make catalog-apply
-DBT_AWS_PROFILE=custom-dbt make dbt-build
 EMR_DEPLOYER_AWS_PROFILE=custom-deployer make emr-jobs-publish
 IMAGE_PUBLISHER_AWS_PROFILE=custom-publisher make images-publish
-OCR_AWS_PROFILE=custom-ocr make ocr-kaggle-runner-publish
+make dbt-build
+make ocr-kaggle-runner-publish
 ```
 
 These selectors are not credentials. Airflow, dbt tasks, OCR tasks, Inspector, and the
 services deployer each exchange their own X.509 certificate for short-lived credentials.
-The CA private key stays on the administrator machine; copy only the five workload directories to
-the services host.
+The CA private key stays on the administrator machine. After provisioning the OCI host, transfer
+only the five leaf bundles over the private network:
+
+```bash
+make workload-identities-install
+```
+
+Application entitlements and non-secret notification destinations are checked-in environment
+policy in Terraform. `tfvars` contains only account/deployment identities and resource OCIDs; SSM
+is the runtime distribution layer, not the authoring source for IAM policy.
 
 Terraform creates one Airflow bootstrap secret and the Airflow connection secret containers, but
 intentionally does not write their values into Terraform state. Populate the bootstrap secret with
@@ -71,6 +81,8 @@ aws secretsmanager put-secret-value \
 
 Airflow reads connection values through its AWS Secrets Manager backend. Rotate them with another
 `put-secret-value`; do not add secret values to local configuration, Terraform variables, or Git.
+Task logs are written to the SSM-configured, KMS-encrypted logs bucket and expire after 30 days in
+dev. Container recreation therefore does not erase completed task logs.
 
 OCR provider credentials use OCR-owned secrets instead of Airflow connections:
 
@@ -87,7 +99,7 @@ aws secretsmanager put-secret-value \
 ## Local service releases
 
 Terraform creates separate immutable ECR repositories for Airflow, dbt tasks, ArXiv Inspector, and
-the OCR worker. The image publisher role is the only local workload role that can push to them.
+the OCR worker. The image publisher operator role is the only identity that can push to them.
 Publish a clean commit, then pull and run that exact release on the Tailscale host:
 
 ```bash
@@ -96,9 +108,10 @@ make release-deploy
 ```
 
 Neither command uses `latest`. Published images include AMD64 and ARM64 manifests. Repository
-lifecycle policies retain the newest 20 releases.
-`release-deploy` pre-pulls every image before restarting services, so `DockerOperator` does not
-need registry credentials at task time. For unpublished local iteration:
+lifecycle policies retain the newest 20 releases. Publishing updates the SSM release manifest only
+after all images exist. `release-deploy` pre-pulls every image, waits for healthy services, advances
+task aliases last, and rolls services back on failure. It does not read Terraform state, and
+`DockerOperator` does not need registry credentials at task time. For unpublished local iteration:
 
 ```bash
 make images-build
@@ -107,5 +120,5 @@ make services-up
 
 Only the Airflow scheduler receives the Docker socket because `LocalExecutor` launches task
 containers there. The OCR DAG uses the stable local image name
-`ocr-worker:runtime`; `release-deploy` moves that alias to the exact immutable
-ECR release before Airflow starts, so DAG files never contain a release SHA.
+`ocr-worker:runtime`; `release-deploy` moves that alias only after the corresponding Airflow and
+Inspector services are healthy, so DAG files never contain a release SHA.

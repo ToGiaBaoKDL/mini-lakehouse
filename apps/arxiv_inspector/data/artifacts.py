@@ -39,12 +39,8 @@ class S3ObjectReader:
         self,
         *,
         region_name: str,
-        profile_name: str | None = None,
     ) -> None:
-        self._client = boto3.Session(
-            region_name=region_name,
-            profile_name=profile_name,
-        ).client("s3")
+        self._client = boto3.Session(region_name=region_name).client("s3")
 
     def read_bytes(self, uri: str, *, max_bytes: int) -> bytes:
         if max_bytes < 1:

@@ -9,6 +9,7 @@ flowchart LR
     S[Sources] --> A[Self-hosted Airflow on OCI]
     A --> E[EMR Serverless / Spark]
     A --> W[Ephemeral local task containers]
+    A --> Z[(S3 Airflow task logs)]
     W --> R[Remote GPU document processing]
     E --> L[(S3 landing)]
     E --> C[(S3 curated)]
@@ -67,6 +68,9 @@ s3://<project>-<env>-analytics-<suffix>/
 s3://<project>-<env>-artifacts-<suffix>/
   emr/jobs/<release>/
 
+s3://<project>-<env>-logs-<suffix>/
+  airflow/task-logs/                  # 30-day dev retention
+
 s3://<project>-<env>-query-results-<suffix>/
   dbt/
   arxiv-inspector/
@@ -75,7 +79,8 @@ s3://<project>-<env>-query-results-<suffix>/
 Glue database names are explicit contract fields, such as `landing_<source>`,
 `curated_<product>`, and `analytics_<domain>`. These names are conventions, not runtime string
 generation. EMR uses AWS-managed logs; runtime resource references live under `/lakehouse/<env>/`
-in SSM Parameter Store.
+in SSM Parameter Store. Airflow's remote-log URI and the published service release manifest are
+also resolved from SSM instead of being embedded in Compose.
 
 ## Run
 
@@ -101,8 +106,9 @@ export TF_VAR_tailscale_auth_key="$(terraform -chdir=infra/terraform/tailscale/e
 make oci-plan
 make oci-apply
 unset TF_VAR_tailscale_auth_key
+make workload-identities-install
 
-# Configure the default lakehouse-dev-* assume-role profiles, then create the catalog
+# Configure the operator assume-role profiles, then create the catalog
 make catalog-apply
 make catalog-validate
 
@@ -121,9 +127,10 @@ the exact contract bundle to `emr/jobs/<commit-sha>/`, then atomically updates
 `/lakehouse/<env>/emr/code_uri` in SSM.
 
 `make images-publish` builds multi-architecture Airflow, dbt task, ArXiv Inspector, and OCR worker
-images from their domain Dockerfiles and publishes each image with the committed Git SHA.
-`make release-deploy` pulls that exact release, updates the stable local task aliases, and starts
-Compose on the private services host. DAG source
+images, publishes every immutable Git-SHA tag, and then updates one release manifest in SSM.
+`make release-deploy` pulls the complete manifest, waits for both Compose projects to become
+healthy, updates local dbt/OCR aliases last, and restores the previous healthy images on failure.
+The OCI host does not read Terraform state during deployment. DAG source
 and its locked providers are packaged together in the Airflow image; the worktree is never mounted.
 
 Terraform creates separate OCR provider secrets and Airflow notification connection secrets;
@@ -138,7 +145,7 @@ own Docker and EMR lifecycle defaults. The weekly maintenance DAG compacts only 
 expires snapshots, and removes sufficiently old orphan files. Catalog validation reports stale
 objects carrying platform ownership but never drops them.
 
-The manual `etl_docker_arxiv_document_ocr` DAG requires one exact `arxiv_id` and one provider.
+The manual `etl_docker_arxiv_document_ocr` DAG requires one non-empty `arxiv_id` and one provider.
 Airflow starts the pinned OCR worker image through `DockerOperator`; that container submits the
 remote GPU run, streams its logs, publishes validated artifacts to curated S3, and commits one
 Iceberg run row last. OCR libraries and provider SDKs are not installed in Airflow.
@@ -177,6 +184,7 @@ make check
 
 The repository does not use `.env` files. Secret values belong in Secrets Manager, runtime resource
 references belong in Parameter Store, and stable defaults live in the Makefile/Compose boundary.
-Operator commands use named AWS profiles; OCI workloads use certificate-backed temporary
-credentials. Override an operator profile only at the command boundary, for example
+Human and CI publishing commands use named operator profiles; OCI workloads and local workload
+tests use isolated certificate-backed temporary credentials. Override an operator profile only at
+the command boundary, for example
 `EMR_DEPLOYER_AWS_PROFILE=custom-profile make emr-jobs-publish`.
