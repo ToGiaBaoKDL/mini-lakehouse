@@ -86,11 +86,13 @@ also resolved from SSM instead of being embedded in Compose.
 
 Requirements: Docker Compose, Terraform, uv, AWS CLI, OCI CLI/config, and scoped Tailscale OAuth
 credentials.
+Use the Make targets below rather than running `terraform init` from the repository root; they keep
+Terraform working data in a shared cache outside the worktree and discover the state bucket
+automatically.
 
 ```bash
 # One-time remote-state bootstrap
 make aws-state-apply
-export TF_STATE_BUCKET="$(terraform -chdir=infra/terraform/aws/bootstrap/state output -raw bucket_name)"
 
 # AWS development environment and temporary external workload identities
 make workload-pki-init
@@ -102,7 +104,7 @@ AWS_PROFILE=your-terraform-admin make airflow-bootstrap-init
 # Private network and OCI services host (after copying the documented tfvars examples)
 make tailscale-plan
 make tailscale-apply
-export TF_VAR_tailscale_auth_key="$(terraform -chdir=infra/terraform/tailscale/environments/dev output -raw services_auth_key)"
+export TF_VAR_tailscale_auth_key="$(make --no-print-directory tailscale-auth-key)"
 make oci-plan
 make oci-apply
 unset TF_VAR_tailscale_auth_key

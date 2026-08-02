@@ -31,12 +31,12 @@ release-preflight: preflight ## Require an immutable committed release.
 
 images-publish-preflight: release-preflight ## Require initialized AWS image registry state.
 	@command -v terraform >/dev/null
-	@terraform -chdir=$(AWS_TERRAFORM_DIR) output -json container_repository_urls >/dev/null
+	@$(AWS_TERRAFORM) output -json container_repository_urls >/dev/null
 
 images-login: preflight ## Authenticate Docker to the environment ECR registry.
 	@command -v terraform >/dev/null
 	@set -eu; \
-		REPOSITORIES="$$(terraform -chdir=$(AWS_TERRAFORM_DIR) output -json container_repository_urls)"; \
+		REPOSITORIES="$$($(AWS_TERRAFORM) output -json container_repository_urls)"; \
 		REGISTRY="$$(printf '%s' "$${REPOSITORIES}" | jq -er '.airflow' | cut -d/ -f1)"; \
 		aws --profile "$(IMAGE_PUBLISHER_AWS_PROFILE)" ecr get-login-password \
 			| docker login --username AWS --password-stdin "$${REGISTRY}" >/dev/null; \
@@ -44,7 +44,7 @@ images-login: preflight ## Authenticate Docker to the environment ECR registry.
 
 images-publish: images-publish-preflight images-login ## Publish immutable multi-architecture images for RELEASE.
 	@set -eu; \
-		REPOSITORIES="$$(terraform -chdir=$(AWS_TERRAFORM_DIR) output -json container_repository_urls)"; \
+		REPOSITORIES="$$($(AWS_TERRAFORM) output -json container_repository_urls)"; \
 		printf '%s' "$${REPOSITORIES}" | jq -er 'keys[]' | while read -r SERVICE; do \
 			REPOSITORY="$$(printf '%s' "$${REPOSITORIES}" | jq -er --arg service "$${SERVICE}" '.[$$service]')"; \
 			if aws --profile "$(IMAGE_PUBLISHER_AWS_PROFILE)" ecr describe-images \

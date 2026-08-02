@@ -73,8 +73,8 @@ emr-jobs-publish-preflight: ## Require a committed release and deployment tools.
 
 emr-jobs-publish: emr-jobs-publish-preflight emr-jobs-package ## Publish one immutable EMR release.
 	@set -eu; \
-		EMR_CODE_URI="$$(terraform -chdir=$(AWS_TERRAFORM_DIR) output -raw emr_artifacts_uri)/$(RELEASE)"; \
-		EMR_CODE_PARAMETER="$$(terraform -chdir=$(AWS_TERRAFORM_DIR) output -raw emr_code_parameter_name)"; \
+		EMR_CODE_URI="$$($(AWS_TERRAFORM) output -raw emr_artifacts_uri)/$(RELEASE)"; \
+		EMR_CODE_PARAMETER="$$($(AWS_TERRAFORM) output -raw emr_code_parameter_name)"; \
 		aws --profile "$(EMR_DEPLOYER_AWS_PROFILE)" s3 sync \
 			$(EMR_BUILD_DIR)/ "$${EMR_CODE_URI}/" --only-show-errors; \
 		aws --profile "$(EMR_DEPLOYER_AWS_PROFILE)" ssm put-parameter \

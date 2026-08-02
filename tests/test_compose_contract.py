@@ -301,6 +301,11 @@ def test_makefile_exposes_owned_operational_entrypoints() -> None:
     assert "AIRFLOW_PARALLELISM ?=" not in makefile
     assert "AIRFLOW_USERS ?=" not in makefile
     assert "PROJECT_NAME ?=" not in makefile
+    assert "AIRFLOW_HOME ?= /tmp/lakehouse-airflow-$(LOCAL_UID)" in makefile
+    assert "TF_STATE_BUCKET" not in makefile
+    assert "TF_PLUGIN_CACHE_DIR" in makefile
+    assert "AWS_STATE_TERRAFORM" in makefile
+    assert "terraform -chdir=$(AWS_TERRAFORM_DIR)" not in makefile
     assert "AWS_REGION ?=" not in makefile
     assert "OCR_TASK_IMAGE" not in makefile
     assert "up -d --build" not in makefile

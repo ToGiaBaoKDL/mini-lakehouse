@@ -16,13 +16,15 @@ AWS owns S3, KMS, EMR Serverless, ECR, workload IAM, SSM references, and empty S
 containers. Terraform does not create Glue databases, Iceberg tables, schedules, dbt models, or
 secret values. OCI owns only the self-hosted compute/network boundary. Tailscale owns only private
 network access. Each root has an isolated state key and can be planned independently.
+Make stores Terraform working data under `~/.cache/lakehouse/terraform`, shares one provider cache,
+and resolves the remote-state bucket from the bootstrap output. Terraform never writes `.terraform`
+directories at the repository root or inside environment roots when invoked through Make.
 
 ## Bootstrap order
 
 ```bash
 # 1. Create the remote-state bucket once.
 make aws-state-apply
-export TF_STATE_BUCKET="$(terraform -chdir=infra/terraform/aws/bootstrap/state output -raw bucket_name)"
 
 # 2. Create the offline CA and apply AWS, including IAM Roles Anywhere.
 make workload-pki-init
@@ -36,7 +38,7 @@ make workload-identities-render
 cp infra/terraform/tailscale/environments/dev/terraform.tfvars.example \
   infra/terraform/tailscale/environments/dev/terraform.tfvars
 make tailscale-init
-terraform -chdir=infra/terraform/tailscale/environments/dev import tailscale_acl.policy acl
+make tailscale-policy-import
 make tailscale-plan
 make tailscale-apply
 
@@ -45,7 +47,7 @@ export PATH="$HOME/bin:$PATH"
 oci setup config
 cp infra/terraform/oci/environments/dev/terraform.tfvars.example \
   infra/terraform/oci/environments/dev/terraform.tfvars
-export TF_VAR_tailscale_auth_key="$(terraform -chdir=infra/terraform/tailscale/environments/dev output -raw services_auth_key)"
+export TF_VAR_tailscale_auth_key="$(make --no-print-directory tailscale-auth-key)"
 make oci-plan
 make oci-apply
 unset TF_VAR_tailscale_auth_key
