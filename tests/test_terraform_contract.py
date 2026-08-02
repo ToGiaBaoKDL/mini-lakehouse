@@ -16,10 +16,12 @@ def test_terraform_manages_infrastructure_but_not_glue_objects() -> None:
     assert 'resource "aws_athena_workgroup"' not in source
     assert "enforce_workgroup_configuration" not in source
     assert 'resource "aws_s3_bucket"' in source
+    assert "hashicorp/random" not in source
+    assert 'resource "random_string"' not in source
 
 
 def test_reusable_modules_contain_no_ingestion_table_identifiers() -> None:
-    modules = _terraform_sources(Path("infra/terraform/modules")).lower()
+    modules = _terraform_sources(Path("infra/terraform/aws/modules")).lower()
 
     assert "github" not in modules
     assert "curated_arxiv" not in modules
@@ -29,13 +31,15 @@ def test_reusable_modules_contain_no_ingestion_table_identifiers() -> None:
 def test_each_child_module_declares_its_provider_contract() -> None:
     expected_providers = {
         "container_registry": ('source  = "hashicorp/aws"',),
-        "storage": ('source  = "hashicorp/aws"', 'source  = "hashicorp/random"'),
+        "storage": ('source  = "hashicorp/aws"',),
         "emr_serverless": ('source  = "hashicorp/aws"',),
         "identity": ('source  = "hashicorp/aws"',),
     }
 
     for module, providers in expected_providers.items():
-        versions = Path(f"infra/terraform/modules/{module}/versions.tf").read_text(encoding="utf-8")
+        versions = Path(f"infra/terraform/aws/modules/{module}/versions.tf").read_text(
+            encoding="utf-8"
+        )
         assert 'required_version = ">= 1.10"' in versions
         for provider in providers:
             assert provider in versions
@@ -52,8 +56,8 @@ def test_all_terraform_inputs_and_outputs_are_documented() -> None:
 
 
 def test_remote_state_is_versioned_locked_and_bootstrapped_separately() -> None:
-    backend = Path("infra/terraform/environments/dev/backend.tf").read_text(encoding="utf-8")
-    bootstrap = _terraform_sources(Path("infra/terraform/bootstrap/state"))
+    backend = Path("infra/terraform/aws/environments/dev/backend.tf").read_text(encoding="utf-8")
+    bootstrap = _terraform_sources(Path("infra/terraform/aws/bootstrap/state"))
 
     assert 'backend "s3"' in backend
     assert "use_lockfile = true" in backend
@@ -63,15 +67,18 @@ def test_remote_state_is_versioned_locked_and_bootstrapped_separately() -> None:
 
 
 def test_ci_validation_does_not_require_remote_state() -> None:
-    makefile = Path("Makefile").read_text(encoding="utf-8")
+    makefile = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (Path("Makefile"), *sorted(Path("make").glob("*.mk")))
+    )
 
     assert "terraform-validate: ##" in makefile
-    assert makefile.count("init -backend=false -lockfile=readonly") == 2
+    assert makefile.count("init -backend=false -lockfile=readonly") == 4
     assert "$(MAKE) terraform-validate" in makefile
 
 
 def test_secret_containers_never_manage_secret_values() -> None:
-    environment = _terraform_sources(Path("infra/terraform/environments/dev"))
+    environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
 
     assert 'resource "aws_secretsmanager_secret" "airflow"' in environment
     assert 'resource "aws_secretsmanager_secret" "ocr"' in environment
@@ -82,23 +89,23 @@ def test_secret_containers_never_manage_secret_values() -> None:
 
 
 def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
-    environment = _terraform_sources(Path("infra/terraform/environments/dev"))
-    runtime = Path("infra/terraform/environments/dev/runtime.tf").read_text(encoding="utf-8")
-    identity = _terraform_sources(Path("infra/terraform/modules/identity"))
+    environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
+    runtime = Path("infra/terraform/aws/environments/dev/runtime.tf").read_text(encoding="utf-8")
+    identity = _terraform_sources(Path("infra/terraform/aws/modules/identity"))
     normalized_environment = " ".join(environment.split())
     normalized_identity = " ".join(identity.split())
 
     assert 'name_prefix = "${local.project}-${local.environment}"' in normalized_environment
-    assert (
-        'bucket_tiers = ["landing", "curated", "analytics", "artifacts", "query-results"]'
-        in normalized_environment
-    )
+    for tier in ("landing", "curated", "analytics", "artifacts", "query-results"):
+        assert f"${{local.name_prefix}}-{tier}-" in normalized_environment
+    assert "hashicorp/random" not in environment
     assert 'parameter_prefix = "/lakehouse/${local.environment}"' in normalized_environment
     assert 'athena_workgroup = "primary"' in normalized_environment
     assert 'dbt_transformer = "dbt"' in normalized_environment
     assert 'arxiv_inspector = "arxiv-inspector"' in normalized_environment
     assert '"athena/dbt_output_uri"' in environment
     assert '"athena/arxiv_inspector_output_uri"' in environment
+    assert '"catalog/name"' not in environment
     assert "athena/primary" not in environment
     assert "storage/query_results_uri" not in runtime
     assert "athena/workgroups/" not in environment
@@ -107,6 +114,7 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
         "emr-deployer",
         "airflow",
         "catalog-admin",
+        "services-deployer",
         "dbt-transformer",
         "arxiv-inspector",
         "image-publisher",
@@ -122,41 +130,40 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
 
 
 def test_environment_uses_only_domain_modules() -> None:
-    modules = {path.name for path in Path("infra/terraform/modules").iterdir() if path.is_dir()}
+    modules = {path.name for path in Path("infra/terraform/aws/modules").iterdir() if path.is_dir()}
 
     assert modules == {"container_registry", "emr_serverless", "identity", "storage"}
 
 
 def test_runtime_parameters_and_trust_are_bounded_by_workload() -> None:
-    environment = _terraform_sources(Path("infra/terraform/environments/dev"))
-    identity = _terraform_sources(Path("infra/terraform/modules/identity"))
+    environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
+    identity = _terraform_sources(Path("infra/terraform/aws/modules/identity"))
 
     assert 'check "runtime_parameter_grants"' in environment
     assert '"emr/code_uri"' in environment
     assert '"secrets/airflow_bootstrap_id"' in environment
+    assert '"catalog/name"' not in environment
     assert "managed_parameter_names" in environment
     assert "granted_parameter_names" in environment
 
-    assert "for_each = var.role_trust" in identity
-    for workload in (
-        "airflow",
-        "catalog_admin",
-        "dbt_transformer",
-        "arxiv_inspector",
-        "emr_deployer",
-        "image_publisher",
-        "ocr_worker",
-    ):
-        assert f'operator_trust["{workload}"]' in identity
+    assert "identifiers = var.operator_principals" in identity
+    assert "role_trust" not in identity
+    assert "source_policy_documents" in identity
+    assert "external_runtime_trust" in identity
+    assert "rolesanywhere.amazonaws.com" in identity
+    assert "aws:PrincipalTag/x509Subject/CN" in identity
     assert "trusted_principals" not in identity
 
 
 def test_service_images_are_immutable_bounded_and_published_by_one_role() -> None:
-    environment = _terraform_sources(Path("infra/terraform/environments/dev"))
-    registry = _terraform_sources(Path("infra/terraform/modules/container_registry"))
-    identity = _terraform_sources(Path("infra/terraform/modules/identity"))
+    environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
+    registry = _terraform_sources(Path("infra/terraform/aws/modules/container_registry"))
+    identity = _terraform_sources(Path("infra/terraform/aws/modules/identity"))
 
-    assert 'repositories         = ["airflow", "arxiv-inspector", "ocr-worker"]' in environment
+    assert (
+        'repositories         = ["airflow", "arxiv-inspector", "dbt-task", "ocr-worker"]'
+        in environment
+    )
     assert 'image_tag_mutability = "IMMUTABLE"' in registry
     assert "scan_on_push = true" in registry
     assert 'encryption_type = "AES256"' in registry
@@ -169,8 +176,8 @@ def test_service_images_are_immutable_bounded_and_published_by_one_role() -> Non
 
 
 def test_airflow_and_ocr_worker_have_separate_data_permissions() -> None:
-    airflow = Path("infra/terraform/modules/identity/airflow.tf").read_text(encoding="utf-8")
-    ocr = Path("infra/terraform/modules/identity/ocr.tf").read_text(encoding="utf-8")
+    airflow = Path("infra/terraform/aws/modules/identity/airflow.tf").read_text(encoding="utf-8")
+    ocr = Path("infra/terraform/aws/modules/identity/ocr.tf").read_text(encoding="utf-8")
 
     assert "UpdateCuratedIceberg" not in airflow
     assert "UpdateCuratedStorage" not in airflow
@@ -178,3 +185,24 @@ def test_airflow_and_ocr_worker_have_separate_data_permissions() -> None:
     assert "UpdateCuratedIceberg" in ocr
     assert "UpdateCuratedStorage" in ocr
     assert "ReadProviderCredentials" in ocr
+
+
+def test_cloud_roots_have_isolated_state_and_private_services_host() -> None:
+    oci = _terraform_sources(Path("infra/terraform/oci/environments/dev"))
+    tailscale = _terraform_sources(Path("infra/terraform/tailscale/environments/dev"))
+    normalized_oci = " ".join(oci.split())
+
+    assert 'key          = "lakehouse/oci/dev/terraform.tfstate"' in oci
+    assert 'key          = "lakehouse/tailscale/dev/terraform.tfstate"' in tailscale
+    assert 'shape = "VM.Standard.A1.Flex"' in normalized_oci
+    assert "prohibit_internet_ingress  = true" in oci
+    assert "ingress_security_rules" not in oci
+    assert 'version = "~> 8.23.0"' in oci
+    assert 'version = "~> 0.29.2"' in tailscale
+    assert '"tcp:22"' in tailscale
+    assert '"tcp:8080"' in tailscale
+    assert '"tcp:8501"' in tailscale
+    assert "reusable            = false" in tailscale
+    assert 'services_tag = "tag:tgbao-dev-services"' in tailscale
+    assert 'name = "tgbao-dev-services"' in normalized_oci
+    assert 'dns_label                  = "services"' in oci

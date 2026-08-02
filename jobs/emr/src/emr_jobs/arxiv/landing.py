@@ -9,7 +9,8 @@ from lakehouse.contracts.sources import SourceContract
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
-from emr_jobs.common.contracts import spark_identifier, spark_schema
+from emr_jobs.common.contracts import spark_schema
+from emr_jobs.common.iceberg import qualified_name
 from emr_jobs.common.s3 import join_key, put_if_changed, split_uri
 
 
@@ -59,7 +60,6 @@ def archive_pages(
 def publish(
     spark: SparkSession,
     *,
-    catalog_name: str,
     source: SourceContract,
     source_day: date,
     records: list[dict[str, object]],
@@ -70,11 +70,8 @@ def publish(
 ) -> tuple[str, bool]:
     records_contract = source.table("oai_records_raw")
     publication_contract = source.table("oai_publications")
-    records_table = spark_identifier(catalog_name, source.table_identifier("oai_records_raw"))
-    publication_table = spark_identifier(
-        catalog_name,
-        source.table_identifier("oai_publications"),
-    )
+    records_table = qualified_name(source.table_identifier("oai_records_raw"))
+    publication_table = qualified_name(source.table_identifier("oai_publications"))
     day_filter = F.col("datestamp_date") == F.lit(source_day)
     current = (
         spark.table(publication_table)

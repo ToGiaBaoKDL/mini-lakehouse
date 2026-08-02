@@ -1,0 +1,80 @@
+CATALOG_ADMIN_AWS_PROFILE ?= lakehouse-$(LAKEHOUSE_ENVIRONMENT)-catalog-admin
+DBT_AWS_PROFILE ?= lakehouse-$(LAKEHOUSE_ENVIRONMENT)-dbt-transformer
+EMR_DEPLOYER_AWS_PROFILE ?= lakehouse-$(LAKEHOUSE_ENVIRONMENT)-emr-deployer
+OCR_AWS_PROFILE ?= lakehouse-$(LAKEHOUSE_ENVIRONMENT)-ocr-worker
+EMR_BUILD_DIR := dist/emr
+
+.PHONY: catalog-apply catalog-validate ocr-kaggle-runner-publish \
+	dbt-deps dbt-validate dbt-build \
+	emr-jobs-package emr-jobs-publish-preflight emr-jobs-publish
+
+catalog-apply: ## Apply Glue/Iceberg YAML contracts with PyIceberg.
+	AWS_PROFILE="$(CATALOG_ADMIN_AWS_PROFILE)" \
+		uv run --package lakehouse --extra catalog --extra cli python -m lakehouse.catalog.admin apply
+
+catalog-validate: ## Validate Glue/Iceberg state against YAML contracts.
+	AWS_PROFILE="$(CATALOG_ADMIN_AWS_PROFILE)" \
+		uv run --package lakehouse --extra catalog --extra cli python -m lakehouse.catalog.admin validate
+
+ocr-kaggle-runner-publish: preflight ## Publish an immutable Kaggle OCR runner Dataset version.
+	@command -v terraform >/dev/null
+	@set -eu; \
+		PARAMETERS="$$(terraform -chdir=$(AWS_TERRAFORM_DIR) output -json runtime_parameter_names)"; \
+		SECRET_PARAMETER="$$(printf '%s' "$${PARAMETERS}" | jq -er '."ocr/providers/kaggle_secret_id"')"; \
+		SECRET_ID="$$(aws --profile "$(OCR_AWS_PROFILE)" ssm get-parameter \
+			--name "$${SECRET_PARAMETER}" --query Parameter.Value --output text)"; \
+		CREDENTIALS="$$(aws --profile "$(OCR_AWS_PROFILE)" secretsmanager get-secret-value \
+			--secret-id "$${SECRET_ID}" --query SecretString --output text)"; \
+		KAGGLE_USERNAME="$$(printf '%s' "$${CREDENTIALS}" | jq -er '.username | select(type == "string" and length > 0)')" \
+		KAGGLE_API_TOKEN="$$(printf '%s' "$${CREDENTIALS}" | jq -er '.api_token | select(type == "string" and length > 0)')" \
+			uv run --project ocr --extra kaggle-publish python ocr/runners/kaggle/glm_ocr/publish.py
+
+dbt-deps: ## Install locked dbt packages.
+	uv run --project dbt/analytics dbt deps --project-dir dbt/analytics
+
+dbt-validate: dbt-deps ## Parse dbt without accessing AWS data.
+	DBT_QUERY_RESULTS_URI=s3://validation/query-results DBT_ANALYTICS_URI=s3://validation \
+		uv run --project dbt/analytics dbt parse \
+			--project-dir dbt/analytics --profiles-dir dbt/analytics \
+			--no-partial-parse --show-all-deprecations
+
+dbt-build: ## Build analytics with runtime references loaded from SSM.
+	@test -d dbt/analytics/dbt_packages/dbt_utils || { \
+		printf '%s\n' "Missing locked dbt packages; run 'make dbt-deps' first."; exit 1; \
+	}
+	@command -v terraform >/dev/null
+	@set -eu; \
+		PARAMETER_NAMES="$$(terraform -chdir=$(AWS_TERRAFORM_DIR) output -json runtime_parameter_names)"; \
+		QUERY_RESULTS_NAME="$$(printf '%s' "$${PARAMETER_NAMES}" | jq -er '."athena/dbt_output_uri"')"; \
+		ANALYTICS_NAME="$$(printf '%s' "$${PARAMETER_NAMES}" | jq -er '."storage/analytics_uri"')"; \
+		PARAMETERS="$$(aws --profile "$(DBT_AWS_PROFILE)" ssm get-parameters \
+			--names "$${QUERY_RESULTS_NAME}" "$${ANALYTICS_NAME}" --output json)"; \
+		QUERY_RESULTS_URI="$$(printf '%s' "$${PARAMETERS}" | jq -er --arg name "$${QUERY_RESULTS_NAME}" \
+			'.Parameters[] | select(.Name == $$name) | .Value')"; \
+		ANALYTICS_URI="$$(printf '%s' "$${PARAMETERS}" | jq -er --arg name "$${ANALYTICS_NAME}" \
+			'.Parameters[] | select(.Name == $$name) | .Value')"; \
+		AWS_PROFILE="$(DBT_AWS_PROFILE)" DBT_QUERY_RESULTS_URI="$${QUERY_RESULTS_URI}" \
+		DBT_ANALYTICS_URI="$${ANALYTICS_URI}" uv run --project dbt/analytics dbt build \
+			--project-dir dbt/analytics --profiles-dir dbt/analytics
+
+emr-jobs-package: ## Build EMR artifacts in the matching EMR runtime.
+	rm -rf $(EMR_BUILD_DIR)
+	docker build --platform linux/amd64 --file jobs/emr/Dockerfile --target artifacts \
+		--output type=local,dest=$(EMR_BUILD_DIR) .
+
+emr-jobs-publish-preflight: ## Require a committed release and deployment tools.
+	@test -z "$$(git status --porcelain)" || { \
+		printf '%s\n' "Commit the worktree before publishing an EMR release."; exit 1; \
+	}
+	@command -v aws >/dev/null
+	@command -v terraform >/dev/null
+
+emr-jobs-publish: emr-jobs-publish-preflight emr-jobs-package ## Publish one immutable EMR release.
+	@set -eu; \
+		EMR_CODE_URI="$$(terraform -chdir=$(AWS_TERRAFORM_DIR) output -raw emr_artifacts_uri)/$(RELEASE)"; \
+		EMR_CODE_PARAMETER="$$(terraform -chdir=$(AWS_TERRAFORM_DIR) output -raw emr_code_parameter_name)"; \
+		aws --profile "$(EMR_DEPLOYER_AWS_PROFILE)" s3 sync \
+			$(EMR_BUILD_DIR)/ "$${EMR_CODE_URI}/" --only-show-errors; \
+		aws --profile "$(EMR_DEPLOYER_AWS_PROFILE)" ssm put-parameter \
+			--name "$${EMR_CODE_PARAMETER}" --type String --value "$${EMR_CODE_URI}" --overwrite >/dev/null; \
+		printf '%s\n' "Published EMR release $${EMR_CODE_URI}"

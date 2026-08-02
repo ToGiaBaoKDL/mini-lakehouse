@@ -3,7 +3,6 @@
 from lakehouse.contracts import (
     DataContracts,
     ManagedIcebergTableContract,
-    TableIdentifier,
 )
 from pyspark.sql.types import (
     BooleanType,
@@ -28,10 +27,6 @@ SPARK_TYPES = {
 
 def load_contracts(uri: str) -> DataContracts:
     return DataContracts.model_validate_json(read_bytes(uri))
-
-
-def spark_identifier(catalog_name: str, identifier: TableIdentifier) -> str:
-    return ".".join((catalog_name, *identifier.iceberg))
 
 
 def spark_schema(table: ManagedIcebergTableContract) -> StructType:

@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 from datetime import timedelta
 
 from airflow.providers.amazon.aws.operators.emr import EmrServerlessStartJobOperator
+from airflow.sdk import Asset
 
 from orchestration.callbacks.notifications import task_failure_callbacks
 from orchestration.config.templates import runtime_value
@@ -13,13 +14,14 @@ EMR_JOB_TIMEOUT_MINUTES = 120
 AIRFLOW_TASK_TIMEOUT_MINUTES = 130
 
 
-def emr_source_job(
+def emr_spark_job(
     *,
     task_id: str,
     job_name: str,
     entry_point: str,
     entry_point_arguments: Sequence[str],
     spark_conf: Mapping[str, str],
+    outlets: Sequence[Asset] = (),
 ) -> EmrServerlessStartJobOperator:
     code_uri = runtime_value("emr/code_uri")
     submit_parameters = shlex.join(
@@ -49,12 +51,8 @@ def emr_source_job(
                 "entryPoint": f"{code_uri}/{entry_point}",
                 "entryPointArguments": [
                     *entry_point_arguments,
-                    "--landing-uri",
-                    runtime_value("storage/landing_uri"),
                     "--contracts-uri",
                     f"{code_uri}/contracts.json",
-                    "--catalog-name",
-                    runtime_value("catalog/name"),
                 ],
                 "sparkSubmitParameters": submit_parameters,
             }
@@ -74,5 +72,6 @@ def emr_source_job(
         execution_timeout=timedelta(minutes=AIRFLOW_TASK_TIMEOUT_MINUTES),
         waiter_delay=30,
         waiter_max_attempts=AIRFLOW_TASK_TIMEOUT_MINUTES * 2,
+        outlets=list(outlets),
         on_failure_callback=task_failure_callbacks(),
     )

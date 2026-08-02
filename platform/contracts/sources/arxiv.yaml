@@ -12,7 +12,7 @@ raw_subpath: oai
 tables:
   - key: oai_records_raw
     name: oai_records_raw
-    description: Parsed immutable OAI records for one ArXiv datestamp day.
+    description: Authoritative parsed OAI records; re-harvesting replaces one datestamp day.
     primary_key: [datestamp_date, oai_identifier]
     columns:
       - {field_id: 1, name: oai_identifier, data_type: string, required: true, description: Stable OAI identifier.}

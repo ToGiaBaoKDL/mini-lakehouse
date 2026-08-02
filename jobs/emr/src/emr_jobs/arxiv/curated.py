@@ -3,23 +3,19 @@
 from lakehouse.contracts.curated import CuratedProductContract
 from pyspark.sql import SparkSession
 
-from emr_jobs.common.contracts import spark_identifier
+from emr_jobs.common.iceberg import qualified_name
 
 
 def publish(
     spark: SparkSession,
     *,
-    catalog_name: str,
     source_table: str,
     product: CuratedProductContract,
     source_date: str,
 ) -> None:
-    papers = spark_identifier(catalog_name, product.table_identifier("papers"))
-    authors = spark_identifier(catalog_name, product.table_identifier("paper_authors"))
-    categories = spark_identifier(
-        catalog_name,
-        product.table_identifier("paper_categories"),
-    )
+    papers = qualified_name(product.table_identifier("papers"))
+    authors = qualified_name(product.table_identifier("paper_authors"))
+    categories = qualified_name(product.table_identifier("paper_categories"))
     spark.sql(
         f"""
         CREATE OR REPLACE TEMP VIEW arxiv_day_latest AS

@@ -3,23 +3,19 @@
 from lakehouse.contracts.curated import CuratedProductContract
 from pyspark.sql import SparkSession
 
-from emr_jobs.common.contracts import spark_identifier
+from emr_jobs.common.iceberg import qualified_name
 
 
 def publish(
     spark: SparkSession,
     *,
-    catalog_name: str,
     landing_table: str,
     product: CuratedProductContract,
     source_date: str,
 ) -> None:
-    events = spark_identifier(catalog_name, product.table_identifier("events"))
-    actors = spark_identifier(catalog_name, product.table_identifier("actors_current"))
-    repositories = spark_identifier(
-        catalog_name,
-        product.table_identifier("repositories_current"),
-    )
+    events = qualified_name(product.table_identifier("events"))
+    actors = qualified_name(product.table_identifier("actors_current"))
+    repositories = qualified_name(product.table_identifier("repositories_current"))
     spark.sql(
         f"""
         CREATE OR REPLACE TEMP VIEW github_day AS

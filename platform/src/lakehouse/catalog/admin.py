@@ -36,13 +36,9 @@ def _run(*, apply: bool) -> None:
     )
     contracts = load_contracts(settings.contracts_dir)
 
-    def parameter(key: str) -> str:
-        return get_runtime_parameter(settings.environment, key)
-
-    landing_uri = parameter("storage/landing_uri")
-    curated_uri = parameter("storage/curated_uri")
+    landing_uri = get_runtime_parameter(settings.environment, "storage/landing_uri")
+    curated_uri = get_runtime_parameter(settings.environment, "storage/curated_uri")
     catalog = load_iceberg_catalog(
-        parameter("catalog/name"),
         region_name=settings.aws_region,
         profile_name=settings.aws_profile,
     )

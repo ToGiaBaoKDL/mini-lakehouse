@@ -47,8 +47,9 @@ def test_airflow_uses_local_executor_and_deferrable_runtime_components() -> None
     scheduler = payload["services"]["airflow-scheduler"]
     assert "/var/run/docker.sock:/var/run/docker.sock" in scheduler["volumes"]
     assert scheduler["group_add"] == ["${DOCKER_GID}"]
-    assert environment["OCR_AWS_PROFILE"] == "${OCR_AWS_PROFILE}"
-    assert environment["HOST_AWS_CONFIG_DIR"] == "${AWS_CONFIG_DIR}"
+    assert environment["HOST_AWS_IDENTITY_DIR"] == "${AWS_IDENTITY_DIR}"
+    assert "OCR_AWS_PROFILE" not in environment
+    assert "DBT_AWS_PROFILE" not in environment
     assert "OCR_TASK_IMAGE" not in environment
     assert "DOCKER_TASK_USER" not in environment
     assert "AIRFLOW_CONN_AWS_DEFAULT" not in environment
@@ -99,8 +100,9 @@ def test_compose_uses_aws_credential_chain_without_static_keys() -> None:
 
     assert "AWS_ACCESS_KEY_ID" not in rendered
     assert "AWS_SECRET_ACCESS_KEY" not in rendered
-    assert "AWS_PROFILE" in rendered
-    assert "AWS_CONFIG_DIR" in rendered
+    assert "AWS_PROFILE" not in rendered
+    assert "AWS_IDENTITY_DIR" in rendered
+    assert "AWS_CONFIG_FILE" in rendered
 
 
 def test_local_runtime_does_not_use_dotenv_files() -> None:
@@ -123,32 +125,46 @@ def test_arxiv_inspector_receives_only_its_explicit_environment() -> None:
     assert "build" not in service
     assert service["image"] == ("${ARXIV_INSPECTOR_IMAGE:-arxiv-inspector:local}")
     assert service["user"] == "${LOCAL_UID}:0"
-    assert set(service["environment"]) == {"LAKEHOUSE_ENVIRONMENT", "AWS_PROFILE"}
-    assert service["volumes"] == ["${AWS_CONFIG_DIR}:/tmp/.aws:ro"]
+    assert set(service["environment"]) == {
+        "LAKEHOUSE_ENVIRONMENT",
+        "AWS_CONFIG_FILE",
+        "AWS_EC2_METADATA_DISABLED",
+    }
+    assert service["volumes"] == ["${AWS_IDENTITY_DIR}/arxiv-inspector:/run/aws:ro"]
 
 
 def test_all_container_images_are_immutable() -> None:
-    dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+    airflow_dockerfile = Path("orchestration/Dockerfile").read_text(encoding="utf-8")
+    dbt_dockerfile = Path("dbt/analytics/Dockerfile").read_text(encoding="utf-8")
+    inspector_dockerfile = Path("apps/arxiv_inspector/Dockerfile").read_text(encoding="utf-8")
+    ocr_dockerfile = Path("ocr/Dockerfile").read_text(encoding="utf-8")
     emr_dockerfile = Path("jobs/emr/Dockerfile").read_text(encoding="utf-8")
     compose = Path("compose.airflow.yaml").read_text(encoding="utf-8")
 
-    assert "ghcr.io/astral-sh/uv:0.11.30@sha256:" in dockerfile
-    assert "python:3.12.13-slim@sha256:" in dockerfile
-    assert "apache/airflow:3.3.0-python3.12@sha256:" in dockerfile
-    assert "FROM base AS airflow-requirements" not in dockerfile
-    assert "COPY --chown=airflow:0 orchestration /opt/airflow/orchestration" in dockerfile
-    assert "FROM ocr-worker-dependencies AS ocr-worker" in dockerfile
-    assert 'ENTRYPOINT ["document-ocr"]' in dockerfile
+    assert not Path("Dockerfile").exists()
+    assert "apache/airflow:3.3.0-python3.12@sha256:" in airflow_dockerfile
+    assert "orchestration/uv.lock" in airflow_dockerfile
+    assert '"/uv", "export", "--frozen", "--no-dev"' in airflow_dockerfile
+    assert "USER airflow" in airflow_dockerfile
+    assert 'ENTRYPOINT ["dbt"]' in dbt_dockerfile
+    assert "dbt/analytics/uv.lock" in dbt_dockerfile
+    assert "dbt deps" in dbt_dockerfile
+    assert "USER dbt" in dbt_dockerfile
+    assert 'ENTRYPOINT ["document-ocr"]' in ocr_dockerfile
+    assert "USER worker" in ocr_dockerfile
+    assert "USER inspector" in inspector_dockerfile
+    assert "HEALTHCHECK" in inspector_dockerfile
     assert '"apache-airflow==3.3.0"' in Path("orchestration/pyproject.toml").read_text(
         encoding="utf-8"
     )
     assert "postgres:17.10@sha256:" in compose
     assert "public.ecr.aws/amazonlinux/amazonlinux:2023-minimal@sha256:" in emr_dockerfile
     assert "ghcr.io/astral-sh/uv:0.11.30@sha256:" in emr_dockerfile
-    assert ":latest" not in f"{dockerfile}\n{compose}"
-    assert "apps/arxiv_inspector/.streamlit ./.streamlit" in dockerfile
-    assert "USER inspector" in dockerfile
-    assert "USER worker" in dockerfile
+    dockerfiles = "\n".join(
+        (airflow_dockerfile, dbt_dockerfile, inspector_dockerfile, ocr_dockerfile, emr_dockerfile)
+    )
+    assert dockerfiles.count("ghcr.io/astral-sh/uv:0.11.30@sha256:") == 5
+    assert ":latest" not in f"{dockerfiles}\n{compose}"
 
 
 def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
@@ -187,8 +203,12 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
     assert "providers = [" not in ocr
     assert "s3fs" not in ocr
     assert '"dbt-athena==1.11.0"' in analytics
-    assert 'members = ["apps/arxiv_inspector", "dbt/analytics", "ocr", "platform"]' in workspace
-    assert 'exclude = ["jobs/emr", "ocr/runners/glm_ocr", "orchestration"]' in workspace
+    assert 'members = ["apps/arxiv_inspector", "ocr", "platform"]' in workspace
+    assert (
+        'exclude = ["dbt/analytics", "jobs/emr", "ocr/runners/glm_ocr", "orchestration"]'
+        in workspace
+    )
+    assert Path("dbt/analytics/uv.lock").is_file()
     assert Path("orchestration/uv.lock").is_file()
     assert "apache-airflow" not in Path("uv.lock").read_text(encoding="utf-8")
     assert "opentelemetry" not in Path("uv.lock").read_text(encoding="utf-8")
@@ -210,11 +230,24 @@ def test_platform_control_plane_is_one_owned_workspace_package() -> None:
 
 
 def test_makefile_exposes_owned_operational_entrypoints() -> None:
-    makefile = Path("Makefile").read_text(encoding="utf-8")
+    root_makefile = Path("Makefile").read_text(encoding="utf-8")
+    makefile = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (Path("Makefile"), *sorted(Path("make").glob("*.mk")))
+    )
+
+    assert "include make/infra.mk" in root_makefile
+    assert "include make/images.mk" in root_makefile
+    assert "include make/services.mk" in root_makefile
+    assert "include make/data.mk" in root_makefile
     for target in (
-        "terraform-state-apply:",
-        "terraform-plan:",
-        "terraform-apply:",
+        "aws-state-apply:",
+        "aws-plan:",
+        "aws-apply:",
+        "tailscale-plan:",
+        "tailscale-apply:",
+        "oci-plan:",
+        "oci-apply:",
         "airflow-up:",
         "airflow-down:",
         "arxiv-inspector-up:",
@@ -225,10 +258,11 @@ def test_makefile_exposes_owned_operational_entrypoints() -> None:
         "catalog-apply:",
         "catalog-validate:",
         "airflow-bootstrap-init:",
-        "ecr-login:",
-        "ecr-publish:",
-        "ecr-deploy:",
+        "images-login:",
+        "images-publish:",
+        "release-deploy:",
         "ocr-worker-build:",
+        "dbt-task-build:",
         "emr-jobs-package:",
         "emr-jobs-publish:",
         "ocr-kaggle-runner-publish:",
@@ -236,7 +270,8 @@ def test_makefile_exposes_owned_operational_entrypoints() -> None:
         assert target in makefile
 
     assert "compose.core.yaml" not in makefile
-    assert "docker push" in makefile
+    assert "--platform linux/amd64,linux/arm64" in makefile
+    assert "--push" in makefile
     assert "ecr describe-images" in makefile
     assert "already published" in makefile
     assert 'imageTag="$(RELEASE)"' in makefile
@@ -247,3 +282,5 @@ def test_makefile_exposes_owned_operational_entrypoints() -> None:
     assert "AWS_REGION ?=" not in makefile
     assert "OCR_TASK_IMAGE" not in makefile
     assert "up -d --build" not in makefile
+    assert "control-plane-deploy" not in makefile
+    assert "ecr-deploy:" not in makefile

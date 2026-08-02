@@ -8,8 +8,9 @@ from emr_jobs.arxiv.curated import publish as publish_curated
 from emr_jobs.arxiv.landing import archive_pages
 from emr_jobs.arxiv.landing import publish as publish_landing
 from emr_jobs.arxiv.oai import harvest, parse_records
-from emr_jobs.common.contracts import load_contracts, spark_identifier
-from emr_jobs.common.spark import configure_logging, require_tables, session
+from emr_jobs.common.contracts import load_contracts
+from emr_jobs.common.iceberg import require_tables
+from emr_jobs.common.spark import configure_logging, session
 
 
 def run(
@@ -17,7 +18,6 @@ def run(
     source_date: str,
     landing_uri: str,
     contracts_uri: str,
-    catalog_name: str,
     max_pages: int,
 ) -> None:
     source_day = date.fromisoformat(source_date)
@@ -26,18 +26,14 @@ def run(
     contracts = load_contracts(contracts_uri)
     source = contracts.source("arxiv")
     product = contracts.curated_product("arxiv")
-    landing_tables = tuple(
-        spark_identifier(catalog_name, source.table_identifier(table.key))
-        for table in source.tables
-    )
-    curated_tables = tuple(
-        spark_identifier(catalog_name, product.table_identifier(key))
-        for key in ("papers", "paper_authors", "paper_categories")
+    required_identifiers = (
+        *(source.table_identifier(table.key) for table in source.tables),
+        *(product.table_identifier(key) for key in ("papers", "paper_authors", "paper_categories")),
     )
 
     spark = session(f"arxiv-metadata-{source_date}")
     try:
-        require_tables(spark, (*landing_tables, *curated_tables))
+        require_tables(spark, required_identifiers)
         pages = harvest(source_date, max_pages)
         page_objects, manifest_key, manifest_sha256 = archive_pages(
             pages,
@@ -54,7 +50,6 @@ def run(
         )
         records_table, changed = publish_landing(
             spark,
-            catalog_name=catalog_name,
             source=source,
             source_day=source_day,
             records=records,
@@ -69,7 +64,6 @@ def run(
             logger.info("Landing publication already matches the OAI manifest")
         publish_curated(
             spark,
-            catalog_name=catalog_name,
             source_table=records_table,
             product=product,
             source_date=source_date,

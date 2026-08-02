@@ -46,7 +46,6 @@ class ModalRunnerConfig(ConfigModel):
 
 
 class ProcessorRunnerConfig(ConfigModel):
-    default_provider: Literal["kaggle", "modal"]
     kaggle: KaggleRunnerConfig
     modal: ModalRunnerConfig
 

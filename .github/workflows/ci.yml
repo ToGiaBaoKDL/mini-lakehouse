@@ -22,5 +22,6 @@ jobs:
           terraform_version: "1.14.5"
           terraform_wrapper: false
       - run: uv sync --frozen --all-packages --all-extras --all-groups
+      - run: uv sync --frozen --project dbt/analytics
       - run: uv sync --frozen --project orchestration --all-groups
       - run: make check

@@ -22,12 +22,3 @@ def configure_logging(job: str, source_date: str) -> None:
 
 def session(name: str) -> SparkSession:
     return SparkSession.builder.appName(name).getOrCreate()
-
-
-def require_tables(spark: SparkSession, tables: tuple[str, ...]) -> None:
-    missing = [table for table in tables if not spark.catalog.tableExists(table)]
-    if missing:
-        raise RuntimeError(
-            "Missing contract-managed Iceberg tables; run catalog apply first: "
-            + ", ".join(missing)
-        )

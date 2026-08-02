@@ -14,7 +14,10 @@ from lakehouse.contracts import (
 )
 
 FORMAT_VERSION = 2
+MANAGED_BY_PROPERTY = "managed_by"
+MANAGED_BY_VALUE = "lakehouse-platform"
 TABLE_PROPERTIES = {
+    MANAGED_BY_PROPERTY: MANAGED_BY_VALUE,
     "write.format.default": "parquet",
     "write.parquet.compression-codec": "zstd",
     "write.metadata.delete-after-commit.enabled": "true",
@@ -122,7 +125,10 @@ def apply_table_contracts(
     curated_uri: str,
 ) -> None:
     for namespace in contracts.managed_namespaces():
-        properties = namespace_properties(namespace)
+        properties = {
+            **namespace_properties(namespace),
+            MANAGED_BY_PROPERTY: MANAGED_BY_VALUE,
+        }
         catalog.create_namespace_if_not_exists(namespace.path, properties)
         current = catalog.load_namespace_properties(namespace.path)
         updates = {key: value for key, value in properties.items() if current.get(key) != value}
@@ -144,6 +150,15 @@ def validate_table_contracts(
     curated_uri: str,
 ) -> tuple[str, ...]:
     errors = []
+    expected_namespaces = {namespace.path for namespace in contracts.managed_namespaces()}
+    expected_tables = {
+        identifier.iceberg
+        for identifier, _, _ in managed_tables(
+            contracts,
+            landing_uri=landing_uri,
+            curated_uri=curated_uri,
+        )
+    }
     existing_namespaces = set()
     for namespace in contracts.managed_namespaces():
         rendered = namespace.path[0]
@@ -151,13 +166,23 @@ def validate_table_contracts(
             errors.append(f"namespace:{rendered}:missing")
             continue
         existing_namespaces.add(namespace.path)
-        expected = namespace_properties(namespace)
+        expected = {
+            **namespace_properties(namespace),
+            MANAGED_BY_PROPERTY: MANAGED_BY_VALUE,
+        }
         current = catalog.load_namespace_properties(namespace.path)
         errors.extend(
             f"namespace:{rendered}:properties.{key}"
             for key, value in expected.items()
             if current.get(key) != value
         )
+    for namespace in catalog.list_namespaces():
+        if namespace in expected_namespaces:
+            continue
+        properties = catalog.load_namespace_properties(namespace)
+        if properties.get(MANAGED_BY_PROPERTY) == MANAGED_BY_VALUE:
+            errors.append(f"namespace:{'.'.join(namespace)}:unexpected")
+
     for identifier, location, contract in managed_tables(
         contracts,
         landing_uri=landing_uri,
@@ -177,4 +202,11 @@ def validate_table_contracts(
                 contract,
             )
         )
+    for namespace in existing_namespaces:
+        for identifier in catalog.list_tables(namespace):
+            if identifier in expected_tables:
+                continue
+            table = catalog.load_table(identifier)
+            if table.properties.get(MANAGED_BY_PROPERTY) == MANAGED_BY_VALUE:
+                errors.append(f"table:{'.'.join(identifier)}:unexpected")
     return tuple(sorted(errors))

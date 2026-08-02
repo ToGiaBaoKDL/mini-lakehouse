@@ -5,6 +5,7 @@ sources:
     description: Canonical validated GitHub entities and events for downstream data products.
     database: awsdatacatalog
     schema: curated_github
+    loader: emr-serverless
     meta:
       owner: data-platform
       contact: bao.to@timo.vn
@@ -18,110 +19,28 @@ sources:
             error_after: {count: 54, period: hour}
         columns:
           - name: event_id
-            description: Stable GitHub event identifier.
-            data_type: varchar
             data_tests: [not_null, unique]
           - name: event_type
-            description: GitHub event type.
-            data_type: varchar
             data_tests: [not_null]
-          - name: actor_id
-            description: GitHub actor identifier when present.
-            data_type: bigint
-          - name: actor_login
-            description: Normalized actor login.
-            data_type: varchar
-          - name: repository_id
-            description: GitHub repository identifier when present.
-            data_type: bigint
-          - name: repository_name
-            description: Normalized repository full name.
-            data_type: varchar
           - name: is_public
-            description: Whether the source event is public.
-            data_type: boolean
+            data_tests: [not_null]
           - name: occurred_at
-            description: Event occurrence timestamp.
-            data_type: timestamp
+            data_tests: [not_null]
           - name: event_date_utc
-            description: UTC event calendar date.
-            data_type: date
             data_tests: [not_null]
-          - name: push_commit_count
-            description: Commit count reported by a push event.
-            data_type: bigint
-          - name: event_action
-            description: Payload action when present.
-            data_type: varchar
-          - name: ref_type
-            description: Git reference type when present.
-            data_type: varchar
-          - name: issue_number
-            description: Issue number when present.
-            data_type: bigint
-          - name: pull_request_number
-            description: Pull request number when present.
-            data_type: bigint
-          - name: comment_id
-            description: Comment identifier when present.
-            data_type: bigint
-          - name: source_file
-            description: Source archive filename.
-            data_type: varchar
           - name: source_hour
-            description: Source archive hour.
-            data_type: timestamp
             data_tests: [not_null]
-          - name: ingested_at
-            description: Landing ingestion timestamp used to break ties within a source archive hour.
-            data_type: timestamp
           - name: curated_at
-            description: Timestamp of the latest curated mutation.
-            data_type: timestamp
             data_tests: [not_null]
 
       - name: actors_current
         description: Latest observed GitHub actor attributes at one row per actor ID.
         columns:
           - name: actor_id
-            description: Stable GitHub actor identifier.
-            data_type: bigint
             data_tests: [not_null, unique]
-          - name: actor_login
-            description: Latest observed actor login.
-            data_type: varchar
-          - name: is_bot
-            description: Heuristic bot classification.
-            data_type: boolean
-          - name: last_observed_at
-            description: Latest event timestamp for this actor.
-            data_type: timestamp
-          - name: curated_at
-            description: Timestamp of the latest curated mutation.
-            data_type: timestamp
-          - name: last_event_id
-            description: Event ID used as the deterministic observation tie-breaker.
-            data_type: varchar
 
       - name: repositories_current
         description: Latest observed GitHub repository attributes at one row per repository ID.
         columns:
           - name: repository_id
-            description: Stable GitHub repository identifier.
-            data_type: bigint
             data_tests: [not_null, unique]
-          - name: repository_name
-            description: Latest observed repository full name.
-            data_type: varchar
-          - name: repository_owner
-            description: Owner component of the repository full name.
-            data_type: varchar
-          - name: last_observed_at
-            description: Latest event timestamp for this repository.
-            data_type: timestamp
-          - name: curated_at
-            description: Timestamp of the latest curated mutation.
-            data_type: timestamp
-          - name: last_event_id
-            description: Event ID used as the deterministic observation tie-breaker.
-            data_type: varchar

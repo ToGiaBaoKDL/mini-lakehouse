@@ -54,7 +54,6 @@ def run_arxiv_ocr(arxiv_id: str, provider_name: str) -> dict[str, object]:
     provider = _provider(cast(OcrProviderName, provider_name), processor)
     curated_uri = get_runtime_parameter(settings.environment, "storage/curated_uri")
     catalog = load_iceberg_catalog(
-        get_runtime_parameter(settings.environment, "catalog/name"),
         region_name=settings.aws_region,
         profile_name=settings.aws_profile,
     )

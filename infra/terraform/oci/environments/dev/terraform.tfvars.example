@@ -1,0 +1,8 @@
+oci_profile       = "DEFAULT"
+tenancy_ocid      = "ocid1.tenancy.oc1..example"
+compartment_ocid  = "ocid1.compartment.oc1..example"
+region            = "ap-singapore-1"
+ssh_authorized_key = "ssh-ed25519 AAAA..."
+
+# Pass this at apply time instead of storing it in tfvars:
+# TF_VAR_tailscale_auth_key="$(terraform -chdir=infra/terraform/tailscale/environments/dev output -raw services_auth_key)"

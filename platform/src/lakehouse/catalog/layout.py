@@ -25,6 +25,32 @@ ManagedTableBinding: TypeAlias = tuple[  # noqa: UP040
     str,
     ManagedIcebergTableContract,
 ]
+DeclaredTableBinding: TypeAlias = tuple[  # noqa: UP040
+    str,
+    TableIdentifier,
+    str,
+    ManagedIcebergTableContract,
+]
+
+
+def declared_tables(contracts: DataContracts) -> Iterator[DeclaredTableBinding]:
+    """Yield every contract-owned table once with its tier-relative location."""
+    for source in contracts.sources:
+        for table in source.tables:
+            yield (
+                "landing",
+                source.table_identifier(table.key),
+                f"{source.storage_prefix}/tables/{table.name}",
+                table,
+            )
+    for product in contracts.curated:
+        for table in product.tables:
+            yield (
+                "curated",
+                product.table_identifier(table.key),
+                f"{product.name}/tables/{table.name}",
+                table,
+            )
 
 
 def managed_tables(
@@ -34,19 +60,10 @@ def managed_tables(
     curated_uri: str,
 ) -> Iterator[ManagedTableBinding]:
     seen_locations = set()
-    for source in contracts.sources:
-        for table in source.tables:
-            identifier = source.table_identifier(table.key)
-            location = f"{landing_uri.rstrip('/')}/{source.storage_prefix}/tables/{table.name}"
-            if location in seen_locations:
-                raise ValueError("Managed Iceberg table locations must be unique")
-            seen_locations.add(location)
-            yield identifier, location, table
-    for product in contracts.curated:
-        for table in product.tables:
-            identifier = product.table_identifier(table.key)
-            location = f"{curated_uri.rstrip('/')}/{product.name}/tables/{table.name}"
-            if location in seen_locations:
-                raise ValueError("Managed Iceberg table locations must be unique")
-            seen_locations.add(location)
-            yield identifier, location, table
+    roots = {"landing": landing_uri.rstrip("/"), "curated": curated_uri.rstrip("/")}
+    for tier, identifier, relative_location, table in declared_tables(contracts):
+        location = f"{roots[tier]}/{relative_location}"
+        if location in seen_locations:
+            raise ValueError("Managed Iceberg table locations must be unique")
+        seen_locations.add(location)
+        yield identifier, location, table

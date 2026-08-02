@@ -1,23 +1,19 @@
 """Manually OCR one curated ArXiv PDF through Kaggle or Modal."""
 
-import os
 from datetime import timedelta
 
 import pendulum
-from airflow.providers.docker.operators.docker import DockerOperator
 from airflow.sdk import DAG, Param
 from airflow.sdk.definitions.param import ParamsDict
-from docker.types import Mount
 
 from orchestration.callbacks.notifications import (
     dag_failure_callbacks,
     dag_success_callbacks,
-    task_failure_callbacks,
 )
+from orchestration.config.assets import CURATED_ARXIV_METADATA, CURATED_ARXIV_OCR
+from orchestration.operators.docker import docker_task
 
 OCR_IMAGE = "ocr-worker:runtime"
-OCR_AWS_PROFILE = os.environ["OCR_AWS_PROFILE"]
-HOST_AWS_CONFIG_DIR = os.environ["HOST_AWS_CONFIG_DIR"]
 
 with DAG(
     dag_id="etl_docker_arxiv_document_ocr",
@@ -46,7 +42,7 @@ with DAG(
     ),
     tags=["arxiv", "etl", "docker", "ocr", "gpu"],
 ) as dag:
-    DockerOperator(
+    docker_task(
         task_id="process_arxiv_pdf",
         image=OCR_IMAGE,
         command=[
@@ -55,23 +51,8 @@ with DAG(
             "--provider",
             "{{ params.provider }}",
         ],
-        docker_url="unix://var/run/docker.sock",
-        environment={
-            "AWS_PROFILE": OCR_AWS_PROFILE,
-            "LAKEHOUSE_ENVIRONMENT": os.environ["LAKEHOUSE_ENVIRONMENT"],
-        },
-        mounts=[
-            Mount(
-                source=HOST_AWS_CONFIG_DIR,
-                target="/tmp/.aws",
-                type="bind",
-                read_only=True,
-            )
-        ],
-        user=f"{os.getuid()}:0",
-        force_pull=False,
-        auto_remove="force",
-        mount_tmp_dir=False,
+        workload="ocr-worker",
         execution_timeout=timedelta(hours=5),
-        on_failure_callback=task_failure_callbacks(),
+        inlets=[CURATED_ARXIV_METADATA],
+        outlets=[CURATED_ARXIV_OCR],
     )

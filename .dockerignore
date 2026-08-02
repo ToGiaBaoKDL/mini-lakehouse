@@ -15,7 +15,10 @@ dbt/**/logs
 dbt/**/target
 dist
 docs
-infra
+infra/*
+!infra/runtime/
+infra/runtime/*
+!infra/runtime/install-aws-signing-helper
 ocr/runners
 plans
 tests

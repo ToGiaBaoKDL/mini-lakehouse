@@ -29,7 +29,6 @@ inference:
   layout_device: cpu
 
 runner:
-  default_provider: kaggle
   kaggle:
     kernel_name: document-ocr-arxiv-glm-ocr
     runner_dataset_name: document-ocr-arxiv-glm-ocr-runner

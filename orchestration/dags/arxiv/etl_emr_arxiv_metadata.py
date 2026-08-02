@@ -5,8 +5,9 @@ from airflow.sdk import DAG, Param
 from airflow.sdk.definitions.param import ParamsDict
 
 from orchestration.callbacks.notifications import dag_failure_callbacks, dag_success_callbacks
-from orchestration.config.templates import previous_local_date
-from orchestration.operators.emr import emr_source_job
+from orchestration.config.assets import CURATED_ARXIV_METADATA
+from orchestration.config.templates import previous_local_date, runtime_value
+from orchestration.operators.emr import emr_spark_job
 
 SOURCE_DATE = previous_local_date()
 
@@ -31,14 +32,17 @@ with DAG(
     ),
     tags=["arxiv", "etl", "emr", "iceberg"],
 ) as dag:
-    emr_source_job(
+    emr_spark_job(
         task_id="process_arxiv_metadata_day",
         job_name=f"arxiv-metadata-{SOURCE_DATE}",
         entry_point="entrypoints/arxiv_metadata.py",
         entry_point_arguments=[
             "--source-date",
             SOURCE_DATE,
+            "--landing-uri",
+            runtime_value("storage/landing_uri"),
         ],
+        outlets=[CURATED_ARXIV_METADATA],
         spark_conf={
             "spark.driver.cores": "2",
             "spark.driver.memory": "8g",

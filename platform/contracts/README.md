@@ -19,4 +19,5 @@ for enforcing uniqueness because Iceberg identifier fields are not uniqueness co
 `python -m lakehouse.catalog.admin apply` creates missing objects and updates safe
 table properties. Structural drift in location, schema, identifier fields, partition spec, or
 format version fails and requires an explicit migration. The command never silently rewrites
-existing tables.
+existing tables. Applied objects carry a platform ownership property so validation can report
+removed contract objects without claiming or deleting externally managed tables.

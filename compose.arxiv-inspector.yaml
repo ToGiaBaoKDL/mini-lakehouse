@@ -6,11 +6,12 @@ services:
     user: "${LOCAL_UID}:0"
     environment:
       LAKEHOUSE_ENVIRONMENT: ${LAKEHOUSE_ENVIRONMENT}
-      AWS_PROFILE: ${ARXIV_INSPECTOR_AWS_PROFILE}
+      AWS_CONFIG_FILE: /run/aws/config
+      AWS_EC2_METADATA_DISABLED: "true"
     volumes:
-      - ${AWS_CONFIG_DIR}:/tmp/.aws:ro
+      - ${AWS_IDENTITY_DIR}/arxiv-inspector:/run/aws:ro
     ports:
-      - "127.0.0.1:8501:8501"
+      - "${HOST_BIND_ADDRESS:-127.0.0.1}:8501:8501"
     healthcheck:
       test:
         [

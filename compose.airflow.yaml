@@ -12,21 +12,21 @@ x-airflow-common: &airflow-common
       password = quote_plus(Path('/run/secrets/airflow_db_password').read_text().strip());
       print('postgresql+psycopg2://airflow:' + password + '@airflow-postgres:5432/airflow')"
     AIRFLOW__API_AUTH__JWT_SECRET_CMD: cat /run/secrets/airflow_jwt_secret
-    AIRFLOW__API__BASE_URL: "http://localhost:8080"
+    AIRFLOW__API__BASE_URL: "http://${HOST_BIND_ADDRESS:-127.0.0.1}:8080"
     AIRFLOW__CORE__FERNET_KEY_CMD: cat /run/secrets/airflow_fernet_key
     AIRFLOW__SECRETS__BACKEND: orchestration.config.aws_secrets.AwsSecretsBackend
     AIRFLOW__SECRETS__BACKEND_KWARGS: '{"connections_prefix":"lakehouse/${LAKEHOUSE_ENVIRONMENT}/airflow/connections","variables_prefix":"/lakehouse/${LAKEHOUSE_ENVIRONMENT}"}'
-    AWS_PROFILE: "${AIRFLOW_AWS_PROFILE}"
+    AWS_CONFIG_FILE: /run/aws/config
+    AWS_EC2_METADATA_DISABLED: "true"
     LAKEHOUSE_ENVIRONMENT: "${LAKEHOUSE_ENVIRONMENT}"
-    OCR_AWS_PROFILE: "${OCR_AWS_PROFILE}"
-    HOST_AWS_CONFIG_DIR: "${AWS_CONFIG_DIR}"
+    HOST_AWS_IDENTITY_DIR: "${AWS_IDENTITY_DIR}"
   secrets: &airflow-secrets
     - airflow_db_password
     - airflow_fernet_key
     - airflow_jwt_secret
   volumes:
     - airflow-logs:/opt/airflow/logs
-    - ${AWS_CONFIG_DIR}:/home/airflow/.aws:ro
+    - ${AWS_IDENTITY_DIR}/airflow:/run/aws:ro
   depends_on:
     airflow-postgres:
       condition: service_healthy
@@ -62,6 +62,7 @@ services:
     secrets: *airflow-secrets
     volumes:
       - airflow-logs:/opt/airflow/logs
+      - ${AWS_IDENTITY_DIR}/airflow:/run/aws:ro
     depends_on:
       airflow-postgres:
         condition: service_healthy
@@ -72,7 +73,7 @@ services:
     <<: *airflow-common
     command: airflow api-server
     ports:
-      - "127.0.0.1:8080:8080"
+      - "${HOST_BIND_ADDRESS:-127.0.0.1}:8080:8080"
     healthcheck:
       test:
         [
@@ -93,7 +94,7 @@ services:
       - "${DOCKER_GID}"
     volumes:
       - airflow-logs:/opt/airflow/logs
-      - ${AWS_CONFIG_DIR}:/home/airflow/.aws:ro
+      - ${AWS_IDENTITY_DIR}/airflow:/run/aws:ro
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\""]

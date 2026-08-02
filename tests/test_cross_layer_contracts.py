@@ -19,30 +19,31 @@ def test_dbt_sources_match_curated_product_contracts() -> None:
     product = contracts.curated_product("github")
     source_tables = cast(list[dict[str, object]], source["tables"])
     contract_tables = {table.name: table for table in product.tables}
-    type_names = {
-        "boolean": "boolean",
-        "date": "date",
-        "long": "bigint",
-        "string": "varchar",
-        "timestamptz": "timestamp",
-    }
-
     assert source["database"] == "awsdatacatalog"
     assert source["schema"] == product.database
     assert source["description"] == product.description
+    assert source["loader"] == "emr-serverless"
+    assert source["meta"] == {
+        "owner": product.owner,
+        "contact": product.contact.email,
+    }
     assert {table["name"] for table in source_tables} == set(contract_tables)
     for source_table in source_tables:
         contract = contract_tables[cast(str, source_table["name"])]
         assert source_table["description"] == contract.description
-        documented_columns = {
-            cast(str, column["name"]): column
+        tested_columns = {
+            cast(str, column["name"])
             for column in cast(list[dict[str, object]], source_table["columns"])
         }
-        assert set(documented_columns) == {column.name for column in contract.columns}
-        for column in contract.columns:
-            documented = documented_columns[column.name]
-            assert documented["description"] == column.description
-            assert documented["data_type"] == type_names[column.data_type]
+        assert tested_columns <= {column.name for column in contract.columns}
+
+    events = next(table for table in source_tables if table["name"] == "events")
+    events_config = cast(dict[str, object], events["config"])
+    assert events_config["loaded_at_field"] == "source_hour"
+    assert events_config["freshness"] == {
+        "warn_after": {"count": 30, "period": "hour"},
+        "error_after": {"count": 54, "period": "hour"},
+    }
 
 
 def test_dbt_athena_configuration_is_explicit() -> None:
@@ -91,10 +92,10 @@ def test_dbt_athena_configuration_is_explicit() -> None:
     assert mart_meta["business_owner"] == domain.business_owner
     assert output["schema"] == domain.database
 
-    makefile = Path("Makefile").read_text(encoding="utf-8")
-    assert "/athena/dbt_output_uri" in makefile
-    assert "DBT_QUERY_RESULTS_URI" in makefile
-    assert "/athena/workgroup" not in makefile
+    data_operations = Path("make/data.mk").read_text(encoding="utf-8")
+    assert '"athena/dbt_output_uri"' in data_operations
+    assert "DBT_QUERY_RESULTS_URI" in data_operations
+    assert "athena/workgroup" not in data_operations
 
 
 def test_dbt_uses_first_party_adapter_and_standard_test_package() -> None:

@@ -10,7 +10,6 @@ def main(
     source_date: Annotated[str, typer.Option(help="UTC source day in YYYY-MM-DD format.")],
     landing_uri: Annotated[str, typer.Option(help="Landing S3 root URI.")],
     contracts_uri: Annotated[str, typer.Option(help="Versioned contract bundle URI.")],
-    catalog_name: Annotated[str, typer.Option(help="Spark Iceberg catalog alias.")] = "glue",
     capture_workers: Annotated[
         int,
         typer.Option(min=1, max=24, help="Concurrent archive downloads."),
@@ -20,7 +19,6 @@ def main(
         source_date=source_date,
         landing_uri=landing_uri,
         contracts_uri=contracts_uri,
-        catalog_name=catalog_name,
         capture_workers=capture_workers,
     )
 

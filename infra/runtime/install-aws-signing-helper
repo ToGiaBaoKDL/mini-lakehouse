@@ -1,0 +1,37 @@
+#!/bin/sh
+set -eu
+
+version="1.8.4"
+architecture="${1:-}"
+case "$architecture" in
+    amd64 | x86_64)
+        distribution_architecture="X86_64"
+        checksum="b7568acd6e1517a4e1adaee68d52bfd6284a0e5305677166cd83d43a07c815c9"
+        ;;
+    arm64 | aarch64)
+        distribution_architecture="Aarch64"
+        checksum="581a57223b476637458fa4598169d1d71c1b5b796f08026b460ec3f41a2b3707"
+        ;;
+    *)
+        printf '%s\n' "Unsupported architecture: $architecture" >&2
+        exit 2
+        ;;
+esac
+
+url="https://rolesanywhere.amazonaws.com/releases/$version/$distribution_architecture/Linux/Amzn2023/aws_signing_helper"
+python - "$url" "$checksum" <<'PY'
+import hashlib
+import pathlib
+import sys
+import urllib.request
+
+url, expected = sys.argv[1:]
+target = pathlib.Path("/usr/local/bin/aws_signing_helper")
+with urllib.request.urlopen(url, timeout=60) as response:
+    payload = response.read()
+actual = hashlib.sha256(payload).hexdigest()
+if actual != expected:
+    raise SystemExit(f"aws_signing_helper checksum mismatch: {actual}")
+target.write_bytes(payload)
+target.chmod(0o755)
+PY

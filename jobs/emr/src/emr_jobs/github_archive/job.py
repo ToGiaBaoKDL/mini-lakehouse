@@ -5,8 +5,9 @@ from datetime import date, datetime, time, timedelta
 from loguru import logger
 from pyspark.sql import functions as F
 
-from emr_jobs.common.contracts import load_contracts, spark_identifier
-from emr_jobs.common.spark import configure_logging, require_tables, session
+from emr_jobs.common.contracts import load_contracts
+from emr_jobs.common.iceberg import qualified_name, require_tables
+from emr_jobs.common.spark import configure_logging, session
 from emr_jobs.github_archive.curated import publish
 from emr_jobs.github_archive.extract import capture_day
 from emr_jobs.github_archive.landing import build_frame
@@ -17,7 +18,6 @@ def run(
     source_date: str,
     landing_uri: str,
     contracts_uri: str,
-    catalog_name: str,
     capture_workers: int,
 ) -> None:
     source_day = date.fromisoformat(source_date)
@@ -26,15 +26,16 @@ def run(
     contracts = load_contracts(contracts_uri)
     source = contracts.source("github_archive")
     product = contracts.curated_product("github")
-    landing_table = spark_identifier(catalog_name, source.table_identifier("events_raw"))
-    curated_tables = tuple(
-        spark_identifier(catalog_name, product.table_identifier(table.key))
-        for table in product.tables
+    landing_identifier = source.table_identifier("events_raw")
+    required_identifiers = (
+        landing_identifier,
+        *(product.table_identifier(table.key) for table in product.tables),
     )
+    landing_table = qualified_name(landing_identifier)
 
     spark = session(f"github-archive-{source_date}")
     try:
-        require_tables(spark, (landing_table, *curated_tables))
+        require_tables(spark, required_identifiers)
         captures = capture_day(
             source_date=source_date,
             landing_uri=landing_uri,
@@ -54,7 +55,6 @@ def run(
             landing.unpersist()
         publish(
             spark,
-            catalog_name=catalog_name,
             landing_table=landing_table,
             product=product,
             source_date=source_date,

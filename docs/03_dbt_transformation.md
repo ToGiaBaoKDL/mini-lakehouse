@@ -9,6 +9,6 @@ projections, dbt-utils tests, adapter-managed unique Iceberg locations, and a sc
 The dbt client supplies its isolated `dbt/` query-result prefix when using Athena's built-in
 `primary` workgroup; final table data lives only in the analytics bucket.
 
-Model YAML documents every projected column and its Athena type. Source declarations mirror the
-curated product contract; repository tests prevent table, column, description, type, schema, and
-ownership drift between the two boundaries.
+Model YAML documents every projected column and its Athena type. Source declarations retain only
+the dbt-specific mapping, freshness policy, and source tests. Repository tests verify those table
+and tested-column references against the curated product contract without duplicating its schema.

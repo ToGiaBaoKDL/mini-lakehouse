@@ -1,6 +1,6 @@
 [tool.uv.workspace]
-members = ["apps/arxiv_inspector", "dbt/analytics", "ocr", "platform"]
-exclude = ["jobs/emr", "ocr/runners/glm_ocr", "orchestration"]
+members = ["apps/arxiv_inspector", "ocr", "platform"]
+exclude = ["dbt/analytics", "jobs/emr", "ocr/runners/glm_ocr", "orchestration"]
 
 [dependency-groups]
 dev = [

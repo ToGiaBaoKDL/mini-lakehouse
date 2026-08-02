@@ -17,7 +17,10 @@ dependencies = [
 package = false
 
 [dependency-groups]
-dev = ["pyright>=1.1.408,<2"]
+dev = [
+    "pyright>=1.1.408,<2",
+    "pytest>=9,<10",
+]
 
 [tool.pyright]
 pythonVersion = "3.12"
@@ -31,3 +34,7 @@ reportUnknownArgumentType = false
 reportUnknownMemberType = false
 reportUnknownParameterType = false
 reportUnknownVariableType = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".."]

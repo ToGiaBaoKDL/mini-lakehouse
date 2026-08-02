@@ -1,0 +1,118 @@
+#!/bin/sh
+set -eu
+
+usage() {
+    printf '%s\n' \
+        "Usage: workload-identities init <identity-dir>" \
+        "       workload-identities render <identity-dir> <aws-terraform-dir>"
+    exit 2
+}
+
+command_name="${1:-}"
+identity_dir="${2:-}"
+[ -n "$command_name" ] && [ -n "$identity_dir" ] || usage
+
+ca_dir="$identity_dir/ca"
+ca_key="$ca_dir/private-key.pem"
+ca_certificate="$ca_dir/certificate.pem"
+
+initialize_ca() {
+    command -v openssl >/dev/null
+    umask 077
+    install -d -m 0700 "$identity_dir" "$ca_dir"
+
+    if [ ! -f "$ca_key" ]; then
+        openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$ca_key"
+    fi
+    if [ ! -f "$ca_certificate" ]; then
+        openssl req -x509 -new -sha256 -days 3650 \
+            -key "$ca_key" \
+            -subj "/CN=lakehouse-workload-ca" \
+            -out "$ca_certificate"
+    fi
+    printf '%s\n' "Workload CA: $ca_certificate"
+}
+
+issue_certificate() {
+    workload="$1"
+    common_name="$2"
+    bundle="$identity_dir/$workload"
+    private_key="$bundle/private-key.pem"
+    certificate="$bundle/certificate.pem"
+    request="$bundle/request.pem"
+    extensions="$bundle/extensions.conf"
+    install -d -m 0700 "$bundle"
+
+    if [ ! -f "$private_key" ]; then
+        openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$private_key"
+    fi
+    if [ -f "$certificate" ] && openssl x509 -checkend 2592000 -noout -in "$certificate"; then
+        return
+    fi
+
+    printf '%s\n' \
+        "basicConstraints=critical,CA:FALSE" \
+        "keyUsage=critical,digitalSignature" \
+        "extendedKeyUsage=clientAuth" >"$extensions"
+    openssl req -new -sha256 \
+        -key "$private_key" \
+        -subj "/CN=$common_name" \
+        -out "$request"
+    openssl x509 -req -sha256 -days 397 \
+        -in "$request" \
+        -CA "$ca_certificate" \
+        -CAkey "$ca_key" \
+        -CAcreateserial \
+        -extfile "$extensions" \
+        -out "$certificate"
+    rm -f "$request" "$extensions"
+}
+
+render_configs() {
+    terraform_dir="${3:-}"
+    [ -n "$terraform_dir" ] || usage
+    command -v jq >/dev/null
+    command -v openssl >/dev/null
+    command -v terraform >/dev/null
+    [ -r "$ca_key" ] && [ -r "$ca_certificate" ] || {
+        printf '%s\n' "Run the init command before rendering workload identities."
+        exit 1
+    }
+
+    trust_anchor_arn="$(terraform -chdir="$terraform_dir" output -raw roles_anywhere_trust_anchor_arn)"
+    region="$(printf '%s' "$trust_anchor_arn" | cut -d: -f4)"
+    workload_config="$(terraform -chdir="$terraform_dir" output -json roles_anywhere_workloads)"
+
+    printf '%s' "$workload_config" | jq -er 'keys[]' | while read -r workload_key; do
+        workload="$(printf '%s' "$workload_key" | tr _ -)"
+        common_name="$(printf '%s' "$workload_config" | jq -er --arg key "$workload_key" '.[$key].common_name')"
+        profile_arn="$(printf '%s' "$workload_config" | jq -er --arg key "$workload_key" '.[$key].profile_arn')"
+        role_arn="$(printf '%s' "$workload_config" | jq -er --arg key "$workload_key" '.[$key].role_arn')"
+        bundle="$identity_dir/$workload"
+        issue_certificate "$workload" "$common_name"
+
+        printf '%s\n' \
+            "[default]" \
+            "region = $region" \
+            "credential_process = /usr/local/bin/aws_signing_helper credential-process --certificate /run/aws/certificate.pem --private-key /run/aws/private-key.pem --trust-anchor-arn $trust_anchor_arn --profile-arn $profile_arn --role-arn $role_arn" \
+            >"$bundle/config"
+
+        if [ "$workload_key" = "services_deployer" ]; then
+            printf '%s\n' \
+                "[default]" \
+                "region = $region" \
+                "credential_process = /usr/local/bin/aws_signing_helper credential-process --certificate $bundle/certificate.pem --private-key $bundle/private-key.pem --trust-anchor-arn $trust_anchor_arn --profile-arn $profile_arn --role-arn $role_arn" \
+                >"$bundle/host-config"
+            chmod 0600 "$bundle/host-config"
+        fi
+        chmod 0600 "$bundle/config" "$bundle/private-key.pem"
+        chmod 0644 "$bundle/certificate.pem"
+    done
+    printf '%s\n' "Rendered workload identities under $identity_dir."
+}
+
+case "$command_name" in
+    init) initialize_ca ;;
+    render) render_configs "$@" ;;
+    *) usage ;;
+esac
