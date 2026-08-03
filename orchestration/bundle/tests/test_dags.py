@@ -22,7 +22,7 @@ EXPECTED_DAGS = {
 
 
 def _bag() -> DagBag:
-    return DagBag(dag_folder=Path("orchestration/dags"))
+    return DagBag(dag_folder=Path("orchestration/bundle/dags"))
 
 
 def _dag(bag: DagBag, dag_id: str) -> DAG:
@@ -37,9 +37,9 @@ def test_dagbag_loads_every_owned_dag_without_import_errors() -> None:
 
 
 def test_dag_files_are_domain_scoped_and_follow_worker_aware_naming() -> None:
-    files = sorted(Path("orchestration/dags").rglob("*.py"))
+    files = sorted(Path("orchestration/bundle/dags").rglob("*.py"))
     assert {path.stem for path in files} == EXPECTED_DAGS
-    assert all(path.parent != Path("orchestration/dags") for path in files)
+    assert all(path.parent != Path("orchestration/bundle/dags") for path in files)
     for path in files:
         job_type, worker_type, description = path.stem.split("_", maxsplit=2)
         assert job_type in ALLOWED_JOB_TYPES

@@ -39,7 +39,7 @@ RUN groupadd --gid 10001 worker \
     && useradd --uid 10001 --gid worker --create-home --shell /usr/sbin/nologin worker
 COPY --from=platform-wheel /dist /dist
 COPY --from=ocr-wheel /dist /dist
-COPY infra/runtime/install-aws-signing-helper /tmp/install-aws-signing-helper
+COPY infra/runtime/identity/install-aws-signing-helper /tmp/install-aws-signing-helper
 COPY --chown=worker:worker platform/contracts ./platform/contracts
 COPY --chown=worker:worker ocr/config ./ocr/config
 RUN --mount=type=cache,target=/root/.cache/uv \

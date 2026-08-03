@@ -16,7 +16,6 @@ locals {
     "notifications/slack_channel"       = local.notification_destinations.slack_channel
     "ocr/providers/kaggle_secret_id"    = aws_secretsmanager_secret.ocr["kaggle"].name
     "ocr/providers/modal_secret_id"     = aws_secretsmanager_secret.ocr["modal"].name
-    "secrets/airflow_bootstrap_id"      = aws_secretsmanager_secret.airflow["bootstrap"].name
   }
   parameter_names_by_workload = {
     airflow = [
@@ -27,20 +26,12 @@ locals {
       "emr/execution_role_arn",
       "notifications/alert_email",
       "notifications/slack_channel",
-      "secrets/airflow_bootstrap_id",
+      "airflow/remote_log_uri",
       "emr/code_uri",
     ]
     catalog_admin = [
       "storage/landing_uri",
       "storage/curated_uri",
-    ]
-    services_deployer = [
-      "secrets/airflow_bootstrap_id",
-      "airflow/remote_log_uri",
-      "deployment/release_manifest",
-    ]
-    image_publisher = [
-      "deployment/release_manifest",
     ]
     emr_deployer = [
       "emr/code_uri",
@@ -61,7 +52,6 @@ locals {
   }
   parameter_arn_prefix = "arn:${data.aws_partition.current.partition}:ssm:${local.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${local.parameter_prefix}"
   external_parameter_names = toset([
-    "deployment/release_manifest",
     "emr/code_uri",
   ])
   managed_parameter_names = toset(keys(local.runtime_parameters))

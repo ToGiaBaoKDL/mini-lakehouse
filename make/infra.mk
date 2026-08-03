@@ -102,26 +102,27 @@ terraform-validate: terraform-cache ## Initialize without remote state and valid
 		validate_root "$(TERRAFORM_VALIDATE_DATA_DIR)/oci" "$(OCI_TERRAFORM_DIR)"
 
 workload-pki-init: ## Create the local workload CA outside the repository.
-	infra/runtime/workload-identities init "$(AWS_IDENTITY_DIR)"
+	infra/runtime/identity/workload-identities init "$(AWS_IDENTITY_DIR)"
 
 workload-identities-render: ## Issue certificates and render configs from applied AWS outputs.
 	TF_DATA_DIR="$(AWS_TERRAFORM_DATA_DIR)" \
-		infra/runtime/workload-identities render "$(AWS_IDENTITY_DIR)" "$(AWS_TERRAFORM_DIR)"
+		infra/runtime/identity/workload-identities render "$(AWS_IDENTITY_DIR)" "$(AWS_TERRAFORM_DIR)"
 
 workload-identities-install: ## Install leaf workload identities on the private services host.
 	@command -v tailscale >/dev/null
-	@for WORKLOAD in airflow arxiv-inspector dbt-transformer ocr-worker services-deployer; do \
+	@for WORKLOAD in airflow arxiv-inspector dbt-transformer metadata-postgres ocr-worker services-deployer; do \
 		test -r "$(AWS_IDENTITY_DIR)/$${WORKLOAD}/config" || { \
 			printf '%s\n' "Missing rendered identity for $${WORKLOAD}."; exit 1; \
 		}; \
 	done
 	@tar -C "$(AWS_IDENTITY_DIR)" -cf - \
-		airflow arxiv-inspector dbt-transformer ocr-worker services-deployer \
+		airflow arxiv-inspector dbt-transformer metadata-postgres ocr-worker services-deployer \
 		| tailscale ssh "$(SERVICES_HOST_USER)@$(SERVICES_HOST)" \
 			'set -eu; target="$$HOME/.config/lakehouse/$(LAKEHOUSE_ENVIRONMENT)/aws"; \
 			install -d -m 0700 "$$target"; tar -C "$$target" -xf -; \
 			chmod 0700 "$$target"/*; chmod 0600 "$$target"/*/private-key.pem "$$target"/*/config; \
-			rm -f "$$target"/*/host-config; \
-			sed "s#/run/aws/#$$target/services-deployer/#g" \
-				"$$target/services-deployer/config" >"$$target/services-deployer/host-config"; \
-			chmod 0600 "$$target/services-deployer/host-config"'
+			for config in "$$target"/*/config; do \
+				workload="$$(basename "$$(dirname "$$config")")"; \
+				sed "s#/run/aws/#$$target/$$workload/#g" "$$config" >"$${config%/config}/host-config"; \
+			done; \
+			chmod 0600 "$$target"/*/host-config'

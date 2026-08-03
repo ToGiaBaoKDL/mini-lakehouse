@@ -15,11 +15,6 @@ env/
 .aws/
 .secrets/
 
-# Airflow
-airflow/logs/
-airflow/config/
-airflow/plugins/
-
 # Terraform
 **/.terraform/
 *.tfstate

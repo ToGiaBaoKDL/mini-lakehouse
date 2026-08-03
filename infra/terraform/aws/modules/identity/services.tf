@@ -19,16 +19,6 @@ data "aws_iam_policy_document" "services_deployer" {
     ]
     resources = var.container_repository_arns
   }
-  statement {
-    sid       = "ReadBootstrapReference"
-    actions   = ["ssm:GetParameter"]
-    resources = var.parameter_arns.services_deployer
-  }
-  statement {
-    sid       = "ReadAirflowBootstrapSecret"
-    actions   = ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"]
-    resources = [var.airflow_bootstrap_secret_arn]
-  }
 }
 
 resource "aws_iam_role_policy" "services_deployer" {

@@ -38,7 +38,7 @@ RUN groupadd --gid 10001 inspector \
     && useradd --uid 10001 --gid inspector --create-home --shell /usr/sbin/nologin inspector
 COPY --from=platform-wheel /dist /dist
 COPY --from=ocr-wheel /dist /dist
-COPY infra/runtime/install-aws-signing-helper /tmp/install-aws-signing-helper
+COPY infra/runtime/identity/install-aws-signing-helper /tmp/install-aws-signing-helper
 COPY --chown=inspector:inspector platform/contracts ./platform/contracts
 COPY --chown=inspector:inspector apps/arxiv_inspector ./apps/arxiv_inspector
 COPY --chown=inspector:inspector apps/arxiv_inspector/.streamlit ./.streamlit

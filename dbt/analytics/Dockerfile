@@ -15,7 +15,7 @@ ENV HOME=/tmp \
 WORKDIR /app
 
 COPY --from=uv /uv /uvx /bin/
-COPY infra/runtime/install-aws-signing-helper /tmp/install-aws-signing-helper
+COPY infra/runtime/identity/install-aws-signing-helper /tmp/install-aws-signing-helper
 COPY dbt/analytics/pyproject.toml dbt/analytics/uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
 

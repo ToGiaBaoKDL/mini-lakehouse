@@ -14,6 +14,7 @@ locals {
   external_runtime_workloads = toset([
     "airflow",
     "arxiv_inspector",
+    "metadata_postgres",
     "services_deployer",
     "dbt_transformer",
     "ocr_worker",

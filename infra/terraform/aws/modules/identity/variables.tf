@@ -108,9 +108,14 @@ variable "airflow_secret_arns" {
   }
 }
 
-variable "airflow_bootstrap_secret_arn" {
-  type        = string
-  description = "Airflow bootstrap secret readable by the services deployer."
+variable "metadata_postgres_secret_arns" {
+  type        = set(string)
+  description = "Bootstrap and application database secrets readable by metadata PostgreSQL."
+
+  validation {
+    condition     = length(var.metadata_postgres_secret_arns) > 0
+    error_message = "Metadata PostgreSQL requires at least one managed secret."
+  }
 }
 
 variable "ocr_secret_arns" {

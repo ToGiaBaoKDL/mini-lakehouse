@@ -4,14 +4,13 @@ from datetime import timedelta
 
 import pendulum
 from airflow.sdk import DAG
-
-from orchestration.callbacks.notifications import (
+from airflow_bundle.callbacks.notifications import (
     dag_failure_callbacks,
     dag_success_callbacks,
 )
-from orchestration.config.assets import ANALYTICS_ENGINEERING, CURATED_GITHUB
-from orchestration.config.templates import runtime_value
-from orchestration.operators.docker import docker_task
+from airflow_bundle.config.assets import ANALYTICS_ENGINEERING, CURATED_GITHUB
+from airflow_bundle.config.templates import runtime_value
+from airflow_bundle.operators.docker import docker_task
 
 DBT_IMAGE = "dbt-task:runtime"
 

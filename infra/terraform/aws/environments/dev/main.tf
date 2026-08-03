@@ -108,12 +108,15 @@ module "identity" {
     logs          = module.storage.bucket_arns.logs
     query_results = module.storage.bucket_arns["query-results"]
   }
-  airflow_secret_arns = toset([
-    for secret in aws_secretsmanager_secret.airflow : secret.arn
+  airflow_secret_arns = toset(concat(
+    [for secret in aws_secretsmanager_secret.airflow : secret.arn],
+    [aws_secretsmanager_secret.metadata_postgres["airflow"].arn],
+  ))
+  metadata_postgres_secret_arns = toset([
+    for secret in aws_secretsmanager_secret.metadata_postgres : secret.arn
   ])
-  airflow_bootstrap_secret_arn = aws_secretsmanager_secret.airflow["bootstrap"].arn
-  ocr_secret_arns              = toset([for secret in aws_secretsmanager_secret.ocr : secret.arn])
-  container_repository_arns    = toset(values(module.container_registry.repository_arns))
-  workload_data_access         = local.workload_data_access
-  tags                         = local.tags
+  ocr_secret_arns           = toset([for secret in aws_secretsmanager_secret.ocr : secret.arn])
+  container_repository_arns = toset(values(module.container_registry.repository_arns))
+  workload_data_access      = local.workload_data_access
+  tags                      = local.tags
 }

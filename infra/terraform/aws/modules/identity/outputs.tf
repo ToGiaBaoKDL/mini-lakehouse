@@ -3,6 +3,11 @@ output "airflow_role_arn" {
   value       = aws_iam_role.airflow.arn
 }
 
+output "metadata_postgres_role_arn" {
+  description = "IAM role used to materialize shared metadata PostgreSQL secrets."
+  value       = aws_iam_role.metadata_postgres.arn
+}
+
 output "emr_runtime_role_arn" {
   description = "Execution role assumed by EMR Serverless jobs."
   value       = aws_iam_role.emr_runtime.arn

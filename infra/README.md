@@ -64,15 +64,17 @@ Pin `image_ocid` in OCI tfvars to one reviewed Ubuntu 24.04 AArch64 image; Terra
 the host to a newly published image implicitly. IAM Roles Anywhere trusts the public workload CA only. The CA private key stays outside the
 repository; containers receive only their own leaf certificate, private key, and generated AWS
 config. `make workload-identities-install` transfers only leaf bundles over Tailscale SSH and never
-copies the CA. The services deployer can pull ECR images and read the Airflow bootstrap secret,
-remote-log URI, and release manifest but
-cannot access lakehouse data. Airflow, dbt, OCR, and Inspector retain separate least-privilege
-roles. Checked-in workload entitlements bind dbt to `curated_github`/`analytics_engineering`, OCR
-and Inspector to `curated_arxiv`, and each workload to its matching S3 prefix. Only the shared EMR
-processor and catalog administrator retain tier-wide landing/curated access by design.
+copies the CA. The services deployer can pull reviewed ECR digests but cannot read application
+secrets or lakehouse data. Airflow and metadata PostgreSQL retrieve only their own runtime and
+database secrets with separate workload identities. dbt, OCR, and Inspector retain separate
+least-privilege roles. Checked-in workload entitlements bind dbt to
+`curated_github`/`analytics_engineering`, OCR and Inspector to `curated_arxiv`, and each workload to
+its matching S3 prefix. Only the shared EMR processor and catalog administrator retain tier-wide
+landing/curated access by design.
 
 Airflow task logs use a dedicated KMS-encrypted S3 bucket with 30-day dev retention. Its generated
-dev-auth password file and PostgreSQL data remain persistent Docker volumes on the single dev host.
+dev-auth password file, DAG bundle cache, and shared PostgreSQL data remain persistent Docker
+volumes on the single dev host.
 
 Review every plan. Dev remains rebuildable; production should disable destructive bucket/ECR
 flags, use managed certificate issuance, and keep the same ownership boundaries.

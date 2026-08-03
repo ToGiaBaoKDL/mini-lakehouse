@@ -1,0 +1,40 @@
+name: Airflow Bundle CI
+
+on:
+  pull_request:
+    paths:
+      - orchestration/bundle/**
+      - orchestration/runtime/pyproject.toml
+      - orchestration/runtime/uv.lock
+      - .github/workflows/airflow-bundle.yml
+  push:
+    branches: [main, master]
+    paths:
+      - orchestration/bundle/**
+      - orchestration/runtime/pyproject.toml
+      - orchestration/runtime/uv.lock
+      - .github/workflows/airflow-bundle.yml
+
+concurrency:
+  group: airflow-bundle-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          version: "0.11.30"
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version-file: .python-version
+      - run: uv sync --frozen --project orchestration/runtime --all-groups
+      - run: uv run --project orchestration/runtime ruff format --check orchestration/bundle
+      - run: uv run --project orchestration/runtime ruff check orchestration/bundle
+      - run: uv run --project orchestration/runtime pyright --project orchestration/runtime
+      - run: >-
+          uv run --project orchestration/runtime pytest
+          -c orchestration/runtime/pyproject.toml orchestration/bundle/tests

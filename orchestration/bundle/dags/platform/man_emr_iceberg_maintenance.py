@@ -2,9 +2,8 @@
 
 import pendulum
 from airflow.sdk import DAG
-
-from orchestration.callbacks.notifications import dag_failure_callbacks, dag_success_callbacks
-from orchestration.operators.emr import emr_spark_job
+from airflow_bundle.callbacks.notifications import dag_failure_callbacks, dag_success_callbacks
+from airflow_bundle.operators.emr import emr_spark_job
 
 with DAG(
     dag_id="man_emr_iceberg_maintenance",

@@ -2,8 +2,12 @@ name: Lakehouse CI
 
 on:
   pull_request:
+    paths-ignore:
+      - orchestration/bundle/**
   push:
     branches: [main, master]
+    paths-ignore:
+      - orchestration/bundle/**
 
 jobs:
   quality:
@@ -23,5 +27,5 @@ jobs:
           terraform_wrapper: false
       - run: uv sync --frozen --all-packages --all-extras --all-groups
       - run: uv sync --frozen --project dbt/analytics
-      - run: uv sync --frozen --project orchestration --all-groups
+      - run: uv sync --frozen --project orchestration/runtime --all-groups
       - run: make check

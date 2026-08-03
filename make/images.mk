@@ -1,17 +1,18 @@
 IMAGE_PUBLISHER_AWS_PROFILE ?= lakehouse-$(LAKEHOUSE_ENVIRONMENT)-image-publisher
 
 .PHONY: images-check airflow-build arxiv-inspector-build dbt-task-build ocr-worker-build images-build \
-	release-preflight images-publish-preflight images-login images-publish
+	release-preflight image-publish-preflight image-login image-publish \
+	airflow-publish arxiv-inspector-publish dbt-task-publish ocr-worker-publish
 
 images-check: ## Validate every Dockerfile without building image layers.
-	docker buildx build --check --file orchestration/Dockerfile .
+	docker buildx build --check --file orchestration/runtime/Dockerfile .
 	docker buildx build --check --file apps/arxiv_inspector/Dockerfile .
 	docker buildx build --check --file dbt/analytics/Dockerfile .
 	docker buildx build --check --file ocr/Dockerfile .
 	docker buildx build --check --file jobs/emr/Dockerfile .
 
 airflow-build: ## Build the local Airflow image.
-	docker build --file orchestration/Dockerfile --tag airflow:local .
+	docker build --file orchestration/runtime/Dockerfile --tag airflow:local .
 
 arxiv-inspector-build: ## Build the local ArXiv Inspector image.
 	docker build --file apps/arxiv_inspector/Dockerfile --tag arxiv-inspector:local .
@@ -29,11 +30,15 @@ release-preflight: preflight ## Require an immutable committed release.
 		printf '%s\n' "Commit the worktree before publishing or deploying a release."; exit 1; \
 	}
 
-images-publish-preflight: release-preflight ## Require initialized AWS image registry state.
+image-publish-preflight: release-preflight ## Validate one component image release.
 	@command -v terraform >/dev/null
+	@case "$(COMPONENT)" in \
+		airflow|arxiv-inspector|dbt-task|ocr-worker) ;; \
+		*) printf '%s\n' "COMPONENT must be airflow, arxiv-inspector, dbt-task, or ocr-worker."; exit 1 ;; \
+	esac
 	@$(AWS_TERRAFORM) output -json container_repository_urls >/dev/null
 
-images-login: preflight ## Authenticate Docker to the environment ECR registry.
+image-login: preflight ## Authenticate Docker to the environment ECR registry.
 	@command -v terraform >/dev/null
 	@set -eu; \
 		REPOSITORIES="$$($(AWS_TERRAFORM) output -json container_repository_urls)"; \
@@ -42,28 +47,35 @@ images-login: preflight ## Authenticate Docker to the environment ECR registry.
 			| docker login --username AWS --password-stdin "$${REGISTRY}" >/dev/null; \
 		printf '%s\n' "Authenticated Docker to $${REGISTRY}."
 
-images-publish: images-publish-preflight images-login ## Publish immutable multi-architecture images for RELEASE.
+image-publish: image-publish-preflight image-login ## Publish one immutable multi-architecture component image.
 	@set -eu; \
 		REPOSITORIES="$$($(AWS_TERRAFORM) output -json container_repository_urls)"; \
-		printf '%s' "$${REPOSITORIES}" | jq -er 'keys[]' | while read -r SERVICE; do \
-			REPOSITORY="$$(printf '%s' "$${REPOSITORIES}" | jq -er --arg service "$${SERVICE}" '.[$$service]')"; \
-			if aws --profile "$(IMAGE_PUBLISHER_AWS_PROFILE)" ecr describe-images \
-				--repository-name "$${REPOSITORY##*/}" --image-ids imageTag="$(RELEASE)" >/dev/null 2>&1; then \
-				printf '%s\n' "$${SERVICE}:$(RELEASE) is already published."; continue; \
-			fi; \
-			case "$${SERVICE}" in \
-				airflow) DOCKERFILE=orchestration/Dockerfile ;; \
-				arxiv-inspector) DOCKERFILE=apps/arxiv_inspector/Dockerfile ;; \
-				dbt-task) DOCKERFILE=dbt/analytics/Dockerfile ;; \
-				ocr-worker) DOCKERFILE=ocr/Dockerfile ;; \
-				*) printf '%s\n' "Unknown image $${SERVICE}."; exit 1 ;; \
-			esac; \
-			docker buildx build --platform linux/amd64,linux/arm64 \
-				--file "$${DOCKERFILE}" --tag "$${REPOSITORY}:$(RELEASE)" --push .; \
-		done; \
-		MANIFEST="$$(printf '%s' "$${REPOSITORIES}" | jq -c --arg release "$(RELEASE)" \
-			'{version: 1, release: $$release, images: with_entries(.value = (.value + ":" + $$release))}')"; \
-		aws --profile "$(IMAGE_PUBLISHER_AWS_PROFILE)" ssm put-parameter \
-			--name "$(RUNTIME_PARAMETER_PREFIX)/deployment/release_manifest" \
-			--type String --value "$${MANIFEST}" --overwrite >/dev/null; \
-		printf '%s\n' "Published release manifest for $(RELEASE)."
+		REPOSITORY="$$(printf '%s' "$${REPOSITORIES}" | jq -er --arg component "$(COMPONENT)" '.[$$component]')"; \
+		if aws --profile "$(IMAGE_PUBLISHER_AWS_PROFILE)" ecr describe-images \
+			--repository-name "$${REPOSITORY##*/}" --image-ids imageTag="$(RELEASE)" >/dev/null 2>&1; then \
+			printf '%s\n' "$(COMPONENT):$(RELEASE) is already published."; exit 0; \
+		fi; \
+		case "$(COMPONENT)" in \
+			airflow) DOCKERFILE=orchestration/runtime/Dockerfile ;; \
+			arxiv-inspector) DOCKERFILE=apps/arxiv_inspector/Dockerfile ;; \
+			dbt-task) DOCKERFILE=dbt/analytics/Dockerfile ;; \
+			ocr-worker) DOCKERFILE=ocr/Dockerfile ;; \
+		esac; \
+		docker buildx build --platform linux/amd64,linux/arm64 \
+			--file "$${DOCKERFILE}" --tag "$${REPOSITORY}:$(RELEASE)" --push .; \
+		DIGEST="$$(aws --profile "$(IMAGE_PUBLISHER_AWS_PROFILE)" ecr describe-images \
+			--repository-name "$${REPOSITORY##*/}" --image-ids imageTag="$(RELEASE)" \
+			--query 'imageDetails[0].imageDigest' --output text)"; \
+		printf '%s@%s\n' "$${REPOSITORY}" "$${DIGEST}"
+
+airflow-publish: ## Publish only the Airflow runtime image.
+	@$(MAKE) image-publish COMPONENT=airflow
+
+arxiv-inspector-publish: ## Publish only the ArXiv Inspector image.
+	@$(MAKE) image-publish COMPONENT=arxiv-inspector
+
+dbt-task-publish: ## Publish only the dbt task image.
+	@$(MAKE) image-publish COMPONENT=dbt-task
+
+ocr-worker-publish: ## Publish only the OCR worker image.
+	@$(MAKE) image-publish COMPONENT=ocr-worker

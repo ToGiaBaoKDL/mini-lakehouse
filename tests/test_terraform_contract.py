@@ -82,9 +82,11 @@ def test_secret_containers_never_manage_secret_values() -> None:
     environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
 
     assert 'resource "aws_secretsmanager_secret" "airflow"' in environment
+    assert 'resource "aws_secretsmanager_secret" "metadata_postgres"' in environment
     assert 'resource "aws_secretsmanager_secret" "ocr"' in environment
-    assert '"lakehouse/${local.environment}/airflow/bootstrap"' in environment
+    assert '"lakehouse/${local.environment}/airflow/runtime"' in environment
     assert '"lakehouse/${local.environment}/airflow/connections/${connection}"' in environment
+    assert '"lakehouse/${local.environment}/metadata-postgres/${each.key}"' in environment
     assert '"lakehouse/${local.environment}/ocr/providers/${each.key}"' in environment
     assert "aws_secretsmanager_secret_version" not in environment
 
@@ -107,8 +109,8 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
     assert '"athena/dbt_output_uri"' in environment
     assert '"athena/arxiv_inspector_output_uri"' in environment
     assert '"airflow/remote_log_uri"' in environment
-    assert '"deployment/release_manifest"' in environment
-    assert "workload_data_access         = local.workload_data_access" in environment
+    assert '"deployment/release_manifest"' not in environment
+    assert "workload_data_access = local.workload_data_access" in normalized_environment
     assert "local.notification_destinations.alert_email" in environment
     assert "local.notification_destinations.slack_channel" in environment
     assert '"catalog/name"' not in environment
@@ -124,6 +126,7 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
         "dbt-transformer",
         "arxiv-inspector",
         "image-publisher",
+        "metadata-postgres",
         "ocr-worker",
     ):
         assert f'name = "${{var.name_prefix}}-{role}"' in normalized_identity
@@ -148,7 +151,7 @@ def test_runtime_parameters_and_trust_are_bounded_by_workload() -> None:
 
     assert 'check "runtime_parameter_grants"' in environment
     assert '"emr/code_uri"' in environment
-    assert '"secrets/airflow_bootstrap_id"' in environment
+    assert '"secrets/airflow_bootstrap_id"' not in environment
     assert '"catalog/name"' not in environment
     assert "managed_parameter_names" in environment
     assert "granted_parameter_names" in environment
@@ -180,6 +183,10 @@ def test_service_images_are_immutable_bounded_and_published_by_one_role() -> Non
     assert '"ecr:GetAuthorizationToken"' in identity
     assert '"ecr:PutImage"' in identity
     assert "container_repository_arns" in identity
+    assert "PublishReleaseManifest" not in identity
+    assert "ssm:PutParameter" not in Path(
+        "infra/terraform/aws/modules/identity/images.tf"
+    ).read_text(encoding="utf-8")
 
 
 def test_airflow_and_ocr_worker_have_separate_data_permissions() -> None:

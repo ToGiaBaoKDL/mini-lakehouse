@@ -1,12 +1,13 @@
 [project]
 name = "airflow-orchestration"
 version = "0.1.0"
-description = "Self-hosted Airflow DAGs and runtime integration for the lakehouse."
+description = "Self-hosted Airflow runtime and provider integration for the lakehouse."
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "apache-airflow==3.3.0",
     "apache-airflow-providers-amazon[aiobotocore]==9.31.0",
     "apache-airflow-providers-docker==4.5.7",
+    "apache-airflow-providers-git==0.4.1",
     "apache-airflow-providers-slack==9.10.2",
     "apache-airflow-providers-smtp==3.0.1",
     "docker>=7.1,<8",
@@ -20,13 +21,14 @@ package = false
 dev = [
     "pyright>=1.1.408,<2",
     "pytest>=9,<10",
+    "ruff>=0.14,<0.16",
 ]
 
 [tool.pyright]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
-include = ["callbacks", "config", "dags", "operators"]
-extraPaths = [".."]
+include = ["airflow_runtime", "../bundle"]
+extraPaths = [".", "../bundle"]
 venvPath = "."
 venv = ".venv"
 reportMissingTypeStubs = false
@@ -36,5 +38,5 @@ reportUnknownParameterType = false
 reportUnknownVariableType = false
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = [".."]
+testpaths = ["../bundle/tests"]
+pythonpath = [".", "../bundle"]

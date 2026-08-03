@@ -5,7 +5,7 @@ locals {
   ])
   airflow_secret_names = merge(
     {
-      bootstrap = "lakehouse/${local.environment}/airflow/bootstrap"
+      runtime = "lakehouse/${local.environment}/airflow/runtime"
     },
     {
       for connection in local.airflow_connection_names :
@@ -14,12 +14,21 @@ locals {
   )
 }
 
+resource "aws_secretsmanager_secret" "metadata_postgres" {
+  for_each = toset(["airflow", "bootstrap"])
+
+  name                    = "lakehouse/${local.environment}/metadata-postgres/${each.key}"
+  description             = each.key == "bootstrap" ? "Bootstrap credential for the shared metadata PostgreSQL server." : "Database credential owned by the Airflow metadata database."
+  recovery_window_in_days = 7
+  tags                    = local.tags
+}
+
 resource "aws_secretsmanager_secret" "airflow" {
   for_each = local.airflow_secret_names
 
   name = each.value
-  description = each.key == "bootstrap" ? (
-    "Bootstrap credentials for the self-hosted Airflow runtime."
+  description = each.key == "runtime" ? (
+    "Runtime credentials for the self-hosted Airflow service."
     ) : (
     "Airflow connection ${each.key} for the ${local.environment} environment."
   )

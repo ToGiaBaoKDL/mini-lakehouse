@@ -8,7 +8,7 @@ from airflow.providers.docker.operators.docker import DockerOperator
 from airflow.sdk import Asset
 from docker.types import Mount
 
-from orchestration.callbacks.notifications import task_failure_callbacks
+from airflow_bundle.callbacks.notifications import task_failure_callbacks
 
 
 def docker_task(

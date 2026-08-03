@@ -18,7 +18,9 @@ docs
 infra/*
 !infra/runtime/
 infra/runtime/*
-!infra/runtime/install-aws-signing-helper
+!infra/runtime/identity/
+infra/runtime/identity/*
+!infra/runtime/identity/install-aws-signing-helper
 ocr/runners
 plans
 tests

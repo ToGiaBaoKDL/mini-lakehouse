@@ -24,11 +24,6 @@ data "aws_iam_policy_document" "image_publisher" {
     ]
     resources = var.container_repository_arns
   }
-  statement {
-    sid       = "PublishReleaseManifest"
-    actions   = ["ssm:PutParameter"]
-    resources = var.parameter_arns.image_publisher
-  }
 }
 
 resource "aws_iam_role_policy" "image_publisher" {

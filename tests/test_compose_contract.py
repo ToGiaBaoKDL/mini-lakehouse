@@ -1,7 +1,13 @@
+import json
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+AIRFLOW_COMPOSE = "orchestration/deploy/compose.yaml"
+INSPECTOR_COMPOSE = "apps/arxiv_inspector/deploy/compose.yaml"
+POSTGRES_COMPOSE = "infra/runtime/postgres/compose.yaml"
+AIRFLOW_RUNTIME = Path("orchestration/runtime")
 
 
 def _compose(path: str) -> dict[str, Any]:
@@ -11,36 +17,57 @@ def _compose(path: str) -> dict[str, Any]:
 
 
 def test_compose_owns_only_self_hosted_application_services() -> None:
-    files = sorted(path.name for path in Path.cwd().glob("compose*.yaml"))
-    assert files == ["compose.airflow.yaml", "compose.arxiv-inspector.yaml"]
+    assert not list(Path.cwd().glob("compose*.yaml"))
 
-    airflow = _compose("compose.airflow.yaml")["services"]
+    airflow = _compose(AIRFLOW_COMPOSE)["services"]
     assert set(airflow) == {
-        "airflow-postgres",
         "airflow-init",
         "airflow-api-server",
         "airflow-scheduler",
         "airflow-dag-processor",
         "airflow-triggerer",
     }
-    assert set(_compose("compose.arxiv-inspector.yaml")["services"]) == {"arxiv-inspector"}
+    assert set(_compose(INSPECTOR_COMPOSE)["services"]) == {"arxiv-inspector"}
+    assert set(_compose(POSTGRES_COMPOSE)["services"]) == {
+        "metadata-postgres",
+        "metadata-postgres-bootstrap",
+    }
 
 
 def test_airflow_uses_local_executor_and_deferrable_runtime_components() -> None:
-    payload = _compose("compose.airflow.yaml")
+    payload = _compose(AIRFLOW_COMPOSE)
     common = payload["x-airflow-common"]
     environment = common["environment"]
 
     assert environment["AIRFLOW__CORE__EXECUTOR"] == "LocalExecutor"
     assert environment["AIRFLOW__CORE__LOAD_EXAMPLES"] == "false"
+    assert environment["AIRFLOW__CORE__RERUN_WITH_LATEST_VERSION"] == "false"
     assert common["image"] == "${AIRFLOW_IMAGE:-airflow:local}"
     assert common["user"] == "${LOCAL_UID}:0"
     assert "build" not in common
-    assert environment["AIRFLOW__SECRETS__BACKEND"].endswith("AwsSecretsBackend")
+    assert environment["AIRFLOW__SECRETS__BACKEND"] == ("airflow_runtime.secrets.AwsSecretsBackend")
     assert "variables_prefix" in environment["AIRFLOW__SECRETS__BACKEND_KWARGS"]
     assert "profile_name" not in environment["AIRFLOW__SECRETS__BACKEND_KWARGS"]
     assert payload["services"]["airflow-triggerer"]["command"] == "airflow triggerer"
     assert payload["services"]["airflow-dag-processor"]["command"] == "airflow dag-processor"
+    bundle_config = json.loads(environment["AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_CONFIG_LIST"])
+    assert bundle_config == [
+        {
+            "name": "lakehouse",
+            "classpath": "airflow.providers.git.bundles.git.GitDagBundle",
+            "kwargs": {
+                "repo_url": "https://github.com/ToGiaBaoKDL/mini-lakehouse.git",
+                "tracking_ref": "main",
+                "subdir": "orchestration/bundle",
+                "sparse_dirs": ["orchestration/bundle"],
+                "refresh_interval": 60,
+            },
+        }
+    ]
+    assert environment["AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_STORAGE_PATH"] == (
+        "/opt/airflow/dag-bundles"
+    )
+    assert environment["AIRFLOW__DAG_PROCESSOR__DISABLE_BUNDLE_VERSIONING"] == "false"
     init_command = payload["services"]["airflow-init"]["command"]
     assert init_command[:2] == ["bash", "-ec"]
     assert "install -m 0600 /run/secrets/airflow_admin_passwords" in init_command[-1]
@@ -68,10 +95,14 @@ def test_airflow_uses_local_executor_and_deferrable_runtime_components() -> None
         ".generated"
     )
     assert "airflow-auth:/opt/airflow/auth" in common["volumes"]
+    assert "airflow-dag-bundles:/opt/airflow/dag-bundles" in common["volumes"]
+    assert payload["networks"]["metadata"]["external"] is True
+    assert set(common["networks"]) == {"metadata", "runtime"}
+    assert _compose(POSTGRES_COMPOSE)["networks"]["metadata"]["internal"] is True
 
 
-def test_airflow_bootstrap_secrets_are_service_scoped_files() -> None:
-    payload = _compose("compose.airflow.yaml")
+def test_airflow_runtime_secrets_are_service_scoped_files() -> None:
+    payload = _compose(AIRFLOW_COMPOSE)
     services = payload["services"]
     environment = payload["x-airflow-common"]["environment"]
 
@@ -83,11 +114,8 @@ def test_airflow_bootstrap_secrets_are_service_scoped_files() -> None:
     assert environment["AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD"].startswith("python -c")
     assert environment["AIRFLOW__CORE__FERNET_KEY_CMD"].startswith("cat /run/secrets/")
     assert environment["AIRFLOW__API_AUTH__JWT_SECRET_CMD"].startswith("cat /run/secrets/")
-    assert services["airflow-postgres"]["environment"]["POSTGRES_PASSWORD_FILE"] == (
-        "/run/secrets/airflow_db_password"
-    )
     assert set(payload["secrets"]) == {
-        "airflow_db_password",
+        "airflow_database_password",
         "airflow_fernet_key",
         "airflow_jwt_secret",
         "airflow_admin_passwords",
@@ -95,27 +123,32 @@ def test_airflow_bootstrap_secrets_are_service_scoped_files() -> None:
     assert all("environment" in secret for secret in payload["secrets"].values())
 
     services_makefile = Path("make/services.mk").read_text(encoding="utf-8")
-    assert '"version":2' in services_makefile
-    assert ".version == 2" in services_makefile
+    assert '"version":1' in services_makefile
+    assert ".version == 1" in services_makefile
     assert "admin_password" in services_makefile
     assert "AIRFLOW_ADMIN_PASSWORDS" in services_makefile
+    assert "METADATA_POSTGRES_BOOTSTRAP_SECRET" in services_makefile
+    assert "AIRFLOW_DATABASE_SECRET" in services_makefile
 
 
 def test_airflow_runtime_components_have_role_appropriate_healthchecks() -> None:
-    services = _compose("compose.airflow.yaml")["services"]
+    services = _compose(AIRFLOW_COMPOSE)["services"]
 
     assert "/api/v2/version" in services["airflow-api-server"]["healthcheck"]["test"][-1]
     assert "SchedulerJob" in services["airflow-scheduler"]["healthcheck"]["test"][-1]
     assert "DagProcessorJob" in services["airflow-dag-processor"]["healthcheck"]["test"][-1]
     assert "TriggererJob" in services["airflow-triggerer"]["healthcheck"]["test"][-1]
-    assert "healthcheck" in services["airflow-postgres"]
     assert "healthcheck" not in services["airflow-init"]
+    postgres = _compose(POSTGRES_COMPOSE)["services"]
+    assert "healthcheck" in postgres["metadata-postgres"]
+    assert postgres["metadata-postgres-bootstrap"]["restart"] == "no"
+    assert Path("infra/runtime/postgres/bootstrap.sql").is_file()
 
 
 def test_compose_uses_aws_credential_chain_without_static_keys() -> None:
     rendered = "\n".join(
         Path(path).read_text(encoding="utf-8")
-        for path in ("compose.airflow.yaml", "compose.arxiv-inspector.yaml")
+        for path in (AIRFLOW_COMPOSE, INSPECTOR_COMPOSE, POSTGRES_COMPOSE)
     )
 
     assert "AWS_ACCESS_KEY_ID" not in rendered
@@ -139,7 +172,7 @@ def test_local_runtime_does_not_use_dotenv_files() -> None:
 
 
 def test_arxiv_inspector_receives_only_its_explicit_environment() -> None:
-    service = _compose("compose.arxiv-inspector.yaml")["services"]["arxiv-inspector"]
+    service = _compose(INSPECTOR_COMPOSE)["services"]["arxiv-inspector"]
 
     assert "env_file" not in service
     assert "build" not in service
@@ -154,16 +187,19 @@ def test_arxiv_inspector_receives_only_its_explicit_environment() -> None:
 
 
 def test_all_container_images_are_immutable() -> None:
-    airflow_dockerfile = Path("orchestration/Dockerfile").read_text(encoding="utf-8")
+    airflow_dockerfile = (AIRFLOW_RUNTIME / "Dockerfile").read_text(encoding="utf-8")
     dbt_dockerfile = Path("dbt/analytics/Dockerfile").read_text(encoding="utf-8")
     inspector_dockerfile = Path("apps/arxiv_inspector/Dockerfile").read_text(encoding="utf-8")
     ocr_dockerfile = Path("ocr/Dockerfile").read_text(encoding="utf-8")
     emr_dockerfile = Path("jobs/emr/Dockerfile").read_text(encoding="utf-8")
-    compose = Path("compose.airflow.yaml").read_text(encoding="utf-8")
+    compose = "\n".join(
+        Path(path).read_text(encoding="utf-8") for path in (AIRFLOW_COMPOSE, POSTGRES_COMPOSE)
+    )
 
     assert not Path("Dockerfile").exists()
     assert "apache/airflow:3.3.0-python3.12@sha256:" in airflow_dockerfile
-    assert "orchestration/uv.lock" in airflow_dockerfile
+    assert "orchestration/runtime/uv.lock" in airflow_dockerfile
+    assert "COPY --chown=airflow:0 orchestration/bundle" not in airflow_dockerfile
     assert '"/uv", "export", "--frozen", "--no-dev"' in airflow_dockerfile
     assert "USER airflow" in airflow_dockerfile
     assert 'ENTRYPOINT ["dbt"]' in dbt_dockerfile
@@ -174,7 +210,9 @@ def test_all_container_images_are_immutable() -> None:
     assert "USER worker" in ocr_dockerfile
     assert "USER inspector" in inspector_dockerfile
     assert "HEALTHCHECK" in inspector_dockerfile
-    assert '"apache-airflow==3.3.0"' in Path("orchestration/pyproject.toml").read_text(
+    dockerignore = Path(".dockerignore").read_text(encoding="utf-8")
+    assert "!infra/runtime/identity/install-aws-signing-helper" in dockerignore
+    assert '"apache-airflow==3.3.0"' in (AIRFLOW_RUNTIME / "pyproject.toml").read_text(
         encoding="utf-8"
     )
     assert "postgres:17.10@sha256:" in compose
@@ -190,7 +228,7 @@ def test_all_container_images_are_immutable() -> None:
 def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
     workspace = Path("pyproject.toml").read_text(encoding="utf-8")
     platform = Path("platform/pyproject.toml").read_text(encoding="utf-8")
-    orchestration = Path("orchestration/pyproject.toml").read_text(encoding="utf-8")
+    orchestration = (AIRFLOW_RUNTIME / "pyproject.toml").read_text(encoding="utf-8")
     inspector = Path("apps/arxiv_inspector/pyproject.toml").read_text(encoding="utf-8")
     analytics = Path("dbt/analytics/pyproject.toml").read_text(encoding="utf-8")
     ocr = Path("ocr/pyproject.toml").read_text(encoding="utf-8")
@@ -202,6 +240,7 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
     assert '"apache-airflow==3.3.0"' in orchestration
     assert '"apache-airflow-providers-amazon[aiobotocore]==9.31.0"' in orchestration
     assert '"apache-airflow-providers-docker==4.5.7"' in orchestration
+    assert '"apache-airflow-providers-git==0.4.1"' in orchestration
     assert '"apache-airflow-providers-smtp==3.0.1"' in orchestration
     assert "constraint-dependencies" not in orchestration
     assert "document-ocr" not in orchestration
@@ -229,11 +268,31 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
         in workspace
     )
     assert Path("dbt/analytics/uv.lock").is_file()
-    assert Path("orchestration/uv.lock").is_file()
+    assert (AIRFLOW_RUNTIME / "uv.lock").is_file()
     assert "apache-airflow" not in Path("uv.lock").read_text(encoding="utf-8")
     assert "opentelemetry" not in Path("uv.lock").read_text(encoding="utf-8")
-    assert "apache-airflow" in Path("orchestration/uv.lock").read_text(encoding="utf-8")
-    assert "opentelemetry" in Path("orchestration/uv.lock").read_text(encoding="utf-8")
+    assert "apache-airflow" in (AIRFLOW_RUNTIME / "uv.lock").read_text(encoding="utf-8")
+    assert "opentelemetry" in (AIRFLOW_RUNTIME / "uv.lock").read_text(encoding="utf-8")
+
+
+def test_airflow_bundle_and_runtime_have_one_way_ownership() -> None:
+    bundle = Path("orchestration/bundle")
+    runtime = Path("orchestration/runtime")
+
+    assert (bundle / "dags").is_dir()
+    assert (bundle / ".airflowignore").read_text(encoding="utf-8").strip() == "^tests/"
+    assert (bundle / "airflow_bundle/operators").is_dir()
+    assert (bundle / "airflow_bundle/callbacks").is_dir()
+    assert (runtime / "airflow_runtime/secrets.py").is_file()
+    assert (Path("orchestration/deploy") / "compose.yaml").is_file()
+    assert Path(POSTGRES_COMPOSE).is_file()
+    assert not (bundle / "config/aws_secrets.py").exists()
+
+    bundle_source = "\n".join(path.read_text(encoding="utf-8") for path in bundle.rglob("*.py"))
+    runtime_source = "\n".join(path.read_text(encoding="utf-8") for path in runtime.rglob("*.py"))
+    assert "from orchestration" not in bundle_source
+    assert "airflow_runtime" not in bundle_source
+    assert "airflow_bundle" not in runtime_source
 
 
 def test_platform_control_plane_is_one_owned_workspace_package() -> None:
@@ -275,12 +334,22 @@ def test_makefile_exposes_owned_operational_entrypoints() -> None:
         "services-up:",
         "services-down:",
         "services-ps:",
+        "metadata-postgres-secrets-init:",
+        "metadata-postgres-up:",
+        "metadata-postgres-down:",
         "catalog-apply:",
         "catalog-validate:",
-        "airflow-bootstrap-init:",
-        "images-login:",
-        "images-publish:",
-        "release-deploy:",
+        "airflow-secrets-init:",
+        "image-login:",
+        "image-publish:",
+        "airflow-publish:",
+        "arxiv-inspector-publish:",
+        "dbt-task-publish:",
+        "ocr-worker-publish:",
+        "airflow-deploy:",
+        "arxiv-inspector-deploy:",
+        "dbt-task-install:",
+        "ocr-worker-install:",
         "ocr-worker-build:",
         "dbt-task-build:",
         "emr-jobs-package:",
@@ -295,13 +364,15 @@ def test_makefile_exposes_owned_operational_entrypoints() -> None:
     assert "--push" in makefile
     assert "ecr describe-images" in makefile
     assert "already published" in makefile
-    assert "deployment/release_manifest" in makefile
+    assert "deployment/release_manifest" not in makefile
+    assert "deploy-release" not in makefile
+    assert "COMPONENT_IMAGE must be an immutable image reference by digest" in makefile
     assert 'imageTag="$(RELEASE)"' in makefile
     assert "ocr-worker:runtime" in makefile
     assert "AIRFLOW_PARALLELISM ?=" not in makefile
     assert "AIRFLOW_USERS ?=" not in makefile
     assert "PROJECT_NAME ?=" not in makefile
-    assert "AIRFLOW_HOME ?= /tmp/lakehouse-airflow-$(LOCAL_UID)" in makefile
+    assert "AIRFLOW_HOME ?=" not in makefile
     assert "TF_STATE_BUCKET" not in makefile
     assert "TF_PLUGIN_CACHE_DIR" in makefile
     assert "AWS_STATE_TERRAFORM" in makefile

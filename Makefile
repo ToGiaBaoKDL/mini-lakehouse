@@ -8,7 +8,6 @@ LOCAL_UID ?= $(shell id -u)
 DOCKER_GID ?= $(shell stat -c '%g' /var/run/docker.sock 2>/dev/null || printf '0')
 AWS_IDENTITY_DIR ?= $(HOME)/.config/lakehouse/$(LAKEHOUSE_ENVIRONMENT)/aws
 HOST_BIND_ADDRESS ?= 127.0.0.1
-AIRFLOW_HOME ?= /tmp/lakehouse-airflow-$(LOCAL_UID)
 RUNTIME_PARAMETER_PREFIX := /lakehouse/$(LAKEHOUSE_ENVIRONMENT)
 
 export LAKEHOUSE_ENVIRONMENT
@@ -16,7 +15,6 @@ export LOCAL_UID
 export DOCKER_GID
 export AWS_IDENTITY_DIR
 export HOST_BIND_ADDRESS
-export AIRFLOW_HOME
 
 include make/infra.mk
 include make/images.mk
@@ -38,25 +36,28 @@ platform-validate: ## Validate settings and YAML contracts without AWS I/O.
 	uv run --package lakehouse --extra cli python -m lakehouse.validate
 
 lint: ## Run formatting, linting, and static type checks.
-	sh -n infra/runtime/deploy-release infra/runtime/install-aws-signing-helper infra/runtime/workload-identities
+	sh -n infra/runtime/identity/install-aws-signing-helper \
+		infra/runtime/identity/workload-identities
 	uv run ruff format --check .
 	uv run ruff check .
 	uv run --all-packages --all-extras pyright
-	uv run --project orchestration pyright --project orchestration
+	uv run --project orchestration/runtime pyright --project orchestration/runtime
 	uv run pyright --project jobs/emr
 
 test: ## Run unit tests.
 	uv run --all-packages --all-extras pytest -m "not integration"
-	uv run --project orchestration pytest orchestration/tests
+	uv run --project orchestration/runtime pytest \
+		-c orchestration/runtime/pyproject.toml orchestration/bundle/tests
 
 compose-validate: ## Validate self-hosted service Compose files.
+	$(METADATA_POSTGRES_COMPOSE_CONFIG) config --quiet
 	$(AIRFLOW_COMPOSE_CONFIG) config --quiet
 	$(INSPECTOR_COMPOSE) config --quiet
 
 check: ## Run the complete local quality gate.
 	uv lock --check
 	uv lock --check --project dbt/analytics
-	uv lock --check --project orchestration
+	uv lock --check --project orchestration/runtime
 	uv lock --check --project jobs/emr
 	uv lock --check --directory ocr/runners/glm_ocr
 	$(MAKE) platform-validate

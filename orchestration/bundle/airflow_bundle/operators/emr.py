@@ -7,8 +7,8 @@ from datetime import timedelta
 from airflow.providers.amazon.aws.operators.emr import EmrServerlessStartJobOperator
 from airflow.sdk import Asset
 
-from orchestration.callbacks.notifications import task_failure_callbacks
-from orchestration.config.templates import runtime_value
+from airflow_bundle.callbacks.notifications import task_failure_callbacks
+from airflow_bundle.config.templates import runtime_value
 
 EMR_JOB_TIMEOUT_MINUTES = 120
 AIRFLOW_TASK_TIMEOUT_MINUTES = 130

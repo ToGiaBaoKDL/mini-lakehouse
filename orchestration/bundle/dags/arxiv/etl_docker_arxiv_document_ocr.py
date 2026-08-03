@@ -5,13 +5,12 @@ from datetime import timedelta
 import pendulum
 from airflow.sdk import DAG, Param
 from airflow.sdk.definitions.param import ParamsDict
-
-from orchestration.callbacks.notifications import (
+from airflow_bundle.callbacks.notifications import (
     dag_failure_callbacks,
     dag_success_callbacks,
 )
-from orchestration.config.assets import CURATED_ARXIV_METADATA, CURATED_ARXIV_OCR
-from orchestration.operators.docker import docker_task
+from airflow_bundle.config.assets import CURATED_ARXIV_METADATA, CURATED_ARXIV_OCR
+from airflow_bundle.operators.docker import docker_task
 
 OCR_IMAGE = "ocr-worker:runtime"
 

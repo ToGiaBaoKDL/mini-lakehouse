@@ -7,6 +7,8 @@ and data applications while keeping local development simple.
 ```mermaid
 flowchart LR
     S[Sources] --> A[Self-hosted Airflow on OCI]
+    B[Versioned Git DAG bundle] --> A
+    A --> M[(Shared metadata PostgreSQL)]
     A --> E[EMR Serverless / Spark]
     A --> W[Ephemeral local task containers]
     A --> Z[(S3 Airflow task logs)]
@@ -34,9 +36,12 @@ flowchart LR
 | `infra/terraform/aws/` | AWS platform | S3, ECR, KMS, IAM, EMR Serverless, SSM, Secrets Manager |
 | `infra/terraform/oci/` | Runtime platform | Rebuildable ARM services host with no public ingress |
 | `infra/terraform/tailscale/` | Network platform | Private grants, SSH policy, and enrollment |
+| `infra/runtime/postgres/` | Runtime platform | Shared PostgreSQL server with isolated application databases |
 | `platform/` | Data platform | YAML contracts and the contract-driven Glue/Iceberg control plane |
 | `jobs/emr/` | Source/product teams | Spark extract, landing publication, and curated business transforms |
-| `orchestration/` | Data platform | Thin Airflow DAGs that submit EMR jobs or run isolated task images |
+| `orchestration/bundle/` | Workflow definitions | Versionable Airflow DAGs and DAG-only support code |
+| `orchestration/runtime/` | Runtime platform | Airflow image, providers, and runtime integrations |
+| `orchestration/deploy/` | Runtime platform | Self-hosted Airflow deployment definition |
 | `dbt/analytics/` | Analytics engineering | Isolated curated-to-analytics task image, models, and tests through Athena |
 | `ocr/` | Document processing | Provider-neutral protocol, adapters, configuration, and portable GPU runtimes |
 | `apps/arxiv_inspector/` | Data application | UI plus its read-only Athena/S3 access layer |
@@ -79,8 +84,9 @@ s3://<project>-<env>-query-results-<suffix>/
 Glue database names are explicit contract fields, such as `landing_<source>`,
 `curated_<product>`, and `analytics_<domain>`. These names are conventions, not runtime string
 generation. EMR uses AWS-managed logs; runtime resource references live under `/lakehouse/<env>/`
-in SSM Parameter Store. Airflow's remote-log URI and the published service release manifest are
-also resolved from SSM instead of being embedded in Compose.
+in SSM Parameter Store. Airflow's remote-log URI is resolved from SSM instead of being embedded in
+Compose. Immutable service releases stay in ECR and are deployed independently by digest; SSM does
+not duplicate Git-owned image versions.
 
 ## Run
 
@@ -99,7 +105,8 @@ make workload-pki-init
 make aws-plan
 make aws-apply
 make workload-identities-render
-AWS_PROFILE=your-terraform-admin make airflow-bootstrap-init
+AWS_PROFILE=your-terraform-admin make metadata-postgres-secrets-init
+AWS_PROFILE=your-terraform-admin make airflow-secrets-init
 
 # Private network and OCI services host (after copying the documented tfvars examples)
 make tailscale-plan
@@ -114,32 +121,43 @@ make workload-identities-install
 make catalog-apply
 make catalog-validate
 
-# Build analytics locally and publish immutable EMR and service releases
+# Build analytics locally and publish only the changed immutable component
 make dbt-deps
 make dbt-build
 make emr-jobs-publish
-make images-publish
+make airflow-publish
+make arxiv-inspector-publish
+make dbt-task-publish
+make ocr-worker-publish
 
-# On the enrolled services host, pull that exact commit and bind only to Tailscale
-make release-deploy
+# On the enrolled services host, initialize dependencies and deploy exact ECR digests
+make metadata-postgres-up
+make airflow-deploy AIRFLOW_IMAGE='<repository>@sha256:<digest>'
+make arxiv-inspector-deploy ARXIV_INSPECTOR_IMAGE='<repository>@sha256:<digest>'
+make dbt-task-install DBT_TASK_IMAGE='<repository>@sha256:<digest>'
+make ocr-worker-install OCR_WORKER_IMAGE='<repository>@sha256:<digest>'
 ```
 
 `make emr-jobs-publish` requires a clean commit. It uploads entrypoints, locked dependencies, and
 the exact contract bundle to `emr/jobs/<commit-sha>/`, then atomically updates
 `/lakehouse/<env>/emr/code_uri` in SSM.
 
-`make images-publish` builds multi-architecture Airflow, dbt task, ArXiv Inspector, and OCR worker
-images, publishes every immutable Git-SHA tag, and then updates one release manifest in SSM.
-`make release-deploy` pulls the complete manifest, waits for both Compose projects to become
-healthy, updates local dbt/OCR aliases last, and restores the previous healthy images on failure.
-The OCI host does not read Terraform state during deployment. DAG source
-and its locked providers are packaged together in the Airflow image; the worktree is never mounted.
+Each `<component>-publish` target builds and pushes only that component under an immutable Git-SHA
+tag, then prints its digest reference. Each deploy/install target accepts only a digest, so Airflow,
+Inspector, dbt, and OCR releases cannot accidentally move together. The OCI host does not read
+Terraform state during deployment.
 
-Terraform creates separate OCR provider secrets and Airflow notification connection secrets;
-credential values are populated out of band. It also creates one domain-level Airflow bootstrap
-secret containing the metadata database password, Fernet key, JWT secret, and UI administrator
-password. `make airflow-up` reads that secret without mutating it and mounts the values as
-service-scoped Compose secrets; SimpleAuthManager never generates or logs a password.
+Airflow uses the official versioned `GitDagBundle` and tracks the reviewed `main` ref under
+`orchestration/bundle`. A DAG-only merge is fetched by the DAG processor without rebuilding or
+restarting Airflow; active and retried runs retain their original Git commit by default. The
+Airflow image contains providers and runtime integrations only. Changing bundle code to require a
+new provider still requires a compatible runtime image release first.
+
+Terraform creates secret containers but never secret values. Shared PostgreSQL bootstrap, the
+Airflow database owner, and the Airflow runtime each have a separate secret boundary. PostgreSQL is
+deployed independently and owns only storage/availability; Airflow owns its database migrations.
+`make airflow-up` materializes only the Airflow database and runtime values as service-scoped Compose
+secrets; SimpleAuthManager never generates or logs a password.
 
 Producer tasks emit centrally declared logical assets only after successful completion. The GitHub
 curated asset triggers the dbt task DAG, which runs source freshness before `dbt build`; ArXiv
@@ -165,7 +183,7 @@ job and a small launcher; provider SDKs own remote execution and log streaming.
 2. Apply contracts before any data job writes.
 3. Add source logic under `jobs/emr/src/emr_jobs/<source>/` and a thin adapter under
    `jobs/emr/entrypoints/`.
-4. Add a thin DAG under `orchestration/dags/<domain>/` named
+4. Add a thin DAG under `orchestration/bundle/dags/<domain>/` named
    `[job_type]_[worker_type]_[description].py`.
 5. Add contract, idempotency, and business-logic tests.
 

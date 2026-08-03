@@ -1,0 +1,70 @@
+services:
+  metadata-postgres:
+    image: postgres:17.10@sha256:a426e44bac0b759c95894d68e1a0ac03ecc20b619f498a91aae373bf06d8508d
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_USER: postgres
+    secrets:
+      - postgres_password
+    volumes:
+      - metadata-postgres-data:/var/lib/postgresql/data
+    networks:
+      - metadata
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+    stop_grace_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 2G
+
+  metadata-postgres-bootstrap:
+    image: postgres:17.10@sha256:a426e44bac0b759c95894d68e1a0ac03ecc20b619f498a91aae373bf06d8508d
+    environment:
+      PGHOST: metadata-postgres
+      PGUSER: postgres
+    secrets:
+      - airflow_database_password
+      - postgres_password
+    volumes:
+      - ./bootstrap.sql:/opt/lakehouse/bootstrap.sql:ro
+    networks:
+      - metadata
+    depends_on:
+      metadata-postgres:
+        condition: service_healthy
+    command:
+      - sh
+      - -ec
+      - >-
+        export PGPASSWORD="$$(cat /run/secrets/postgres_password)";
+        exec psql --dbname postgres --set ON_ERROR_STOP=1
+        --set airflow_password="$$(cat /run/secrets/airflow_database_password)"
+        --file /opt/lakehouse/bootstrap.sql
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+volumes:
+  metadata-postgres-data:
+
+networks:
+  metadata:
+    internal: true
+    name: lakehouse-metadata
+
+secrets:
+  postgres_password:
+    environment: METADATA_POSTGRES_PASSWORD
+  airflow_database_password:
+    environment: AIRFLOW_DATABASE_PASSWORD

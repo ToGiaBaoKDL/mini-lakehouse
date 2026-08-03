@@ -2,20 +2,25 @@ x-airflow-common: &airflow-common
   image: "${AIRFLOW_IMAGE:-airflow:local}"
   user: "${LOCAL_UID}:0"
   environment: &airflow-environment
-    AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/orchestration/dags
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__CORE__PARALLELISM: "4"
+    AIRFLOW__CORE__RERUN_WITH_LATEST_VERSION: "false"
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "admin:admin"
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/auth/simple_auth_manager_passwords.json
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD: >-
       python -c "from pathlib import Path; from urllib.parse import quote_plus;
-      password = quote_plus(Path('/run/secrets/airflow_db_password').read_text().strip());
-      print('postgresql+psycopg2://airflow:' + password + '@airflow-postgres:5432/airflow')"
+      password = quote_plus(Path('/run/secrets/airflow_database_password').read_text().strip());
+      print('postgresql+psycopg2://airflow:' + password + '@metadata-postgres:5432/airflow')"
+    AIRFLOW__DAG_PROCESSOR__BUNDLE_REFRESH_CHECK_INTERVAL: "5"
+    AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_CONFIG_LIST: >-
+      [{"name":"lakehouse","classpath":"airflow.providers.git.bundles.git.GitDagBundle","kwargs":{"repo_url":"https://github.com/ToGiaBaoKDL/mini-lakehouse.git","tracking_ref":"main","subdir":"orchestration/bundle","sparse_dirs":["orchestration/bundle"],"refresh_interval":60}}]
+    AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_STORAGE_PATH: /opt/airflow/dag-bundles
+    AIRFLOW__DAG_PROCESSOR__DISABLE_BUNDLE_VERSIONING: "false"
     AIRFLOW__API_AUTH__JWT_SECRET_CMD: cat /run/secrets/airflow_jwt_secret
     AIRFLOW__API__BASE_URL: "http://${HOST_BIND_ADDRESS:-127.0.0.1}:8080"
     AIRFLOW__CORE__FERNET_KEY_CMD: cat /run/secrets/airflow_fernet_key
-    AIRFLOW__SECRETS__BACKEND: orchestration.config.aws_secrets.AwsSecretsBackend
+    AIRFLOW__SECRETS__BACKEND: airflow_runtime.secrets.AwsSecretsBackend
     AIRFLOW__SECRETS__BACKEND_KWARGS: '{"connections_prefix":"lakehouse/${LAKEHOUSE_ENVIRONMENT}/airflow/connections","variables_prefix":"/lakehouse/${LAKEHOUSE_ENVIRONMENT}"}'
     AIRFLOW__LOGGING__REMOTE_LOGGING: "true"
     AIRFLOW__LOGGING__REMOTE_BASE_LOG_FOLDER: "${AIRFLOW_REMOTE_LOG_URI}"
@@ -25,41 +30,25 @@ x-airflow-common: &airflow-common
     LAKEHOUSE_ENVIRONMENT: "${LAKEHOUSE_ENVIRONMENT}"
     HOST_AWS_IDENTITY_DIR: "${AWS_IDENTITY_DIR}"
   secrets: &airflow-secrets
-    - airflow_db_password
+    - airflow_database_password
     - airflow_fernet_key
     - airflow_jwt_secret
     - airflow_admin_passwords
   volumes:
     - airflow-auth:/opt/airflow/auth
+    - airflow-dag-bundles:/opt/airflow/dag-bundles
     - airflow-logs:/opt/airflow/logs
     - ${AWS_IDENTITY_DIR}/airflow:/run/aws:ro
+  networks:
+    - metadata
+    - runtime
   depends_on:
-    airflow-postgres:
-      condition: service_healthy
     airflow-init:
       condition: service_completed_successfully
   restart: unless-stopped
   stop_grace_period: 60s
 
 services:
-  airflow-postgres:
-    image: postgres:17.10@sha256:a426e44bac0b759c95894d68e1a0ac03ecc20b619f498a91aae373bf06d8508d
-    environment:
-      POSTGRES_USER: airflow
-      POSTGRES_PASSWORD_FILE: /run/secrets/airflow_db_password
-      POSTGRES_DB: airflow
-    secrets:
-      - airflow_db_password
-    volumes:
-      - airflow-postgres-data:/var/lib/postgresql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
-      interval: 5s
-      timeout: 5s
-      retries: 12
-      start_period: 10s
-    restart: unless-stopped
-
   airflow-init:
     image: "${AIRFLOW_IMAGE:-airflow:local}"
     user: "${LOCAL_UID}:0"
@@ -70,9 +59,9 @@ services:
       - airflow-auth:/opt/airflow/auth
       - airflow-logs:/opt/airflow/logs
       - ${AWS_IDENTITY_DIR}/airflow:/run/aws:ro
-    depends_on:
-      airflow-postgres:
-        condition: service_healthy
+    networks:
+      - metadata
+      - runtime
     command:
       - bash
       - -ec
@@ -107,6 +96,7 @@ services:
       - "${DOCKER_GID}"
     volumes:
       - airflow-auth:/opt/airflow/auth
+      - airflow-dag-bundles:/opt/airflow/dag-bundles
       - airflow-logs:/opt/airflow/logs
       - ${AWS_IDENTITY_DIR}/airflow:/run/aws:ro
       - /var/run/docker.sock:/var/run/docker.sock
@@ -143,12 +133,18 @@ services:
 
 volumes:
   airflow-auth:
+  airflow-dag-bundles:
   airflow-logs:
-  airflow-postgres-data:
+
+networks:
+  metadata:
+    external: true
+    name: lakehouse-metadata
+  runtime:
 
 secrets:
-  airflow_db_password:
-    environment: AIRFLOW_DB_PASSWORD
+  airflow_database_password:
+    environment: AIRFLOW_DATABASE_PASSWORD
   airflow_fernet_key:
     environment: AIRFLOW_FERNET_KEY
   airflow_jwt_secret:

@@ -1,76 +1,76 @@
 # Environment setup
 
-Use an SSO/named profile for operator commands and IAM Roles Anywhere for self-hosted workloads.
-The repository does not use `.env` files. Secrets Manager owns credentials and
-cryptographic material, Parameter Store owns runtime resource references, and the local
-Makefile/Compose boundary supplies stable development defaults.
+Use named/SSO profiles for operator commands and IAM Roles Anywhere for self-hosted workloads. The
+repository does not use `.env` files. Secrets Manager owns credentials, Parameter Store owns
+runtime resource discovery, and Git owns stable application configuration.
 
-Terraform state uses a separate, versioned S3 bootstrap bucket with native lock files. The dev
-environment uses explicit unique data-bucket names and can be destroyed; a future production
-environment should set `force_destroy = false`, use production trusted principals, and retain the
-same modules.
+Terraform state uses a separate versioned S3 bootstrap bucket with native lock files. Dev resources
+can be rebuilt; production should disable destructive bucket behavior while retaining the same
+module boundaries.
 
-Only Airflow, Postgres, and ArXiv Inspector are composed on the OCI services host. S3, Glue, EMR
-Serverless, Athena, KMS, IAM, and Secrets Manager remain AWS services. OCI exposes no public
-ingress; Tailscale carries SSH and application traffic.
+Only shared metadata PostgreSQL, Airflow, and ArXiv Inspector are composed on the OCI services host.
+AWS owns S3, Glue, EMR Serverless, Athena, KMS, IAM, ECR, SSM, and Secrets Manager. OCI exposes no
+public ingress; Tailscale carries SSH and application traffic.
 
-Operator commands default to the `lakehouse-dev-*` assume-role profiles. Terraform itself follows
-the standard AWS/OCI provider credential chains instead of accepting profile names as variables.
-Runtime containers do
-not inherit these profiles or mount `$HOME/.aws`; each receives a certificate-backed bundle from
-`AWS_IDENTITY_DIR`:
+## Workload identities
+
+Terraform follows the standard AWS/OCI credential chains. Runtime containers never inherit an
+operator profile or mount `$HOME/.aws`; each receives a certificate-backed identity under
+`AWS_IDENTITY_DIR`.
 
 ```bash
 make workload-pki-init
 make aws-apply
 make workload-identities-render
-CATALOG_ADMIN_AWS_PROFILE=custom-catalog make catalog-apply
-EMR_DEPLOYER_AWS_PROFILE=custom-deployer make emr-jobs-publish
-IMAGE_PUBLISHER_AWS_PROFILE=custom-publisher make images-publish
-make dbt-build
-make ocr-kaggle-runner-publish
-```
-
-These selectors are not credentials. Airflow, dbt tasks, OCR tasks, Inspector, and the
-services deployer each exchange their own X.509 certificate for short-lived credentials.
-The CA private key stays on the administrator machine. After provisioning the OCI host, transfer
-only the five leaf bundles over the private network:
-
-```bash
 make workload-identities-install
 ```
 
-Application entitlements and non-secret notification destinations are checked-in environment
-policy in Terraform. `tfvars` contains only account/deployment identities and resource OCIDs; SSM
-is the runtime distribution layer, not the authoring source for IAM policy.
+Airflow, metadata PostgreSQL, dbt, OCR, Inspector, and the services deployer exchange separate X.509
+certificates for short-lived AWS credentials. The services deployer may pull reviewed ECR images but
+cannot read application secrets. The CA private key stays on the administrator machine; only leaf
+identities cross the private network.
 
-Terraform creates one Airflow bootstrap secret and the Airflow connection secret containers, but
-intentionally does not write their values into Terraform state. Populate the bootstrap secret with
-one JSON object:
+Operator commands can override their non-secret profile selector at the command boundary:
+
+```bash
+CATALOG_ADMIN_AWS_PROFILE=custom-catalog make catalog-apply
+EMR_DEPLOYER_AWS_PROFILE=custom-deployer make emr-jobs-publish
+IMAGE_PUBLISHER_AWS_PROFILE=custom-publisher make airflow-publish
+```
+
+## Secrets
+
+Terraform creates secret containers but never secret values. PostgreSQL bootstrap and the Airflow
+database each use an independent object:
+
+```json
+{"version": 1, "password": "<random password>"}
+```
+
+The Airflow runtime secret is separate from its database credential:
 
 ```json
 {
-  "version": 2,
-  "database_password": "<random password>",
+  "version": 1,
   "fernet_key": "<Airflow Fernet key>",
   "jwt_secret": "<random JWT secret>",
   "admin_password": "<random UI admin password>"
 }
 ```
 
-`make airflow-up` reads this object using the services deployer identity and passes it to Compose
-as service-scoped files. The init container writes the SimpleAuthManager password file before
-Airflow starts, so Airflow never generates or logs a UI password. Repeating the command is
-read-only and idempotent. Initialize the
-value once without printing it or storing it in Terraform state:
+Initialize them once without printing values or putting them in Terraform state:
 
 ```bash
-AWS_PROFILE=your-terraform-admin make airflow-bootstrap-init
+AWS_PROFILE=your-terraform-admin make metadata-postgres-secrets-init
+AWS_PROFILE=your-terraform-admin make airflow-secrets-init
 ```
 
-The initialization target is also idempotent: it exits without creating a new Secrets Manager
-version when an `AWSCURRENT` version already exists. Populate each external connection with an
-Airflow connection JSON using an administrator profile:
+Both targets preserve an existing valid `AWSCURRENT` version. `make metadata-postgres-up`
+idempotently reconciles the Airflow owner/database and rotates only that role password. Airflow owns
+and runs its schema migrations. The Airflow init container writes the SimpleAuthManager password
+file before startup, so the UI password is never generated or logged by Airflow.
+
+Populate notification connections independently:
 
 ```bash
 aws secretsmanager put-secret-value \
@@ -82,12 +82,7 @@ aws secretsmanager put-secret-value \
   --secret-string '<Airflow SMTP connection JSON>'
 ```
 
-Airflow reads connection values through its AWS Secrets Manager backend. Rotate them with another
-`put-secret-value`; do not add secret values to local configuration, Terraform variables, or Git.
-Task logs are written to the SSM-configured, KMS-encrypted logs bucket and expire after 30 days in
-dev. Container recreation therefore does not erase completed task logs.
-
-OCR provider credentials use OCR-owned secrets instead of Airflow connections:
+OCR provider credentials remain OCR-owned:
 
 ```bash
 aws secretsmanager put-secret-value \
@@ -99,29 +94,46 @@ aws secretsmanager put-secret-value \
   --secret-string '{"token_id":"<token-id>","token_secret":"<token-secret>"}'
 ```
 
-## Local service releases
+## Component releases
 
-Terraform creates separate immutable ECR repositories for Airflow, dbt tasks, ArXiv Inspector, and
-the OCR worker. The image publisher operator role is the only identity that can push to them.
-Publish a clean commit, then pull and run that exact release on the Tailscale host:
+ECR repositories are immutable and retain the newest 20 releases. Publish only the changed
+component from a clean commit; each target prints the digest reference used for deployment.
 
 ```bash
-make images-publish
-make release-deploy
+make airflow-publish
+make arxiv-inspector-publish
+make dbt-task-publish
+make ocr-worker-publish
 ```
 
-Neither command uses `latest`. Published images include AMD64 and ARM64 manifests. Repository
-lifecycle policies retain the newest 20 releases. Publishing updates the SSM release manifest only
-after all images exist. `release-deploy` pre-pulls every image, waits for healthy services, advances
-task aliases last, and rolls services back on failure. It does not read Terraform state, and
-`DockerOperator` does not need registry credentials at task time. For unpublished local iteration:
+On the services host, deploy or install each component independently by digest:
+
+```bash
+make metadata-postgres-up
+make airflow-deploy AIRFLOW_IMAGE='<repository>@sha256:<digest>'
+make arxiv-inspector-deploy ARXIV_INSPECTOR_IMAGE='<repository>@sha256:<digest>'
+make dbt-task-install DBT_TASK_IMAGE='<repository>@sha256:<digest>'
+make ocr-worker-install OCR_WORKER_IMAGE='<repository>@sha256:<digest>'
+```
+
+No release uses `latest`, and there is no global service manifest. Rolling back means deploying the
+previous reviewed digest for that component. The dbt and OCR install targets advance their stable
+host-local aliases only after pulling an exact digest, so DAG files never contain image SHAs.
+
+Airflow uses the official versioned `GitDagBundle` for `orchestration/bundle`. A DAG-only merge is
+validated by the focused bundle CI, then fetched without rebuilding or restarting Airflow. Active
+and retried runs keep their original Git commit by default. A new Airflow/provider dependency still
+requires publishing the compatible runtime image first.
+
+For unpublished local iteration:
 
 ```bash
 make images-build
-make services-up
+make metadata-postgres-up
+make airflow-up
+make arxiv-inspector-up
 ```
 
 Only the Airflow scheduler receives the Docker socket because `LocalExecutor` launches task
-containers there. The OCR DAG uses the stable local image name
-`ocr-worker:runtime`; `release-deploy` moves that alias only after the corresponding Airflow and
-Inspector services are healthy, so DAG files never contain a release SHA.
+containers there. Task logs are written to the SSM-configured KMS-encrypted S3 prefix and expire
+after 30 days in dev; container recreation does not erase completed task logs.
