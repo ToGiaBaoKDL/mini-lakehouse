@@ -8,18 +8,9 @@ output "emr_code_parameter_name" {
   value       = "${local.parameter_prefix}/emr/code_uri"
 }
 
-output "runtime_parameter_names" {
-  description = "Managed runtime SSM parameter names keyed by their domain path."
-  value       = { for name, parameter in aws_ssm_parameter.runtime : name => parameter.name }
-}
-
-output "operator_role_arns" {
-  description = "Human break-glass operator roles keyed by responsibility."
-  value = {
-    catalog_admin   = module.identity.catalog_admin_role_arn
-    emr_deployer    = module.identity.emr_deployer_role_arn
-    image_publisher = module.identity.image_publisher_role_arn
-  }
+output "catalog_admin_role_arn" {
+  description = "Human-assumable role allowed to apply and validate catalog contracts."
+  value       = module.identity.catalog_admin_role_arn
 }
 
 output "github_ci_role_arns" {

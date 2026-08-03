@@ -94,7 +94,10 @@ metadata-postgres-logs: ## Follow metadata PostgreSQL logs.
 
 airflow-up: preflight ## Start self-hosted Airflow against shared metadata PostgreSQL.
 	@test -r "$(AIRFLOW_AWS_CONFIG)" || { \
-		printf '%s\n' "Run 'make workload-identities-render' first."; exit 1; \
+		printf '%s\n' "Install or render the airflow workload identity first."; exit 1; \
+	}
+	@test -r "$(AWS_IDENTITY_DIR)/airflow/config" || { \
+		printf '%s\n' "The airflow container identity config is missing."; exit 1; \
 	}
 	@set -eu; \
 		aws_runtime() { env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
@@ -126,6 +129,9 @@ airflow-dags: ## List parsed Airflow DAGs and bundle versions.
 	$(AIRFLOW_COMPOSE_CONFIG) exec -T airflow-scheduler airflow dags list
 
 arxiv-inspector-up: preflight ## Start the read-only ArXiv Inspector.
+	@test -r "$(AWS_IDENTITY_DIR)/arxiv-inspector/config" || { \
+		printf '%s\n' "Install or render the arxiv-inspector workload identity first."; exit 1; \
+	}
 	$(INSPECTOR_COMPOSE) up -d --wait --wait-timeout 180
 
 arxiv-inspector-down: ## Stop ArXiv Inspector.
@@ -134,16 +140,17 @@ arxiv-inspector-down: ## Stop ArXiv Inspector.
 arxiv-inspector-logs: ## Follow ArXiv Inspector logs.
 	$(INSPECTOR_COMPOSE) logs --follow --tail=200
 
-component-image-pull: preflight ## Pull one reviewed ECR image by digest on the services host.
+component-image-pull: preflight
 	@test -n "$(COMPONENT_IMAGE)" || { printf '%s\n' "COMPONENT_IMAGE is required."; exit 1; }
 	@printf '%s' "$(COMPONENT_IMAGE)" | grep -Eq '@sha256:[0-9a-f]{64}$$' || { \
 		printf '%s\n' "COMPONENT_IMAGE must be an immutable image reference by digest."; exit 1; \
 	}
 	@test -r "$(SERVICES_DEPLOYER_AWS_CONFIG)" || { \
-		printf '%s\n' "Run 'make workload-identities-render' first."; exit 1; \
+		printf '%s\n' "Install or render the services-deployer workload identity first."; exit 1; \
 	}
 	@set -eu; \
 		REGISTRY="$$(printf '%s' "$(COMPONENT_IMAGE)" | cut -d/ -f1)"; \
+		trap 'docker logout "$${REGISTRY}" >/dev/null 2>&1 || true' EXIT HUP INT TERM; \
 		env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
 			AWS_CONFIG_FILE="$(SERVICES_DEPLOYER_AWS_CONFIG)" AWS_PROFILE=default \
 			aws ecr get-login-password | docker login --username AWS --password-stdin "$${REGISTRY}" >/dev/null; \

@@ -71,13 +71,7 @@ resource "aws_iam_role_policy" "emr_runtime" {
   policy = data.aws_iam_policy_document.emr_runtime.json
 }
 
-resource "aws_iam_role" "emr_deployer" {
-  name               = "${var.name_prefix}-emr-deployer"
-  assume_role_policy = data.aws_iam_policy_document.operator_trust.json
-  tags               = var.tags
-}
-
-data "aws_iam_policy_document" "emr_deployer" {
+data "aws_iam_policy_document" "emr_publisher" {
   statement {
     sid       = "ListJobArtifacts"
     actions   = ["s3:GetBucketLocation", "s3:ListBucket"]
@@ -101,16 +95,11 @@ data "aws_iam_policy_document" "emr_deployer" {
   statement {
     sid       = "PublishCurrentReleasePointer"
     actions   = ["ssm:PutParameter"]
-    resources = var.parameter_arns.emr_deployer
+    resources = var.parameter_arns.emr_publisher
   }
   statement {
     sid       = "UseLakehouseKey"
     actions   = ["kms:Decrypt", "kms:DescribeKey", "kms:Encrypt", "kms:GenerateDataKey"]
     resources = [var.kms_key_arn]
   }
-}
-
-resource "aws_iam_role_policy" "emr_deployer" {
-  role   = aws_iam_role.emr_deployer.id
-  policy = data.aws_iam_policy_document.emr_deployer.json
 }

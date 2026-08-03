@@ -25,7 +25,7 @@ locals {
       "storage/landing_uri",
       "storage/curated_uri",
     ]
-    emr_deployer = [
+    emr_publisher = [
       "emr/code_uri",
     ]
     dbt_transformer = [

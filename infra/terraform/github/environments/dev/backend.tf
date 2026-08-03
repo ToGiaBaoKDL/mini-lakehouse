@@ -1,6 +1,6 @@
 terraform {
   backend "s3" {
-    key          = "lakehouse/aws/dev/terraform.tfstate"
+    key          = "lakehouse/github/dev/terraform.tfstate"
     region       = "ap-southeast-1"
     encrypt      = true
     use_lockfile = true

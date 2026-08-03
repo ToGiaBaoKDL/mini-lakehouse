@@ -48,14 +48,6 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "this" {
   }
 }
 
-resource "aws_s3_bucket_versioning" "this" {
-  for_each = var.versioned_tiers
-  bucket   = aws_s3_bucket.this[each.key].id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
 resource "aws_s3_bucket_lifecycle_configuration" "this" {
   for_each = aws_s3_bucket.this
   bucket   = each.value.id

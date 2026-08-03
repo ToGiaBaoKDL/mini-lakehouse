@@ -18,13 +18,13 @@ x-airflow-common: &airflow-common
     AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_STORAGE_PATH: /opt/airflow/dag-bundles
     AIRFLOW__DAG_PROCESSOR__DISABLE_BUNDLE_VERSIONING: "false"
     AIRFLOW__API_AUTH__JWT_SECRET_CMD: cat /run/secrets/airflow_jwt_secret
-    AIRFLOW__API__BASE_URL: "http://${HOST_BIND_ADDRESS:-127.0.0.1}:8080"
+    AIRFLOW__API__BASE_URL: "${AIRFLOW_BASE_URL:-http://127.0.0.1:8080}"
     AIRFLOW__CORE__FERNET_KEY_CMD: cat /run/secrets/airflow_fernet_key
     AIRFLOW__SECRETS__BACKEND: airflow_runtime.secrets.AwsSecretsBackend
     AIRFLOW__SECRETS__BACKEND_KWARGS: '{"connections_prefix":"lakehouse/${LAKEHOUSE_ENVIRONMENT}/airflow/connections","variables_prefix":"/lakehouse/${LAKEHOUSE_ENVIRONMENT}"}'
     AIRFLOW__LOGGING__REMOTE_LOGGING: "true"
     AIRFLOW__LOGGING__REMOTE_BASE_LOG_FOLDER: "${AIRFLOW_REMOTE_LOG_URI}"
-    AIRFLOW__LOGGING__DELETE_LOCAL_LOGS: "false"
+    AIRFLOW__LOGGING__DELETE_LOCAL_LOGS: "true"
     AWS_CONFIG_FILE: /run/aws/config
     AWS_EC2_METADATA_DISABLED: "true"
     LAKEHOUSE_ENVIRONMENT: "${LAKEHOUSE_ENVIRONMENT}"

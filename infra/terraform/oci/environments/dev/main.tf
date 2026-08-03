@@ -8,6 +8,16 @@ locals {
   }
 }
 
+data "terraform_remote_state" "tailscale" {
+  backend = "s3"
+  config = {
+    bucket  = var.state_bucket
+    key     = "lakehouse/tailscale/dev/terraform.tfstate"
+    region  = "ap-southeast-1"
+    encrypt = true
+  }
+}
+
 data "oci_identity_availability_domains" "available" {
   compartment_id = var.tenancy_ocid
 }
@@ -75,8 +85,8 @@ resource "oci_core_instance" "services" {
   freeform_tags        = local.tags
 
   shape_config {
-    ocpus         = 2
-    memory_in_gbs = 12
+    ocpus         = 4
+    memory_in_gbs = 24
   }
 
   source_details {
@@ -98,7 +108,7 @@ resource "oci_core_instance" "services" {
     user_data = base64encode(templatefile("${path.module}/cloud-init.yaml.tftpl", {
       hostname           = local.name
       installer          = indent(6, file("${path.module}/../../../../runtime/identity/install-aws-signing-helper"))
-      tailscale_auth_key = jsonencode(var.tailscale_auth_key)
+      tailscale_auth_key = jsonencode(data.terraform_remote_state.tailscale.outputs.services_auth_key)
     }))
   }
 }

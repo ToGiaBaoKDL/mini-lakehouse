@@ -58,12 +58,17 @@ def test_all_terraform_inputs_and_outputs_are_documented() -> None:
 def test_remote_state_is_versioned_locked_and_bootstrapped_separately() -> None:
     backend = Path("infra/terraform/aws/environments/dev/backend.tf").read_text(encoding="utf-8")
     bootstrap = _terraform_sources(Path("infra/terraform/aws/bootstrap/state"))
+    makefile = Path("make/infra.mk").read_text(encoding="utf-8")
 
     assert 'backend "s3"' in backend
+    assert 'key          = "lakehouse/aws/dev/terraform.tfstate"' in backend
     assert "use_lockfile = true" in backend
+    assert 'backend "local"' in bootstrap
     assert 'status = "Enabled"' in bootstrap
     assert "prevent_destroy = true" in bootstrap
     assert "BucketOwnerEnforced" in bootstrap
+    assert "aws-bootstrap.tfstate" in makefile
+    assert 'init -backend-config="path=$(AWS_STATE_FILE)"' in makefile
 
 
 def test_ci_validation_does_not_require_remote_state() -> None:
@@ -74,7 +79,7 @@ def test_ci_validation_does_not_require_remote_state() -> None:
 
     assert "terraform-validate: terraform-cache ##" in makefile
     assert makefile.count("init -backend=false -lockfile=readonly") == 1
-    assert makefile.count('validate_root "$(TERRAFORM_VALIDATE_DATA_DIR)/') == 4
+    assert makefile.count('validate_root "$(TERRAFORM_VALIDATE_DATA_DIR)/') == 5
     assert "$(MAKE) terraform-validate" in makefile
 
 
@@ -119,13 +124,11 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
     assert "athena/workgroups/" not in environment
     for role in (
         "emr-runtime",
-        "emr-deployer",
         "airflow",
         "catalog-admin",
         "services-deployer",
         "dbt-transformer",
         "arxiv-inspector",
-        "image-publisher",
         "metadata-postgres",
         "ocr-worker",
         "github-image-publisher",
@@ -158,7 +161,7 @@ def test_runtime_parameters_and_trust_are_bounded_by_workload() -> None:
     assert "managed_parameter_names" in environment
     assert "granted_parameter_names" in environment
 
-    assert "identifiers = var.operator_principal_arns" in identity
+    assert "identifiers = var.catalog_admin_principal_arns" in identity
     assert "role_trust" not in identity
     assert "source_policy_documents" not in identity
     assert "external_runtime_trust" in identity
@@ -186,7 +189,9 @@ def test_service_images_are_immutable_bounded_and_published_by_one_role() -> Non
     assert 'encryption_type = "AES256"' in registry
     assert 'countType   = "imageCountMoreThan"' in registry
     assert "retained_image_count = 20" in environment
-    assert '"${var.name_prefix}-image-publisher"' in identity
+    assert '"${var.name_prefix}-github-image-publisher"' in identity
+    assert '"${var.name_prefix}-image-publisher"' not in identity
+    assert '"${var.name_prefix}-emr-deployer"' not in identity
     assert '"ecr:GetAuthorizationToken"' in identity
     assert '"ecr:PutImage"' in identity
     assert "container_repository_arns" in identity
@@ -230,11 +235,17 @@ def test_data_consumers_use_reviewed_database_and_prefix_entitlements() -> None:
 def test_cloud_roots_have_isolated_state_and_private_services_host() -> None:
     oci = _terraform_sources(Path("infra/terraform/oci/environments/dev"))
     tailscale = _terraform_sources(Path("infra/terraform/tailscale/environments/dev"))
+    github = _terraform_sources(Path("infra/terraform/github/environments/dev"))
     normalized_oci = " ".join(oci.split())
 
     assert 'key          = "lakehouse/oci/dev/terraform.tfstate"' in oci
     assert 'key          = "lakehouse/tailscale/dev/terraform.tfstate"' in tailscale
+    assert 'key          = "lakehouse/github/dev/terraform.tfstate"' in github
+    assert 'key     = "lakehouse/tailscale/dev/terraform.tfstate"' in oci
+    assert 'variable "tailscale_auth_key"' not in oci
     assert 'shape = "VM.Standard.A1.Flex"' in normalized_oci
+    assert "ocpus = 4" in normalized_oci
+    assert "memory_in_gbs = 24" in normalized_oci
     assert "source_id               = var.image_ocid" in oci
     assert 'data "oci_core_images"' not in oci
     assert "prohibit_internet_ingress  = true" in oci
@@ -245,6 +256,7 @@ def test_cloud_roots_have_isolated_state_and_private_services_host() -> None:
     assert '"tcp:8080"' in tailscale
     assert '"tcp:8501"' in tailscale
     assert "reusable            = false" in tailscale
+    assert 'recreate_if_invalid = "always"' in tailscale
     assert 'services_tag = "tag:tgbao-dev-services"' in tailscale
     assert 'ci_tag       = "tag:tgbao-dev-ci"' in tailscale
     assert 'resource "tailscale_federated_identity" "github_deployer"' in tailscale
@@ -254,10 +266,39 @@ def test_cloud_roots_have_isolated_state_and_private_services_host() -> None:
     assert 'dns_label                  = "services"' in oci
 
 
+def test_github_delivery_configuration_is_terraform_owned_and_state_derived() -> None:
+    github = _terraform_sources(Path("infra/terraform/github/environments/dev"))
+
+    assert 'version = "~> 6.13.0"' in github
+    assert "hashicorp/aws" not in github
+    assert 'data "aws_caller_identity"' not in github
+    assert 'variable "state_bucket"' in github
+    assert 'data "github_repository" "this"' in github
+    assert 'resource "github_repository"' not in github
+    assert 'resource "github_repository_environment" "dev"' in github
+    assert 'resource "github_repository_environment_deployment_policy" "main"' in github
+    assert 'branch_pattern = "main"' in github
+    assert "can_admins_bypass   = false" in github
+    assert "users = [data.github_user.owner.id]" in github
+    assert 'data "terraform_remote_state" "aws"' in github
+    assert 'data "terraform_remote_state" "tailscale"' in github
+    assert 'resource "github_actions_environment_variable" "release"' in github
+    for variable in (
+        "AWS_EMR_PUBLISHER_ROLE_ARN",
+        "AWS_IMAGE_PUBLISHER_ROLE_ARN",
+        "EMR_ARTIFACTS_URI",
+        "EMR_CODE_PARAMETER_NAME",
+        "TAILSCALE_AUDIENCE",
+        "TAILSCALE_CLIENT_ID",
+    ):
+        assert variable in github
+
+
 def test_provider_authentication_is_not_a_terraform_input() -> None:
     aws_environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
     aws_bootstrap = _terraform_sources(Path("infra/terraform/aws/bootstrap/state"))
     oci_environment = _terraform_sources(Path("infra/terraform/oci/environments/dev"))
+    github_environment = _terraform_sources(Path("infra/terraform/github/environments/dev"))
     examples = "\n".join(
         path.read_text(encoding="utf-8")
         for path in Path("infra/terraform").rglob("terraform.tfvars.example")
@@ -267,6 +308,8 @@ def test_provider_authentication_is_not_a_terraform_input() -> None:
     assert "profile = var.aws_profile" not in aws_environment + aws_bootstrap
     assert 'variable "oci_profile"' not in oci_environment
     assert "config_file_profile = var.oci_profile" not in oci_environment
+    assert 'variable "github_token"' not in github_environment
+    assert "token =" not in github_environment
     assert "aws_profile" not in examples
     assert "oci_profile" not in examples
 
@@ -300,3 +343,16 @@ def test_reviewable_policy_is_not_hidden_in_tfvars() -> None:
     assert "workload_data_access" not in example
     assert "alert_email" not in example
     assert "slack_channel" not in example
+
+
+def test_catalog_admin_mutates_contract_tiers_but_only_reads_analytics_metadata() -> None:
+    catalog = Path("infra/terraform/aws/modules/identity/catalog.tf").read_text(encoding="utf-8")
+    identity = Path("infra/terraform/aws/modules/identity/main.tf").read_text(encoding="utf-8")
+
+    assert 'sid = "ApplyContractManagedCatalog"' in catalog
+    assert 'sid = "ReadLakehouseCatalog"' in catalog
+    assert "local.analytics_table_arns" in catalog
+    assert 'sid       = "ReadAnalyticsMetadata"' in catalog
+    assert 'actions   = ["s3:GetObject"]' in catalog
+    assert '"${var.bucket_arns.analytics}/tables/*/metadata/*"' in identity
+    assert "local.analytics_object_arns_by_workload" not in catalog

@@ -23,15 +23,15 @@ variable "aws_region" {
   description = "AWS Region containing the workload resources."
 }
 
-variable "operator_principal_arns" {
+variable "catalog_admin_principal_arns" {
   type        = set(string)
-  description = "Existing IAM principal ARNs allowed to assume human break-glass operator roles."
+  description = "Existing IAM principal ARNs allowed to assume the catalog administrator role."
 
   validation {
-    condition = length(var.operator_principal_arns) > 0 && alltrue([
-      for arn in var.operator_principal_arns : startswith(arn, "arn:")
+    condition = length(var.catalog_admin_principal_arns) > 0 && alltrue([
+      for arn in var.catalog_admin_principal_arns : startswith(arn, "arn:")
     ])
-    error_message = "At least one valid operator principal ARN is required."
+    error_message = "At least one valid catalog administrator principal ARN is required."
   }
 }
 

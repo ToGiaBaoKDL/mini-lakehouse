@@ -34,5 +34,17 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ vars.AWS_EMR_PUBLISHER_ROLE_ARN }}
           role-session-name: github-${{ github.run_id }}
+      - name: Package EMR jobs
+        run: make emr-jobs-package
       - name: Publish immutable EMR artifacts
-        run: make emr-jobs-publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          code_uri="${EMR_ARTIFACTS_URI%/}/$GITHUB_SHA"
+          aws s3 sync dist/emr/ "$code_uri/" --only-show-errors
+          aws ssm put-parameter \
+            --name "$EMR_CODE_PARAMETER_NAME" \
+            --type String \
+            --value "$code_uri" \
+            --overwrite >/dev/null
+          echo "Published $code_uri"

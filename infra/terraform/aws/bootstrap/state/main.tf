@@ -6,6 +6,10 @@ locals {
 
 resource "aws_s3_bucket" "state" {
   bucket = local.bucket_name
+  tags = {
+    ManagedBy = "terraform"
+    Purpose   = "terraform-state"
+  }
 
   lifecycle {
     prevent_destroy = true

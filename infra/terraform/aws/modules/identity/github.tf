@@ -37,5 +37,5 @@ resource "aws_iam_role" "github_emr_publisher" {
 
 resource "aws_iam_role_policy" "github_emr_publisher" {
   role   = aws_iam_role.github_emr_publisher.id
-  policy = data.aws_iam_policy_document.emr_deployer.json
+  policy = data.aws_iam_policy_document.emr_publisher.json
 }

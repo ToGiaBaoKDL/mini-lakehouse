@@ -29,8 +29,12 @@ variable "ssh_authorized_key" {
   sensitive   = true
 }
 
-variable "tailscale_auth_key" {
+variable "state_bucket" {
   type        = string
-  description = "Single-use, tagged Tailscale enrollment key for cloud-init."
-  sensitive   = true
+  description = "Existing S3 bucket containing the upstream Tailscale Terraform state."
+
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", var.state_bucket))
+    error_message = "state_bucket must be a valid S3 bucket name."
+  }
 }

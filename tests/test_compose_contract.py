@@ -87,7 +87,8 @@ def test_airflow_uses_local_executor_and_deferrable_runtime_components() -> None
     assert "AWS_REGION" not in environment
     assert environment["AIRFLOW__LOGGING__REMOTE_LOGGING"] == "true"
     assert environment["AIRFLOW__LOGGING__REMOTE_BASE_LOG_FOLDER"] == ("${AIRFLOW_REMOTE_LOG_URI}")
-    assert environment["AIRFLOW__LOGGING__DELETE_LOCAL_LOGS"] == "false"
+    assert environment["AIRFLOW__LOGGING__DELETE_LOCAL_LOGS"] == "true"
+    assert environment["AIRFLOW__API__BASE_URL"] == ("${AIRFLOW_BASE_URL:-http://127.0.0.1:8080}")
     assert environment["AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE"].startswith(
         "/opt/airflow/auth/"
     )
@@ -325,6 +326,8 @@ def test_makefile_exposes_owned_operational_entrypoints() -> None:
         "aws-apply:",
         "tailscale-plan:",
         "tailscale-apply:",
+        "github-plan:",
+        "github-apply:",
         "oci-plan:",
         "oci-apply:",
         "airflow-up:",
@@ -340,12 +343,6 @@ def test_makefile_exposes_owned_operational_entrypoints() -> None:
         "catalog-apply:",
         "catalog-validate:",
         "airflow-secrets-init:",
-        "image-login:",
-        "image-publish:",
-        "airflow-publish:",
-        "arxiv-inspector-publish:",
-        "dbt-task-publish:",
-        "ocr-worker-publish:",
         "airflow-deploy:",
         "arxiv-inspector-deploy:",
         "dbt-task-install:",
@@ -353,21 +350,17 @@ def test_makefile_exposes_owned_operational_entrypoints() -> None:
         "ocr-worker-build:",
         "dbt-task-build:",
         "emr-jobs-package:",
-        "emr-jobs-publish:",
         "ocr-kaggle-runner-publish:",
         "workload-identities-install:",
     ):
         assert target in makefile
 
     assert "compose.core.yaml" not in makefile
-    assert "--platform linux/amd64,linux/arm64" in makefile
-    assert "--push" in makefile
-    assert "ecr describe-images" in makefile
-    assert "already published" in makefile
+    assert "image-publish:" not in makefile
+    assert "emr-jobs-publish:" not in makefile
     assert "deployment/release_manifest" not in makefile
     assert "deploy-release" not in makefile
     assert "COMPONENT_IMAGE must be an immutable image reference by digest" in makefile
-    assert 'imageTag="$(RELEASE)"' in makefile
     assert "ocr-worker:runtime" in makefile
     assert "AIRFLOW_PARALLELISM ?=" not in makefile
     assert "AIRFLOW_USERS ?=" not in makefile

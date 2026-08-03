@@ -4,9 +4,10 @@ Use named/SSO profiles for operator commands and IAM Roles Anywhere for self-hos
 repository does not use `.env` files. Secrets Manager owns credentials, Parameter Store owns
 runtime resource discovery, and Git owns stable application configuration.
 
-Terraform state uses a separate versioned S3 bootstrap bucket with native lock files. Dev resources
-can be rebuilt; production should disable destructive bucket behavior while retaining the same
-module boundaries.
+The backend bootstrap keeps its local state outside the worktree under
+`~/.cache/lakehouse/terraform/state/`. It creates the versioned S3 bucket where AWS, Tailscale,
+GitHub, and OCI use separate state keys with native lock files. Dev resources can be rebuilt;
+production should disable destructive bucket behavior while retaining the same module boundaries.
 
 Only shared metadata PostgreSQL, Airflow, and ArXiv Inspector are composed on the OCI services host.
 AWS owns S3, Glue, EMR Serverless, Athena, KMS, IAM, ECR, SSM, and Secrets Manager. OCI exposes no
@@ -35,8 +36,7 @@ boundary when the default chain is not the intended identity:
 
 ```bash
 AWS_PROFILE=custom-catalog make catalog-apply
-AWS_PROFILE=custom-deployer make emr-jobs-publish
-AWS_PROFILE=custom-publisher make airflow-publish
+AWS_PROFILE=custom-terraform-admin make aws-plan
 ```
 
 ## Secrets
@@ -101,26 +101,24 @@ ECR repositories are immutable and retain the newest 20 releases. GitHub publish
 the changed component after the protected `dev` environment is approved. AWS and Tailscale access
 uses OIDC; there are no long-lived CI credentials.
 
-After applying AWS and Tailscale, create a GitHub environment named `dev`, restrict it to `main`,
-require a reviewer, and populate its six non-secret variables from:
+After applying AWS and Tailscale, apply the isolated GitHub root with a fine-grained token that can
+manage Actions environments and variables for this repository:
 
 ```bash
-make github-delivery-config
+GITHUB_TOKEN='<fine-grained token>' make github-plan
+GITHUB_TOKEN='<fine-grained token>' make github-apply
 ```
 
 The variable names are `AWS_IMAGE_PUBLISHER_ROLE_ARN`, `AWS_EMR_PUBLISHER_ROLE_ARN`,
 `EMR_ARTIFACTS_URI`, `EMR_CODE_PARAMETER_NAME`, `TAILSCALE_CLIENT_ID`, and
-`TAILSCALE_AUDIENCE`. Terraform owns their resources; GitHub environment configuration remains a
-reviewed repository-administration step.
+`TAILSCALE_AUDIENCE`. Terraform reads them directly from the AWS and Tailscale remote states and
+owns the `dev` environment, owner reviewer, and exact `main` deployment policy. The token is provider
+authentication only: keep it in the process environment, never in tfvars or Terraform state. A
+GitHub App can replace the local token if repository administration is automated later.
 
-Human break-glass publication remains available through the standard credential chain:
-
-```bash
-AWS_PROFILE=your-image-publisher make airflow-publish
-AWS_PROFILE=your-image-publisher make arxiv-inspector-publish
-AWS_PROFILE=your-image-publisher make dbt-task-publish
-AWS_PROFILE=your-image-publisher make ocr-worker-publish
-```
+Protected GitHub workflows are the only release publishers. Rollback is a separate protected
+workflow and accepts an immutable digest plus its owning Git revision; there are no duplicate human
+image or EMR publishing targets to drift from CI.
 
 On the services host, deploy or install each component independently by digest:
 

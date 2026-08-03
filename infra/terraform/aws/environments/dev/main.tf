@@ -58,10 +58,9 @@ locals {
 }
 
 module "storage" {
-  source          = "../../modules/storage"
-  name_prefix     = local.name_prefix
-  bucket_names    = local.bucket_names
-  versioned_tiers = ["artifacts"]
+  source       = "../../modules/storage"
+  name_prefix  = local.name_prefix
+  bucket_names = local.bucket_names
   expiration_days = {
     "query-results" = 7
     logs            = 30
@@ -100,7 +99,7 @@ module "identity" {
   name_prefix                     = local.name_prefix
   account_id                      = data.aws_caller_identity.current.account_id
   aws_region                      = local.aws_region
-  operator_principal_arns         = var.operator_principal_arns
+  catalog_admin_principal_arns    = var.catalog_admin_principal_arns
   github_oidc_provider_arn        = aws_iam_openid_connect_provider.github.arn
   github_environment_subject      = local.github_environment_subject
   roles_anywhere_trust_anchor_arn = aws_rolesanywhere_trust_anchor.workloads.arn

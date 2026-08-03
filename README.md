@@ -36,6 +36,7 @@ flowchart LR
 | `infra/terraform/aws/` | AWS platform | S3, ECR, KMS, IAM, EMR Serverless, SSM, Secrets Manager |
 | `infra/terraform/oci/` | Runtime platform | Rebuildable ARM services host with no public ingress |
 | `infra/terraform/tailscale/` | Network platform | Private grants, SSH policy, and enrollment |
+| `infra/terraform/github/` | Delivery platform | Protected environments, deployment policy, and release variables |
 | `infra/runtime/postgres/` | Runtime platform | Shared PostgreSQL server with isolated application databases |
 | `platform/` | Data platform | YAML contracts and the contract-driven Glue/Iceberg control plane |
 | `jobs/emr/` | Source/product teams | Spark extract, landing publication, and curated business transforms |
@@ -90,8 +91,8 @@ not duplicate Git-owned image versions.
 
 ## Run
 
-Requirements: Docker Compose, Terraform, uv, AWS CLI, OCI CLI/config, and scoped Tailscale OAuth
-credentials.
+Requirements: Docker Compose, Terraform, uv, AWS CLI, OCI CLI/config, scoped Tailscale OAuth
+credentials, and a scoped GitHub API credential for repository administration.
 Use the Make targets below rather than running `terraform init` from the repository root; they keep
 Terraform working data in a shared cache outside the worktree and discover the state bucket
 automatically.
@@ -111,24 +112,19 @@ AWS_PROFILE=your-terraform-admin make airflow-secrets-init
 # Private network and OCI services host (after copying the documented tfvars examples)
 make tailscale-plan
 make tailscale-apply
-make github-delivery-config
-export TF_VAR_tailscale_auth_key="$(make --no-print-directory tailscale-auth-key)"
+GITHUB_TOKEN='<fine-grained token>' make github-plan
+GITHUB_TOKEN='<fine-grained token>' make github-apply
 make oci-plan
 make oci-apply
-unset TF_VAR_tailscale_auth_key
 make workload-identities-install
 
 # Configure the operator assume-role profiles, then create the catalog
 make catalog-apply
 make catalog-validate
 
-# Build analytics locally; component publication is normally owned by protected CI
+# Build analytics locally; protected CI owns every release publication
 make dbt-deps
 make dbt-build
-
-# Optional human break-glass publication through the standard AWS credential chain
-AWS_PROFILE=your-image-publisher make airflow-publish
-AWS_PROFILE=your-emr-publisher make emr-jobs-publish
 
 # On the enrolled services host, initialize dependencies and deploy exact ECR digests
 make metadata-postgres-up
@@ -138,15 +134,21 @@ make dbt-task-install DBT_TASK_IMAGE='<repository>@sha256:<digest>'
 make ocr-worker-install OCR_WORKER_IMAGE='<repository>@sha256:<digest>'
 ```
 
-`make github-delivery-config` prints the six non-secret variables required by the protected GitHub
-`dev` environment. Restrict that environment to `main` and require approval. Pull requests only
-validate; a reviewed merge publishes only affected images or EMR artifacts. GitHub exchanges OIDC
-tokens for short-lived AWS and Tailscale credentials, so CI stores no AWS key, Tailscale OAuth
-secret, or SSH key.
+The GitHub Terraform root reads the applied AWS and Tailscale remote states, creates the protected
+`dev` environment, restricts deployments to `main`, requires owner approval, and writes its six
+non-secret release variables. Its API token stays in the provider credential chain and never enters
+Terraform configuration or state. Pull requests only validate; a reviewed merge publishes only
+affected images or EMR artifacts. GitHub exchanges OIDC tokens for short-lived AWS and Tailscale
+credentials, so CI stores no AWS key, Tailscale OAuth secret, or SSH key.
 
-`make emr-jobs-publish` requires a clean commit. It uploads entrypoints, locked dependencies, and
-the exact contract bundle to `emr/jobs/<commit-sha>/`, then atomically updates
-`/lakehouse/<env>/emr/code_uri` in SSM.
+The one-time backend bootstrap keeps its small local state at
+`~/.cache/lakehouse/terraform/state/aws-bootstrap.tfstate`; this is the unavoidable state needed to
+create the state bucket itself. AWS, Tailscale, GitHub, and OCI then use isolated, natively locked
+keys in that versioned S3 bucket. OCI consumes the single-use Tailscale enrollment key directly
+from the Tailscale state, so it is never copied through a shell variable or tfvars file.
+
+The EMR release workflow uploads entrypoints, locked dependencies, and the exact contract bundle to
+`emr/jobs/<commit-sha>/`, then atomically updates `/lakehouse/<env>/emr/code_uri` in SSM.
 
 Each component workflow builds one multi-architecture image under an immutable Git-SHA tag, records
 provenance/SBOM, and deploys its digest through a port-22-only Tailscale identity. Deployments are

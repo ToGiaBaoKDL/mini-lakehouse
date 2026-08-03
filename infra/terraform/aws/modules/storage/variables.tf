@@ -13,17 +13,6 @@ variable "bucket_names" {
   }
 }
 
-variable "versioned_tiers" {
-  type        = set(string)
-  description = "Storage tiers that retain S3 object versions."
-  default     = []
-
-  validation {
-    condition     = length(setsubtract(var.versioned_tiers, toset(keys(var.bucket_names)))) == 0
-    error_message = "versioned_tiers must be a subset of bucket_names keys."
-  }
-}
-
 variable "expiration_days" {
   type        = map(number)
   description = "Optional object expiration by bucket tier."

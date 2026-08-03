@@ -13,11 +13,6 @@ output "emr_runtime_role_arn" {
   value       = aws_iam_role.emr_runtime.arn
 }
 
-output "emr_deployer_role_arn" {
-  description = "IAM role allowed to publish immutable EMR job releases."
-  value       = aws_iam_role.emr_deployer.arn
-}
-
 output "catalog_admin_role_arn" {
   description = "IAM role allowed to apply contract-owned Glue and Iceberg metadata."
   value       = aws_iam_role.catalog_admin.arn
@@ -36,11 +31,6 @@ output "arxiv_inspector_role_arn" {
 output "dbt_transformer_role_arn" {
   description = "IAM role used by dbt to read curated data and manage analytics."
   value       = aws_iam_role.dbt_transformer.arn
-}
-
-output "image_publisher_role_arn" {
-  description = "IAM role allowed to publish and pull local service images."
-  value       = aws_iam_role.image_publisher.arn
 }
 
 output "ocr_worker_role_arn" {

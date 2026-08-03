@@ -1,11 +1,11 @@
 data "aws_partition" "current" {}
 
-data "aws_iam_policy_document" "operator_trust" {
+data "aws_iam_policy_document" "catalog_admin_trust" {
   statement {
     actions = ["sts:AssumeRole"]
     principals {
       type        = "AWS"
-      identifiers = var.operator_principal_arns
+      identifiers = var.catalog_admin_principal_arns
     }
   }
 }
@@ -127,4 +127,11 @@ locals {
     var.bucket_arns.curated,
   ]
   ingestion_object_arns = [for arn in local.ingestion_bucket_arns : "${arn}/*"]
+  analytics_metadata_prefixes = [
+    "tables",
+    "tables/*",
+  ]
+  analytics_metadata_object_arns = [
+    "${var.bucket_arns.analytics}/tables/*/metadata/*",
+  ]
 }

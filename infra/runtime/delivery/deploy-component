@@ -34,6 +34,9 @@ git -C "$work_dir" fetch --quiet --depth=1 origin "$revision"
 git -C "$work_dir" checkout --quiet --detach FETCH_HEAD
 test "$(git -C "$work_dir" rev-parse HEAD)" = "$revision"
 
+export HOST_BIND_ADDRESS=0.0.0.0
+export AIRFLOW_BASE_URL=http://tgbao-dev-services:8080
+
 case "$component" in
     airflow)
         make -C "$work_dir" airflow-deploy AIRFLOW_IMAGE="$image"

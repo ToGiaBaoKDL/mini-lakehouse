@@ -36,6 +36,16 @@ def test_component_release_is_environment_protected_and_digest_driven() -> None:
     assert "tailscale ssh ubuntu@tgbao-dev-services" in action
     assert "deployment/release_manifest" not in release + action + script
     assert "latest" not in release + action + script
+    assert "export HOST_BIND_ADDRESS=0.0.0.0" in script
+    assert "export AIRFLOW_BASE_URL=http://tgbao-dev-services:8080" in script
+
+
+def test_service_pull_uses_short_lived_registry_login() -> None:
+    services = Path("make/services.mk").read_text(encoding="utf-8")
+
+    assert "aws ecr get-login-password" in services
+    assert "docker logout" in services
+    assert "COMPONENT_IMAGE must be an immutable image reference by digest" in services
 
 
 def test_each_custom_component_has_a_thin_release_caller() -> None:
@@ -73,8 +83,11 @@ def test_emr_has_an_independent_release_pointer() -> None:
     assert "AWS_EMR_PUBLISHER_ROLE_ARN" in source
     assert "EMR_ARTIFACTS_URI" in source
     assert "EMR_CODE_PARAMETER_NAME" in source
-    assert "make emr-jobs-publish" in source
-    assert "EMR_ARTIFACTS_URI and EMR_CODE_PARAMETER_NAME must be set together" in makefile
+    assert "make emr-jobs-package" in source
+    assert "aws s3 sync dist/emr/" in source
+    assert "aws ssm put-parameter" in source
+    assert "emr-jobs-publish:" not in makefile
+    assert "terraform output" not in makefile
 
 
 def test_manual_rollback_requires_an_exact_image_and_revision() -> None:

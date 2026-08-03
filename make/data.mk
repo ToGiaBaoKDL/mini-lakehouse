@@ -4,7 +4,7 @@ OCR_AWS_CONFIG := $(AWS_IDENTITY_DIR)/ocr-worker/host-config
 
 .PHONY: catalog-apply catalog-validate ocr-kaggle-runner-publish \
 	dbt-deps dbt-validate dbt-build \
-	emr-jobs-package emr-jobs-publish-preflight emr-jobs-publish
+	emr-jobs-package
 
 catalog-apply: ## Apply Glue/Iceberg YAML contracts with PyIceberg.
 	uv run --package lakehouse --extra catalog --extra cli python -m lakehouse.catalog.admin apply
@@ -59,31 +59,3 @@ emr-jobs-package: ## Build EMR artifacts in the matching EMR runtime.
 	rm -rf $(EMR_BUILD_DIR)
 	docker build --platform linux/amd64 --file jobs/emr/Dockerfile --target artifacts \
 		--output type=local,dest=$(EMR_BUILD_DIR) .
-
-emr-jobs-publish-preflight: ## Require a committed release and deployment tools.
-	@test -z "$$(git status --porcelain)" || { \
-		printf '%s\n' "Commit the worktree before publishing an EMR release."; exit 1; \
-	}
-	@command -v aws >/dev/null
-	@if test -z "$${EMR_ARTIFACTS_URI:-}" || test -z "$${EMR_CODE_PARAMETER_NAME:-}"; then \
-		command -v terraform >/dev/null || { \
-			printf '%s\n' "Set EMR_ARTIFACTS_URI and EMR_CODE_PARAMETER_NAME when Terraform state is unavailable."; exit 1; \
-		}; \
-	fi
-
-emr-jobs-publish: emr-jobs-publish-preflight emr-jobs-package ## Publish one immutable EMR release.
-	@set -eu; \
-		ARTIFACTS_URI="$${EMR_ARTIFACTS_URI:-}"; \
-		CODE_PARAMETER="$${EMR_CODE_PARAMETER_NAME:-}"; \
-		if test -z "$${ARTIFACTS_URI}" && test -z "$${CODE_PARAMETER}"; then \
-			ARTIFACTS_URI="$$($(AWS_TERRAFORM) output -raw emr_artifacts_uri)"; \
-			CODE_PARAMETER="$$($(AWS_TERRAFORM) output -raw emr_code_parameter_name)"; \
-		elif test -z "$${ARTIFACTS_URI}" || test -z "$${CODE_PARAMETER}"; then \
-			printf '%s\n' "EMR_ARTIFACTS_URI and EMR_CODE_PARAMETER_NAME must be set together."; exit 1; \
-		fi; \
-		EMR_CODE_URI="$${ARTIFACTS_URI%/}/$(RELEASE)"; \
-		aws s3 sync \
-			$(EMR_BUILD_DIR)/ "$${EMR_CODE_URI}/" --only-show-errors; \
-		aws ssm put-parameter \
-			--name "$${CODE_PARAMETER}" --type String --value "$${EMR_CODE_URI}" --overwrite >/dev/null; \
-		printf '%s\n' "Published EMR release $${EMR_CODE_URI}"
