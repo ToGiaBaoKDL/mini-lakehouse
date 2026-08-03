@@ -76,6 +76,38 @@ populate the four operator-owned connection/provider secrets, manually dispatch 
 component and EMR releases, then apply and validate catalog contracts. Release workflows are not
 safe to dispatch before the OCI host, workload identities, and required secret values exist.
 
+## Runtime secrets
+
+Terraform creates Secrets Manager containers but deliberately does not own secret values. After
+the AWS root has been applied, generate the PostgreSQL and Airflow runtime values idempotently:
+
+```bash
+AWS_PROFILE=tgbao-dev make metadata-postgres-secrets-init
+AWS_PROFILE=tgbao-dev make airflow-secrets-init
+```
+
+Populate optional integration credentials only when their workloads are enabled. Local payloads
+under `.secrets/dev` are ignored by Git and must not be uploaded while they still contain
+`REPLACE_...` placeholders:
+
+```bash
+AWS_PROFILE=tgbao-dev aws secretsmanager put-secret-value \
+  --secret-id lakehouse/dev/airflow/connections/slack_api_default \
+  --secret-string file://.secrets/dev/airflow/slack_api_default.json
+
+AWS_PROFILE=tgbao-dev aws secretsmanager put-secret-value \
+  --secret-id lakehouse/dev/airflow/connections/smtp_default \
+  --secret-string file://.secrets/dev/airflow/smtp_default.json
+
+AWS_PROFILE=tgbao-dev aws secretsmanager put-secret-value \
+  --secret-id lakehouse/dev/ocr/providers/kaggle \
+  --secret-string file://.secrets/dev/ocr/kaggle.json
+
+AWS_PROFILE=tgbao-dev aws secretsmanager put-secret-value \
+  --secret-id lakehouse/dev/ocr/providers/modal \
+  --secret-string file://.secrets/dev/ocr/modal.json
+```
+
 Authenticate the Tailscale provider with scoped OAuth environment variables. AWS and OCI providers
 use their standard SDK credential chains; select non-default operator profiles with `AWS_PROFILE`
 and `OCI_CONFIG_FILE_PROFILE` at the command boundary. The GitHub provider uses `GITHUB_TOKEN` (or
