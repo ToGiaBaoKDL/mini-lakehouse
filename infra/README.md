@@ -64,6 +64,18 @@ make oci-apply
 make workload-identities-install
 ```
 
+The exact first-apply inputs are intentionally small:
+
+- AWS tfvars: public workload CA path and existing catalog-operator IAM principal ARN(s).
+- Tailscale tfvars: one owner email; provider OAuth credentials and tailnet are environment values.
+- GitHub: provider token only; this root has no tfvars file.
+- OCI tfvars: tenancy, compartment, region, and a pinned Ubuntu AArch64 image OCID.
+
+After the host identities are installed, initialize the generated PostgreSQL/Airflow secrets,
+populate the four operator-owned connection/provider secrets, manually dispatch the initial
+component and EMR releases, then apply and validate catalog contracts. Release workflows are not
+safe to dispatch before the OCI host, workload identities, and required secret values exist.
+
 Authenticate the Tailscale provider with scoped OAuth environment variables. AWS and OCI providers
 use their standard SDK credential chains; select non-default operator profiles with `AWS_PROFILE`
 and `OCI_CONFIG_FILE_PROFILE` at the command boundary. The GitHub provider uses `GITHUB_TOKEN` (or
@@ -75,6 +87,11 @@ The GitHub root manages the existing repository's `dev` environment, owner appro
 deployment policy, and six non-secret release variables. It deliberately does not adopt ownership
 of the repository itself. CI uses immutable GitHub repository IDs in the OIDC subject and receives
 only image/EMR publication plus port-22 deployment access.
+
+Application delivery sends only the selected component-owned deployment bundle over Tailscale SSH.
+OCI needs Docker, AWS CLI, and the workload identities, but no repository checkout, Git, Make, or
+Terraform state. Airflow owns its Compose reconciliation and idempotently brings up the shared
+metadata PostgreSQL dependency; Inspector, dbt, and OCR retain independent deployment boundaries.
 
 Pin `image_ocid` in OCI tfvars to one reviewed Ubuntu 24.04 AArch64 image; Terraform never moves
 the host to a newly published image implicitly. IAM Roles Anywhere trusts the public workload CA only. The CA private key stays outside the

@@ -1,55 +1,39 @@
 #!/bin/sh
 set -eu
 
-usage() {
-    printf '%s\n' "Usage: deploy-component <component> <image@sha256:digest> <git-sha>" >&2
+if [ "$#" -ne 2 ]; then
+    printf '%s\n' "Usage: deploy-component <component> <image@sha256:digest>" >&2
     exit 2
-}
-
-test "$#" -eq 3 || usage
+fi
 
 component=$1
 image=$2
-revision=$3
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+bundle_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
 
-case "$component" in
-    airflow|arxiv-inspector|dbt-task|ocr-worker) ;;
-    *) usage ;;
-esac
-
-case "$image" in
-    *.dkr.ecr.*.amazonaws.com/tgbao-dev-"$component"@sha256:*) ;;
-    *) printf '%s\n' "Image does not belong to the dev $component repository." >&2; exit 2 ;;
-esac
-
-printf '%s' "$image" | grep -Eq '@sha256:[0-9a-f]{64}$' || usage
-printf '%s' "$revision" | grep -Eq '^[0-9a-f]{40}$' || usage
-
-work_dir=$(mktemp -d)
-trap 'rm -rf "$work_dir"' EXIT HUP INT TERM
-
-git -C "$work_dir" init --quiet
-git -C "$work_dir" remote add origin https://github.com/ToGiaBaoKDL/mini-lakehouse.git
-git -C "$work_dir" fetch --quiet --depth=1 origin "$revision"
-git -C "$work_dir" checkout --quiet --detach FETCH_HEAD
-test "$(git -C "$work_dir" rev-parse HEAD)" = "$revision"
-
-export HOST_BIND_ADDRESS=0.0.0.0
-export AIRFLOW_BASE_URL=http://tgbao-dev-services:8080
+export LAKEHOUSE_ENVIRONMENT=${LAKEHOUSE_ENVIRONMENT:-dev}
+export AWS_IDENTITY_DIR=${AWS_IDENTITY_DIR:-"$HOME/.config/lakehouse/$LAKEHOUSE_ENVIRONMENT/aws"}
+export HOST_BIND_ADDRESS=${HOST_BIND_ADDRESS:-0.0.0.0}
 
 case "$component" in
     airflow)
-        make -C "$work_dir" airflow-deploy AIRFLOW_IMAGE="$image"
+        export AIRFLOW_BASE_URL=${AIRFLOW_BASE_URL:-http://tgbao-dev-services:8080}
+        deploy="$bundle_root/orchestration/deploy/deploy"
         ;;
     arxiv-inspector)
-        make -C "$work_dir" arxiv-inspector-deploy ARXIV_INSPECTOR_IMAGE="$image"
+        deploy="$bundle_root/apps/arxiv_inspector/deploy/deploy"
         ;;
     dbt-task)
-        make -C "$work_dir" dbt-task-install DBT_TASK_IMAGE="$image"
+        deploy="$bundle_root/dbt/analytics/deploy/deploy"
         ;;
     ocr-worker)
-        make -C "$work_dir" ocr-worker-install OCR_WORKER_IMAGE="$image"
+        deploy="$bundle_root/ocr/deploy/deploy"
+        ;;
+    *)
+        printf '%s\n' "Unknown component: $component" >&2
+        exit 2
         ;;
 esac
 
-printf '%s\n' "Deployed $component from $revision as $image"
+"$deploy" "$image"
+printf '%s\n' "Deployed $component as $image"

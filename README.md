@@ -126,12 +126,10 @@ make catalog-validate
 make dbt-deps
 make dbt-build
 
-# On the enrolled services host, initialize dependencies and deploy exact ECR digests
-make metadata-postgres-up
-make airflow-deploy AIRFLOW_IMAGE='<repository>@sha256:<digest>'
-make arxiv-inspector-deploy ARXIV_INSPECTOR_IMAGE='<repository>@sha256:<digest>'
-make dbt-task-install DBT_TASK_IMAGE='<repository>@sha256:<digest>'
-make ocr-worker-install OCR_WORKER_IMAGE='<repository>@sha256:<digest>'
+# For unpublished workstation iteration
+make images-build
+make airflow-up
+make arxiv-inspector-up
 ```
 
 The GitHub Terraform root reads the applied AWS and Tailscale remote states, creates the protected
@@ -148,13 +146,18 @@ keys in that versioned S3 bucket. OCI consumes the single-use Tailscale enrollme
 from the Tailscale state, so it is never copied through a shell variable or tfvars file.
 
 The EMR release workflow uploads entrypoints, locked dependencies, and the exact contract bundle to
-`emr/jobs/<commit-sha>/`, then atomically updates `/lakehouse/<env>/emr/code_uri` in SSM.
+`emr/jobs/<commit-sha>/`. A checksum manifest marks a complete release; only then does CI atomically
+update `/lakehouse/<env>/emr/code_uri` in SSM. Rerunning a completed revision reuses it, while a
+failed partial upload can be repaired before the completion marker is written.
 
 Each component workflow builds one multi-architecture image under an immutable Git-SHA tag, records
 provenance/SBOM, and deploys its digest through a port-22-only Tailscale identity. Deployments are
-serialized per component; reruns reuse the existing immutable image. Manual rollback accepts only a
-reviewed digest plus its exact Git revision. Airflow, Inspector, dbt, and OCR cannot accidentally
-move together, and the OCI host never reads Terraform state.
+serialized per component; reruns reuse the existing immutable image. Component rollback verifies
+that the digest belongs to its reviewed Git revision, and EMR rollback restores only a completed
+reviewed release. Airflow, Inspector, dbt, and OCR cannot accidentally move together, and the OCI
+host never reads Terraform state. CI streams only the selected component-owned deployment bundle;
+the host does not clone the repository or run its root Makefile.
+Airflow reconciliation also brings up its metadata PostgreSQL dependency before migrating Airflow.
 
 Airflow uses the official versioned `GitDagBundle` and tracks the reviewed `main` ref under
 `orchestration/bundle`. A DAG-only merge is fetched by the DAG processor without rebuilding or

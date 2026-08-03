@@ -1,0 +1,25 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -gt 1 ]; then
+    printf '%s\n' "Usage: apps/arxiv_inspector/deploy/reconcile [image]" >&2
+    exit 2
+fi
+
+image=${1:-arxiv-inspector:local}
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+environment=${LAKEHOUSE_ENVIRONMENT:-dev}
+identity_dir=${AWS_IDENTITY_DIR:-"$HOME/.config/lakehouse/$environment/aws"}
+test -r "$identity_dir/arxiv-inspector/config" || {
+    printf '%s\n' "The arxiv-inspector workload identity is missing." >&2
+    exit 1
+}
+
+export LAKEHOUSE_ENVIRONMENT=$environment
+export AWS_IDENTITY_DIR=$identity_dir
+export HOST_BIND_ADDRESS=${HOST_BIND_ADDRESS:-127.0.0.1}
+export LOCAL_UID=${LOCAL_UID:-$(id -u)}
+export ARXIV_INSPECTOR_IMAGE=$image
+
+docker compose --project-name arxiv-inspector -f "$script_dir/compose.yaml" \
+    up -d --wait --wait-timeout 180

@@ -1,4 +1,3 @@
-EMR_BUILD_DIR := dist/emr
 DBT_AWS_CONFIG := $(AWS_IDENTITY_DIR)/dbt-transformer/host-config
 OCR_AWS_CONFIG := $(AWS_IDENTITY_DIR)/ocr-worker/host-config
 
@@ -56,6 +55,4 @@ dbt-build: ## Build analytics with runtime references loaded from SSM.
 			--project-dir dbt/analytics --profiles-dir dbt/analytics
 
 emr-jobs-package: ## Build EMR artifacts in the matching EMR runtime.
-	rm -rf $(EMR_BUILD_DIR)
-	docker build --platform linux/amd64 --file jobs/emr/Dockerfile --target artifacts \
-		--output type=local,dest=$(EMR_BUILD_DIR) .
+	jobs/emr/release/package

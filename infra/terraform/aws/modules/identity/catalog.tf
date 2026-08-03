@@ -54,8 +54,8 @@ data "aws_iam_policy_document" "catalog_admin" {
   }
   statement {
     sid       = "ManageIcebergMetadata"
-    actions   = ["s3:GetObject", "s3:PutObject"]
-    resources = local.ingestion_object_arns
+    actions   = ["s3:DeleteObject", "s3:GetObject", "s3:PutObject"]
+    resources = local.ingestion_metadata_object_arns
   }
   statement {
     sid       = "ListAnalyticsMetadata"

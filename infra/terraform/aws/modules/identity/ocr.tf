@@ -12,7 +12,7 @@ data "aws_iam_policy_document" "ocr_worker" {
   }
   statement {
     sid       = "ReadProviderCredentials"
-    actions   = ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"]
+    actions   = ["secretsmanager:GetSecretValue"]
     resources = var.ocr_secret_arns
   }
   statement {

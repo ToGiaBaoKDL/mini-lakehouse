@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - .github/workflows/release-emr-jobs.yml
       - jobs/emr/**
       - platform/contracts/**
       - platform/src/**
@@ -28,6 +29,8 @@ jobs:
       EMR_CODE_PARAMETER_NAME: ${{ vars.EMR_CODE_PARAMETER_NAME }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Assume the EMR publisher role
         uses: aws-actions/configure-aws-credentials@acca2b1b2070338fb9fd1ca27ecee81d687e58e5 # v6.1.2
         with:
@@ -35,16 +38,8 @@ jobs:
           role-to-assume: ${{ vars.AWS_EMR_PUBLISHER_ROLE_ARN }}
           role-session-name: github-${{ github.run_id }}
       - name: Package EMR jobs
-        run: make emr-jobs-package
+        run: jobs/emr/release/package
       - name: Publish immutable EMR artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
-          code_uri="${EMR_ARTIFACTS_URI%/}/$GITHUB_SHA"
-          aws s3 sync dist/emr/ "$code_uri/" --only-show-errors
-          aws ssm put-parameter \
-            --name "$EMR_CODE_PARAMETER_NAME" \
-            --type String \
-            --value "$code_uri" \
-            --overwrite >/dev/null
-          echo "Published $code_uri"
+        run: >-
+          jobs/emr/release/publish dist/emr "$EMR_ARTIFACTS_URI"
+          "$GITHUB_SHA" "$EMR_CODE_PARAMETER_NAME"

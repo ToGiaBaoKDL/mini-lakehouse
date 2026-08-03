@@ -12,8 +12,10 @@ def test_emr_artifacts_are_built_in_the_pinned_runtime() -> None:
     assert "python.tar.gz" in dockerfile
 
     makefile = Path("make/data.mk").read_text(encoding="utf-8")
+    package = Path("jobs/emr/release/package").read_text(encoding="utf-8")
     assert "jobs/emr/.venv/lib/python" not in makefile
-    assert "--file jobs/emr/Dockerfile" in makefile
+    assert "jobs/emr/release/package" in makefile
+    assert 'jobs/emr/Dockerfile"' in package
     assert "emr_jobs.zip" not in makefile
 
 

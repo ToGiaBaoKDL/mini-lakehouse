@@ -118,15 +118,21 @@ workload-identities-render: aws-init ## Issue certificates and render configs fr
 	TF_DATA_DIR="$(AWS_TERRAFORM_DATA_DIR)" \
 		infra/runtime/identity/workload-identities render "$(AWS_IDENTITY_DIR)" "$(AWS_TERRAFORM_DIR)"
 
-workload-identities-install: ## Install leaf workload identities on the private services host.
+workload-identities-install: aws-init ## Install leaf workload identities on the private services host.
 	@command -v tailscale >/dev/null
-	@for WORKLOAD in airflow arxiv-inspector dbt-transformer metadata-postgres ocr-worker services-deployer; do \
-		test -r "$(AWS_IDENTITY_DIR)/$${WORKLOAD}/config" || { \
-			printf '%s\n' "Missing rendered identity for $${WORKLOAD}."; exit 1; \
-		}; \
-	done
-	@tar -C "$(AWS_IDENTITY_DIR)" -cf - \
-		airflow arxiv-inspector dbt-transformer metadata-postgres ocr-worker services-deployer \
+	@set -eu; \
+		WORKLOADS="$$(TF_DATA_DIR="$(AWS_TERRAFORM_DATA_DIR)" \
+			terraform -chdir="$(AWS_TERRAFORM_DIR)" output -json roles_anywhere_workloads \
+			| jq -r 'keys[] | gsub("_"; "-")')"; \
+		test -n "$${WORKLOADS}"; \
+		for WORKLOAD in $${WORKLOADS}; do \
+			for FILE in certificate.pem private-key.pem config; do \
+				test -r "$(AWS_IDENTITY_DIR)/$${WORKLOAD}/$${FILE}" || { \
+					printf '%s\n' "Missing $${FILE} for $${WORKLOAD}."; exit 1; \
+				}; \
+			done; \
+		done; \
+		tar -C "$(AWS_IDENTITY_DIR)" --exclude='*/host-config' -cf - $${WORKLOADS} \
 		| tailscale ssh "$(SERVICES_HOST_USER)@$(SERVICES_HOST)" \
 			'set -eu; target="$$HOME/.config/lakehouse/$(LAKEHOUSE_ENVIRONMENT)/aws"; \
 			install -d -m 0700 "$$target"; tar -C "$$target" -xf -; \

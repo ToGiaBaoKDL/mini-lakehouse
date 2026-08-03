@@ -17,7 +17,7 @@ on:
         required: true
         type: string
       revision:
-        description: Exact 40-character Git revision owning the deployment definition
+        description: Exact reviewed Git revision owning both the image and deployment definition
         required: true
         type: string
 
@@ -34,12 +34,65 @@ jobs:
       contents: read
       id-token: write
     env:
+      AWS_REGION: ap-southeast-1
       TAILSCALE_CLIENT_ID: ${{ vars.TAILSCALE_CLIENT_ID }}
       TAILSCALE_AUDIENCE: ${{ vars.TAILSCALE_AUDIENCE }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate deployment revision
+        shell: bash
+        env:
+          REVISION: ${{ inputs.revision }}
+        run: |
+          set -euo pipefail
+          [[ "$REVISION" =~ ^[0-9a-f]{40}$ ]]
+      - name: Assume the image publisher role
+        uses: aws-actions/configure-aws-credentials@acca2b1b2070338fb9fd1ca27ecee81d687e58e5 # v6.1.2
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_IMAGE_PUBLISHER_ROLE_ARN }}
+          role-session-name: github-rollback-${{ github.run_id }}
+      - name: Verify image ownership
+        shell: bash
+        env:
+          COMPONENT: ${{ inputs.component }}
+          IMAGE: ${{ inputs.image }}
+          REVISION: ${{ inputs.revision }}
+        run: |
+          set -euo pipefail
+          repository="tgbao-dev-$COMPONENT"
+          response=$(aws ecr batch-get-image \
+            --repository-name "$repository" \
+            --image-ids "imageTag=$REVISION" \
+            --output json)
+          digest=$(jq -r '.images[0].imageId.imageDigest // empty' <<<"$response")
+          account_id=$(aws sts get-caller-identity --query Account --output text)
+          registry="$account_id.dkr.ecr.$AWS_REGION.amazonaws.com"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$IMAGE" == "$registry/$repository@$digest" ]]
+      - name: Check out the matching deployment bundle
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.revision }}
+          path: .release-source
+          fetch-depth: 0
+          persist-credentials: false
+          sparse-checkout: |
+            infra/runtime/delivery
+            infra/runtime/postgres
+            orchestration/deploy
+            apps/arxiv_inspector/deploy
+            dbt/analytics/deploy
+            ocr/deploy
+      - name: Verify the deployment bundle was reviewed on main
+        shell: bash
+        env:
+          REVISION: ${{ inputs.revision }}
+        run: git -C .release-source merge-base --is-ancestor "$REVISION" origin/main
       - uses: ./.github/actions/deploy-component
         with:
           component: ${{ inputs.component }}
           image: ${{ inputs.image }}
-          revision: ${{ inputs.revision }}
+          source_root: .release-source

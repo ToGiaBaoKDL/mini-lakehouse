@@ -1,0 +1,36 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+environment=${LAKEHOUSE_ENVIRONMENT:-dev}
+identity_dir=${AWS_IDENTITY_DIR:-"$HOME/.config/lakehouse/$environment/aws"}
+host_config="$identity_dir/metadata-postgres/host-config"
+test -r "$host_config" || {
+    printf '%s\n' "The metadata-postgres workload identity is missing." >&2
+    exit 1
+}
+
+aws_runtime() {
+    env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+        AWS_CONFIG_FILE="$host_config" AWS_PROFILE=default aws "$@"
+}
+
+postgres_secret=$(aws_runtime secretsmanager get-secret-value \
+    --secret-id "lakehouse/$environment/metadata-postgres/bootstrap" \
+    --query SecretString --output text)
+airflow_secret=$(aws_runtime secretsmanager get-secret-value \
+    --secret-id "lakehouse/$environment/metadata-postgres/airflow" \
+    --query SecretString --output text)
+printf '%s' "$postgres_secret" | jq -e \
+    '.version == 1 and (.password | type == "string" and length > 0)' >/dev/null
+printf '%s' "$airflow_secret" | jq -e \
+    '.version == 1 and (.password | type == "string" and length > 0)' >/dev/null
+
+METADATA_POSTGRES_PASSWORD=$(printf '%s' "$postgres_secret" | jq -r '.password')
+AIRFLOW_DATABASE_PASSWORD=$(printf '%s' "$airflow_secret" | jq -r '.password')
+export METADATA_POSTGRES_PASSWORD AIRFLOW_DATABASE_PASSWORD
+
+docker compose --project-name metadata-postgres -f "$script_dir/compose.yaml" \
+    up -d --wait --wait-timeout 180 metadata-postgres
+docker compose --project-name metadata-postgres -f "$script_dir/compose.yaml" \
+    run --rm metadata-postgres-bootstrap

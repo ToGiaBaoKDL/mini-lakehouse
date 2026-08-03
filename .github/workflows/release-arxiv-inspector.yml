@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
     paths:
+      - .github/workflows/release-arxiv-inspector.yml
       - apps/arxiv_inspector/**
       - ocr/src/**
       - ocr/pyproject.toml

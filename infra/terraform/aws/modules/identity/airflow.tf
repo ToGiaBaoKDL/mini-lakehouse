@@ -34,7 +34,7 @@ data "aws_iam_policy_document" "airflow" {
   }
   statement {
     sid       = "ReadAirflowSecrets"
-    actions   = ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"]
+    actions   = ["secretsmanager:GetSecretValue"]
     resources = var.airflow_secret_arns
   }
   statement {

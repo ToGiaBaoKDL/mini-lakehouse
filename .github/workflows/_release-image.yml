@@ -34,6 +34,8 @@ jobs:
       TAILSCALE_AUDIENCE: ${{ vars.TAILSCALE_AUDIENCE }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Validate component boundary
         shell: bash
@@ -68,11 +70,11 @@ jobs:
           REPOSITORY: ${{ inputs.repository }}
         run: |
           set -euo pipefail
-          digest=$(aws ecr describe-images \
+          response=$(aws ecr batch-get-image \
             --repository-name "$REPOSITORY" \
             --image-ids "imageTag=$GITHUB_SHA" \
-            --query 'imageDetails[0].imageDigest' \
-            --output text 2>/dev/null || true)
+            --output json)
+          digest=$(jq -r '.images[0].imageId.imageDigest // empty' <<<"$response")
           if [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "digest=$digest" >> "$GITHUB_OUTPUT"
             echo "exists=true" >> "$GITHUB_OUTPUT"
@@ -123,4 +125,3 @@ jobs:
         with:
           component: ${{ inputs.component }}
           image: ${{ steps.release.outputs.image }}
-          revision: ${{ github.sha }}

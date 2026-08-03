@@ -124,12 +124,16 @@ def test_airflow_runtime_secrets_are_service_scoped_files() -> None:
     assert all("environment" in secret for secret in payload["secrets"].values())
 
     services_makefile = Path("make/services.mk").read_text(encoding="utf-8")
-    assert '"version":1' in services_makefile
-    assert ".version == 1" in services_makefile
-    assert "admin_password" in services_makefile
-    assert "AIRFLOW_ADMIN_PASSWORDS" in services_makefile
-    assert "METADATA_POSTGRES_BOOTSTRAP_SECRET" in services_makefile
-    assert "AIRFLOW_DATABASE_SECRET" in services_makefile
+    airflow_secrets = Path("orchestration/deploy/initialize-secrets").read_text(encoding="utf-8")
+    postgres_secrets = Path("infra/runtime/postgres/initialize-secrets").read_text(encoding="utf-8")
+    airflow_reconcile = Path("orchestration/deploy/reconcile").read_text(encoding="utf-8")
+    assert '"version":1' in airflow_secrets + postgres_secrets
+    assert ".version == 1" in airflow_secrets + postgres_secrets
+    assert "admin_password" in airflow_secrets
+    assert "AIRFLOW_ADMIN_PASSWORDS" in airflow_reconcile
+    assert "infra/runtime/postgres/initialize-secrets" in services_makefile
+    assert "orchestration/deploy/initialize-secrets" in services_makefile
+    assert "secretsmanager put-secret-value" not in services_makefile
 
 
 def test_airflow_runtime_components_have_role_appropriate_healthchecks() -> None:
@@ -343,10 +347,6 @@ def test_makefile_exposes_owned_operational_entrypoints() -> None:
         "catalog-apply:",
         "catalog-validate:",
         "airflow-secrets-init:",
-        "airflow-deploy:",
-        "arxiv-inspector-deploy:",
-        "dbt-task-install:",
-        "ocr-worker-install:",
         "ocr-worker-build:",
         "dbt-task-build:",
         "emr-jobs-package:",
@@ -360,7 +360,11 @@ def test_makefile_exposes_owned_operational_entrypoints() -> None:
     assert "emr-jobs-publish:" not in makefile
     assert "deployment/release_manifest" not in makefile
     assert "deploy-release" not in makefile
-    assert "COMPONENT_IMAGE must be an immutable image reference by digest" in makefile
+    assert "component-image-pull:" not in makefile
+    assert "airflow-deploy:" not in makefile
+    assert "arxiv-inspector-deploy:" not in makefile
+    assert "dbt-task-install:" not in makefile
+    assert "ocr-worker-install:" not in makefile
     assert "ocr-worker:runtime" in makefile
     assert "AIRFLOW_PARALLELISM ?=" not in makefile
     assert "AIRFLOW_USERS ?=" not in makefile

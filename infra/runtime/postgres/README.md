@@ -1,6 +1,6 @@
 # Metadata PostgreSQL
 
-Shared metadata database for self-hosted control-plane services. Docker Compose owns
+Shared metadata database for self-hosted platform services. Docker Compose owns
 the process and persistent volume; Terraform owns only the workload identity and
 secret containers in AWS.
 

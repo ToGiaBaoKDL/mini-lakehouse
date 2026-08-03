@@ -28,8 +28,21 @@ initialize_ca() {
         openssl req -x509 -new -sha256 -days 3650 \
             -key "$ca_key" \
             -subj "/CN=lakehouse-workload-ca" \
+            -addext "basicConstraints=critical,CA:TRUE" \
+            -addext "keyUsage=critical,keyCertSign,cRLSign" \
+            -addext "subjectKeyIdentifier=hash" \
             -out "$ca_certificate"
     fi
+    openssl x509 -in "$ca_certificate" -noout -ext basicConstraints \
+        | grep -q "CA:TRUE" || {
+        printf '%s\n' "The workload certificate is not a valid CA certificate: $ca_certificate" >&2
+        exit 1
+    }
+    [ "$(openssl x509 -in "$ca_certificate" -pubkey -noout | openssl pkey -pubin -outform DER | openssl dgst -sha256)" = \
+      "$(openssl pkey -in "$ca_key" -pubout -outform DER | openssl dgst -sha256)" ] || {
+        printf '%s\n' "The workload CA certificate does not match its private key." >&2
+        exit 1
+    }
     printf '%s\n' "Workload CA: $ca_certificate"
 }
 

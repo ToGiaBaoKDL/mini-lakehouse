@@ -37,9 +37,21 @@ platform-validate: ## Validate settings and YAML contracts without AWS I/O.
 	uv run --package lakehouse --extra cli python -m lakehouse.validate
 
 lint: ## Run formatting, linting, and static type checks.
+	bash -n jobs/emr/release/publish
 	sh -n infra/runtime/identity/install-aws-signing-helper \
 		infra/runtime/identity/workload-identities \
-		infra/runtime/delivery/deploy-component
+		infra/runtime/delivery/deploy-component \
+		infra/runtime/delivery/pull-image \
+		infra/runtime/postgres/initialize-secrets \
+		infra/runtime/postgres/deploy \
+		jobs/emr/release/package \
+		orchestration/deploy/deploy \
+		orchestration/deploy/initialize-secrets \
+		orchestration/deploy/reconcile \
+		apps/arxiv_inspector/deploy/deploy \
+		apps/arxiv_inspector/deploy/reconcile \
+		dbt/analytics/deploy/deploy \
+		ocr/deploy/deploy
 	uv run ruff format --check .
 	uv run ruff check .
 	uv run --all-packages --all-extras pyright

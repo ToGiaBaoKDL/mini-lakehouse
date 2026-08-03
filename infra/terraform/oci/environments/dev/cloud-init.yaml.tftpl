@@ -6,9 +6,7 @@ packages:
   - curl
   - docker.io
   - docker-compose-v2
-  - git
   - jq
-  - make
   - python3-minimal
 
 write_files:
@@ -23,7 +21,7 @@ write_files:
       ${installer}
 
 runcmd:
-  - install -d -m 0755 /usr/share/keyrings /etc/apt/sources.list.d /opt/lakehouse
+  - install -d -m 0755 /usr/share/keyrings /etc/apt/sources.list.d
   - curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg -o /usr/share/keyrings/tailscale-archive-keyring.gpg
   - curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.tailscale-keyring.list -o /etc/apt/sources.list.d/tailscale.list
   - apt-get update
@@ -31,5 +29,5 @@ runcmd:
   - systemctl enable --now docker tailscaled
   - /usr/local/sbin/install-aws-signing-helper "$(uname -m)"
   - usermod -aG docker ubuntu
-  - tailscale up --auth-key="$(cat /run/tailscale-auth-key)" --hostname=${hostname} --ssh
+  - tailscale up --auth-key=file:/run/tailscale-auth-key --hostname=${hostname} --ssh
   - shred -u /run/tailscale-auth-key

@@ -187,13 +187,18 @@ def test_service_images_are_immutable_bounded_and_published_by_one_role() -> Non
     assert 'image_tag_mutability = "IMMUTABLE"' in registry
     assert "scan_on_push = true" in registry
     assert 'encryption_type = "AES256"' in registry
-    assert 'countType   = "imageCountMoreThan"' in registry
+    assert 'countType      = "imageCountMoreThan"' in registry
+    assert 'tagStatus      = "tagged"' in registry
+    assert 'tagPatternList = ["*"]' in registry
+    assert 'tagStatus   = "untagged"' in registry
+    assert 'countType   = "sinceImagePushed"' in registry
     assert "retained_image_count = 20" in environment
     assert '"${var.name_prefix}-github-image-publisher"' in identity
     assert '"${var.name_prefix}-image-publisher"' not in identity
     assert '"${var.name_prefix}-emr-deployer"' not in identity
     assert '"ecr:GetAuthorizationToken"' in identity
     assert '"ecr:PutImage"' in identity
+    assert '"ecr:DescribeImages"' not in identity
     assert "container_repository_arns" in identity
     assert "PublishReleaseManifest" not in identity
     assert "ssm:PutParameter" not in Path(
@@ -204,6 +209,7 @@ def test_service_images_are_immutable_bounded_and_published_by_one_role() -> Non
 def test_airflow_and_ocr_worker_have_separate_data_permissions() -> None:
     airflow = Path("infra/terraform/aws/modules/identity/airflow.tf").read_text(encoding="utf-8")
     ocr = Path("infra/terraform/aws/modules/identity/ocr.tf").read_text(encoding="utf-8")
+    postgres = Path("infra/terraform/aws/modules/identity/postgres.tf").read_text(encoding="utf-8")
 
     assert "UpdateCuratedIceberg" not in airflow
     assert "UpdateCuratedStorage" not in airflow
@@ -214,6 +220,7 @@ def test_airflow_and_ocr_worker_have_separate_data_permissions() -> None:
     assert "local.curated_database_arns_by_workload.ocr_worker" in ocr
     assert "local.curated_object_arns_by_workload.ocr_worker" in ocr
     assert '"${var.bucket_arns.curated}/*"' not in ocr
+    assert "secretsmanager:DescribeSecret" not in airflow + ocr + postgres
 
 
 def test_data_consumers_use_reviewed_database_and_prefix_entitlements() -> None:
@@ -234,6 +241,9 @@ def test_data_consumers_use_reviewed_database_and_prefix_entitlements() -> None:
 
 def test_cloud_roots_have_isolated_state_and_private_services_host() -> None:
     oci = _terraform_sources(Path("infra/terraform/oci/environments/dev"))
+    cloud_init = Path("infra/terraform/oci/environments/dev/cloud-init.yaml.tftpl").read_text(
+        encoding="utf-8"
+    )
     tailscale = _terraform_sources(Path("infra/terraform/tailscale/environments/dev"))
     github = _terraform_sources(Path("infra/terraform/github/environments/dev"))
     normalized_oci = " ".join(oci.split())
@@ -248,6 +258,8 @@ def test_cloud_roots_have_isolated_state_and_private_services_host() -> None:
     assert "memory_in_gbs = 24" in normalized_oci
     assert "source_id               = var.image_ocid" in oci
     assert 'data "oci_core_images"' not in oci
+    assert 'variable "ssh_authorized_key"' not in oci
+    assert "ssh_authorized_keys" not in oci
     assert "prohibit_internet_ingress  = true" in oci
     assert "ingress_security_rules" not in oci
     assert 'version = "~> 8.23.0"' in oci
@@ -264,6 +276,10 @@ def test_cloud_roots_have_isolated_state_and_private_services_host() -> None:
     assert "repository_id = local.github_repository.id" in tailscale
     assert 'name = "tgbao-dev-services"' in normalized_oci
     assert 'dns_label                  = "services"' in oci
+    assert "  - git" not in cloud_init
+    assert "  - make" not in cloud_init
+    assert "/opt/lakehouse" not in cloud_init
+    assert "--auth-key=file:/run/tailscale-auth-key" in cloud_init
 
 
 def test_github_delivery_configuration_is_terraform_owned_and_state_derived() -> None:
@@ -355,4 +371,18 @@ def test_catalog_admin_mutates_contract_tiers_but_only_reads_analytics_metadata(
     assert 'sid       = "ReadAnalyticsMetadata"' in catalog
     assert 'actions   = ["s3:GetObject"]' in catalog
     assert '"${var.bucket_arns.analytics}/tables/*/metadata/*"' in identity
+    assert "local.ingestion_metadata_object_arns" in catalog
+    assert '"${var.bucket_arns.landing}/*/*/tables/*/metadata/*"' in identity
+    assert '"${var.bucket_arns.curated}/*/tables/*/metadata/*"' in identity
     assert "local.analytics_object_arns_by_workload" not in catalog
+
+
+def test_emr_artifact_access_uses_only_exact_object_actions() -> None:
+    emr = Path("infra/terraform/aws/modules/identity/emr.tf").read_text(encoding="utf-8")
+
+    assert 'sid       = "ReadJobArtifacts"' in emr
+    assert 'sid = "PublishImmutableJobArtifacts"' in emr
+    assert 'resources = ["${var.bucket_arns.artifacts}/emr/jobs/*"]' in emr
+    assert "GetJobArtifactBucketLocation" not in emr
+    assert "ListJobArtifacts" not in emr
+    assert emr.count("s3:ListMultipartUploadParts") == 1

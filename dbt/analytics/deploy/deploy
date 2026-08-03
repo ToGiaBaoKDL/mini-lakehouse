@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 1 ]; then
+    printf '%s\n' "Usage: dbt/analytics/deploy/deploy <image@sha256:digest>" >&2
+    exit 2
+fi
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+bundle_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
+"$bundle_root/infra/runtime/delivery/pull-image" dbt-task "$1"
+docker tag "$1" dbt-task:runtime

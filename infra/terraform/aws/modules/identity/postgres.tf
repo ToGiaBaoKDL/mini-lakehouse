@@ -7,7 +7,7 @@ resource "aws_iam_role" "metadata_postgres" {
 data "aws_iam_policy_document" "metadata_postgres" {
   statement {
     sid       = "ReadMetadataDatabaseSecrets"
-    actions   = ["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"]
+    actions   = ["secretsmanager:GetSecretValue"]
     resources = var.metadata_postgres_secret_arns
   }
 }

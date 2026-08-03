@@ -104,7 +104,6 @@ resource "oci_core_instance" "services" {
   }
 
   metadata = {
-    ssh_authorized_keys = var.ssh_authorized_key
     user_data = base64encode(templatefile("${path.module}/cloud-init.yaml.tftpl", {
       hostname           = local.name
       installer          = indent(6, file("${path.module}/../../../../runtime/identity/install-aws-signing-helper"))

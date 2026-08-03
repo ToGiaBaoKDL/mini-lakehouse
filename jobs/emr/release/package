@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 0 ]; then
+    printf '%s\n' "Usage: jobs/emr/release/package" >&2
+    exit 2
+fi
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repository_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
+output="$repository_root/dist/emr"
+
+rm -rf "$output"
+docker build \
+    --platform linux/amd64 \
+    --file "$repository_root/jobs/emr/Dockerfile" \
+    --target artifacts \
+    --output "type=local,dest=$output" \
+    "$repository_root"

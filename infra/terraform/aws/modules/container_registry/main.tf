@@ -21,17 +21,33 @@ resource "aws_ecr_lifecycle_policy" "this" {
 
   repository = each.value.name
   policy = jsonencode({
-    rules = [{
-      rulePriority = 1
-      description  = "Retain the newest ${var.retained_image_count} immutable releases"
-      selection = {
-        tagStatus   = "any"
-        countType   = "imageCountMoreThan"
-        countNumber = var.retained_image_count
+    rules = [
+      {
+        rulePriority = 1
+        description  = "Retain the newest ${var.retained_image_count} tagged releases"
+        selection = {
+          tagStatus      = "tagged"
+          tagPatternList = ["*"]
+          countType      = "imageCountMoreThan"
+          countNumber    = var.retained_image_count
+        }
+        action = {
+          type = "expire"
+        }
+      },
+      {
+        rulePriority = 2
+        description  = "Remove unreferenced image data after seven days"
+        selection = {
+          tagStatus   = "untagged"
+          countType   = "sinceImagePushed"
+          countUnit   = "days"
+          countNumber = 7
+        }
+        action = {
+          type = "expire"
+        }
       }
-      action = {
-        type = "expire"
-      }
-    }]
+    ]
   })
 }

@@ -23,12 +23,6 @@ variable "image_ocid" {
   }
 }
 
-variable "ssh_authorized_key" {
-  type        = string
-  description = "OpenSSH public key used as break-glass access over the Tailscale network."
-  sensitive   = true
-}
-
 variable "state_bucket" {
   type        = string
   description = "Existing S3 bucket containing the upstream Tailscale Terraform state."

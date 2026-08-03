@@ -8,9 +8,10 @@ inputs:
   image:
     description: Immutable ECR image reference by digest
     required: true
-  revision:
-    description: Exact repository revision owning the deployment definition
-    required: true
+  source_root:
+    description: Checkout containing the component-owned deployment bundle
+    required: false
+    default: .
 
 runs:
   using: composite
@@ -23,28 +24,40 @@ runs:
         tags: tag:tgbao-dev-ci
         ping: tgbao-dev-services
 
-    - name: Validate release inputs
-      shell: bash
-      env:
-        COMPONENT: ${{ inputs.component }}
-        IMAGE: ${{ inputs.image }}
-        REVISION: ${{ inputs.revision }}
-      run: |
-        set -euo pipefail
-        case "$COMPONENT" in
-          airflow|arxiv-inspector|dbt-task|ocr-worker) ;;
-          *) exit 2 ;;
-        esac
-        [[ "$IMAGE" =~ ^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/tgbao-dev-${COMPONENT}@sha256:[0-9a-f]{64}$ ]]
-        [[ "$REVISION" =~ ^[0-9a-f]{40}$ ]]
-
     - name: Deploy exact component release
       shell: bash
       env:
         COMPONENT: ${{ inputs.component }}
         IMAGE: ${{ inputs.image }}
-        REVISION: ${{ inputs.revision }}
+        SOURCE_ROOT: ${{ inputs.source_root }}
       run: |
         set -euo pipefail
-        tailscale ssh ubuntu@tgbao-dev-services 'sh -s --' "$COMPONENT" "$IMAGE" "$REVISION" \
-          < infra/runtime/delivery/deploy-component
+        bundle=(infra/runtime/delivery)
+        case "$COMPONENT" in
+          airflow)
+            bundle+=(infra/runtime/postgres orchestration/deploy)
+            ;;
+          arxiv-inspector)
+            bundle+=(apps/arxiv_inspector/deploy)
+            ;;
+          dbt-task)
+            bundle+=(dbt/analytics/deploy)
+            ;;
+          ocr-worker)
+            bundle+=(ocr/deploy)
+            ;;
+          *) exit 2 ;;
+        esac
+        [[ "$IMAGE" =~ ^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/tgbao-dev-${COMPONENT}@sha256:[0-9a-f]{64}$ ]]
+        [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]]
+        [[ "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]]
+        [[ -d "$SOURCE_ROOT" ]]
+
+        for path in "${bundle[@]}"; do
+          [[ -e "$SOURCE_ROOT/$path" ]]
+        done
+
+        remote_dir="/tmp/lakehouse-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+        remote_command="set -eu; work_dir='$remote_dir'; trap 'rm -rf \"\$work_dir\"' EXIT; install -d -m 0700 \"\$work_dir\"; tar -C \"\$work_dir\" -xf -; \"\$work_dir/infra/runtime/delivery/deploy-component\" '$COMPONENT' '$IMAGE'"
+        tar -C "$SOURCE_ROOT" -cf - "${bundle[@]}" \
+          | tailscale ssh ubuntu@tgbao-dev-services "$remote_command"

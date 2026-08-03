@@ -4,8 +4,10 @@ on:
   push:
     branches: [main]
     paths:
+      - .github/workflows/release-airflow.yml
       - orchestration/runtime/**
       - orchestration/deploy/**
+      - infra/runtime/postgres/**
       - infra/runtime/identity/install-aws-signing-helper
   workflow_dispatch:
 

@@ -127,6 +127,10 @@ locals {
     var.bucket_arns.curated,
   ]
   ingestion_object_arns = [for arn in local.ingestion_bucket_arns : "${arn}/*"]
+  ingestion_metadata_object_arns = [
+    "${var.bucket_arns.landing}/*/*/tables/*/metadata/*",
+    "${var.bucket_arns.curated}/*/tables/*/metadata/*",
+  ]
   analytics_metadata_prefixes = [
     "tables",
     "tables/*",

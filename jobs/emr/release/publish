@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 4 ]]; then
+    echo "Usage: jobs/emr/release/publish <artifacts-dir> <s3-base-uri> <git-sha> <ssm-parameter>" >&2
+    exit 2
+fi
+
+artifacts_dir=$1
+base_uri=${2%/}
+revision=$3
+parameter_name=$4
+
+[[ -d "$artifacts_dir" ]]
+[[ "$base_uri" =~ ^s3://[^/]+/.+ ]]
+[[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+[[ "$parameter_name" == /* ]]
+
+s3_path=${base_uri#s3://}
+bucket=${s3_path%%/*}
+prefix=${s3_path#*/}/$revision
+release_uri="s3://$bucket/$prefix"
+temporary_dir=$(mktemp -d "${TMPDIR:-/tmp}/emr-release.XXXXXX")
+trap 'rm -rf "$temporary_dir"' EXIT
+
+activate_release() {
+    aws ssm put-parameter \
+        --name "$parameter_name" \
+        --type String \
+        --value "$release_uri" \
+        --overwrite >/dev/null
+    echo "Published $release_uri"
+}
+
+if aws s3api head-object \
+    --bucket "$bucket" --key "$prefix/SHA256SUMS" >/dev/null 2>&1; then
+    activate_release
+    exit 0
+fi
+
+manifest="$temporary_dir/SHA256SUMS"
+(
+    cd "$artifacts_dir"
+    find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum
+) >"$manifest"
+[[ -s "$manifest" ]]
+
+while IFS= read -r -d '' source; do
+    relative=${source#"$artifacts_dir"/}
+    aws s3api put-object \
+        --bucket "$bucket" \
+        --key "$prefix/$relative" \
+        --body "$source" >/dev/null
+done < <(find "$artifacts_dir" -type f -print0 | LC_ALL=C sort -z)
+aws s3api put-object \
+    --bucket "$bucket" \
+    --key "$prefix/SHA256SUMS" \
+    --body "$manifest" \
+    --if-none-match '*' >/dev/null
+
+activate_release

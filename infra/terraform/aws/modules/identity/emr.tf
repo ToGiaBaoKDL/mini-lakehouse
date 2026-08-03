@@ -22,16 +22,6 @@ data "aws_iam_policy_document" "emr_runtime" {
     resources = local.ingestion_object_arns
   }
   statement {
-    sid       = "ListJobArtifacts"
-    actions   = ["s3:GetBucketLocation", "s3:ListBucket", "s3:ListBucketMultipartUploads"]
-    resources = [var.bucket_arns.artifacts]
-    condition {
-      test     = "StringLike"
-      variable = "s3:prefix"
-      values   = ["emr/jobs/*"]
-    }
-  }
-  statement {
     sid       = "ReadJobArtifacts"
     actions   = ["s3:GetObject"]
     resources = ["${var.bucket_arns.artifacts}/emr/jobs/*"]
@@ -73,21 +63,9 @@ resource "aws_iam_role_policy" "emr_runtime" {
 
 data "aws_iam_policy_document" "emr_publisher" {
   statement {
-    sid       = "ListJobArtifacts"
-    actions   = ["s3:GetBucketLocation", "s3:ListBucket"]
-    resources = [var.bucket_arns.artifacts]
-    condition {
-      test     = "StringLike"
-      variable = "s3:prefix"
-      values   = ["emr/jobs/*"]
-    }
-  }
-  statement {
     sid = "PublishImmutableJobArtifacts"
     actions = [
-      "s3:AbortMultipartUpload",
       "s3:GetObject",
-      "s3:ListMultipartUploadParts",
       "s3:PutObject",
     ]
     resources = ["${var.bucket_arns.artifacts}/emr/jobs/*"]

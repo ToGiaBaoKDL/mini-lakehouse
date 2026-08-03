@@ -1,0 +1,48 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 2 ]; then
+    printf '%s\n' "Usage: pull-image <component> <image@sha256:digest>" >&2
+    exit 2
+fi
+
+component=$1
+image=$2
+
+case "$component" in
+    airflow|arxiv-inspector|dbt-task|ocr-worker) ;;
+    *)
+        printf '%s\n' "Unknown component: $component" >&2
+        exit 2
+        ;;
+esac
+
+printf '%s' "$image" \
+    | grep -Eq "^[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com/tgbao-dev-$component@sha256:[0-9a-f]{64}$" \
+    || {
+    printf '%s\n' "Image must be an immutable digest from the dev $component repository." >&2
+    exit 2
+}
+
+environment=${LAKEHOUSE_ENVIRONMENT:-dev}
+identity_dir=${AWS_IDENTITY_DIR:-"$HOME/.config/lakehouse/$environment/aws"}
+aws_config="$identity_dir/services-deployer/host-config"
+test -r "$aws_config" || {
+    printf '%s\n' "The services-deployer workload identity is missing." >&2
+    exit 1
+}
+
+registry=${image%%/*}
+docker_config=$(mktemp -d "${TMPDIR:-/tmp}/lakehouse-docker.XXXXXX")
+cleanup() {
+    DOCKER_CONFIG="$docker_config" docker logout "$registry" >/dev/null 2>&1 || true
+    rm -rf "$docker_config"
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+    AWS_CONFIG_FILE="$aws_config" AWS_PROFILE=default \
+    aws ecr get-login-password \
+    | DOCKER_CONFIG="$docker_config" \
+        docker login --username AWS --password-stdin "$registry" >/dev/null
+DOCKER_CONFIG="$docker_config" docker pull "$image"

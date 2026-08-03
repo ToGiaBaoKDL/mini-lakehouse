@@ -13,6 +13,39 @@ Only shared metadata PostgreSQL, Airflow, and ArXiv Inspector are composed on th
 AWS owns S3, Glue, EMR Serverless, Athena, KMS, IAM, ECR, SSM, and Secrets Manager. OCI exposes no
 public ingress; Tailscale carries SSH and application traffic.
 
+## Inputs before the first plan
+
+Provider credentials stay in their standard process-level credential chains. Only stable,
+reviewable resource choices belong in tfvars.
+
+| Root | Provider authentication | Reviewed input |
+|---|---|---|
+| AWS state and platform | Default AWS chain; optionally select `AWS_PROFILE` | `roles_anywhere_ca_certificate_path` and one existing IAM role/user ARN in `catalog_admin_principal_arns` |
+| Tailscale | AWS chain for the S3 backend, plus `TAILSCALE_OAUTH_CLIENT_ID`, `TAILSCALE_OAUTH_CLIENT_SECRET`, `TAILSCALE_TAILNET` | Owner email in the Tailscale tfvars file |
+| GitHub | AWS chain for backend/remote state, plus `GITHUB_TOKEN` with access to this repository's Actions environment and variables | None; upstream values come from Terraform state |
+| OCI | AWS chain for backend/remote state, plus the default OCI CLI config; optionally select `OCI_CONFIG_FILE_PROFILE` | Tenancy, compartment, region, and pinned Ubuntu image OCIDs |
+
+Create the workload CA before copying the AWS example, because the example points to its public
+certificate. `catalog_admin_principal_arns` must contain a durable IAM role or user ARN, not a
+temporary `arn:aws:sts::...:assumed-role/...` session ARN. Terraform state contains infrastructure
+metadata and the one-time Tailscale enrollment key, so access to the state bucket remains an
+administrator boundary.
+
+Set provider credentials only for the command that needs them. A typical operator shell uses these
+standard names; this repository defines no aliases for them:
+
+```bash
+export AWS_PROFILE='<terraform-admin-profile>'
+export TAILSCALE_OAUTH_CLIENT_ID='<scoped-client-id>'
+export TAILSCALE_OAUTH_CLIENT_SECRET='<scoped-client-secret>'
+export TAILSCALE_TAILNET='<tailnet-name>'
+export GITHUB_TOKEN='<fine-grained-repository-token>'
+export OCI_CONFIG_FILE_PROFILE='<oci-cli-profile>'
+```
+
+The Tailscale OAuth client must be scoped to manage the checked-in ACL policy, auth keys, and the
+GitHub federated identity. Unset credentials for providers that are not part of the current root.
+
 ## Workload identities
 
 Terraform follows the standard AWS/OCI credential chains. Runtime containers never inherit an
@@ -66,7 +99,7 @@ AWS_PROFILE=your-terraform-admin make metadata-postgres-secrets-init
 AWS_PROFILE=your-terraform-admin make airflow-secrets-init
 ```
 
-Both targets preserve an existing valid `AWSCURRENT` version. `make metadata-postgres-up`
+Both targets preserve an existing valid `AWSCURRENT` version. The metadata PostgreSQL deployment
 idempotently reconciles the Airflow owner/database and rotates only that role password. Airflow owns
 and runs its schema migrations. The Airflow init container writes the SimpleAuthManager password
 file before startup, so the UI password is never generated or logged by Airflow.
@@ -76,11 +109,11 @@ Populate notification connections independently:
 ```bash
 aws secretsmanager put-secret-value \
   --secret-id lakehouse/dev/airflow/connections/slack_api_default \
-  --secret-string '<Airflow Slack connection JSON>'
+  --secret-string 'file://<0600-temporary-slack-connection.json>'
 
 aws secretsmanager put-secret-value \
   --secret-id lakehouse/dev/airflow/connections/smtp_default \
-  --secret-string '<Airflow SMTP connection JSON>'
+  --secret-string 'file://<0600-temporary-smtp-connection.json>'
 ```
 
 OCR provider credentials remain OCR-owned:
@@ -88,12 +121,19 @@ OCR provider credentials remain OCR-owned:
 ```bash
 aws secretsmanager put-secret-value \
   --secret-id lakehouse/dev/ocr/providers/kaggle \
-  --secret-string '{"username":"<kaggle-user>","api_token":"<token>"}'
+  --secret-string 'file://<0600-temporary-kaggle.json>'
 
 aws secretsmanager put-secret-value \
   --secret-id lakehouse/dev/ocr/providers/modal \
-  --secret-string '{"token_id":"<token-id>","token_secret":"<token-secret>"}'
+  --secret-string 'file://<0600-temporary-modal.json>'
 ```
+
+The three PostgreSQL/Airflow runtime credentials are generated locally by the idempotent Make
+targets. Slack, SMTP, Kaggle, and Modal are the only operator-supplied secret values. No secret or
+provider credential belongs in tfvars, GitHub variables, Compose, a command-line literal, or a
+repository `.env` file. Delete each temporary file immediately after Secrets Manager accepts it.
+The OCR schemas are `{"username":"...","api_token":"..."}` for Kaggle and
+`{"token_id":"...","token_secret":"..."}` for Modal.
 
 ## Component releases
 
@@ -116,24 +156,18 @@ owns the `dev` environment, owner reviewer, and exact `main` deployment policy. 
 authentication only: keep it in the process environment, never in tfvars or Terraform state. A
 GitHub App can replace the local token if repository administration is automated later.
 
-Protected GitHub workflows are the only release publishers. Rollback is a separate protected
-workflow and accepts an immutable digest plus its owning Git revision; there are no duplicate human
-image or EMR publishing targets to drift from CI.
+Protected GitHub workflows are the only release publishers. Image rollback accepts an immutable
+digest and verifies that it is the image tagged by the reviewed Git revision. EMR rollback accepts a
+reviewed revision only after its completed checksum manifest is found. There are no duplicate human
+image or EMR publishing targets to drift from CI. CI streams only the selected deployment files
+over Tailscale SSH; the services host never clones the monorepo or invokes its root Makefile.
 
-On the services host, deploy or install each component independently by digest:
-
-```bash
-make metadata-postgres-up
-make airflow-deploy AIRFLOW_IMAGE='<repository>@sha256:<digest>'
-make arxiv-inspector-deploy ARXIV_INSPECTOR_IMAGE='<repository>@sha256:<digest>'
-make dbt-task-install DBT_TASK_IMAGE='<repository>@sha256:<digest>'
-make ocr-worker-install OCR_WORKER_IMAGE='<repository>@sha256:<digest>'
-```
-
-No release uses `latest`, and there is no global service manifest. The protected `Roll back
-component` workflow deploys a previous reviewed digest with the exact Git revision that owns its
-Compose/Make boundary. The dbt and OCR install targets advance their stable host-local aliases only
-after pulling an exact digest, so DAG files never contain image SHAs.
+No release uses `latest`, and there is no global service manifest. Component path filters cover
+only files that affect that component; changing a shared CI helper does not rebuild unrelated
+images. The protected rollback workflows restore either a verified component image/deployment
+pair or a completed EMR release. Airflow and Inspector reconcile their own Compose services;
+Airflow first reconciles metadata PostgreSQL. The dbt and OCR deployments advance their stable
+host-local aliases only after pulling an exact digest, so DAG files never contain image SHAs.
 
 Airflow uses the official versioned `GitDagBundle` for `orchestration/bundle`. A DAG-only merge is
 validated by the focused bundle CI, then fetched without rebuilding or restarting Airflow. Active
@@ -144,7 +178,6 @@ For unpublished local iteration:
 
 ```bash
 make images-build
-make metadata-postgres-up
 make airflow-up
 make arxiv-inspector-up
 ```
