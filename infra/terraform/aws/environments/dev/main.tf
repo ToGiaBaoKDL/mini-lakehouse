@@ -8,6 +8,13 @@ locals {
   name_prefix      = "${local.project}-${local.environment}"
   parameter_prefix = "/lakehouse/${local.environment}"
   athena_workgroup = "primary"
+  github_repository = {
+    owner    = "ToGiaBaoKDL"
+    owner_id = "136962009"
+    name     = "mini-lakehouse"
+    id       = "1313563456"
+  }
+  github_environment_subject = "repo:${local.github_repository.owner}@${local.github_repository.owner_id}/${local.github_repository.name}@${local.github_repository.id}:environment:${local.environment}"
   bucket_names = {
     landing         = "${local.name_prefix}-landing-cy8j1c"
     curated         = "${local.name_prefix}-curated-za7rju"
@@ -94,6 +101,8 @@ module "identity" {
   account_id                      = data.aws_caller_identity.current.account_id
   aws_region                      = local.aws_region
   operator_principal_arns         = var.operator_principal_arns
+  github_oidc_provider_arn        = aws_iam_openid_connect_provider.github.arn
+  github_environment_subject      = local.github_environment_subject
   roles_anywhere_trust_anchor_arn = aws_rolesanywhere_trust_anchor.workloads.arn
   parameter_arns                  = local.parameter_arns
   kms_key_arn                     = module.storage.kms_key_arn

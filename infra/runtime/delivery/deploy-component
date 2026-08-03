@@ -1,0 +1,52 @@
+#!/bin/sh
+set -eu
+
+usage() {
+    printf '%s\n' "Usage: deploy-component <component> <image@sha256:digest> <git-sha>" >&2
+    exit 2
+}
+
+test "$#" -eq 3 || usage
+
+component=$1
+image=$2
+revision=$3
+
+case "$component" in
+    airflow|arxiv-inspector|dbt-task|ocr-worker) ;;
+    *) usage ;;
+esac
+
+case "$image" in
+    *.dkr.ecr.*.amazonaws.com/tgbao-dev-"$component"@sha256:*) ;;
+    *) printf '%s\n' "Image does not belong to the dev $component repository." >&2; exit 2 ;;
+esac
+
+printf '%s' "$image" | grep -Eq '@sha256:[0-9a-f]{64}$' || usage
+printf '%s' "$revision" | grep -Eq '^[0-9a-f]{40}$' || usage
+
+work_dir=$(mktemp -d)
+trap 'rm -rf "$work_dir"' EXIT HUP INT TERM
+
+git -C "$work_dir" init --quiet
+git -C "$work_dir" remote add origin https://github.com/ToGiaBaoKDL/mini-lakehouse.git
+git -C "$work_dir" fetch --quiet --depth=1 origin "$revision"
+git -C "$work_dir" checkout --quiet --detach FETCH_HEAD
+test "$(git -C "$work_dir" rev-parse HEAD)" = "$revision"
+
+case "$component" in
+    airflow)
+        make -C "$work_dir" airflow-deploy AIRFLOW_IMAGE="$image"
+        ;;
+    arxiv-inspector)
+        make -C "$work_dir" arxiv-inspector-deploy ARXIV_INSPECTOR_IMAGE="$image"
+        ;;
+    dbt-task)
+        make -C "$work_dir" dbt-task-install DBT_TASK_IMAGE="$image"
+        ;;
+    ocr-worker)
+        make -C "$work_dir" ocr-worker-install OCR_WORKER_IMAGE="$image"
+        ;;
+esac
+
+printf '%s\n' "Deployed $component from $revision as $image"

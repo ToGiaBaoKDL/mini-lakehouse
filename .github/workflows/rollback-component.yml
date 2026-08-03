@@ -1,0 +1,45 @@
+name: Roll back component
+
+on:
+  workflow_dispatch:
+    inputs:
+      component:
+        description: Component to roll back
+        required: true
+        type: choice
+        options:
+          - airflow
+          - arxiv-inspector
+          - dbt-task
+          - ocr-worker
+      image:
+        description: Exact ECR image reference by digest
+        required: true
+        type: string
+      revision:
+        description: Exact 40-character Git revision owning the deployment definition
+        required: true
+        type: string
+
+jobs:
+  rollback:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: dev
+    concurrency:
+      group: dev-${{ inputs.component }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TAILSCALE_CLIENT_ID: ${{ vars.TAILSCALE_CLIENT_ID }}
+      TAILSCALE_AUDIENCE: ${{ vars.TAILSCALE_AUDIENCE }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/deploy-component
+        with:
+          component: ${{ inputs.component }}
+          image: ${{ inputs.image }}
+          revision: ${{ inputs.revision }}

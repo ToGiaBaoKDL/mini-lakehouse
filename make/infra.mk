@@ -21,6 +21,7 @@ SERVICES_HOST_USER ?= ubuntu
 	aws-init aws-plan aws-apply aws-destroy \
 	tailscale-init tailscale-plan tailscale-apply tailscale-policy-import tailscale-auth-key \
 	oci-init oci-plan oci-apply oci-destroy \
+	github-delivery-config \
 	workload-pki-init workload-identities-render \
 	workload-identities-install
 
@@ -71,6 +72,18 @@ tailscale-policy-import: tailscale-init ## Import an existing tailnet ACL once.
 
 tailscale-auth-key: ## Print the current one-time OCI enrollment key.
 	@$(TAILSCALE_TERRAFORM) output -raw services_auth_key
+
+github-delivery-config: ## Print non-secret GitHub dev-environment delivery variables as JSON.
+	@set -eu; \
+		ROLES="$$($(AWS_TERRAFORM) output -json github_ci_role_arns)"; \
+		jq -n \
+			--arg aws_image_publisher_role_arn "$$(printf '%s' "$${ROLES}" | jq -r '.image_publisher')" \
+			--arg aws_emr_publisher_role_arn "$$(printf '%s' "$${ROLES}" | jq -r '.emr_publisher')" \
+			--arg emr_artifacts_uri "$$($(AWS_TERRAFORM) output -raw emr_artifacts_uri)" \
+			--arg emr_code_parameter_name "$$($(AWS_TERRAFORM) output -raw emr_code_parameter_name)" \
+			--arg tailscale_client_id "$$($(TAILSCALE_TERRAFORM) output -raw github_deployer_client_id)" \
+			--arg tailscale_audience "$$($(TAILSCALE_TERRAFORM) output -raw github_deployer_audience)" \
+			'{AWS_IMAGE_PUBLISHER_ROLE_ARN: $$aws_image_publisher_role_arn, AWS_EMR_PUBLISHER_ROLE_ARN: $$aws_emr_publisher_role_arn, EMR_ARTIFACTS_URI: $$emr_artifacts_uri, EMR_CODE_PARAMETER_NAME: $$emr_code_parameter_name, TAILSCALE_CLIENT_ID: $$tailscale_client_id, TAILSCALE_AUDIENCE: $$tailscale_audience}'
 
 oci-init: terraform-cache ## Initialize OCI from the bootstrap state output.
 	@set -eu; \

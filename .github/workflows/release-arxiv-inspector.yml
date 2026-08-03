@@ -1,0 +1,27 @@
+name: Release ArXiv Inspector
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - apps/arxiv_inspector/**
+      - ocr/src/**
+      - ocr/pyproject.toml
+      - platform/contracts/**
+      - platform/src/**
+      - platform/pyproject.toml
+      - pyproject.toml
+      - uv.lock
+      - infra/runtime/identity/install-aws-signing-helper
+  workflow_dispatch:
+
+jobs:
+  release:
+    uses: ./.github/workflows/_release-image.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      component: arxiv-inspector
+      dockerfile: apps/arxiv_inspector/Dockerfile
+      repository: tgbao-dev-arxiv-inspector

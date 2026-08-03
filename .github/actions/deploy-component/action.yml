@@ -1,0 +1,50 @@
+name: Deploy component
+description: Deploy one reviewed image digest to the private dev services host
+
+inputs:
+  component:
+    description: Component release boundary
+    required: true
+  image:
+    description: Immutable ECR image reference by digest
+    required: true
+  revision:
+    description: Exact repository revision owning the deployment definition
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Connect to the private services host
+      uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+      with:
+        oauth-client-id: ${{ env.TAILSCALE_CLIENT_ID }}
+        audience: ${{ env.TAILSCALE_AUDIENCE }}
+        tags: tag:tgbao-dev-ci
+        ping: tgbao-dev-services
+
+    - name: Validate release inputs
+      shell: bash
+      env:
+        COMPONENT: ${{ inputs.component }}
+        IMAGE: ${{ inputs.image }}
+        REVISION: ${{ inputs.revision }}
+      run: |
+        set -euo pipefail
+        case "$COMPONENT" in
+          airflow|arxiv-inspector|dbt-task|ocr-worker) ;;
+          *) exit 2 ;;
+        esac
+        [[ "$IMAGE" =~ ^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/tgbao-dev-${COMPONENT}@sha256:[0-9a-f]{64}$ ]]
+        [[ "$REVISION" =~ ^[0-9a-f]{40}$ ]]
+
+    - name: Deploy exact component release
+      shell: bash
+      env:
+        COMPONENT: ${{ inputs.component }}
+        IMAGE: ${{ inputs.image }}
+        REVISION: ${{ inputs.revision }}
+      run: |
+        set -euo pipefail
+        tailscale ssh ubuntu@tgbao-dev-services 'sh -s --' "$COMPONENT" "$IMAGE" "$REVISION" \
+          < infra/runtime/delivery/deploy-component

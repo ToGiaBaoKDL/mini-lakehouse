@@ -6,8 +6,8 @@ from airflow.providers.slack.notifications.slack import send_slack_notification
 from airflow.providers.smtp.notifications.smtp import send_smtp_notification
 from airflow.sdk.definitions.context import Context
 
-ALERT_EMAIL = "{{ var.value.get('notifications/alert_email') }}"
-SLACK_CHANNEL = "{{ var.value.get('notifications/slack_channel') }}"
+ALERT_EMAIL = "bao.to@timo.vn"
+SLACK_CHANNEL = "#data-platform-alerts"
 
 
 def dag_failure_callbacks() -> list[Callable[[Context], None]]:

@@ -20,13 +20,10 @@ METADATA_POSTGRES_BOOTSTRAP_SECRET := lakehouse/$(LAKEHOUSE_ENVIRONMENT)/metadat
 	services-up services-down services-ps
 
 metadata-postgres-secrets-init: ## Initialize shared PostgreSQL secrets exactly once.
-	@test -n "$${AWS_PROFILE:-}" || { \
-		printf '%s\n' "Set AWS_PROFILE to the Terraform administrator profile."; exit 1; \
-	}
 	@command -v sha256sum >/dev/null
 	@set -eu; \
 		for SECRET_ID in "$(METADATA_POSTGRES_BOOTSTRAP_SECRET)" "$(AIRFLOW_DATABASE_SECRET)"; do \
-			if CURRENT="$$(aws --profile "$${AWS_PROFILE}" secretsmanager get-secret-value \
+			if CURRENT="$$(aws secretsmanager get-secret-value \
 				--secret-id "$${SECRET_ID}" --query SecretString --output text 2>/dev/null)"; then \
 				printf '%s' "$${CURRENT}" | jq -e \
 					'.version == 1 and (.password | type == "string" and length > 0)' >/dev/null || { \
@@ -41,7 +38,7 @@ metadata-postgres-secrets-init: ## Initialize shared PostgreSQL secrets exactly 
 				'import json,secrets; print(json.dumps({"version":1,"password":secrets.token_urlsafe(32)}))' \
 				>"$${SECRET_FILE}"; \
 			CLIENT_TOKEN="$$(sha256sum "$${SECRET_FILE}" | cut -d ' ' -f 1)"; \
-			aws --profile "$${AWS_PROFILE}" secretsmanager put-secret-value \
+			aws secretsmanager put-secret-value \
 				--secret-id "$${SECRET_ID}" --client-request-token "$${CLIENT_TOKEN}" \
 				--secret-string "file://$${SECRET_FILE}" >/dev/null; \
 			rm -f "$${SECRET_FILE}"; trap - EXIT HUP INT TERM; \
@@ -49,12 +46,9 @@ metadata-postgres-secrets-init: ## Initialize shared PostgreSQL secrets exactly 
 		done
 
 airflow-secrets-init: ## Initialize Airflow runtime secrets exactly once.
-	@test -n "$${AWS_PROFILE:-}" || { \
-		printf '%s\n' "Set AWS_PROFILE to the Terraform administrator profile."; exit 1; \
-	}
 	@command -v sha256sum >/dev/null
 	@set -eu; \
-		if CURRENT="$$(aws --profile "$${AWS_PROFILE}" secretsmanager get-secret-value \
+		if CURRENT="$$(aws secretsmanager get-secret-value \
 			--secret-id "$(AIRFLOW_RUNTIME_SECRET)" --query SecretString --output text 2>/dev/null)"; then \
 			printf '%s' "$${CURRENT}" | jq -e \
 				'.version == 1 and ([.fernet_key, .jwt_secret, .admin_password] | all(type == "string" and length > 0))' >/dev/null || { \
@@ -69,7 +63,7 @@ airflow-secrets-init: ## Initialize Airflow runtime secrets exactly once.
 			'import base64,json,secrets; print(json.dumps({"version":1,"fernet_key":base64.urlsafe_b64encode(secrets.token_bytes(32)).decode(),"jwt_secret":secrets.token_urlsafe(48),"admin_password":secrets.token_urlsafe(32)}))' \
 			>"$${SECRET_FILE}"; \
 		CLIENT_TOKEN="$$(sha256sum "$${SECRET_FILE}" | cut -d ' ' -f 1)"; \
-		aws --profile "$${AWS_PROFILE}" secretsmanager put-secret-value \
+		aws secretsmanager put-secret-value \
 			--secret-id "$(AIRFLOW_RUNTIME_SECRET)" --client-request-token "$${CLIENT_TOKEN}" \
 			--secret-string "file://$${SECRET_FILE}" >/dev/null; \
 		printf '%s\n' "Initialized Airflow runtime secret."

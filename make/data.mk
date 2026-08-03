@@ -1,5 +1,3 @@
-CATALOG_ADMIN_AWS_PROFILE ?= lakehouse-$(LAKEHOUSE_ENVIRONMENT)-catalog-admin
-EMR_DEPLOYER_AWS_PROFILE ?= lakehouse-$(LAKEHOUSE_ENVIRONMENT)-emr-deployer
 EMR_BUILD_DIR := dist/emr
 DBT_AWS_CONFIG := $(AWS_IDENTITY_DIR)/dbt-transformer/host-config
 OCR_AWS_CONFIG := $(AWS_IDENTITY_DIR)/ocr-worker/host-config
@@ -9,12 +7,10 @@ OCR_AWS_CONFIG := $(AWS_IDENTITY_DIR)/ocr-worker/host-config
 	emr-jobs-package emr-jobs-publish-preflight emr-jobs-publish
 
 catalog-apply: ## Apply Glue/Iceberg YAML contracts with PyIceberg.
-	AWS_PROFILE="$(CATALOG_ADMIN_AWS_PROFILE)" \
-		uv run --package lakehouse --extra catalog --extra cli python -m lakehouse.catalog.admin apply
+	uv run --package lakehouse --extra catalog --extra cli python -m lakehouse.catalog.admin apply
 
 catalog-validate: ## Validate Glue/Iceberg state against YAML contracts.
-	AWS_PROFILE="$(CATALOG_ADMIN_AWS_PROFILE)" \
-		uv run --package lakehouse --extra catalog --extra cli python -m lakehouse.catalog.admin validate
+	uv run --package lakehouse --extra catalog --extra cli python -m lakehouse.catalog.admin validate
 
 ocr-kaggle-runner-publish: preflight ## Publish an immutable Kaggle OCR runner Dataset version.
 	@test -r "$(OCR_AWS_CONFIG)" || { printf '%s\n' "Render the ocr-worker identity first."; exit 1; }
@@ -69,14 +65,25 @@ emr-jobs-publish-preflight: ## Require a committed release and deployment tools.
 		printf '%s\n' "Commit the worktree before publishing an EMR release."; exit 1; \
 	}
 	@command -v aws >/dev/null
-	@command -v terraform >/dev/null
+	@if test -z "$${EMR_ARTIFACTS_URI:-}" || test -z "$${EMR_CODE_PARAMETER_NAME:-}"; then \
+		command -v terraform >/dev/null || { \
+			printf '%s\n' "Set EMR_ARTIFACTS_URI and EMR_CODE_PARAMETER_NAME when Terraform state is unavailable."; exit 1; \
+		}; \
+	fi
 
 emr-jobs-publish: emr-jobs-publish-preflight emr-jobs-package ## Publish one immutable EMR release.
 	@set -eu; \
-		EMR_CODE_URI="$$($(AWS_TERRAFORM) output -raw emr_artifacts_uri)/$(RELEASE)"; \
-		EMR_CODE_PARAMETER="$$($(AWS_TERRAFORM) output -raw emr_code_parameter_name)"; \
-		aws --profile "$(EMR_DEPLOYER_AWS_PROFILE)" s3 sync \
+		ARTIFACTS_URI="$${EMR_ARTIFACTS_URI:-}"; \
+		CODE_PARAMETER="$${EMR_CODE_PARAMETER_NAME:-}"; \
+		if test -z "$${ARTIFACTS_URI}" && test -z "$${CODE_PARAMETER}"; then \
+			ARTIFACTS_URI="$$($(AWS_TERRAFORM) output -raw emr_artifacts_uri)"; \
+			CODE_PARAMETER="$$($(AWS_TERRAFORM) output -raw emr_code_parameter_name)"; \
+		elif test -z "$${ARTIFACTS_URI}" || test -z "$${CODE_PARAMETER}"; then \
+			printf '%s\n' "EMR_ARTIFACTS_URI and EMR_CODE_PARAMETER_NAME must be set together."; exit 1; \
+		fi; \
+		EMR_CODE_URI="$${ARTIFACTS_URI%/}/$(RELEASE)"; \
+		aws s3 sync \
 			$(EMR_BUILD_DIR)/ "$${EMR_CODE_URI}/" --only-show-errors; \
-		aws --profile "$(EMR_DEPLOYER_AWS_PROFILE)" ssm put-parameter \
-			--name "$${EMR_CODE_PARAMETER}" --type String --value "$${EMR_CODE_URI}" --overwrite >/dev/null; \
+		aws ssm put-parameter \
+			--name "$${CODE_PARAMETER}" --type String --value "$${EMR_CODE_URI}" --overwrite >/dev/null; \
 		printf '%s\n' "Published EMR release $${EMR_CODE_URI}"

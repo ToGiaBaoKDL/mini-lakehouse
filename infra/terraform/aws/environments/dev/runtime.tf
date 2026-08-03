@@ -1,8 +1,4 @@
 locals {
-  notification_destinations = {
-    alert_email   = "data-platform@example.com"
-    slack_channel = "#data-platform-alerts"
-  }
   runtime_parameters = {
     "storage/landing_uri"               = "s3://${module.storage.bucket_names.landing}"
     "storage/curated_uri"               = "s3://${module.storage.bucket_names.curated}"
@@ -12,8 +8,6 @@ locals {
     "airflow/remote_log_uri"            = "s3://${module.storage.bucket_names.logs}/airflow/task-logs"
     "emr/application_id"                = module.emr_serverless.application_id
     "emr/execution_role_arn"            = module.identity.emr_runtime_role_arn
-    "notifications/alert_email"         = local.notification_destinations.alert_email
-    "notifications/slack_channel"       = local.notification_destinations.slack_channel
     "ocr/providers/kaggle_secret_id"    = aws_secretsmanager_secret.ocr["kaggle"].name
     "ocr/providers/modal_secret_id"     = aws_secretsmanager_secret.ocr["modal"].name
   }
@@ -24,8 +18,6 @@ locals {
       "athena/dbt_output_uri",
       "emr/application_id",
       "emr/execution_role_arn",
-      "notifications/alert_email",
-      "notifications/slack_channel",
       "airflow/remote_log_uri",
       "emr/code_uri",
     ]

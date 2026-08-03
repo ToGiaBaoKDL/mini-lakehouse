@@ -30,12 +30,13 @@ certificates for short-lived AWS credentials. The services deployer may pull rev
 cannot read application secrets. The CA private key stays on the administrator machine; only leaf
 identities cross the private network.
 
-Operator commands can override their non-secret profile selector at the command boundary:
+Operator commands use the standard AWS credential chain. Select a named profile only at the command
+boundary when the default chain is not the intended identity:
 
 ```bash
-CATALOG_ADMIN_AWS_PROFILE=custom-catalog make catalog-apply
-EMR_DEPLOYER_AWS_PROFILE=custom-deployer make emr-jobs-publish
-IMAGE_PUBLISHER_AWS_PROFILE=custom-publisher make airflow-publish
+AWS_PROFILE=custom-catalog make catalog-apply
+AWS_PROFILE=custom-deployer make emr-jobs-publish
+AWS_PROFILE=custom-publisher make airflow-publish
 ```
 
 ## Secrets
@@ -96,14 +97,29 @@ aws secretsmanager put-secret-value \
 
 ## Component releases
 
-ECR repositories are immutable and retain the newest 20 releases. Publish only the changed
-component from a clean commit; each target prints the digest reference used for deployment.
+ECR repositories are immutable and retain the newest 20 releases. GitHub publishes and deploys only
+the changed component after the protected `dev` environment is approved. AWS and Tailscale access
+uses OIDC; there are no long-lived CI credentials.
+
+After applying AWS and Tailscale, create a GitHub environment named `dev`, restrict it to `main`,
+require a reviewer, and populate its six non-secret variables from:
 
 ```bash
-make airflow-publish
-make arxiv-inspector-publish
-make dbt-task-publish
-make ocr-worker-publish
+make github-delivery-config
+```
+
+The variable names are `AWS_IMAGE_PUBLISHER_ROLE_ARN`, `AWS_EMR_PUBLISHER_ROLE_ARN`,
+`EMR_ARTIFACTS_URI`, `EMR_CODE_PARAMETER_NAME`, `TAILSCALE_CLIENT_ID`, and
+`TAILSCALE_AUDIENCE`. Terraform owns their resources; GitHub environment configuration remains a
+reviewed repository-administration step.
+
+Human break-glass publication remains available through the standard credential chain:
+
+```bash
+AWS_PROFILE=your-image-publisher make airflow-publish
+AWS_PROFILE=your-image-publisher make arxiv-inspector-publish
+AWS_PROFILE=your-image-publisher make dbt-task-publish
+AWS_PROFILE=your-image-publisher make ocr-worker-publish
 ```
 
 On the services host, deploy or install each component independently by digest:
@@ -116,9 +132,10 @@ make dbt-task-install DBT_TASK_IMAGE='<repository>@sha256:<digest>'
 make ocr-worker-install OCR_WORKER_IMAGE='<repository>@sha256:<digest>'
 ```
 
-No release uses `latest`, and there is no global service manifest. Rolling back means deploying the
-previous reviewed digest for that component. The dbt and OCR install targets advance their stable
-host-local aliases only after pulling an exact digest, so DAG files never contain image SHAs.
+No release uses `latest`, and there is no global service manifest. The protected `Roll back
+component` workflow deploys a previous reviewed digest with the exact Git revision that owns its
+Compose/Make boundary. The dbt and OCR install targets advance their stable host-local aliases only
+after pulling an exact digest, so DAG files never contain image SHAs.
 
 Airflow uses the official versioned `GitDagBundle` for `orchestration/bundle`. A DAG-only merge is
 validated by the focused bundle CI, then fetched without rebuilding or restarting Airflow. Active

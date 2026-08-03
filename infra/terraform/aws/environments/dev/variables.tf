@@ -1,6 +1,6 @@
 variable "operator_principal_arns" {
   type        = set(string)
-  description = "Existing IAM principal ARNs allowed to assume human or CI operator roles."
+  description = "Existing IAM principal ARNs allowed to assume human break-glass operator roles."
 
   validation {
     condition = length(var.operator_principal_arns) > 0 && alltrue([

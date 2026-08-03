@@ -1,5 +1,13 @@
 locals {
   services_tag = "tag:tgbao-dev-services"
+  ci_tag       = "tag:tgbao-dev-ci"
+  github_repository = {
+    owner    = "ToGiaBaoKDL"
+    owner_id = "136962009"
+    name     = "mini-lakehouse"
+    id       = "1313563456"
+  }
+  github_environment_subject = "repo:${local.github_repository.owner}@${local.github_repository.owner_id}/${local.github_repository.name}@${local.github_repository.id}:environment:dev"
   services_ports = [
     "tcp:22",
     "tcp:8080",
@@ -11,27 +19,65 @@ resource "tailscale_acl" "policy" {
   acl = jsonencode({
     tagOwners = {
       (local.services_tag) = [var.owner]
+      (local.ci_tag)       = [var.owner]
     }
-    grants = [{
-      src = [var.owner]
-      dst = [local.services_tag]
-      ip  = local.services_ports
-    }]
-    ssh = [{
-      action = "check"
-      src    = [var.owner]
-      dst    = [local.services_tag]
-      users  = ["autogroup:nonroot"]
-    }]
-    tests = [{
-      src = var.owner
-      accept = [
-        "${local.services_tag}:22",
-        "${local.services_tag}:8080",
-        "${local.services_tag}:8501",
-      ]
-    }]
+    grants = [
+      {
+        src = [var.owner]
+        dst = [local.services_tag]
+        ip  = local.services_ports
+      },
+      {
+        src = [local.ci_tag]
+        dst = [local.services_tag]
+        ip  = ["tcp:22"]
+      },
+    ]
+    ssh = [
+      {
+        action = "check"
+        src    = [var.owner]
+        dst    = [local.services_tag]
+        users  = ["autogroup:nonroot"]
+      },
+      {
+        action = "accept"
+        src    = [local.ci_tag]
+        dst    = [local.services_tag]
+        users  = ["ubuntu"]
+      },
+    ]
+    tests = [
+      {
+        src = var.owner
+        accept = [
+          "${local.services_tag}:22",
+          "${local.services_tag}:8080",
+          "${local.services_tag}:8501",
+        ]
+      },
+      {
+        src    = local.ci_tag
+        accept = ["${local.services_tag}:22"]
+        deny = [
+          "${local.services_tag}:8080",
+          "${local.services_tag}:8501",
+        ]
+      },
+    ]
   })
+}
+
+resource "tailscale_federated_identity" "github_deployer" {
+  description = "GitHub Actions dev deployer"
+  issuer      = "https://token.actions.githubusercontent.com"
+  subject     = local.github_environment_subject
+  scopes      = ["auth_keys", "devices:core"]
+  tags        = [local.ci_tag]
+  custom_claim_rules = {
+    ref           = "refs/heads/main"
+    repository_id = local.github_repository.id
+  }
 }
 
 resource "tailscale_tailnet_key" "services" {

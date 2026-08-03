@@ -111,6 +111,7 @@ AWS_PROFILE=your-terraform-admin make airflow-secrets-init
 # Private network and OCI services host (after copying the documented tfvars examples)
 make tailscale-plan
 make tailscale-apply
+make github-delivery-config
 export TF_VAR_tailscale_auth_key="$(make --no-print-directory tailscale-auth-key)"
 make oci-plan
 make oci-apply
@@ -121,14 +122,13 @@ make workload-identities-install
 make catalog-apply
 make catalog-validate
 
-# Build analytics locally and publish only the changed immutable component
+# Build analytics locally; component publication is normally owned by protected CI
 make dbt-deps
 make dbt-build
-make emr-jobs-publish
-make airflow-publish
-make arxiv-inspector-publish
-make dbt-task-publish
-make ocr-worker-publish
+
+# Optional human break-glass publication through the standard AWS credential chain
+AWS_PROFILE=your-image-publisher make airflow-publish
+AWS_PROFILE=your-emr-publisher make emr-jobs-publish
 
 # On the enrolled services host, initialize dependencies and deploy exact ECR digests
 make metadata-postgres-up
@@ -138,14 +138,21 @@ make dbt-task-install DBT_TASK_IMAGE='<repository>@sha256:<digest>'
 make ocr-worker-install OCR_WORKER_IMAGE='<repository>@sha256:<digest>'
 ```
 
+`make github-delivery-config` prints the six non-secret variables required by the protected GitHub
+`dev` environment. Restrict that environment to `main` and require approval. Pull requests only
+validate; a reviewed merge publishes only affected images or EMR artifacts. GitHub exchanges OIDC
+tokens for short-lived AWS and Tailscale credentials, so CI stores no AWS key, Tailscale OAuth
+secret, or SSH key.
+
 `make emr-jobs-publish` requires a clean commit. It uploads entrypoints, locked dependencies, and
 the exact contract bundle to `emr/jobs/<commit-sha>/`, then atomically updates
 `/lakehouse/<env>/emr/code_uri` in SSM.
 
-Each `<component>-publish` target builds and pushes only that component under an immutable Git-SHA
-tag, then prints its digest reference. Each deploy/install target accepts only a digest, so Airflow,
-Inspector, dbt, and OCR releases cannot accidentally move together. The OCI host does not read
-Terraform state during deployment.
+Each component workflow builds one multi-architecture image under an immutable Git-SHA tag, records
+provenance/SBOM, and deploys its digest through a port-22-only Tailscale identity. Deployments are
+serialized per component; reruns reuse the existing immutable image. Manual rollback accepts only a
+reviewed digest plus its exact Git revision. Airflow, Inspector, dbt, and OCR cannot accidentally
+move together, and the OCI host never reads Terraform state.
 
 Airflow uses the official versioned `GitDagBundle` and tracks the reviewed `main` ref under
 `orchestration/bundle`. A DAG-only merge is fetched by the DAG processor without rebuilding or
@@ -205,7 +212,7 @@ make check
 
 The repository does not use `.env` files. Secret values belong in Secrets Manager, runtime resource
 references belong in Parameter Store, and stable defaults live in the Makefile/Compose boundary.
-Human and CI publishing commands use named operator profiles; OCI workloads and local workload
-tests use isolated certificate-backed temporary credentials. Override an operator profile only at
-the command boundary, for example
-`EMR_DEPLOYER_AWS_PROFILE=custom-profile make emr-jobs-publish`.
+Local operator commands use the standard AWS credential chain, GitHub uses environment-scoped OIDC,
+and OCI workloads use isolated certificate-backed temporary credentials. Select a local profile at
+the command boundary with standard `AWS_PROFILE`; repository-specific profile variables do not
+exist.

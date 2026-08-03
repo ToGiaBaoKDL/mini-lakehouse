@@ -1,5 +1,3 @@
-IMAGE_PUBLISHER_AWS_PROFILE ?= lakehouse-$(LAKEHOUSE_ENVIRONMENT)-image-publisher
-
 .PHONY: images-check airflow-build arxiv-inspector-build dbt-task-build ocr-worker-build images-build \
 	release-preflight image-publish-preflight image-login image-publish \
 	airflow-publish arxiv-inspector-publish dbt-task-publish ocr-worker-publish
@@ -43,7 +41,7 @@ image-login: preflight ## Authenticate Docker to the environment ECR registry.
 	@set -eu; \
 		REPOSITORIES="$$($(AWS_TERRAFORM) output -json container_repository_urls)"; \
 		REGISTRY="$$(printf '%s' "$${REPOSITORIES}" | jq -er '.airflow' | cut -d/ -f1)"; \
-		aws --profile "$(IMAGE_PUBLISHER_AWS_PROFILE)" ecr get-login-password \
+		aws ecr get-login-password \
 			| docker login --username AWS --password-stdin "$${REGISTRY}" >/dev/null; \
 		printf '%s\n' "Authenticated Docker to $${REGISTRY}."
 
@@ -51,7 +49,7 @@ image-publish: image-publish-preflight image-login ## Publish one immutable mult
 	@set -eu; \
 		REPOSITORIES="$$($(AWS_TERRAFORM) output -json container_repository_urls)"; \
 		REPOSITORY="$$(printf '%s' "$${REPOSITORIES}" | jq -er --arg component "$(COMPONENT)" '.[$$component]')"; \
-		if aws --profile "$(IMAGE_PUBLISHER_AWS_PROFILE)" ecr describe-images \
+		if aws ecr describe-images \
 			--repository-name "$${REPOSITORY##*/}" --image-ids imageTag="$(RELEASE)" >/dev/null 2>&1; then \
 			printf '%s\n' "$(COMPONENT):$(RELEASE) is already published."; exit 0; \
 		fi; \
@@ -63,7 +61,7 @@ image-publish: image-publish-preflight image-login ## Publish one immutable mult
 		esac; \
 		docker buildx build --platform linux/amd64,linux/arm64 \
 			--file "$${DOCKERFILE}" --tag "$${REPOSITORY}:$(RELEASE)" --push .; \
-		DIGEST="$$(aws --profile "$(IMAGE_PUBLISHER_AWS_PROFILE)" ecr describe-images \
+		DIGEST="$$(aws ecr describe-images \
 			--repository-name "$${REPOSITORY##*/}" --image-ids imageTag="$(RELEASE)" \
 			--query 'imageDetails[0].imageDigest' --output text)"; \
 		printf '%s@%s\n' "$${REPOSITORY}" "$${DIGEST}"

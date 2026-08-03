@@ -14,11 +14,19 @@ output "runtime_parameter_names" {
 }
 
 output "operator_role_arns" {
-  description = "Human or CI operator roles keyed by responsibility."
+  description = "Human break-glass operator roles keyed by responsibility."
   value = {
     catalog_admin   = module.identity.catalog_admin_role_arn
     emr_deployer    = module.identity.emr_deployer_role_arn
     image_publisher = module.identity.image_publisher_role_arn
+  }
+}
+
+output "github_ci_role_arns" {
+  description = "Environment-scoped GitHub Actions roles keyed by release responsibility."
+  value = {
+    emr_publisher   = module.identity.github_emr_publisher_role_arn
+    image_publisher = module.identity.github_image_publisher_role_arn
   }
 }
 

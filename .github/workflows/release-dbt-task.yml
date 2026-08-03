@@ -1,0 +1,20 @@
+name: Release dbt task
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - dbt/analytics/**
+      - infra/runtime/identity/install-aws-signing-helper
+  workflow_dispatch:
+
+jobs:
+  release:
+    uses: ./.github/workflows/_release-image.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      component: dbt-task
+      dockerfile: dbt/analytics/Dockerfile
+      repository: tgbao-dev-dbt-task

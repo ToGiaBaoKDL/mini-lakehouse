@@ -47,3 +47,13 @@ output "ocr_worker_role_arn" {
   description = "IAM role used by the local OCR task container."
   value       = aws_iam_role.ocr_worker.arn
 }
+
+output "github_image_publisher_role_arn" {
+  description = "GitHub Actions role allowed to publish immutable component images."
+  value       = aws_iam_role.github_image_publisher.arn
+}
+
+output "github_emr_publisher_role_arn" {
+  description = "GitHub Actions role allowed to publish immutable EMR releases."
+  value       = aws_iam_role.github_emr_publisher.arn
+}

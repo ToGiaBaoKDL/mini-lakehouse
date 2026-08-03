@@ -16,6 +16,9 @@ AWS owns S3, KMS, EMR Serverless, ECR, workload IAM, SSM references, and empty S
 containers. Terraform does not create Glue databases, Iceberg tables, schedules, dbt models, or
 secret values. OCI owns only the self-hosted compute/network boundary. Tailscale owns only private
 network access. Each root has an isolated state key and can be planned independently.
+AWS also owns repository/environment-scoped GitHub OIDC release roles. Tailscale owns the matching
+federated CI identity and grants it SSH only; human operator roles and runtime Roles Anywhere
+identities remain separate trust boundaries.
 Make stores Terraform working data under `~/.cache/lakehouse/terraform`, shares one provider cache,
 and resolves the remote-state bucket from the bootstrap output. Terraform never writes `.terraform`
 directories at the repository root or inside environment roots when invoked through Make.
@@ -41,6 +44,7 @@ make tailscale-init
 make tailscale-policy-import
 make tailscale-plan
 make tailscale-apply
+make github-delivery-config
 
 # 4. Configure the OCI CLI profile, copy the OCI example, and apply the host.
 export PATH="$HOME/bin:$PATH"
@@ -59,6 +63,10 @@ use their standard SDK credential chains; select non-default operator profiles w
 and `OCI_CONFIG_FILE_PROFILE` at the command boundary. Private keys and OCIDs are not copied into
 Terraform source. The Tailscale enrollment key is single-use and expires after one hour. OCI cloud-init
 deletes it after enrollment.
+
+Use the non-secret JSON from `make github-delivery-config` to configure the protected GitHub `dev`
+environment. Restrict it to `main` and require approval. CI uses immutable GitHub repository IDs in
+the OIDC subject and receives only image/EMR publication plus port-22 deployment access.
 
 Pin `image_ocid` in OCI tfvars to one reviewed Ubuntu 24.04 AArch64 image; Terraform never moves
 the host to a newly published image implicitly. IAM Roles Anywhere trusts the public workload CA only. The CA private key stays outside the

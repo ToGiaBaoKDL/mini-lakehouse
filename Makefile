@@ -37,7 +37,8 @@ platform-validate: ## Validate settings and YAML contracts without AWS I/O.
 
 lint: ## Run formatting, linting, and static type checks.
 	sh -n infra/runtime/identity/install-aws-signing-helper \
-		infra/runtime/identity/workload-identities
+		infra/runtime/identity/workload-identities \
+		infra/runtime/delivery/deploy-component
 	uv run ruff format --check .
 	uv run ruff check .
 	uv run --all-packages --all-extras pyright

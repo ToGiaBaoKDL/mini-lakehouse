@@ -23,7 +23,7 @@ def test_terraform_manages_infrastructure_but_not_glue_objects() -> None:
 def test_reusable_modules_contain_no_ingestion_table_identifiers() -> None:
     modules = _terraform_sources(Path("infra/terraform/aws/modules")).lower()
 
-    assert "github" not in modules
+    assert "github_archive" not in modules
     assert "curated_arxiv" not in modules
     assert "landing_github_archive" not in modules
 
@@ -111,8 +111,8 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
     assert '"airflow/remote_log_uri"' in environment
     assert '"deployment/release_manifest"' not in environment
     assert "workload_data_access = local.workload_data_access" in normalized_environment
-    assert "local.notification_destinations.alert_email" in environment
-    assert "local.notification_destinations.slack_channel" in environment
+    assert "notifications/alert_email" not in environment
+    assert "notifications/slack_channel" not in environment
     assert '"catalog/name"' not in environment
     assert "athena/primary" not in environment
     assert "storage/query_results_uri" not in runtime
@@ -128,6 +128,8 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
         "image-publisher",
         "metadata-postgres",
         "ocr-worker",
+        "github-image-publisher",
+        "github-emr-publisher",
     ):
         assert f'name = "${{var.name_prefix}}-{role}"' in normalized_identity
 
@@ -163,6 +165,11 @@ def test_runtime_parameters_and_trust_are_bounded_by_workload() -> None:
     assert "rolesanywhere.amazonaws.com" in identity
     assert "aws:PrincipalTag/x509Subject/CN" in identity
     assert "trusted_principals" not in identity
+    assert 'actions = ["sts:AssumeRoleWithWebIdentity"]' in identity
+    assert 'variable = "token.actions.githubusercontent.com:aud"' in identity
+    assert 'variable = "token.actions.githubusercontent.com:sub"' in identity
+    assert "github_environment_subject" in environment
+    assert "github_environment_subject" in identity
 
 
 def test_service_images_are_immutable_bounded_and_published_by_one_role() -> None:
@@ -239,6 +246,10 @@ def test_cloud_roots_have_isolated_state_and_private_services_host() -> None:
     assert '"tcp:8501"' in tailscale
     assert "reusable            = false" in tailscale
     assert 'services_tag = "tag:tgbao-dev-services"' in tailscale
+    assert 'ci_tag       = "tag:tgbao-dev-ci"' in tailscale
+    assert 'resource "tailscale_federated_identity" "github_deployer"' in tailscale
+    assert 'ref           = "refs/heads/main"' in tailscale
+    assert "repository_id = local.github_repository.id" in tailscale
     assert 'name = "tgbao-dev-services"' in normalized_oci
     assert 'dns_label                  = "services"' in oci
 
@@ -260,6 +271,18 @@ def test_provider_authentication_is_not_a_terraform_input() -> None:
     assert "oci_profile" not in examples
 
 
+def test_operator_commands_use_the_standard_aws_credential_chain() -> None:
+    makefile = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (Path("Makefile"), *sorted(Path("make").glob("*.mk")))
+    )
+
+    assert "CATALOG_ADMIN_AWS_PROFILE" not in makefile
+    assert "EMR_DEPLOYER_AWS_PROFILE" not in makefile
+    assert "IMAGE_PUBLISHER_AWS_PROFILE" not in makefile
+    assert "aws --profile" not in makefile
+
+
 def test_reviewable_policy_is_not_hidden_in_tfvars() -> None:
     environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
     example = Path("infra/terraform/aws/environments/dev/terraform.tfvars.example").read_text(
@@ -272,8 +295,7 @@ def test_reviewable_policy_is_not_hidden_in_tfvars() -> None:
     assert 'prefixes  = ["arxiv"]' in environment
     assert 'prefixes  = ["github"]' in environment
     assert 'prefixes  = ["tables"]' in environment
-    assert 'alert_email   = "data-platform@example.com"' in environment
-    assert 'slack_channel = "#data-platform-alerts"' in environment
+    assert "notification_destinations" not in environment
     assert "arxiv_inspector_access" not in example
     assert "workload_data_access" not in example
     assert "alert_email" not in example

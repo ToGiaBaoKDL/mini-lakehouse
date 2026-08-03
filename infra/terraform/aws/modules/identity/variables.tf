@@ -25,13 +25,28 @@ variable "aws_region" {
 
 variable "operator_principal_arns" {
   type        = set(string)
-  description = "Existing IAM principal ARNs allowed to assume human or CI operator roles."
+  description = "Existing IAM principal ARNs allowed to assume human break-glass operator roles."
 
   validation {
     condition = length(var.operator_principal_arns) > 0 && alltrue([
       for arn in var.operator_principal_arns : startswith(arn, "arn:")
     ])
     error_message = "At least one valid operator principal ARN is required."
+  }
+}
+
+variable "github_oidc_provider_arn" {
+  type        = string
+  description = "GitHub Actions OIDC provider trusted by environment-scoped release roles."
+}
+
+variable "github_environment_subject" {
+  type        = string
+  description = "Exact immutable GitHub OIDC subject for the protected release environment."
+
+  validation {
+    condition     = startswith(var.github_environment_subject, "repo:") && strcontains(var.github_environment_subject, ":environment:")
+    error_message = "github_environment_subject must identify one repository environment."
   }
 }
 
