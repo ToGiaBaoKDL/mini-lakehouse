@@ -239,7 +239,7 @@ def test_data_consumers_use_reviewed_database_and_prefix_entitlements() -> None:
     assert "local.curated_prefixes_by_workload.arxiv_inspector" in inspector
 
 
-def test_cloud_roots_have_isolated_state_and_private_services_host() -> None:
+def test_cloud_roots_have_isolated_state_and_private_access_host() -> None:
     oci = _terraform_sources(Path("infra/terraform/oci/environments/dev"))
     cloud_init = Path("infra/terraform/oci/environments/dev/cloud-init.yaml.tftpl").read_text(
         encoding="utf-8"
@@ -260,7 +260,8 @@ def test_cloud_roots_have_isolated_state_and_private_services_host() -> None:
     assert 'data "oci_core_images"' not in oci
     assert 'variable "ssh_authorized_key"' not in oci
     assert "ssh_authorized_keys" not in oci
-    assert "prohibit_internet_ingress  = true" in oci
+    assert "assign_public_ip = true" in oci
+    assert 'resource "oci_core_internet_gateway" "services"' in oci
     assert "ingress_security_rules" not in oci
     assert 'version = "~> 8.23.0"' in oci
     assert 'version = "~> 0.29.2"' in tailscale
@@ -275,7 +276,7 @@ def test_cloud_roots_have_isolated_state_and_private_services_host() -> None:
     assert 'ref           = "refs/heads/main"' in tailscale
     assert "repository_id = local.github_repository.id" in tailscale
     assert 'name = "tgbao-dev-services"' in normalized_oci
-    assert 'dns_label                  = "services"' in oci
+    assert 'dns_label = "services"' in normalized_oci
     assert "  - git" not in cloud_init
     assert "  - make" not in cloud_init
     assert "/opt/lakehouse" not in cloud_init

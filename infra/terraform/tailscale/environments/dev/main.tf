@@ -69,6 +69,8 @@ resource "tailscale_acl" "policy" {
 }
 
 resource "tailscale_federated_identity" "github_deployer" {
+  depends_on = [tailscale_acl.policy]
+
   description = "GitHub Actions dev deployer"
   issuer      = "https://token.actions.githubusercontent.com"
   subject     = local.github_environment_subject
@@ -81,6 +83,8 @@ resource "tailscale_federated_identity" "github_deployer" {
 }
 
 resource "tailscale_tailnet_key" "services" {
+  depends_on = [tailscale_acl.policy]
+
   reusable            = false
   ephemeral           = false
   preauthorized       = true

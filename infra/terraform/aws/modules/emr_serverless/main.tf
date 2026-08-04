@@ -24,15 +24,9 @@ resource "aws_emrserverless_application" "spark" {
   }
 
   runtime_configuration {
-    classification = "iceberg-defaults"
-    properties = {
-      "iceberg.enabled" = "true"
-    }
-  }
-
-  runtime_configuration {
     classification = "spark-defaults"
     properties = merge({
+      "spark.jars"                                          = "/usr/share/aws/iceberg/lib/iceberg-spark3-runtime.jar"
       "spark.sql.extensions"                                = "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions"
       "spark.sql.catalog.${var.catalog_alias}"              = "org.apache.iceberg.spark.SparkCatalog"
       "spark.sql.catalog.${var.catalog_alias}.catalog-impl" = "org.apache.iceberg.aws.glue.GlueCatalog"

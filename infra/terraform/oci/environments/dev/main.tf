@@ -64,16 +64,14 @@ resource "oci_core_security_list" "services" {
 }
 
 resource "oci_core_subnet" "services" {
-  compartment_id             = var.compartment_ocid
-  vcn_id                     = oci_core_vcn.services.id
-  cidr_block                 = "10.42.1.0/24"
-  display_name               = local.name
-  dns_label                  = "services"
-  prohibit_public_ip_on_vnic = false
-  prohibit_internet_ingress  = true
-  route_table_id             = oci_core_route_table.services.id
-  security_list_ids          = [oci_core_security_list.services.id]
-  freeform_tags              = local.tags
+  compartment_id    = var.compartment_ocid
+  vcn_id            = oci_core_vcn.services.id
+  cidr_block        = "10.42.1.0/24"
+  display_name      = local.name
+  dns_label         = "services"
+  route_table_id    = oci_core_route_table.services.id
+  security_list_ids = [oci_core_security_list.services.id]
+  freeform_tags     = local.tags
 }
 
 resource "oci_core_instance" "services" {
