@@ -89,10 +89,12 @@ def test_secret_containers_never_manage_secret_values() -> None:
     assert 'resource "aws_secretsmanager_secret" "airflow"' in environment
     assert 'resource "aws_secretsmanager_secret" "metadata_postgres"' in environment
     assert 'resource "aws_secretsmanager_secret" "ocr"' in environment
+    assert 'resource "aws_secretsmanager_secret" "cloudflare_tunnel"' in environment
     assert '"lakehouse/${local.environment}/airflow/runtime"' in environment
     assert '"lakehouse/${local.environment}/airflow/connections/${connection}"' in environment
     assert '"lakehouse/${local.environment}/metadata-postgres/${each.key}"' in environment
     assert '"lakehouse/${local.environment}/ocr/providers/${each.key}"' in environment
+    assert '"lakehouse/${local.environment}/cloudflare/tunnel-token"' in environment
     assert "aws_secretsmanager_secret_version" not in environment
 
 
@@ -204,6 +206,18 @@ def test_service_images_are_immutable_bounded_and_published_by_one_role() -> Non
     assert "ssm:PutParameter" not in Path(
         "infra/terraform/aws/modules/identity/images.tf"
     ).read_text(encoding="utf-8")
+
+
+def test_services_deployer_reads_only_the_connector_secret() -> None:
+    environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
+    services = Path("infra/terraform/aws/modules/identity/services.tf").read_text(encoding="utf-8")
+
+    assert "services_deployer_secret_arns" in environment + services
+    assert "aws_secretsmanager_secret.cloudflare_tunnel.arn" in environment
+    assert 'sid       = "ReadInfrastructureConnectorSecrets"' in services
+    assert 'actions   = ["secretsmanager:GetSecretValue"]' in services
+    assert "airflow_secret_arns" not in services
+    assert "ocr_secret_arns" not in services
 
 
 def test_airflow_and_ocr_worker_have_separate_data_permissions() -> None:
@@ -320,6 +334,7 @@ def test_cloudflare_edge_uses_current_tunnel_and_access_resources() -> None:
     assert "self_hosted_domains" not in cloudflare
     assert 'variable "cloudflare_api_token"' not in cloudflare
     assert "tunnel_secret" not in cloudflare
+    assert 'output "account_id"' in cloudflare
 
 
 def test_github_delivery_configuration_is_terraform_owned_and_state_derived() -> None:

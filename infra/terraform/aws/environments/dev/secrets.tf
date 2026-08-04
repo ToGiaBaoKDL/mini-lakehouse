@@ -44,3 +44,10 @@ resource "aws_secretsmanager_secret" "ocr" {
   recovery_window_in_days = 7
   tags                    = local.tags
 }
+
+resource "aws_secretsmanager_secret" "cloudflare_tunnel" {
+  name                    = "lakehouse/${local.environment}/cloudflare/tunnel-token"
+  description             = "Connector token for the Cloudflare Tunnel running on the services host."
+  recovery_window_in_days = 7
+  tags                    = local.tags
+}

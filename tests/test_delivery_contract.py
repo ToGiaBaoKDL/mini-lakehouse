@@ -47,7 +47,7 @@ def test_component_release_is_environment_protected_and_digest_driven() -> None:
     assert "git fetch" not in script
     assert "make -C" not in script
     assert "HOST_BIND_ADDRESS=${HOST_BIND_ADDRESS:-0.0.0.0}" in script
-    assert "AIRFLOW_BASE_URL=${AIRFLOW_BASE_URL:-http://tgbao-dev-services:8080}" in script
+    assert "AIRFLOW_BASE_URL=${AIRFLOW_BASE_URL:-https://airflow.tgblab.io.vn}" in script
 
 
 def test_service_pull_uses_short_lived_registry_login() -> None:
@@ -77,6 +77,7 @@ def test_each_component_owns_its_deployment_operation() -> None:
     dbt = Path("dbt/analytics/deploy/deploy").read_text(encoding="utf-8")
     ocr = Path("ocr/deploy/deploy").read_text(encoding="utf-8")
     postgres = Path("infra/runtime/postgres/deploy").read_text(encoding="utf-8")
+    cloudflare = Path("infra/runtime/cloudflare/deploy").read_text(encoding="utf-8")
 
     assert "docker compose --project-name airflow" in airflow
     assert "--force-recreate" in airflow
@@ -86,7 +87,34 @@ def test_each_component_owns_its_deployment_operation() -> None:
     assert "docker compose --project-name arxiv-inspector" in inspector
     assert "dbt-task:runtime" in dbt
     assert "ocr-worker:runtime" in ocr
-    assert "git " not in airflow + inspector + dbt + ocr + postgres
+    assert "docker compose --project-name cloudflare" in cloudflare
+    assert "--token-file" in Path("infra/runtime/cloudflare/compose.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "git " not in airflow + inspector + dbt + ocr + postgres + cloudflare
+
+
+def test_cloudflare_connector_has_a_deploy_only_workflow() -> None:
+    source = _workflow("deploy-cloudflare.yml")
+    action = Path(".github/actions/deploy-component/action.yml").read_text(encoding="utf-8")
+    sync = Path("infra/runtime/cloudflare/sync-secret").read_text(encoding="utf-8")
+    image = Path("infra/runtime/cloudflare/image").read_text(encoding="utf-8").strip()
+
+    assert "workflow_dispatch:" in source
+    assert "environment: dev" in source
+    assert "component: cloudflare" in source
+    assert image == (
+        "cloudflare/cloudflared:2026.7.3@sha256:"
+        "e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf"
+    )
+    assert "image=$(<infra/runtime/cloudflare/image)" in source
+    assert "${{ steps.release.outputs.image }}" in source
+    assert "docker/build-push-action" not in source
+    assert "amazon-ecr-login" not in source
+    assert "infra/runtime/cloudflare" in action
+    assert "file:///dev/stdin" in sync
+    assert "CLOUDFLARE_API_TOKEN" in sync
+    assert 'secret-string "$token"' not in sync
 
 
 def test_each_custom_component_has_a_thin_release_caller() -> None:

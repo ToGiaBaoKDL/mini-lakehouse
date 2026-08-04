@@ -1,0 +1,26 @@
+services:
+  cloudflare-tunnel:
+    image: "${CLOUDFLARE_IMAGE:?CLOUDFLARE_IMAGE is required}"
+    user: "${LOCAL_UID}:${LOCAL_GID}"
+    command:
+      - tunnel
+      - --metrics
+      - 127.0.0.1:20241
+      - run
+      - --token-file
+      - /run/secrets/cloudflare_tunnel_token
+    network_mode: host
+    secrets:
+      - cloudflare_tunnel_token
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+secrets:
+  cloudflare_tunnel_token:
+    file: ${CLOUDFLARE_TUNNEL_TOKEN_FILE:?CLOUDFLARE_TUNNEL_TOKEN_FILE is required}

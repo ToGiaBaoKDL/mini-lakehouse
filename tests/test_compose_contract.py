@@ -7,6 +7,7 @@ import yaml
 AIRFLOW_COMPOSE = "orchestration/deploy/compose.yaml"
 INSPECTOR_COMPOSE = "apps/arxiv_inspector/deploy/compose.yaml"
 POSTGRES_COMPOSE = "infra/runtime/postgres/compose.yaml"
+CLOUDFLARE_COMPOSE = "infra/runtime/cloudflare/compose.yaml"
 AIRFLOW_RUNTIME = Path("orchestration/runtime")
 
 
@@ -33,6 +34,7 @@ def test_compose_owns_only_self_hosted_application_services() -> None:
         "metadata-postgres",
         "metadata-postgres-bootstrap",
     }
+    assert set(_compose(CLOUDFLARE_COMPOSE)["services"]) == {"cloudflare-tunnel"}
 
 
 def test_airflow_uses_local_executor_and_deferrable_runtime_components() -> None:
@@ -171,6 +173,25 @@ def test_compose_uses_aws_credential_chain_without_static_keys() -> None:
     assert "AWS_CONFIG_FILE" in rendered
 
 
+def test_cloudflare_connector_is_pinned_hardened_and_file_secret_driven() -> None:
+    payload = _compose(CLOUDFLARE_COMPOSE)
+    service = payload["services"]["cloudflare-tunnel"]
+    command = service["command"]
+
+    assert service["image"] == "${CLOUDFLARE_IMAGE:?CLOUDFLARE_IMAGE is required}"
+    assert service["network_mode"] == "host"
+    assert service["user"] == "${LOCAL_UID}:${LOCAL_GID}"
+    assert service["read_only"] is True
+    assert service["cap_drop"] == ["ALL"]
+    assert service["security_opt"] == ["no-new-privileges:true"]
+    assert service["restart"] == "unless-stopped"
+    assert "--token-file" in command
+    assert "--token" not in command
+    assert "127.0.0.1:20241" in command
+    assert set(payload["secrets"]) == {"cloudflare_tunnel_token"}
+    assert "CLOUDFLARE_TUNNEL_TOKEN_FILE" in payload["secrets"]["cloudflare_tunnel_token"]["file"]
+
+
 def test_local_runtime_does_not_use_dotenv_files() -> None:
     assert not Path(".env").exists()
     assert not Path(".env.example").exists()
@@ -206,7 +227,8 @@ def test_all_container_images_are_immutable() -> None:
     ocr_dockerfile = Path("ocr/Dockerfile").read_text(encoding="utf-8")
     emr_dockerfile = Path("jobs/emr/Dockerfile").read_text(encoding="utf-8")
     compose = "\n".join(
-        Path(path).read_text(encoding="utf-8") for path in (AIRFLOW_COMPOSE, POSTGRES_COMPOSE)
+        Path(path).read_text(encoding="utf-8")
+        for path in (AIRFLOW_COMPOSE, POSTGRES_COMPOSE, CLOUDFLARE_COMPOSE)
     )
 
     assert not Path("Dockerfile").exists()
@@ -342,6 +364,9 @@ def test_makefile_exposes_owned_operational_entrypoints() -> None:
         "github-apply:",
         "oci-plan:",
         "oci-apply:",
+        "cloudflare-plan:",
+        "cloudflare-apply:",
+        "cloudflare-secret-sync:",
         "airflow-up:",
         "airflow-down:",
         "arxiv-inspector-up:",

@@ -26,6 +26,11 @@ output "container_repository_urls" {
   value       = module.container_registry.repository_urls
 }
 
+output "cloudflare_tunnel_secret_id" {
+  description = "Secrets Manager identifier populated by the explicit Cloudflare token sync."
+  value       = aws_secretsmanager_secret.cloudflare_tunnel.name
+}
+
 output "roles_anywhere_trust_anchor_arn" {
   description = "Trust anchor used by external workload certificates."
   value       = aws_rolesanywhere_trust_anchor.workloads.arn

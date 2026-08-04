@@ -28,7 +28,7 @@ SERVICES_HOST_USER ?= ubuntu
 	aws-init aws-plan aws-apply \
 	tailscale-init tailscale-plan tailscale-apply tailscale-policy-import \
 	github-init github-plan github-apply \
-	cloudflare-init cloudflare-plan cloudflare-apply \
+	cloudflare-init cloudflare-plan cloudflare-apply cloudflare-secret-sync \
 	oci-init oci-plan oci-apply \
 	workload-pki-init workload-identities-render \
 	workload-identities-install
@@ -98,6 +98,13 @@ cloudflare-plan: cloudflare-init ## Plan Cloudflare Tunnel, DNS, and Access.
 
 cloudflare-apply: cloudflare-init ## Apply the reviewed Cloudflare edge configuration.
 	$(CLOUDFLARE_TERRAFORM) apply
+
+cloudflare-secret-sync: cloudflare-init aws-init ## Synchronize the connector token into AWS Secrets Manager.
+	@set -eu; \
+		ACCOUNT_ID="$$($(CLOUDFLARE_TERRAFORM) output -raw account_id)"; \
+		TUNNEL_ID="$$($(CLOUDFLARE_TERRAFORM) output -raw tunnel_id)"; \
+		SECRET_ID="$$($(AWS_TERRAFORM) output -raw cloudflare_tunnel_secret_id)"; \
+		infra/runtime/cloudflare/sync-secret "$${ACCOUNT_ID}" "$${TUNNEL_ID}" "$${SECRET_ID}"
 
 oci-init: aws-state-init
 	@set -eu; \

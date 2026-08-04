@@ -138,6 +138,16 @@ variable "ocr_secret_arns" {
   description = "Remote-provider credentials readable by the OCR worker."
 }
 
+variable "services_deployer_secret_arns" {
+  type        = set(string)
+  description = "Infrastructure connector secrets readable by the services deployer."
+
+  validation {
+    condition     = length(var.services_deployer_secret_arns) > 0
+    error_message = "The services deployer requires at least one infrastructure connector secret."
+  }
+}
+
 variable "container_repository_arns" {
   type        = set(string)
   description = "Service image repositories writable by the image publisher."

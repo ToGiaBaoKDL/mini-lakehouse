@@ -123,7 +123,10 @@ module "identity" {
   metadata_postgres_secret_arns = toset([
     for secret in aws_secretsmanager_secret.metadata_postgres : secret.arn
   ])
-  ocr_secret_arns           = toset([for secret in aws_secretsmanager_secret.ocr : secret.arn])
+  ocr_secret_arns = toset([for secret in aws_secretsmanager_secret.ocr : secret.arn])
+  services_deployer_secret_arns = toset([
+    aws_secretsmanager_secret.cloudflare_tunnel.arn,
+  ])
   container_repository_arns = toset(values(module.container_registry.repository_arns))
   workload_data_access      = local.workload_data_access
   tags                      = local.tags

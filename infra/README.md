@@ -120,12 +120,13 @@ generated from the same reviewed application map, and the final catch-all ingres
 export CLOUDFLARE_API_TOKEN='<scoped-api-token>'
 make cloudflare-plan
 make cloudflare-apply
+AWS_PROFILE=tgbao-dev make cloudflare-secret-sync
 unset CLOUDFLARE_API_TOKEN
 ```
 
 The token needs account-scoped Tunnel and Access application write permissions plus DNS write for
-`tgblab.io.vn`. Terraform creates no connector credential; enroll `cloudflared` on the services
-host through the runtime secret path before expecting the tunnel to become healthy.
+`tgblab.io.vn`. The explicit sync writes a versioned connector payload directly to the empty AWS
+secret container without placing it in Terraform state, GitHub, command arguments, or a local file.
 
 ### 6. Catalog operator and contracts
 
@@ -192,12 +193,16 @@ gh workflow run release-dbt-task.yml --ref main
 gh workflow run release-ocr-worker.yml --ref main
 gh workflow run release-airflow.yml --ref main
 gh workflow run release-arxiv-inspector.yml --ref main
+gh workflow run deploy-cloudflare.yml --ref main
 ```
 
 The EMR workflow publishes an immutable contract/job bundle and updates its SSM pointer only after
 the checksum manifest is complete. Component workflows build multi-architecture images, publish
 immutable Git-SHA tags to ECR, resolve their digests, and deploy only the selected component over
 Tailscale SSH. The host receives deployment bundles, not a repository checkout or Terraform state.
+The Cloudflare workflow does not build an image: it deploys the reviewed upstream image digest,
+materializes the connector token through the narrowly scoped services-deployer identity, and waits
+for the local readiness endpoint.
 
 ## Verification
 
@@ -207,8 +212,9 @@ tailscale ping tgbao-dev-services
 tailscale ssh ubuntu@tgbao-dev-services 'docker ps'
 ```
 
-Open Airflow at `http://tgbao-dev-services:8080` and ArXiv Inspector at
-`http://tgbao-dev-services:8501` from a device on the tailnet. Airflow task logs are stored in the
+Open Airflow at `https://airflow.tgblab.io.vn` and ArXiv Inspector at
+`https://arxiv.tgblab.io.vn`; Cloudflare Access restricts both applications to the reviewed email
+set. Tailnet endpoints remain available for private diagnosis. Airflow task logs are stored in the
 KMS-encrypted logs bucket with 30-day dev retention.
 
 ## Day-two changes
@@ -220,8 +226,8 @@ KMS-encrypted logs bucket with 30-day dev retention.
 - Use the component or EMR rollback workflow with an exact reviewed revision/digest.
 - Re-run contract validation after contract or catalog changes.
 
-The services deployer can pull reviewed ECR digests but cannot read application secrets or data.
-Airflow, metadata PostgreSQL, dbt, OCR, and Inspector use separate certificate-backed AWS roles.
-Only EMR and the catalog administrator have tier-wide landing/curated access. Dev is rebuildable;
-production should disable destructive bucket/ECR flags and replace the local CA with managed
-certificate issuance while preserving these ownership boundaries.
+The services deployer can pull reviewed ECR digests and read only the Cloudflare connector token;
+it cannot read application secrets or data. Airflow, metadata PostgreSQL, dbt, OCR, and Inspector
+use separate certificate-backed AWS roles. Only EMR and the catalog administrator have tier-wide
+landing/curated access. Dev is rebuildable; production should disable destructive bucket/ECR flags
+and replace the local CA with managed certificate issuance while preserving these boundaries.

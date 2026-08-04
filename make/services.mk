@@ -1,9 +1,12 @@
 METADATA_POSTGRES_COMPOSE := docker compose --project-name metadata-postgres -f infra/runtime/postgres/compose.yaml
 AIRFLOW_COMPOSE := docker compose --project-name airflow -f orchestration/deploy/compose.yaml
 INSPECTOR_COMPOSE := docker compose --project-name arxiv-inspector -f apps/arxiv_inspector/deploy/compose.yaml
+CLOUDFLARE_COMPOSE := docker compose --project-name cloudflare -f infra/runtime/cloudflare/compose.yaml
+CLOUDFLARE_CONNECTOR_IMAGE := $(shell sed -n '1p' infra/runtime/cloudflare/image)
 
 METADATA_POSTGRES_COMPOSE_CONFIG := METADATA_POSTGRES_PASSWORD=unused AIRFLOW_DATABASE_PASSWORD=unused $(METADATA_POSTGRES_COMPOSE)
 AIRFLOW_COMPOSE_CONFIG := AIRFLOW_DATABASE_PASSWORD=unused AIRFLOW_FERNET_KEY=unused AIRFLOW_JWT_SECRET=unused AIRFLOW_ADMIN_PASSWORDS='{"admin":"unused"}' AIRFLOW_REMOTE_LOG_URI=s3://validation/airflow $(AIRFLOW_COMPOSE)
+CLOUDFLARE_COMPOSE_CONFIG := CLOUDFLARE_IMAGE=$(CLOUDFLARE_CONNECTOR_IMAGE) CLOUDFLARE_TUNNEL_TOKEN_FILE=/dev/null LOCAL_GID=0 $(CLOUDFLARE_COMPOSE)
 
 .PHONY: metadata-postgres-secrets-init metadata-postgres-up metadata-postgres-down metadata-postgres-logs \
 	airflow-secrets-init airflow-up airflow-down airflow-logs airflow-dags \

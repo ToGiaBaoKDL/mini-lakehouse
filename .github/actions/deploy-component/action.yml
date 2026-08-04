@@ -1,12 +1,12 @@
 name: Deploy component
-description: Deploy one reviewed image digest to the private dev services host
+description: Deploy one reviewed container digest to the private dev services host
 
 inputs:
   component:
     description: Component release boundary
     required: true
   image:
-    description: Immutable ECR image reference by digest
+    description: Immutable container image reference by digest
     required: true
   source_root:
     description: Checkout containing the component-owned deployment bundle
@@ -40,6 +40,9 @@ runs:
           arxiv-inspector)
             bundle+=(apps/arxiv_inspector/deploy)
             ;;
+          cloudflare)
+            bundle+=(infra/runtime/cloudflare)
+            ;;
           dbt-task)
             bundle+=(dbt/analytics/deploy)
             ;;
@@ -48,7 +51,14 @@ runs:
             ;;
           *) exit 2 ;;
         esac
-        [[ "$IMAGE" =~ ^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/tgbao-dev-${COMPONENT}@sha256:[0-9a-f]{64}$ ]]
+        case "$COMPONENT" in
+          cloudflare)
+            [[ "$IMAGE" =~ ^cloudflare/cloudflared:[0-9]{4}\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]
+            ;;
+          *)
+            [[ "$IMAGE" =~ ^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/tgbao-dev-${COMPONENT}@sha256:[0-9a-f]{64}$ ]]
+            ;;
+        esac
         [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]]
         [[ "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]]
         [[ -d "$SOURCE_ROOT" ]]

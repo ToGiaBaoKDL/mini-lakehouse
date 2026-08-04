@@ -44,6 +44,8 @@ lint: ## Run formatting, linting, and static type checks.
 		infra/runtime/identity/workload-identities \
 		infra/runtime/delivery/deploy-component \
 		infra/runtime/delivery/pull-image \
+		infra/runtime/cloudflare/deploy \
+		infra/runtime/cloudflare/sync-secret \
 		infra/runtime/postgres/initialize-secrets \
 		infra/runtime/postgres/deploy \
 		jobs/emr/release/package \
@@ -69,6 +71,7 @@ compose-validate: ## Validate self-hosted service Compose files.
 	$(METADATA_POSTGRES_COMPOSE_CONFIG) config --quiet
 	$(AIRFLOW_COMPOSE_CONFIG) config --quiet
 	$(INSPECTOR_COMPOSE) config --quiet
+	$(CLOUDFLARE_COMPOSE_CONFIG) config --quiet
 
 check: ## Run the complete local quality gate.
 	uv lock --check

@@ -1,0 +1,75 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 1 ]; then
+    printf '%s\n' "Usage: infra/runtime/cloudflare/deploy <cloudflared-image@sha256:digest>" >&2
+    exit 2
+fi
+
+image=$1
+printf '%s' "$image" \
+    | grep -Eq '^cloudflare/cloudflared:[0-9]{4}\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$' \
+    || {
+    printf '%s\n' "Image must be a versioned cloudflare/cloudflared multi-architecture digest." >&2
+    exit 2
+}
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+expected_image=$(cat "$script_dir/image")
+test "$image" = "$expected_image" || {
+    printf '%s\n' "Image does not match the reviewed connector release." >&2
+    exit 2
+}
+environment=${LAKEHOUSE_ENVIRONMENT:-dev}
+identity_dir=${AWS_IDENTITY_DIR:-"$HOME/.config/lakehouse/$environment/aws"}
+host_config="$identity_dir/services-deployer/host-config"
+test -r "$host_config" || {
+    printf '%s\n' "The services-deployer workload identity is missing." >&2
+    exit 1
+}
+
+aws_runtime() {
+    env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+        AWS_CONFIG_FILE="$host_config" AWS_PROFILE=default AWS_PAGER= aws "$@"
+}
+
+secret=$(aws_runtime secretsmanager get-secret-value \
+    --secret-id "lakehouse/$environment/cloudflare/tunnel-token" \
+    --query SecretString --output text)
+printf '%s' "$secret" | jq -e \
+    '.version == 1 and (.token | type == "string" and length > 0)' >/dev/null
+
+secret_dir="$HOME/.config/lakehouse/$environment/secrets"
+install -d -m 0700 "$secret_dir"
+token_file=$(mktemp "$secret_dir/.cloudflare-tunnel-token.XXXXXX")
+cleanup() {
+    rm -f "$token_file"
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+chmod 0600 "$token_file"
+printf '%s' "$secret" | jq -er '.token' >"$token_file"
+token_path="$secret_dir/cloudflare-tunnel-token"
+mv "$token_file" "$token_path"
+
+export CLOUDFLARE_IMAGE=$image
+export CLOUDFLARE_TUNNEL_TOKEN_FILE=$token_path
+export LOCAL_UID=${LOCAL_UID:-$(id -u)}
+export LOCAL_GID=${LOCAL_GID:-$(id -g)}
+
+docker pull "$image" >/dev/null
+docker compose --project-name cloudflare -f "$script_dir/compose.yaml" \
+    up -d --force-recreate
+
+attempt=0
+until curl -fsS http://127.0.0.1:20241/ready >/dev/null 2>&1; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 30 ]; then
+        docker compose --project-name cloudflare -f "$script_dir/compose.yaml" logs --tail=100
+        printf '%s\n' "Cloudflare Tunnel did not become ready within 60 seconds." >&2
+        exit 1
+    fi
+    sleep 2
+done
+
+printf '%s\n' "Cloudflare Tunnel connector is ready."

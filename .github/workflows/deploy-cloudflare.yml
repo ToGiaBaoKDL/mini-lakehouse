@@ -1,0 +1,38 @@
+name: Deploy Cloudflare connector
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: dev
+    concurrency:
+      group: dev-cloudflare
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TAILSCALE_CLIENT_ID: ${{ vars.TAILSCALE_CLIENT_ID }}
+      TAILSCALE_AUDIENCE: ${{ vars.TAILSCALE_AUDIENCE }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve reviewed upstream image
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          image=$(<infra/runtime/cloudflare/image)
+          [[ "$image" =~ ^cloudflare/cloudflared:[0-9]{4}\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/deploy-component
+        with:
+          component: cloudflare
+          image: ${{ steps.release.outputs.image }}

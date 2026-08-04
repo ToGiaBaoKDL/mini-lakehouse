@@ -21,6 +21,7 @@ flowchart LR
     Q --> N[(S3 analytics)]
     N -. Iceberg metadata .-> G
     G --> D[Data applications]
+    F[Cloudflare Access + Tunnel] --> A & D
 
     T[Terraform] -. AWS data plane .-> L & C & N & E & Q
     O[OCI A1 + Tailscale] --> A & D
@@ -37,6 +38,8 @@ flowchart LR
 | `infra/terraform/oci/` | Runtime platform | Rebuildable ARM services host with no public ingress |
 | `infra/terraform/tailscale/` | Network platform | Private grants, SSH policy, and enrollment |
 | `infra/terraform/github/` | Delivery platform | Protected environments, deployment policy, and release variables |
+| `infra/terraform/cloudflare/` | Edge platform | Tunnel, public DNS, and identity-aware application access |
+| `infra/runtime/cloudflare/` | Runtime platform | Pinned outbound connector and secret materialization |
 | `infra/runtime/postgres/` | Runtime platform | Shared PostgreSQL server with isolated application databases |
 | `platform/` | Data platform | YAML contracts and the contract-driven Glue/Iceberg control plane |
 | `jobs/emr/` | Source/product teams | Spark extract, landing publication, and curated business transforms |
@@ -122,8 +125,8 @@ credentials, so CI stores no AWS key, Tailscale OAuth secret, or SSH key.
 
 The one-time backend bootstrap keeps its small local state at
 `~/.cache/lakehouse/terraform/state/aws-bootstrap.tfstate`; this is the unavoidable state needed to
-create the state bucket itself. AWS, Tailscale, GitHub, and OCI then use isolated, natively locked
-keys in that versioned S3 bucket. OCI consumes the single-use Tailscale enrollment key directly
+create the state bucket itself. AWS, Tailscale, GitHub, OCI, and Cloudflare then use isolated,
+natively locked keys in that versioned S3 bucket. OCI consumes the single-use Tailscale enrollment key directly
 from the Tailscale state, so it is never copied through a shell variable or tfvars file.
 
 The EMR release workflow uploads entrypoints, locked dependencies, and the exact contract bundle to
@@ -139,6 +142,8 @@ reviewed release. Airflow, Inspector, dbt, and OCR cannot accidentally move toge
 host never reads Terraform state. CI streams only the selected component-owned deployment bundle;
 the host does not clone the repository or run its root Makefile.
 Airflow reconciliation also brings up its metadata PostgreSQL dependency before migrating Airflow.
+The Cloudflare connector is the exception: a protected manual workflow deploys the pinned upstream
+multi-architecture digest directly, without a custom image or ECR repository.
 
 Airflow uses the official versioned `GitDagBundle` and tracks the reviewed `main` ref under
 `orchestration/bundle`. A DAG-only merge is fetched by the DAG processor without rebuilding or
@@ -151,6 +156,8 @@ Airflow database owner, and the Airflow runtime each have a separate secret boun
 deployed independently and owns only storage/availability; Airflow owns its database migrations.
 `make airflow-up` materializes only the Airflow database and runtime values as service-scoped Compose
 secrets; SimpleAuthManager never generates or logs a password.
+The Cloudflare Tunnel token is synchronized explicitly into its AWS secret container and exposed to
+the connector only as a read-only file; the Cloudflare API token remains an operator credential.
 
 Producer tasks emit centrally declared logical assets only after successful completion. The GitHub
 curated asset triggers the dbt task DAG, which runs source freshness before `dbt build`; ArXiv
