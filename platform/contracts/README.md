@@ -16,8 +16,9 @@ maintenance schedules, processor tuning, and execution SQL do not belong here.
 Primary keys compile to Iceberg identifier fields for schema semantics. Writers remain responsible
 for enforcing uniqueness because Iceberg identifier fields are not uniqueness constraints.
 
-`python -m lakehouse.catalog.admin apply` creates missing objects and updates safe
-table properties. Structural drift in location, schema, identifier fields, partition spec, or
-format version fails and requires an explicit migration. The command never silently rewrites
-existing tables. Applied objects carry a platform ownership property so validation can report
-removed contract objects without claiming or deleting externally managed tables.
+`make catalog-apply` creates missing objects and updates safe table properties;
+`make catalog-validate` is read-only. Run both through the catalog-operator AWS profile documented
+in the [infrastructure runbook](../../infra/README.md). Structural drift in location, schema,
+identifier fields, partition spec, or format version requires an explicit migration. Reconciliation
+never rewrites existing tables silently. Platform ownership properties let validation report stale
+contract objects without claiming or deleting externally managed tables.

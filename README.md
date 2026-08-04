@@ -89,48 +89,29 @@ in SSM Parameter Store. Airflow's remote-log URI is resolved from SSM instead of
 Compose. Immutable service releases stay in ECR and are deployed independently by digest; SSM does
 not duplicate Git-owned image versions.
 
-## Run
+## Workflows
 
-Requirements: Docker Compose, Terraform, uv, AWS CLI, OCI CLI/config, scoped Tailscale OAuth
-credentials, and a scoped GitHub API credential for repository administration.
-Use the Make targets below rather than running `terraform init` from the repository root; they keep
-Terraform working data in a shared cache outside the worktree and discover the state bucket
-automatically.
+Run the complete local quality gate before publishing a change:
 
 ```bash
-# One-time remote-state bootstrap
-make aws-state-apply
+make check
+```
 
-# AWS development environment and temporary external workload identities
-make workload-pki-init
-make aws-plan
-make aws-apply
-make workload-identities-render
-AWS_PROFILE=your-terraform-admin make metadata-postgres-secrets-init
-AWS_PROFILE=your-terraform-admin make airflow-secrets-init
+The canonical first-deployment and day-two runbook is [infra/README.md](infra/README.md). It covers
+the one-time state bootstrap, AWS, Tailscale, GitHub, OCI, workload identities, runtime secrets,
+catalog contracts, initial releases, and verification in dependency order. Use the Make targets in
+that runbook instead of running Terraform from the repository root; they keep provider data and
+state outside the worktree.
 
-# Private network and OCI services host (after copying the documented tfvars examples)
-make tailscale-plan
-make tailscale-apply
-GITHUB_TOKEN='<fine-grained token>' make github-plan
-GITHUB_TOKEN='<fine-grained token>' make github-apply
-make oci-plan
-make oci-apply
-make workload-identities-install
+For unpublished workstation iteration only:
 
-# Configure the operator assume-role profiles, then create the catalog
-make catalog-apply
-make catalog-validate
-
-# Build analytics locally; protected CI owns every release publication
-make dbt-deps
-make dbt-build
-
-# For unpublished workstation iteration
+```bash
 make images-build
 make airflow-up
 make arxiv-inspector-up
 ```
+
+## Delivery
 
 The GitHub Terraform root reads the applied AWS and Tailscale remote states, creates the protected
 `dev` environment, restricts deployments to `main`, requires owner approval, and writes its six
@@ -205,15 +186,6 @@ transformation logic.
 
 ArXiv landing publication uses deterministic day paths and partition overwrite. Replaying a day
 replaces that authoritative landing partition before the latest mutations are merged into curated.
-
-## Quality
-
-```bash
-make platform-validate
-make lint
-make test
-make check
-```
 
 The repository does not use `.env` files. Secret values belong in Secrets Manager, runtime resource
 references belong in Parameter Store, and stable defaults live in the Makefile/Compose boundary.

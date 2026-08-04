@@ -1,80 +1,129 @@
 # Infrastructure
 
-Terraform has one backend bootstrap and four independently planned operational roots:
+Terraform has one local bootstrap root and four remote-state roots:
 
 ```text
 terraform/
-  aws/
-    bootstrap/state/       one-time versioned S3 backend
-    environments/dev/      AWS environment composition
-    modules/               storage, EMR, ECR, and IAM boundaries
-  tailscale/environments/dev/  private access policy and one-time enrollment key
-  github/environments/dev/     protected delivery environment and release variables
-  oci/environments/dev/        ARM services host with no public ingress
+  aws/bootstrap/state/          one-time S3 backend bootstrap
+  aws/environments/dev/         AWS data plane and workload IAM
+  tailscale/environments/dev/   private access and host enrollment
+  github/environments/dev/      protected release configuration
+  oci/environments/dev/         private ARM services host
 ```
 
-AWS owns S3, KMS, EMR Serverless, ECR, workload IAM, SSM references, and empty Secrets Manager
-containers. Terraform does not create Glue databases, Iceberg tables, schedules, dbt models, or
-secret values. OCI owns only the self-hosted compute/network boundary. Tailscale owns only private
-network access. GitHub owns the protected release boundary and derives its non-secret variables
-from the AWS and Tailscale remote states. Each root has an isolated state key and can be planned
-independently.
-AWS also owns repository/environment-scoped GitHub OIDC release roles. Tailscale owns the matching
-federated CI identity and grants it SSH only; human operator roles and runtime Roles Anywhere
-identities remain separate trust boundaries.
-Make stores Terraform working data under `~/.cache/lakehouse/terraform`, shares one provider cache,
-and resolves the remote-state bucket from the bootstrap output. The bootstrap state itself lives at
-`~/.cache/lakehouse/terraform/state/aws-bootstrap.tfstate`; the AWS, Tailscale, GitHub, and OCI
-roots use isolated, natively locked keys in the versioned S3 bucket it creates. Terraform never
-writes `.terraform` directories or state into the worktree when invoked through Make.
+AWS owns S3, KMS, ECR, EMR Serverless, IAM, SSM references, and empty Secrets Manager containers.
+Tailscale owns private access. OCI owns the rebuildable services host. GitHub owns release policy
+and non-secret CI variables. Terraform does not own secret values, Glue databases, Iceberg tables,
+schedules, or dbt models.
 
-## Bootstrap order
+The backend bootstrap keeps only its small state at
+`~/.cache/lakehouse/terraform/state/aws-bootstrap.tfstate`. It creates the versioned S3 bucket used
+by the isolated AWS, Tailscale, GitHub, and OCI state keys. Make keeps all Terraform working data
+outside the repository and resolves that bucket automatically.
+
+## Prerequisites
+
+- AWS CLI profile `tgbao-dev`; the account must allow EMR Serverless (a Paid account plan is
+  required for accounts whose Free plan excludes it).
+- OCI CLI profile `tgbao-dev` and populated AWS, Tailscale, and OCI dev tfvars.
+- Local Tailscale client authenticated to the target tailnet.
+- Terraform, AWS CLI, OCI CLI, Tailscale CLI, GitHub CLI, Docker, jq, and uv.
+- A Tailscale provider OAuth client and a fine-grained GitHub token. Provider credentials stay in
+  the process environment, never in tfvars or state.
+
+Authenticate the operator shell once:
 
 ```bash
-# 1. Create the remote-state bucket once.
+export AWS_PROFILE=tgbao-dev
+aws login --profile "$AWS_PROFILE"
+aws sts get-caller-identity
+```
+
+## First deployment
+
+Run each plan, review it, then apply it. An interrupted apply is resumable; do not delete state or
+destroy resources merely because a later resource failed.
+
+### 1. Backend and AWS
+
+```bash
+make aws-state-plan
 make aws-state-apply
 
-# 2. Create the offline CA and apply AWS, including IAM Roles Anywhere.
 make workload-pki-init
-cp infra/terraform/aws/environments/dev/terraform.tfvars.example \
-  infra/terraform/aws/environments/dev/terraform.tfvars
 make aws-plan
 make aws-apply
 make workload-identities-render
+```
 
-# 3. Import the existing tailnet policy once, review it, then apply private access.
-cp infra/terraform/tailscale/environments/dev/terraform.tfvars.example \
-  infra/terraform/tailscale/environments/dev/terraform.tfvars
+The state bootstrap is the only local-state root. `aws-apply` creates the data buckets, KMS key,
+ECR repositories, EMR Serverless application, workload roles, runtime parameters, and empty secret
+containers.
+
+### 2. Tailscale
+
+```bash
+export TAILSCALE_OAUTH_CLIENT_ID='<client-id>'
+export TAILSCALE_OAUTH_CLIENT_SECRET='<client-secret>'
+export TAILSCALE_TAILNET='-'
+
 make tailscale-init
-make tailscale-policy-import
+make tailscale-policy-import  # once: adopt the existing tailnet policy
 make tailscale-plan
 make tailscale-apply
+```
 
-# 4. Apply repository delivery configuration using provider authentication only.
-GITHUB_TOKEN='<fine-grained token>' make github-plan
-GITHUB_TOKEN='<fine-grained token>' make github-apply
+Never rerun the import after it succeeds. A temporary all-scope bootstrap client should be revoked
+after replacing it with a scoped operator credential. Terraform applies the policy before creating
+tagged auth keys or federated identities. If a tagged resource fails after the policy succeeds,
+rerun plan/apply with the same credential and do not import the policy again.
 
-# 5. Configure the OCI CLI profile, copy the OCI example, and apply the host.
-export PATH="$HOME/bin:$PATH"
-oci setup config
-cp infra/terraform/oci/environments/dev/terraform.tfvars.example \
-  infra/terraform/oci/environments/dev/terraform.tfvars
+### 3. GitHub release configuration
+
+The GitHub root depends on both AWS and Tailscale state. Use a fine-grained PAT owned by
+`ToGiaBaoKDL`, restricted to `mini-lakehouse`, with repository permissions `Administration: write`
+and `Environments: write` (`Metadata: read` is automatic). The first permission owns the deployment
+environment and branch policy; the second owns its non-secret Actions variables.
+
+```bash
+export GITHUB_TOKEN='<fine-grained-token>'
+make github-plan
+make github-apply
+unset GITHUB_TOKEN
+```
+
+### 4. OCI services host
+
+OCI reads the one-time host enrollment key from Tailscale state; its Terraform backend remains in
+AWS. The host has outbound internet access but no public ingress.
+
+```bash
+export OCI_CONFIG_FILE_PROFILE=tgbao-dev
 make oci-plan
 make oci-apply
+
+tailscale ping tgbao-dev-services
 make workload-identities-install
 ```
 
-The exact first-apply inputs are intentionally small:
+`workload-identities-install` transfers only service leaf identities over Tailscale SSH. The local
+CA private key never leaves the operator machine.
 
-- AWS tfvars: public workload CA path and existing catalog-operator IAM principal ARN(s).
-- Tailscale tfvars: one owner email; provider OAuth credentials and tailnet are environment values.
-- GitHub: provider token only; this root has no tfvars file.
-- OCI tfvars: tenancy, compartment, region, and a pinned Ubuntu AArch64 image OCID.
+### 5. Catalog operator and contracts
 
-After the host identities are installed, initialize the generated PostgreSQL/Airflow secrets,
-populate the four operator-owned connection/provider secrets, manually dispatch the initial
-component and EMR releases, then apply and validate catalog contracts. Release workflows are not
-safe to dispatch before the OCI host, workload identities, and required secret values exist.
+Configure the human catalog role once, then apply the YAML source of truth before scheduled jobs
+can write tables:
+
+```bash
+account_id="$(aws sts get-caller-identity --query Account --output text)"
+aws configure set source_profile tgbao-dev --profile tgbao-dev-catalog
+aws configure set role_arn "arn:aws:iam::$account_id:role/tgbao-dev-catalog-admin" \
+  --profile tgbao-dev-catalog
+aws configure set region ap-southeast-1 --profile tgbao-dev-catalog
+
+AWS_PROFILE=tgbao-dev-catalog make catalog-apply
+AWS_PROFILE=tgbao-dev-catalog make catalog-validate
+```
 
 ## Runtime secrets
 
@@ -89,6 +138,11 @@ AWS_PROFILE=tgbao-dev make airflow-secrets-init
 Populate optional integration credentials only when their workloads are enabled. Local payloads
 under `.secrets/dev` are ignored by Git and must not be uploaded while they still contain
 `REPLACE_...` placeholders:
+
+- Slack `password` is the installed app's `xoxb-...` Bot User OAuth Token, not its client secret.
+- SMTP `password` is the Gmail app password; `from_email` must be the authenticated account or an
+  approved alias.
+- Kaggle and Modal payloads contain their provider API credentials.
 
 ```bash
 AWS_PROFILE=tgbao-dev aws secretsmanager put-secret-value \
@@ -108,38 +162,48 @@ AWS_PROFILE=tgbao-dev aws secretsmanager put-secret-value \
   --secret-string file://.secrets/dev/ocr/modal.json
 ```
 
-Authenticate the Tailscale provider with scoped OAuth environment variables. AWS and OCI providers
-use their standard SDK credential chains; select non-default operator profiles with `AWS_PROFILE`
-and `OCI_CONFIG_FILE_PROFILE` at the command boundary. The GitHub provider uses `GITHUB_TOKEN` (or
-its standard GitHub App authentication variables); provider credentials never belong in tfvars.
-Private keys and OCIDs are not copied into Terraform source. OCI reads the single-use enrollment
-key from the isolated Tailscale remote state; cloud-init deletes it after enrollment.
+## Initial releases
 
-The GitHub root manages the existing repository's `dev` environment, owner approval, exact `main`
-deployment policy, and six non-secret release variables. It deliberately does not adopt ownership
-of the repository itself. CI uses immutable GitHub repository IDs in the OIDC subject and receives
-only image/EMR publication plus port-22 deployment access.
+Push the reviewed revision to `main`, then dispatch and approve the protected `dev` workflows in
+this order. Wait for each workflow before starting the next one so Airflow cannot schedule work
+against missing artifacts or task images.
 
-Application delivery sends only the selected component-owned deployment bundle over Tailscale SSH.
-OCI needs Docker, AWS CLI, and the workload identities, but no repository checkout, Git, Make, or
-Terraform state. Airflow owns its Compose reconciliation and idempotently brings up the shared
-metadata PostgreSQL dependency; Inspector, dbt, and OCR retain independent deployment boundaries.
+```bash
+gh workflow run release-emr-jobs.yml --ref main
+gh workflow run release-dbt-task.yml --ref main
+gh workflow run release-ocr-worker.yml --ref main
+gh workflow run release-airflow.yml --ref main
+gh workflow run release-arxiv-inspector.yml --ref main
+```
 
-Pin `image_ocid` in OCI tfvars to one reviewed Ubuntu 24.04 AArch64 image; Terraform never moves
-the host to a newly published image implicitly. IAM Roles Anywhere trusts the public workload CA only. The CA private key stays outside the
-repository; containers receive only their own leaf certificate, private key, and generated AWS
-config. `make workload-identities-install` transfers only leaf bundles over Tailscale SSH and never
-copies the CA. The services deployer can pull reviewed ECR digests but cannot read application
-secrets or lakehouse data. Airflow and metadata PostgreSQL retrieve only their own runtime and
-database secrets with separate workload identities. dbt, OCR, and Inspector retain separate
-least-privilege roles. Checked-in workload entitlements bind dbt to
-`curated_github`/`analytics_engineering`, OCR and Inspector to `curated_arxiv`, and each workload to
-its matching S3 prefix. Only the shared EMR processor and catalog administrator retain tier-wide
-landing/curated access by design.
+The EMR workflow publishes an immutable contract/job bundle and updates its SSM pointer only after
+the checksum manifest is complete. Component workflows build multi-architecture images, publish
+immutable Git-SHA tags to ECR, resolve their digests, and deploy only the selected component over
+Tailscale SSH. The host receives deployment bundles, not a repository checkout or Terraform state.
 
-Airflow task logs use a dedicated KMS-encrypted S3 bucket with 30-day dev retention. Its generated
-dev-auth password file, DAG bundle cache, and shared PostgreSQL data remain persistent Docker
-volumes on the single dev host.
+## Verification
 
-Review every plan. Dev remains rebuildable; production should disable destructive bucket/ECR
-flags, use managed certificate issuance, and keep the same ownership boundaries.
+```bash
+tailscale status
+tailscale ping tgbao-dev-services
+tailscale ssh ubuntu@tgbao-dev-services 'docker ps'
+```
+
+Open Airflow at `http://tgbao-dev-services:8080` and ArXiv Inspector at
+`http://tgbao-dev-services:8501` from a device on the tailnet. Airflow task logs are stored in the
+KMS-encrypted logs bucket with 30-day dev retention.
+
+## Day-two changes
+
+- Review and apply only the Terraform root whose ownership changed.
+- DAG-only changes are fetched from the versioned Git DAG bundle; they do not rebuild Airflow.
+- Runtime, task, and application changes publish only their component image.
+- EMR job changes publish a new immutable S3 release; they do not rebuild service images.
+- Use the component or EMR rollback workflow with an exact reviewed revision/digest.
+- Re-run contract validation after contract or catalog changes.
+
+The services deployer can pull reviewed ECR digests but cannot read application secrets or data.
+Airflow, metadata PostgreSQL, dbt, OCR, and Inspector use separate certificate-backed AWS roles.
+Only EMR and the catalog administrator have tier-wide landing/curated access. Dev is rebuildable;
+production should disable destructive bucket/ECR flags and replace the local CA with managed
+certificate issuance while preserving these ownership boundaries.
