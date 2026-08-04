@@ -1,0 +1,4 @@
+account_id = "00000000000000000000000000000000"
+zone_id    = "00000000000000000000000000000000"
+
+access_allowed_emails = ["operator@example.com"]

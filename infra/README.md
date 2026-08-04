@@ -1,6 +1,6 @@
 # Infrastructure
 
-Terraform has one local bootstrap root and four remote-state roots:
+Terraform has one local bootstrap root and five remote-state roots:
 
 ```text
 terraform/
@@ -9,27 +9,29 @@ terraform/
   tailscale/environments/dev/   private access and host enrollment
   github/environments/dev/      protected release configuration
   oci/environments/dev/         private ARM services host
+  cloudflare/environments/dev/  public edge, DNS, and identity access
 ```
 
 AWS owns S3, KMS, ECR, EMR Serverless, IAM, SSM references, and empty Secrets Manager containers.
-Tailscale owns private access. OCI owns the rebuildable services host. GitHub owns release policy
-and non-secret CI variables. Terraform does not own secret values, Glue databases, Iceberg tables,
-schedules, or dbt models.
+Tailscale owns private administrative access. OCI owns the rebuildable services host. Cloudflare
+owns the public tunnel, DNS, and Access boundary. GitHub owns release policy and non-secret CI
+variables. Terraform does not own secret values, Glue databases, Iceberg tables, schedules, or dbt
+models.
 
 The backend bootstrap keeps only its small state at
 `~/.cache/lakehouse/terraform/state/aws-bootstrap.tfstate`. It creates the versioned S3 bucket used
-by the isolated AWS, Tailscale, GitHub, and OCI state keys. Make keeps all Terraform working data
-outside the repository and resolves that bucket automatically.
+by the isolated AWS, Tailscale, GitHub, OCI, and Cloudflare state keys. Make keeps all Terraform
+working data outside the repository and resolves that bucket automatically.
 
 ## Prerequisites
 
 - AWS CLI profile `tgbao-dev`; the account must allow EMR Serverless (a Paid account plan is
   required for accounts whose Free plan excludes it).
-- OCI CLI profile `tgbao-dev` and populated AWS, Tailscale, and OCI dev tfvars.
+- OCI CLI profile `tgbao-dev` and populated AWS, Tailscale, OCI, and Cloudflare dev tfvars.
 - Local Tailscale client authenticated to the target tailnet.
 - Terraform, AWS CLI, OCI CLI, Tailscale CLI, GitHub CLI, Docker, jq, and uv.
-- A Tailscale provider OAuth client and a fine-grained GitHub token. Provider credentials stay in
-  the process environment, never in tfvars or state.
+- Tailscale and Cloudflare provider API tokens plus a fine-grained GitHub token. Provider
+  credentials stay in the process environment, never in tfvars or state.
 
 Authenticate the operator shell once:
 
@@ -109,7 +111,23 @@ make workload-identities-install
 `workload-identities-install` transfers only service leaf identities over Tailscale SSH. The local
 CA private key never leaves the operator machine.
 
-### 5. Catalog operator and contracts
+### 5. Cloudflare edge
+
+Cloudflare manages one remotely configured tunnel for both applications. DNS and Access policy are
+generated from the same reviewed application map, and the final catch-all ingress returns 404.
+
+```bash
+export CLOUDFLARE_API_TOKEN='<scoped-api-token>'
+make cloudflare-plan
+make cloudflare-apply
+unset CLOUDFLARE_API_TOKEN
+```
+
+The token needs account-scoped Tunnel and Access application write permissions plus DNS write for
+`tgblab.io.vn`. Terraform creates no connector credential; enroll `cloudflared` on the services
+host through the runtime secret path before expecting the tunnel to become healthy.
+
+### 6. Catalog operator and contracts
 
 Configure the human catalog role once, then apply the YAML source of truth before scheduled jobs
 can write tables:

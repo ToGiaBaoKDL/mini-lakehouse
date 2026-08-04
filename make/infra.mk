@@ -3,6 +3,7 @@ AWS_TERRAFORM_DIR := infra/terraform/aws/environments/$(LAKEHOUSE_ENVIRONMENT)
 OCI_TERRAFORM_DIR := infra/terraform/oci/environments/$(LAKEHOUSE_ENVIRONMENT)
 TAILSCALE_TERRAFORM_DIR := infra/terraform/tailscale/environments/$(LAKEHOUSE_ENVIRONMENT)
 GITHUB_TERRAFORM_DIR := infra/terraform/github/environments/$(LAKEHOUSE_ENVIRONMENT)
+CLOUDFLARE_TERRAFORM_DIR := infra/terraform/cloudflare/environments/$(LAKEHOUSE_ENVIRONMENT)
 TERRAFORM_CACHE_DIR ?= $(HOME)/.cache/lakehouse/terraform
 TF_PLUGIN_CACHE_DIR ?= $(TERRAFORM_CACHE_DIR)/plugins
 AWS_STATE_FILE := $(TERRAFORM_CACHE_DIR)/state/aws-bootstrap.tfstate
@@ -11,12 +12,14 @@ AWS_TERRAFORM_DATA_DIR := $(TERRAFORM_CACHE_DIR)/data/aws-$(LAKEHOUSE_ENVIRONMEN
 OCI_TERRAFORM_DATA_DIR := $(TERRAFORM_CACHE_DIR)/data/oci-$(LAKEHOUSE_ENVIRONMENT)
 TAILSCALE_TERRAFORM_DATA_DIR := $(TERRAFORM_CACHE_DIR)/data/tailscale-$(LAKEHOUSE_ENVIRONMENT)
 GITHUB_TERRAFORM_DATA_DIR := $(TERRAFORM_CACHE_DIR)/data/github-$(LAKEHOUSE_ENVIRONMENT)
+CLOUDFLARE_TERRAFORM_DATA_DIR := $(TERRAFORM_CACHE_DIR)/data/cloudflare-$(LAKEHOUSE_ENVIRONMENT)
 TERRAFORM_VALIDATE_DATA_DIR := /tmp/lakehouse-terraform-validate-$(LOCAL_UID)
 AWS_STATE_TERRAFORM := TF_DATA_DIR="$(AWS_STATE_TERRAFORM_DATA_DIR)" terraform -chdir="$(AWS_TERRAFORM_STATE_DIR)"
 AWS_TERRAFORM := TF_DATA_DIR="$(AWS_TERRAFORM_DATA_DIR)" terraform -chdir="$(AWS_TERRAFORM_DIR)"
 OCI_TERRAFORM := TF_DATA_DIR="$(OCI_TERRAFORM_DATA_DIR)" terraform -chdir="$(OCI_TERRAFORM_DIR)"
 TAILSCALE_TERRAFORM := TF_DATA_DIR="$(TAILSCALE_TERRAFORM_DATA_DIR)" terraform -chdir="$(TAILSCALE_TERRAFORM_DIR)"
 GITHUB_TERRAFORM := TF_DATA_DIR="$(GITHUB_TERRAFORM_DATA_DIR)" terraform -chdir="$(GITHUB_TERRAFORM_DIR)"
+CLOUDFLARE_TERRAFORM := TF_DATA_DIR="$(CLOUDFLARE_TERRAFORM_DATA_DIR)" terraform -chdir="$(CLOUDFLARE_TERRAFORM_DIR)"
 SERVICES_HOST ?= tgbao-dev-services
 SERVICES_HOST_USER ?= ubuntu
 
@@ -25,6 +28,7 @@ SERVICES_HOST_USER ?= ubuntu
 	aws-init aws-plan aws-apply \
 	tailscale-init tailscale-plan tailscale-apply tailscale-policy-import \
 	github-init github-plan github-apply \
+	cloudflare-init cloudflare-plan cloudflare-apply \
 	oci-init oci-plan oci-apply \
 	workload-pki-init workload-identities-render \
 	workload-identities-install
@@ -84,6 +88,17 @@ github-apply: github-init ## Apply the reviewed GitHub repository configuration.
 	@STATE_BUCKET="$$($(AWS_STATE_TERRAFORM) output -raw bucket_name)"; \
 		TF_VAR_state_bucket="$${STATE_BUCKET}" $(GITHUB_TERRAFORM) apply
 
+cloudflare-init: aws-state-init
+	@set -eu; \
+		STATE_BUCKET="$$($(AWS_STATE_TERRAFORM) output -raw bucket_name)"; \
+		$(CLOUDFLARE_TERRAFORM) init -backend-config="bucket=$${STATE_BUCKET}"
+
+cloudflare-plan: cloudflare-init ## Plan Cloudflare Tunnel, DNS, and Access.
+	$(CLOUDFLARE_TERRAFORM) plan
+
+cloudflare-apply: cloudflare-init ## Apply the reviewed Cloudflare edge configuration.
+	$(CLOUDFLARE_TERRAFORM) apply
+
 oci-init: aws-state-init
 	@set -eu; \
 		STATE_BUCKET="$$($(AWS_STATE_TERRAFORM) output -raw bucket_name)"; \
@@ -109,6 +124,7 @@ terraform-validate: terraform-cache ## Initialize without remote state and valid
 		validate_root "$(TERRAFORM_VALIDATE_DATA_DIR)/aws" "$(AWS_TERRAFORM_DIR)"; \
 		validate_root "$(TERRAFORM_VALIDATE_DATA_DIR)/tailscale" "$(TAILSCALE_TERRAFORM_DIR)"; \
 		validate_root "$(TERRAFORM_VALIDATE_DATA_DIR)/github" "$(GITHUB_TERRAFORM_DIR)"; \
+		validate_root "$(TERRAFORM_VALIDATE_DATA_DIR)/cloudflare" "$(CLOUDFLARE_TERRAFORM_DIR)"; \
 		validate_root "$(TERRAFORM_VALIDATE_DATA_DIR)/oci" "$(OCI_TERRAFORM_DIR)"
 
 workload-pki-init: ## Create the local workload CA outside the repository.

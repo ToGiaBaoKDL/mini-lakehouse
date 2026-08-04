@@ -79,7 +79,7 @@ def test_ci_validation_does_not_require_remote_state() -> None:
 
     assert "terraform-validate: terraform-cache ##" in makefile
     assert makefile.count("init -backend=false -lockfile=readonly") == 1
-    assert makefile.count('validate_root "$(TERRAFORM_VALIDATE_DATA_DIR)/') == 5
+    assert makefile.count('validate_root "$(TERRAFORM_VALIDATE_DATA_DIR)/') == 6
     assert "$(MAKE) terraform-validate" in makefile
 
 
@@ -251,11 +251,13 @@ def test_cloud_roots_have_isolated_state_and_private_access_host() -> None:
     tailscale_installer = Path("infra/runtime/host/install-tailscale").read_text(encoding="utf-8")
     tailscale = _terraform_sources(Path("infra/terraform/tailscale/environments/dev"))
     github = _terraform_sources(Path("infra/terraform/github/environments/dev"))
+    cloudflare = _terraform_sources(Path("infra/terraform/cloudflare/environments/dev"))
     normalized_oci = " ".join(oci.split())
 
     assert 'key          = "lakehouse/oci/dev/terraform.tfstate"' in oci
     assert 'key          = "lakehouse/tailscale/dev/terraform.tfstate"' in tailscale
     assert 'key          = "lakehouse/github/dev/terraform.tfstate"' in github
+    assert 'key          = "lakehouse/cloudflare/dev/terraform.tfstate"' in cloudflare
     assert 'key     = "lakehouse/tailscale/dev/terraform.tfstate"' in oci
     assert 'variable "tailscale_auth_key"' not in oci
     assert 'shape = "VM.Standard.A1.Flex"' in normalized_oci
@@ -298,6 +300,28 @@ def test_cloud_roots_have_isolated_state_and_private_access_host() -> None:
     assert "--auth-key=file:/run/tailscale-auth-key" in cloud_init
 
 
+def test_cloudflare_edge_uses_current_tunnel_and_access_resources() -> None:
+    cloudflare = _terraform_sources(Path("infra/terraform/cloudflare/environments/dev"))
+
+    assert 'version = "~> 5.22.0"' in cloudflare
+    assert 'resource "cloudflare_zero_trust_tunnel_cloudflared" "services"' in cloudflare
+    assert 'resource "cloudflare_zero_trust_tunnel_cloudflared_config" "services"' in cloudflare
+    assert 'resource "cloudflare_dns_record" "application"' in cloudflare
+    assert 'resource "cloudflare_zero_trust_access_application" "application"' in cloudflare
+    assert 'config_src = "cloudflare"' in cloudflare
+    assert 'source     = "cloudflare"' in cloudflare
+    assert 'service = "http_status:404"' in cloudflare
+    assert (
+        'content = "${cloudflare_zero_trust_tunnel_cloudflared.services.id}.cfargotunnel.com"'
+        in cloudflare
+    )
+    assert 'type = "public"' in cloudflare
+    assert 'decision   = "allow"' in cloudflare
+    assert "self_hosted_domains" not in cloudflare
+    assert 'variable "cloudflare_api_token"' not in cloudflare
+    assert "tunnel_secret" not in cloudflare
+
+
 def test_github_delivery_configuration_is_terraform_owned_and_state_derived() -> None:
     github = _terraform_sources(Path("infra/terraform/github/environments/dev"))
 
@@ -331,6 +355,7 @@ def test_provider_authentication_is_not_a_terraform_input() -> None:
     aws_bootstrap = _terraform_sources(Path("infra/terraform/aws/bootstrap/state"))
     oci_environment = _terraform_sources(Path("infra/terraform/oci/environments/dev"))
     github_environment = _terraform_sources(Path("infra/terraform/github/environments/dev"))
+    cloudflare_environment = _terraform_sources(Path("infra/terraform/cloudflare/environments/dev"))
     examples = "\n".join(
         path.read_text(encoding="utf-8")
         for path in Path("infra/terraform").rglob("terraform.tfvars.example")
@@ -342,6 +367,8 @@ def test_provider_authentication_is_not_a_terraform_input() -> None:
     assert "config_file_profile = var.oci_profile" not in oci_environment
     assert 'variable "github_token"' not in github_environment
     assert "token =" not in github_environment
+    assert 'variable "cloudflare_api_token"' not in cloudflare_environment
+    assert "api_token =" not in cloudflare_environment
     assert "aws_profile" not in examples
     assert "oci_profile" not in examples
 
