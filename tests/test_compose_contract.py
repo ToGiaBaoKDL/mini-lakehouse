@@ -44,7 +44,7 @@ def test_airflow_uses_local_executor_and_deferrable_runtime_components() -> None
 
     assert environment["AIRFLOW__CORE__EXECUTOR"] == "LocalExecutor"
     assert environment["AIRFLOW__CORE__LOAD_EXAMPLES"] == "false"
-    assert environment["AIRFLOW__CORE__RERUN_WITH_LATEST_VERSION"] == "false"
+    assert environment["AIRFLOW__CORE__RERUN_WITH_LATEST_VERSION"] == "true"
     assert common["image"] == "${AIRFLOW_IMAGE:-airflow:local}"
     assert common["user"] == "${LOCAL_UID}:0"
     assert "build" not in common

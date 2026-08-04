@@ -5,7 +5,7 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__CORE__PARALLELISM: "4"
-    AIRFLOW__CORE__RERUN_WITH_LATEST_VERSION: "false"
+    AIRFLOW__CORE__RERUN_WITH_LATEST_VERSION: "true"
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "admin:admin"
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/auth/simple_auth_manager_passwords.json
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD: >-
