@@ -245,6 +245,7 @@ def test_all_container_images_are_immutable() -> None:
     assert "USER worker" in ocr_dockerfile
     assert "USER inspector" in inspector_dockerfile
     assert "HEALTHCHECK" in inspector_dockerfile
+    assert "PYTHONPATH=/app" in inspector_dockerfile
     dockerignore = Path(".dockerignore").read_text(encoding="utf-8")
     assert "!infra/runtime/identity/install-aws-signing-helper" in dockerignore
     assert '"apache-airflow==3.3.0"' in (AIRFLOW_RUNTIME / "pyproject.toml").read_text(
