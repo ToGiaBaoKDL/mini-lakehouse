@@ -244,6 +244,11 @@ def test_cloud_roots_have_isolated_state_and_private_access_host() -> None:
     cloud_init = Path("infra/terraform/oci/environments/dev/cloud-init.yaml.tftpl").read_text(
         encoding="utf-8"
     )
+    aws_cli_installer = Path("infra/runtime/host/install-aws-cli").read_text(encoding="utf-8")
+    signing_helper_installer = Path("infra/runtime/identity/install-aws-signing-helper").read_text(
+        encoding="utf-8"
+    )
+    tailscale_installer = Path("infra/runtime/host/install-tailscale").read_text(encoding="utf-8")
     tailscale = _terraform_sources(Path("infra/terraform/tailscale/environments/dev"))
     github = _terraform_sources(Path("infra/terraform/github/environments/dev"))
     normalized_oci = " ".join(oci.split())
@@ -279,6 +284,16 @@ def test_cloud_roots_have_isolated_state_and_private_access_host() -> None:
     assert 'dns_label = "services"' in normalized_oci
     assert "  - git" not in cloud_init
     assert "  - make" not in cloud_init
+    assert "  - awscli" not in cloud_init
+    assert "/usr/local/sbin/install-aws-cli" in cloud_init
+    assert 'version="2.36.11"' in aws_cli_installer
+    assert "awscli-exe-linux-$distribution_architecture-$version.zip" in aws_cli_installer
+    assert "FB5DB77FD5C118B80511ADA8A6310ACC4672475C" in aws_cli_installer
+    assert 'version="1.8.4"' in signing_helper_installer
+    assert '"$target" version' in signing_helper_installer
+    assert "python3 -" in signing_helper_installer
+    assert "/usr/local/sbin/install-tailscale" in cloud_init
+    assert 'version="1.102.1"' in tailscale_installer
     assert "/opt/lakehouse" not in cloud_init
     assert "--auth-key=file:/run/tailscale-auth-key" in cloud_init
 

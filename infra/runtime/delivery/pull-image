@@ -31,6 +31,14 @@ test -r "$aws_config" || {
     printf '%s\n' "The services-deployer workload identity is missing." >&2
     exit 1
 }
+command -v aws >/dev/null 2>&1 || {
+    printf '%s\n' "AWS CLI v2 is missing from the services host." >&2
+    exit 1
+}
+aws --version 2>&1 | grep -q '^aws-cli/2\.' || {
+    printf '%s\n' "AWS CLI v2 is required on the services host." >&2
+    exit 1
+}
 
 registry=${image%%/*}
 docker_config=$(mktemp -d "${TMPDIR:-/tmp}/lakehouse-docker.XXXXXX")

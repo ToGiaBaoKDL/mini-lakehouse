@@ -103,9 +103,11 @@ resource "oci_core_instance" "services" {
 
   metadata = {
     user_data = base64encode(templatefile("${path.module}/cloud-init.yaml.tftpl", {
-      hostname           = local.name
-      installer          = indent(6, file("${path.module}/../../../../runtime/identity/install-aws-signing-helper"))
-      tailscale_auth_key = jsonencode(data.terraform_remote_state.tailscale.outputs.services_auth_key)
+      aws_cli_installer        = indent(6, file("${path.module}/../../../../runtime/host/install-aws-cli"))
+      hostname                 = local.name
+      signing_helper_installer = indent(6, file("${path.module}/../../../../runtime/identity/install-aws-signing-helper"))
+      tailscale_installer      = indent(6, file("${path.module}/../../../../runtime/host/install-tailscale"))
+      tailscale_auth_key       = jsonencode(data.terraform_remote_state.tailscale.outputs.services_auth_key)
     }))
   }
 }

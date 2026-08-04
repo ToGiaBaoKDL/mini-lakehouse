@@ -1,13 +1,14 @@
 #cloud-config
 package_update: true
 packages:
-  - awscli
   - ca-certificates
   - curl
   - docker.io
   - docker-compose-v2
+  - gnupg
   - jq
   - python3-minimal
+  - unzip
 
 write_files:
   - path: /run/tailscale-auth-key
@@ -18,15 +19,22 @@ write_files:
     owner: root:root
     permissions: "0755"
     content: |
-      ${installer}
+      ${signing_helper_installer}
+  - path: /usr/local/sbin/install-aws-cli
+    owner: root:root
+    permissions: "0755"
+    content: |
+      ${aws_cli_installer}
+  - path: /usr/local/sbin/install-tailscale
+    owner: root:root
+    permissions: "0755"
+    content: |
+      ${tailscale_installer}
 
 runcmd:
-  - install -d -m 0755 /usr/share/keyrings /etc/apt/sources.list.d
-  - curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.noarmor.gpg -o /usr/share/keyrings/tailscale-archive-keyring.gpg
-  - curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/noble.tailscale-keyring.list -o /etc/apt/sources.list.d/tailscale.list
-  - apt-get update
-  - apt-get install -y tailscale
+  - /usr/local/sbin/install-tailscale
   - systemctl enable --now docker tailscaled
+  - /usr/local/sbin/install-aws-cli "$(uname -m)"
   - /usr/local/sbin/install-aws-signing-helper "$(uname -m)"
   - usermod -aG docker ubuntu
   - tailscale up --auth-key=file:/run/tailscale-auth-key --hostname=${hostname} --ssh

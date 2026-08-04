@@ -59,6 +59,7 @@ def test_service_pull_uses_short_lived_registry_login() -> None:
     assert "mktemp -d" in pull
     assert "Image must be an immutable digest from the dev" in pull
     assert "services-deployer/host-config" in pull
+    assert "AWS CLI v2 is missing from the services host." in pull
 
 
 def test_each_component_owns_its_deployment_operation() -> None:

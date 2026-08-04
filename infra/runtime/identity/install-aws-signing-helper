@@ -2,7 +2,13 @@
 set -eu
 
 version="1.8.4"
-architecture="${1:-}"
+target="/usr/local/bin/aws_signing_helper"
+architecture="${1:-$(uname -m)}"
+
+if [ -x "$target" ] && [ "$("$target" version)" = "$version" ]; then
+    exit 0
+fi
+
 case "$architecture" in
     amd64 | x86_64)
         distribution_architecture="X86_64"
@@ -19,14 +25,14 @@ case "$architecture" in
 esac
 
 url="https://rolesanywhere.amazonaws.com/releases/$version/$distribution_architecture/Linux/Amzn2023/aws_signing_helper"
-python - "$url" "$checksum" <<'PY'
+python3 - "$url" "$checksum" "$target" <<'PY'
 import hashlib
 import pathlib
 import sys
 import urllib.request
 
-url, expected = sys.argv[1:]
-target = pathlib.Path("/usr/local/bin/aws_signing_helper")
+url, expected, target_path = sys.argv[1:]
+target = pathlib.Path(target_path)
 with urllib.request.urlopen(url, timeout=60) as response:
     payload = response.read()
 actual = hashlib.sha256(payload).hexdigest()
@@ -35,3 +41,5 @@ if actual != expected:
 target.write_bytes(payload)
 target.chmod(0o755)
 PY
+
+[ "$("$target" version)" = "$version" ]
