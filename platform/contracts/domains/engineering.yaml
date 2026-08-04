@@ -4,7 +4,7 @@ database: analytics_engineering
 owner: engineering-analytics
 contact:
   name: Engineering Analytics
-  email: bao.to@timo.vn
+  email: baokdl2226@gmail.com
 business_owner: engineering
 description: Consumer-facing engineering activity metrics.
 upstream_curated_products: [github]

@@ -21,7 +21,7 @@ models:
       columns: true
     +meta:
       owner: engineering-analytics
-      contact: bao.to@timo.vn
+      contact: baokdl2226@gmail.com
 
     staging:
       +materialized: ephemeral

@@ -5,7 +5,7 @@ source_type: api
 owner: data-platform
 contact:
   name: Data Platform
-  email: bao.to@timo.vn
+  email: baokdl2226@gmail.com
 description: ArXiv article metadata harvested through OAI-PMH.
 raw_subpath: oai
 

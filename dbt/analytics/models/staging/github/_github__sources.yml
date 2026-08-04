@@ -8,7 +8,7 @@ sources:
     loader: emr-serverless
     meta:
       owner: data-platform
-      contact: bao.to@timo.vn
+      contact: baokdl2226@gmail.com
     tables:
       - name: events
         description: Deduplicated and normalized GitHub events at one row per stable event ID.

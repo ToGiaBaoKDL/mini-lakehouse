@@ -4,7 +4,7 @@ database: curated_github
 owner: data-platform
 contact:
   name: Data Platform
-  email: bao.to@timo.vn
+  email: baokdl2226@gmail.com
 description: Canonical validated GitHub entities and events for downstream data products.
 upstream_sources: [github_archive]
 

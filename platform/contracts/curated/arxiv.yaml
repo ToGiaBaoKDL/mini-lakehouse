@@ -4,7 +4,7 @@ database: curated_arxiv
 owner: data-platform
 contact:
   name: Data Platform
-  email: bao.to@timo.vn
+  email: baokdl2226@gmail.com
 description: Canonical current ArXiv metadata and OCR results.
 upstream_sources: [arxiv]
 

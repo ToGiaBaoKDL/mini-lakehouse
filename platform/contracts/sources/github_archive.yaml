@@ -5,7 +5,7 @@ source_type: api
 owner: data-platform
 contact:
   name: Data Platform
-  email: bao.to@timo.vn
+  email: baokdl2226@gmail.com
 description: Public GitHub events published as immutable hourly archives.
 
 tables:

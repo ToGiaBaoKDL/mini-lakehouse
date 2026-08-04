@@ -6,7 +6,7 @@ from airflow.providers.slack.notifications.slack import send_slack_notification
 from airflow.providers.smtp.notifications.smtp import send_smtp_notification
 from airflow.sdk.definitions.context import Context
 
-ALERT_EMAIL = "bao.to@timo.vn"
+ALERT_EMAIL = "baokdl2226@gmail.com"
 SLACK_CHANNEL = "#data-platform-alerts"
 
 
