@@ -21,6 +21,7 @@ def test_compose_owns_only_self_hosted_application_services() -> None:
 
     airflow = _compose(AIRFLOW_COMPOSE)["services"]
     assert set(airflow) == {
+        "airflow-volumes-init",
         "airflow-init",
         "airflow-api-server",
         "airflow-scheduler",
@@ -69,6 +70,12 @@ def test_airflow_uses_local_executor_and_deferrable_runtime_components() -> None
     )
     assert environment["AIRFLOW__DAG_PROCESSOR__DISABLE_BUNDLE_VERSIONING"] == "false"
     init_command = payload["services"]["airflow-init"]["command"]
+    volumes_init = payload["services"]["airflow-volumes-init"]
+    assert volumes_init["user"] == "0:0"
+    assert "chmod -R g+rwX" in volumes_init["command"][-1]
+    assert payload["services"]["airflow-init"]["depends_on"] == {
+        "airflow-volumes-init": {"condition": "service_completed_successfully"}
+    }
     assert init_command[:2] == ["bash", "-ec"]
     assert "install -m 0600 /run/secrets/airflow_admin_passwords" in init_command[-1]
     assert "exec airflow db migrate" in init_command[-1]
@@ -113,6 +120,7 @@ def test_airflow_runtime_secrets_are_service_scoped_files() -> None:
     assert "AIRFLOW__CORE__FERNET_KEY" not in environment
     assert "AIRFLOW__API_AUTH__JWT_SECRET" not in environment
     assert environment["AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD"].startswith("python -c")
+    assert "sys.stdout.write" in environment["AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD"]
     assert environment["AIRFLOW__CORE__FERNET_KEY_CMD"].startswith("cat /run/secrets/")
     assert environment["AIRFLOW__API_AUTH__JWT_SECRET_CMD"].startswith("cat /run/secrets/")
     assert set(payload["secrets"]) == {

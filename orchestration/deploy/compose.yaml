@@ -9,9 +9,9 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: "admin:admin"
     AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/auth/simple_auth_manager_passwords.json
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD: >-
-      python -c "from pathlib import Path; from urllib.parse import quote_plus;
+      python -c "import sys; from pathlib import Path; from urllib.parse import quote_plus;
       password = quote_plus(Path('/run/secrets/airflow_database_password').read_text().strip());
-      print('postgresql+psycopg2://airflow:' + password + '@metadata-postgres:5432/airflow')"
+      sys.stdout.write('postgresql+psycopg2://airflow:' + password + '@metadata-postgres:5432/airflow')"
     AIRFLOW__DAG_PROCESSOR__BUNDLE_REFRESH_CHECK_INTERVAL: "5"
     AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_CONFIG_LIST: >-
       [{"name":"lakehouse","classpath":"airflow.providers.git.bundles.git.GitDagBundle","kwargs":{"repo_url":"https://github.com/ToGiaBaoKDL/mini-lakehouse.git","tracking_ref":"main","subdir":"orchestration/bundle","sparse_dirs":["orchestration/bundle"],"refresh_interval":60}}]
@@ -49,6 +49,20 @@ x-airflow-common: &airflow-common
   stop_grace_period: 60s
 
 services:
+  airflow-volumes-init:
+    image: "${AIRFLOW_IMAGE:-airflow:local}"
+    user: "0:0"
+    entrypoint: ["sh", "-ec"]
+    command:
+      - >-
+        chgrp -R 0 /opt/airflow/auth /opt/airflow/dag-bundles /opt/airflow/logs;
+        chmod -R g+rwX /opt/airflow/auth /opt/airflow/dag-bundles /opt/airflow/logs
+    volumes:
+      - airflow-auth:/opt/airflow/auth
+      - airflow-dag-bundles:/opt/airflow/dag-bundles
+      - airflow-logs:/opt/airflow/logs
+    restart: "no"
+
   airflow-init:
     image: "${AIRFLOW_IMAGE:-airflow:local}"
     user: "${LOCAL_UID}:0"
@@ -62,6 +76,9 @@ services:
     networks:
       - metadata
       - runtime
+    depends_on:
+      airflow-volumes-init:
+        condition: service_completed_successfully
     command:
       - bash
       - -ec
