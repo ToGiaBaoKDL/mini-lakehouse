@@ -59,11 +59,6 @@ def emr_spark_job(
         },
         config={"executionTimeoutMinutes": EMR_JOB_TIMEOUT_MINUTES},
         aws_conn_id=None,
-        client_request_token=(
-            "{{ dag.dag_id[:28] }}-"
-            "{{ dag_run.run_after.strftime('%Y%m%dT%H%M%S%f') }}-"
-            "{{ ti.try_number }}"
-        ),
         deferrable=True,
         enable_application_ui_links=True,
         cancel_on_kill=True,

@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 
 os.environ.setdefault("AIRFLOW_HOME", "/tmp/lakehouse-airflow-tests")
@@ -69,6 +70,7 @@ def test_source_dags_are_bounded_parameterized_deferrable_emr_jobs() -> None:
         assert task.cancel_on_kill is True
         assert task.enable_application_ui_links is True
         assert task.retries == 2
+        assert re.fullmatch(r"[A-Za-z0-9._-]{1,64}", task.client_request_token)
         arguments = task.job_driver["sparkSubmit"]["entryPointArguments"]
         assert "--landing-uri" in arguments
         assert "--contracts-uri" in arguments
