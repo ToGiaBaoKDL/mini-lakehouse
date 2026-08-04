@@ -18,5 +18,6 @@ dependencies = [
 [project.optional-dependencies]
 cli = ["typer==0.25.1"]
 catalog = [
+    "botocore[crt]>=1.42,<2",
     "pyiceberg[glue,pyarrow]>=0.10,<0.12",
 ]

@@ -1,7 +1,10 @@
 from pathlib import Path
+from unittest.mock import Mock
 
+import lakehouse.iceberg as iceberg
 from lakehouse.catalog.layout import managed_tables, namespace_properties
 from lakehouse.contracts import load_contracts
+from pytest import MonkeyPatch
 
 
 def test_glue_databases_are_derived_from_owned_contracts() -> None:
@@ -75,3 +78,30 @@ def test_data_jobs_do_not_create_or_evolve_catalog_objects() -> None:
     for path in Path("jobs/emr/src").rglob("*.py"):
         source = path.read_text(encoding="utf-8")
         assert all(token not in source for token in forbidden), path
+
+
+def test_catalog_shares_resolved_credentials_with_glue_and_s3(monkeypatch: MonkeyPatch) -> None:
+    frozen = Mock(access_key="access", secret_key="secret", token="session")
+    credentials = Mock()
+    credentials.get_frozen_credentials.return_value = frozen
+    session = Mock()
+    session.get_credentials.return_value = credentials
+    catalog = Mock()
+
+    session_factory = Mock(return_value=session)
+    catalog_loader = Mock(return_value=catalog)
+    monkeypatch.setattr(iceberg.boto3, "Session", session_factory)
+    monkeypatch.setattr(iceberg, "load_catalog", catalog_loader)
+
+    assert iceberg.load_iceberg_catalog(region_name="ap-southeast-1") is catalog
+    session_factory.assert_called_once_with(region_name="ap-southeast-1")
+    catalog_loader.assert_called_once_with(
+        "glue",
+        type="glue",
+        **{
+            "client.region": "ap-southeast-1",
+            "client.access-key-id": "access",
+            "client.secret-access-key": "secret",
+            "client.session-token": "session",
+        },
+    )
