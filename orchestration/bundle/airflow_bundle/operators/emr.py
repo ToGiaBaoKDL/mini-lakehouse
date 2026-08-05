@@ -24,6 +24,12 @@ def emr_spark_job(
     outlets: Sequence[Asset] = (),
 ) -> EmrServerlessStartJobOperator:
     code_uri = runtime_value("emr/code_uri")
+    effective_spark_conf = {
+        "spark.executor.instances": "1",
+        "spark.dynamicAllocation.minExecutors": "0",
+        "spark.dynamicAllocation.initialExecutors": "1",
+        **spark_conf,
+    }
     submit_parameters = shlex.join(
         [
             "--archives",
@@ -36,7 +42,7 @@ def emr_spark_job(
             "spark.executorEnv.PYSPARK_PYTHON=./environment/bin/python",
             *(
                 argument
-                for key, value in spark_conf.items()
+                for key, value in effective_spark_conf.items()
                 for argument in ("--conf", f"{key}={value}")
             ),
         ]
@@ -59,7 +65,7 @@ def emr_spark_job(
         },
         config={"executionTimeoutMinutes": EMR_JOB_TIMEOUT_MINUTES},
         aws_conn_id=None,
-        deferrable=True,
+        deferrable=False,
         enable_application_ui_links=True,
         cancel_on_kill=True,
         retries=1,

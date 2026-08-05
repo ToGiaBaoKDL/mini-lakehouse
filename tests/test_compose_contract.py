@@ -27,7 +27,6 @@ def test_compose_owns_only_self_hosted_application_services() -> None:
         "airflow-api-server",
         "airflow-scheduler",
         "airflow-dag-processor",
-        "airflow-triggerer",
     }
     assert set(_compose(INSPECTOR_COMPOSE)["services"]) == {"arxiv-inspector"}
     assert set(_compose(POSTGRES_COMPOSE)["services"]) == {
@@ -37,7 +36,7 @@ def test_compose_owns_only_self_hosted_application_services() -> None:
     assert set(_compose(CLOUDFLARE_COMPOSE)["services"]) == {"cloudflare-tunnel"}
 
 
-def test_airflow_uses_local_executor_and_deferrable_runtime_components() -> None:
+def test_airflow_uses_local_executor_and_required_runtime_components() -> None:
     payload = _compose(AIRFLOW_COMPOSE)
     common = payload["x-airflow-common"]
     environment = common["environment"]
@@ -51,7 +50,6 @@ def test_airflow_uses_local_executor_and_deferrable_runtime_components() -> None
     assert environment["AIRFLOW__SECRETS__BACKEND"] == ("airflow_runtime.secrets.AwsSecretsBackend")
     assert "variables_prefix" in environment["AIRFLOW__SECRETS__BACKEND_KWARGS"]
     assert "profile_name" not in environment["AIRFLOW__SECRETS__BACKEND_KWARGS"]
-    assert payload["services"]["airflow-triggerer"]["command"] == "airflow triggerer"
     assert payload["services"]["airflow-dag-processor"]["command"] == "airflow dag-processor"
     bundle_config = json.loads(environment["AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_CONFIG_LIST"])
     assert bundle_config == [
@@ -94,6 +92,7 @@ def test_airflow_uses_local_executor_and_deferrable_runtime_components() -> None
     assert "AIRFLOW_CONN_AWS_DEFAULT" not in environment
     assert "AIRFLOW_BOOTSTRAP_VERSION" not in environment
     assert "AWS_REGION" not in environment
+    assert environment["PYTHONWARNINGS"] == "ignore:ProvidersManager.hooks is deprecated"
     assert environment["AIRFLOW__LOGGING__REMOTE_LOGGING"] == "true"
     assert environment["AIRFLOW__LOGGING__REMOTE_BASE_LOG_FOLDER"] == ("${AIRFLOW_REMOTE_LOG_URI}")
     assert environment["AIRFLOW__LOGGING__DELETE_LOCAL_LOGS"] == "true"
@@ -152,7 +151,6 @@ def test_airflow_runtime_components_have_role_appropriate_healthchecks() -> None
     assert "/api/v2/version" in services["airflow-api-server"]["healthcheck"]["test"][-1]
     assert "SchedulerJob" in services["airflow-scheduler"]["healthcheck"]["test"][-1]
     assert "DagProcessorJob" in services["airflow-dag-processor"]["healthcheck"]["test"][-1]
-    assert "TriggererJob" in services["airflow-triggerer"]["healthcheck"]["test"][-1]
     assert "healthcheck" not in services["airflow-init"]
     postgres = _compose(POSTGRES_COMPOSE)["services"]
     assert "healthcheck" in postgres["metadata-postgres"]
@@ -236,6 +234,7 @@ def test_all_container_images_are_immutable() -> None:
     assert "orchestration/runtime/uv.lock" in airflow_dockerfile
     assert "COPY --chown=airflow:0 orchestration/bundle" not in airflow_dockerfile
     assert '"/uv", "export", "--frozen", "--no-dev"' in airflow_dockerfile
+    assert "uv pip sync --python /home/airflow/.local/bin/python" in airflow_dockerfile
     assert "USER airflow" in airflow_dockerfile
     assert 'ENTRYPOINT ["dbt"]' in dbt_dockerfile
     assert "dbt/analytics/uv.lock" in dbt_dockerfile
@@ -274,10 +273,12 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
     assert "streamlit" not in workspace
     assert 'name = "lakehouse"' in platform
     assert '"apache-airflow==3.3.0"' in orchestration
-    assert '"apache-airflow-providers-amazon[aiobotocore]==9.31.0"' in orchestration
+    assert '"apache-airflow-providers-amazon==9.32.0"' in orchestration
+    assert "aiobotocore" not in orchestration
     assert '"apache-airflow-providers-docker==4.5.7"' in orchestration
     assert '"apache-airflow-providers-git==0.4.1"' in orchestration
     assert '"apache-airflow-providers-smtp==3.0.1"' in orchestration
+    assert '"psycopg2-binary==2.9.12"' in orchestration
     assert "constraint-dependencies" not in orchestration
     assert "document-ocr" not in orchestration
     assert '"lakehouse"' not in orchestration

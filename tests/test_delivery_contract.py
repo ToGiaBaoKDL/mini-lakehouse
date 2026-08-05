@@ -81,6 +81,7 @@ def test_each_component_owns_its_deployment_operation() -> None:
 
     assert "docker compose --project-name airflow" in airflow
     assert "--force-recreate" in airflow
+    assert "--remove-orphans" in airflow
     assert "airflow/remote_log_uri" in airflow
     assert "infra/runtime/postgres/deploy" in airflow
     assert "docker compose --project-name metadata-postgres" in postgres

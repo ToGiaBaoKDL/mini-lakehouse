@@ -5,13 +5,14 @@ description = "Self-hosted Airflow runtime and provider integration for the lake
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "apache-airflow==3.3.0",
-    "apache-airflow-providers-amazon[aiobotocore]==9.31.0",
+    "apache-airflow-providers-amazon==9.32.0",
     "apache-airflow-providers-docker==4.5.7",
     "apache-airflow-providers-git==0.4.1",
     "apache-airflow-providers-slack==9.10.2",
     "apache-airflow-providers-smtp==3.0.1",
     "docker>=7.1,<8",
     "pendulum>=3.1,<4",
+    "psycopg2-binary==2.9.12",
 ]
 
 [tool.uv]

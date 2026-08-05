@@ -17,9 +17,9 @@ USER root
 COPY infra/runtime/identity/install-aws-signing-helper /tmp/install-aws-signing-helper
 COPY --from=uv /uv /usr/local/bin/uv
 COPY --from=requirements /build/requirements.txt /tmp/orchestration-requirements.txt
-RUN uv pip install --system --no-cache \
-        --requirement /tmp/orchestration-requirements.txt \
-    && python -c "from airflow.providers.amazon.aws.operators.emr import EmrServerlessStartJobOperator; from airflow.providers.docker.operators.docker import DockerOperator; from airflow.providers.git.bundles.git import GitDagBundle" \
+RUN uv pip sync --python /home/airflow/.local/bin/python --no-cache \
+        /tmp/orchestration-requirements.txt \
+    && /home/airflow/.local/bin/python -c "from airflow.providers.amazon.aws.operators.emr import EmrServerlessStartJobOperator; from airflow.providers.docker.operators.docker import DockerOperator; from airflow.providers.git.bundles.git import GitDagBundle" \
     && /tmp/install-aws-signing-helper "$TARGETARCH" \
     && install -d -o airflow -g 0 -m 0770 /opt/airflow/auth \
     && rm /tmp/install-aws-signing-helper /tmp/orchestration-requirements.txt /usr/local/bin/uv

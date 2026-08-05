@@ -1,8 +1,10 @@
+import shlex
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from airflow.sdk.execution_time import macros
-from airflow_bundle.config.templates import previous_local_date
+from airflow_bundle.config.templates import previous_local_date, runtime_value
+from jinja2 import StrictUndefined
 from jinja2.sandbox import SandboxedEnvironment
 
 
@@ -25,3 +27,16 @@ def test_previous_local_date_accepts_standard_datetime() -> None:
 
 def test_explicit_source_date_takes_precedence() -> None:
     assert _render_source_date("2025-01-02") == "2025-01-02"
+
+
+def test_required_runtime_value_is_shell_quote_safe() -> None:
+    template = runtime_value("emr/code_uri")
+    command = shlex.join(["--archives", f"{template}/python.tar.gz#environment"])
+    rendered = (
+        SandboxedEnvironment(undefined=StrictUndefined)
+        .from_string(command)
+        .render(var=SimpleNamespace(value={"emr/code_uri": "s3://artifacts/emr/jobs/release"}))
+    )
+
+    assert template == '{{ var.value["emr/code_uri"] }}'
+    assert rendered == "--archives 's3://artifacts/emr/jobs/release/python.tar.gz#environment'"

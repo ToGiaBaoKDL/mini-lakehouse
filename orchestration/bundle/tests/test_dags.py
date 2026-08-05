@@ -54,7 +54,7 @@ def test_dag_files_are_domain_scoped_and_follow_worker_aware_naming() -> None:
     assert "Asset(" not in sources
 
 
-def test_source_dags_are_bounded_parameterized_deferrable_emr_jobs() -> None:
+def test_source_dags_are_bounded_parameterized_emr_jobs() -> None:
     bag = _bag()
     schedules = {
         "etl_emr_github_archive": "0 8 * * *",
@@ -67,7 +67,7 @@ def test_source_dags_are_bounded_parameterized_deferrable_emr_jobs() -> None:
         assert "source_date" in dag.params
         task = dag.tasks[0]
         assert isinstance(task, EmrServerlessStartJobOperator)
-        assert task.deferrable is True
+        assert task.deferrable is False
         assert task.cancel_on_kill is True
         assert task.enable_application_ui_links is True
         assert task.retries == 1
@@ -77,6 +77,10 @@ def test_source_dags_are_bounded_parameterized_deferrable_emr_jobs() -> None:
         assert "--landing-uri" in arguments
         assert "--contracts-uri" in arguments
         assert "--catalog-name" not in arguments
+        submit_parameters = task.job_driver["sparkSubmit"]["sparkSubmitParameters"]
+        assert "spark.executor.instances=1" in submit_parameters
+        assert "spark.dynamicAllocation.minExecutors=0" in submit_parameters
+        assert "spark.dynamicAllocation.initialExecutors=1" in submit_parameters
 
     arxiv = _dag(bag, "etl_emr_arxiv_metadata").tasks[0]
     assert arxiv.outlets[0].uri == "lakehouse://curated/arxiv/metadata"
@@ -136,7 +140,7 @@ def test_maintenance_dag_uses_the_shared_emr_lifecycle() -> None:
 
     task = dag.get_task("maintain_contract_tables")
     assert isinstance(task, EmrServerlessStartJobOperator)
-    assert task.deferrable is True
+    assert task.deferrable is False
     assert task.job_driver["sparkSubmit"]["entryPoint"].endswith(
         "/entrypoints/iceberg_maintenance.py"
     )

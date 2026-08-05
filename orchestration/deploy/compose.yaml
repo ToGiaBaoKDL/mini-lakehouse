@@ -30,6 +30,7 @@ x-airflow-common: &airflow-common
     AWS_EC2_METADATA_DISABLED: "true"
     LAKEHOUSE_ENVIRONMENT: "${LAKEHOUSE_ENVIRONMENT}"
     HOST_AWS_IDENTITY_DIR: "${AWS_IDENTITY_DIR}"
+    PYTHONWARNINGS: "ignore:ProvidersManager.hooks is deprecated"
   secrets: &airflow-secrets
     - airflow_database_password
     - airflow_fernet_key
@@ -134,16 +135,6 @@ services:
           "CMD-SHELL",
           "airflow jobs check --job-type DagProcessorJob --hostname \"$${HOSTNAME}\"",
         ]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-
-  airflow-triggerer:
-    <<: *airflow-common
-    command: airflow triggerer
-    healthcheck:
-      test: ["CMD-SHELL", "airflow jobs check --job-type TriggererJob --hostname \"$${HOSTNAME}\""]
       interval: 30s
       timeout: 10s
       retries: 5

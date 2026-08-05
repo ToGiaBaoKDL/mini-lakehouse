@@ -59,4 +59,4 @@ AIRFLOW_ADMIN_PASSWORDS=$(printf '%s' "$runtime_secret" | jq -c '{admin: .admin_
 export AIRFLOW_DATABASE_PASSWORD AIRFLOW_FERNET_KEY AIRFLOW_JWT_SECRET AIRFLOW_ADMIN_PASSWORDS
 
 docker compose --project-name airflow -f "$script_dir/compose.yaml" \
-    up -d --force-recreate --wait --wait-timeout 300
+    up -d --force-recreate --remove-orphans --wait --wait-timeout 300
