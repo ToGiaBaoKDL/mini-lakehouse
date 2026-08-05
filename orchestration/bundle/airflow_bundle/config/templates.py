@@ -10,6 +10,7 @@ def previous_local_date(timezone: str = "Asia/Ho_Chi_Minh") -> str:
     """Resolve an optional source date for scheduled and manual DAG runs."""
     return (
         "{{ params.source_date or "
-        f"(((dag_run.logical_date or dag_run.run_after).in_timezone('{timezone}')) "
+        "(((dag_run.logical_date or dag_run.run_after).astimezone("
+        f"macros.dateutil.tz.gettz('{timezone}'))) "
         "- macros.timedelta(days=1)).strftime('%Y-%m-%d') }}"
     )
