@@ -2,6 +2,7 @@ import os
 import re
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 os.environ.setdefault("AIRFLOW_HOME", "/tmp/lakehouse-airflow-tests")
 os.environ.setdefault("HOST_AWS_IDENTITY_DIR", "/tmp")
@@ -11,6 +12,8 @@ from airflow.models import DagBag
 from airflow.providers.amazon.aws.operators.emr import EmrServerlessStartJobOperator
 from airflow.providers.docker.operators.docker import DockerOperator
 from airflow.sdk import DAG
+from jinja2 import StrictUndefined
+from jinja2.sandbox import SandboxedEnvironment
 
 ALLOWED_JOB_TYPES = {"etl", "tl", "rpt", "mon", "man", "bk", "stm", "cat", "gov", "test"}
 ALLOWED_WORKER_TYPES = {"emr", "glue", "k8spod", "afw", "docker", "mix"}
@@ -78,6 +81,15 @@ def test_source_dags_are_bounded_parameterized_emr_jobs() -> None:
         assert "--contracts-uri" in arguments
         assert "--catalog-name" not in arguments
         submit_parameters = task.job_driver["sparkSubmit"]["sparkSubmitParameters"]
+        rendered_submit_parameters = (
+            SandboxedEnvironment(undefined=StrictUndefined)
+            .from_string(submit_parameters)
+            .render(var=SimpleNamespace(value={"emr/code_uri": "s3://artifacts/emr/jobs/release"}))
+        )
+        assert "--archives s3://artifacts/emr/jobs/release/python.tar.gz#environment" in (
+            rendered_submit_parameters
+        )
+        assert "'s3://" not in rendered_submit_parameters
         assert "spark.executor.instances=1" in submit_parameters
         assert "spark.dynamicAllocation.minExecutors=0" in submit_parameters
         assert "spark.dynamicAllocation.initialExecutors=1" in submit_parameters

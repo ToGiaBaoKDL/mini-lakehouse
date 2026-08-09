@@ -1,4 +1,3 @@
-import shlex
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -29,14 +28,13 @@ def test_explicit_source_date_takes_precedence() -> None:
     assert _render_source_date("2025-01-02") == "2025-01-02"
 
 
-def test_required_runtime_value_is_shell_quote_safe() -> None:
+def test_required_runtime_value_renders_exactly() -> None:
     template = runtime_value("emr/code_uri")
-    command = shlex.join(["--archives", f"{template}/python.tar.gz#environment"])
     rendered = (
         SandboxedEnvironment(undefined=StrictUndefined)
-        .from_string(command)
+        .from_string(template)
         .render(var=SimpleNamespace(value={"emr/code_uri": "s3://artifacts/emr/jobs/release"}))
     )
 
     assert template == '{{ var.value["emr/code_uri"] }}'
-    assert rendered == "--archives 's3://artifacts/emr/jobs/release/python.tar.gz#environment'"
+    assert rendered == "s3://artifacts/emr/jobs/release"

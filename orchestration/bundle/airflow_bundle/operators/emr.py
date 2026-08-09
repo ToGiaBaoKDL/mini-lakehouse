@@ -1,6 +1,5 @@
 """Shared construction of thin EMR Serverless Airflow tasks."""
 
-import shlex
 from collections.abc import Mapping, Sequence
 from datetime import timedelta
 
@@ -30,7 +29,7 @@ def emr_spark_job(
         "spark.dynamicAllocation.initialExecutors": "1",
         **spark_conf,
     }
-    submit_parameters = shlex.join(
+    submit_parameters = " ".join(
         [
             "--archives",
             f"{code_uri}/python.tar.gz#environment",
