@@ -11,7 +11,7 @@ x-airflow-common: &airflow-common
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD: >-
       python -c "import sys; from pathlib import Path; from urllib.parse import quote_plus;
       password = quote_plus(Path('/run/secrets/airflow_database_password').read_text().strip());
-      sys.stdout.write('postgresql+psycopg2://airflow:' + password + '@metadata-postgres:5432/airflow')"
+      sys.stdout.write('postgresql+psycopg://airflow:' + password + '@metadata-postgres:5432/airflow')"
     AIRFLOW__DAG_PROCESSOR__BUNDLE_REFRESH_CHECK_INTERVAL: "5"
     AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_CONFIG_LIST: >-
       [{"name":"lakehouse","classpath":"airflow.providers.git.bundles.git.GitDagBundle","kwargs":{"repo_url":"https://github.com/ToGiaBaoKDL/mini-lakehouse.git","tracking_ref":"main","subdir":"orchestration/bundle","sparse_dirs":["orchestration/bundle"],"refresh_interval":60}}]

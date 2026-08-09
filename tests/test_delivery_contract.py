@@ -84,6 +84,7 @@ def test_each_component_owns_its_deployment_operation() -> None:
     assert "--remove-orphans" in airflow
     assert "airflow/remote_log_uri" in airflow
     assert "infra/runtime/postgres/deploy" in airflow
+    assert "compose logs --no-color --tail 200 airflow-volumes-init airflow-init" in airflow
     assert "docker compose --project-name metadata-postgres" in postgres
     assert "docker compose --project-name arxiv-inspector" in inspector
     assert "dbt-task:runtime" in dbt

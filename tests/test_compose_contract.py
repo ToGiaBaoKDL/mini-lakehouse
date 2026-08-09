@@ -122,6 +122,7 @@ def test_airflow_runtime_secrets_are_service_scoped_files() -> None:
     assert "AIRFLOW__API_AUTH__JWT_SECRET" not in environment
     assert environment["AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD"].startswith("python -c")
     assert "sys.stdout.write" in environment["AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD"]
+    assert "postgresql+psycopg://" in environment["AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_CMD"]
     assert environment["AIRFLOW__CORE__FERNET_KEY_CMD"].startswith("cat /run/secrets/")
     assert environment["AIRFLOW__API_AUTH__JWT_SECRET_CMD"].startswith("cat /run/secrets/")
     assert set(payload["secrets"]) == {
@@ -247,7 +248,7 @@ def test_all_container_images_are_immutable() -> None:
     assert "PYTHONPATH=/app" in inspector_dockerfile
     dockerignore = Path(".dockerignore").read_text(encoding="utf-8")
     assert "!infra/runtime/identity/install-aws-signing-helper" in dockerignore
-    assert '"apache-airflow==3.3.0"' in (AIRFLOW_RUNTIME / "pyproject.toml").read_text(
+    assert '"apache-airflow[postgres]==3.3.0"' in (AIRFLOW_RUNTIME / "pyproject.toml").read_text(
         encoding="utf-8"
     )
     assert "postgres:17.10@sha256:" in compose
@@ -272,13 +273,13 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
     assert "dbt-athena" not in workspace
     assert "streamlit" not in workspace
     assert 'name = "lakehouse"' in platform
-    assert '"apache-airflow==3.3.0"' in orchestration
+    assert '"apache-airflow[postgres]==3.3.0"' in orchestration
     assert '"apache-airflow-providers-amazon==9.32.0"' in orchestration
     assert "aiobotocore" not in orchestration
     assert '"apache-airflow-providers-docker==4.5.7"' in orchestration
     assert '"apache-airflow-providers-git==0.4.1"' in orchestration
     assert '"apache-airflow-providers-smtp==3.0.1"' in orchestration
-    assert '"psycopg2-binary==2.9.12"' in orchestration
+    assert '"psycopg2-binary' not in orchestration
     assert "constraint-dependencies" not in orchestration
     assert "document-ocr" not in orchestration
     assert '"lakehouse"' not in orchestration
