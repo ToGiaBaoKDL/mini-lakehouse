@@ -13,6 +13,7 @@ data "aws_iam_policy_document" "airflow" {
       "emr-serverless:GetDashboardForJobRun",
       "emr-serverless:GetJobRun",
       "emr-serverless:ListJobRuns",
+      "emr-serverless:StartApplication",
       "emr-serverless:StartJobRun",
     ]
     resources = [var.emr_application_arn, "${var.emr_application_arn}/jobruns/*"]

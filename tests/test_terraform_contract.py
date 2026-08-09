@@ -237,6 +237,19 @@ def test_airflow_and_ocr_worker_have_separate_data_permissions() -> None:
     assert "secretsmanager:DescribeSecret" not in airflow + ocr + postgres
 
 
+def test_airflow_can_start_only_the_managed_emr_application() -> None:
+    airflow = Path("infra/terraform/aws/modules/identity/airflow.tf").read_text(encoding="utf-8")
+
+    assert '"emr-serverless:StartApplication"' in airflow
+    assert '"emr-serverless:StartJobRun"' in airflow
+    assert (
+        'resources = [var.emr_application_arn, "${var.emr_application_arn}/jobruns/*"]' in airflow
+    )
+    assert '"emr-serverless:CreateApplication"' not in airflow
+    assert '"emr-serverless:UpdateApplication"' not in airflow
+    assert '"emr-serverless:DeleteApplication"' not in airflow
+
+
 def test_data_consumers_use_reviewed_database_and_prefix_entitlements() -> None:
     dbt = Path("infra/terraform/aws/modules/identity/dbt.tf").read_text(encoding="utf-8")
     inspector = Path("infra/terraform/aws/modules/identity/arxiv_inspector.tf").read_text(
