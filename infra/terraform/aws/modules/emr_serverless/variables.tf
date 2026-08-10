@@ -81,6 +81,26 @@ variable "spark_properties" {
   default     = {}
 }
 
+variable "subnet_ids" {
+  type        = set(string)
+  description = "Subnet identifiers available to EMR Serverless workers."
+
+  validation {
+    condition     = length(var.subnet_ids) >= 2 && length(var.subnet_ids) <= 16
+    error_message = "subnet_ids must contain between 2 and 16 unique subnets."
+  }
+}
+
+variable "security_group_ids" {
+  type        = set(string)
+  description = "Security group identifiers attached to EMR Serverless workers."
+
+  validation {
+    condition     = length(var.security_group_ids) >= 1 && length(var.security_group_ids) <= 5
+    error_message = "security_group_ids must contain between 1 and 5 unique security groups."
+  }
+}
+
 variable "tags" {
   type        = map(string)
   description = "Tags applied to the EMR Serverless application."

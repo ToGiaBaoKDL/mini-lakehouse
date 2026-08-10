@@ -12,7 +12,8 @@ terraform/
   cloudflare/environments/dev/  public edge, DNS, and identity access
 ```
 
-AWS owns S3, KMS, ECR, EMR Serverless, IAM, SSM references, and empty Secrets Manager containers.
+AWS owns S3, KMS, ECR, the EMR Serverless application and egress network, IAM, SSM references, and
+empty Secrets Manager containers.
 Tailscale owns private administrative access. OCI owns the rebuildable services host. Cloudflare
 owns the public tunnel, DNS, and Access boundary. GitHub owns release policy and non-secret CI
 variables. Terraform does not own secret values, Glue databases, Iceberg tables, schedules, or dbt
@@ -59,8 +60,10 @@ make workload-identities-render
 ```
 
 The state bootstrap is the only local-state root. `aws-apply` creates the data buckets, KMS key,
-ECR repositories, EMR Serverless application, workload roles, runtime parameters, and empty secret
-containers.
+ECR repositories, EMR Serverless application, its two-AZ public egress network, workload roles,
+runtime parameters, and empty secret containers. The EMR network has no inbound access or NAT
+Gateway; outbound HTTPS reaches external sources through its Internet Gateway while S3 uses a
+Gateway Endpoint.
 
 ### 2. Tailscale
 

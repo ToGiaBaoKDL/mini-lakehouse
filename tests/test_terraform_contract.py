@@ -32,6 +32,7 @@ def test_each_child_module_declares_its_provider_contract() -> None:
     expected_providers = {
         "container_registry": ('source  = "hashicorp/aws"',),
         "storage": ('source  = "hashicorp/aws"',),
+        "emr_network": ('source  = "hashicorp/aws"',),
         "emr_serverless": ('source  = "hashicorp/aws"',),
         "identity": ('source  = "hashicorp/aws"',),
     }
@@ -149,7 +150,36 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
 def test_environment_uses_only_domain_modules() -> None:
     modules = {path.name for path in Path("infra/terraform/aws/modules").iterdir() if path.is_dir()}
 
-    assert modules == {"container_registry", "emr_serverless", "identity", "storage"}
+    assert modules == {
+        "container_registry",
+        "emr_network",
+        "emr_serverless",
+        "identity",
+        "storage",
+    }
+
+
+def test_emr_network_allows_bounded_external_egress() -> None:
+    network = _terraform_sources(Path("infra/terraform/aws/modules/emr_network"))
+    application = _terraform_sources(Path("infra/terraform/aws/modules/emr_serverless"))
+    environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
+
+    assert 'resource "aws_vpc" "this"' in network
+    assert 'resource "aws_internet_gateway" "this"' in network
+    assert 'resource "aws_vpc_endpoint" "s3"' in network
+    assert 'vpc_endpoint_type = "Gateway"' in network
+    assert "map_public_ip_on_launch = true" in network
+    assert 'destination_cidr_block = "0.0.0.0/0"' in network
+    assert 'resource "aws_nat_gateway"' not in network
+    assert 'resource "aws_vpc_security_group_ingress_rule"' not in network
+    assert 'resource "aws_vpc_security_group_egress_rule" "https"' in network
+    assert "from_port         = 443" in network
+    assert "to_port           = 443" in network
+    assert "network_configuration" in application
+    assert "managed_persistence_monitoring_configuration" in application
+    assert "enabled = true" in application
+    assert "subnet_ids         = module.emr_network.public_subnet_ids" in environment
+    assert "module.emr_network.security_group_id" in environment
 
 
 def test_runtime_parameters_and_trust_are_bounded_by_workload() -> None:

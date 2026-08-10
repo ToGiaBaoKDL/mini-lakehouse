@@ -9,7 +9,7 @@ flowchart LR
     S[Sources] --> A[Self-hosted Airflow on OCI]
     B[Versioned Git DAG bundle] --> A
     A --> M[(Shared metadata PostgreSQL)]
-    A --> E[EMR Serverless / Spark]
+    A --> E[EMR Serverless / Spark<br/>dedicated HTTPS egress network]
     A --> W[Ephemeral local task containers]
     A --> Z[(S3 Airflow task logs)]
     W --> R[Remote GPU document processing]
@@ -34,7 +34,7 @@ flowchart LR
 
 | Area | Owner | Responsibility |
 |---|---|---|
-| `infra/terraform/aws/` | AWS platform | S3, ECR, KMS, IAM, EMR Serverless, SSM, Secrets Manager |
+| `infra/terraform/aws/` | AWS platform | S3, ECR, KMS, IAM, EMR Serverless networking, SSM, Secrets Manager |
 | `infra/terraform/oci/` | Runtime platform | Rebuildable ARM services host with no public ingress |
 | `infra/terraform/tailscale/` | Network platform | Private grants, SSH policy, and enrollment |
 | `infra/terraform/github/` | Delivery platform | Protected environments, deployment policy, and release variables |
@@ -87,7 +87,8 @@ s3://<project>-<env>-query-results-<suffix>/
 
 Glue database names are explicit contract fields, such as `landing_<source>`,
 `curated_<product>`, and `analytics_<domain>`. These names are conventions, not runtime string
-generation. EMR uses AWS-managed logs; runtime resource references live under `/lakehouse/<env>/`
+generation. EMR workers use two public subnets, HTTPS-only egress, and an S3 Gateway Endpoint;
+there is no inbound rule or NAT Gateway. EMR uses AWS-managed logs; runtime resource references live under `/lakehouse/<env>/`
 in SSM Parameter Store. Airflow's remote-log URI is resolved from SSM instead of being embedded in
 Compose. Immutable service releases stay in ECR and are deployed independently by digest; SSM does
 not duplicate Git-owned image versions.

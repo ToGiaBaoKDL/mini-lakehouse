@@ -78,6 +78,13 @@ module "container_registry" {
   tags                 = local.tags
 }
 
+module "emr_network" {
+  source      = "../../modules/emr_network"
+  name_prefix = "${local.name_prefix}-emr"
+  vpc_cidr    = "10.20.0.0/16"
+  tags        = local.tags
+}
+
 module "emr_serverless" {
   source               = "../../modules/emr_serverless"
   name                 = "${local.name_prefix}-spark"
@@ -91,7 +98,9 @@ module "emr_serverless" {
     max_concurrent_runs   = 2
     queue_timeout_minutes = 60
   }
-  tags = local.tags
+  subnet_ids         = module.emr_network.public_subnet_ids
+  security_group_ids = toset([module.emr_network.security_group_id])
+  tags               = local.tags
 }
 
 module "identity" {
