@@ -78,6 +78,14 @@ def test_host_workload_identities_ignore_operator_credentials() -> None:
     assert all("AWS_SHARED_CREDENTIALS_FILE=/dev/null" in source for source in sources)
 
 
+def test_modal_runner_keeps_models_cached_before_application_source() -> None:
+    source = Path("ocr/runners/modal/glm_ocr/app.py").read_text(encoding="utf-8")
+
+    assert ".run_function(" not in source
+    assert source.index(".run_commands(") < source.index(".add_local_dir(")
+    assert '.env({"PYTHONPATH": str(RUNNER_ROOT)})' in source
+
+
 def test_each_component_owns_its_deployment_operation() -> None:
     airflow = "\n".join(
         Path(path).read_text(encoding="utf-8")

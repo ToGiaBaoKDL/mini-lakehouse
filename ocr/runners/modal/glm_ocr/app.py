@@ -2,7 +2,6 @@
 
 import json
 import shutil
-import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -18,25 +17,23 @@ MODEL_ROOT = Path("/models")
 OUTPUT_ROOT = Path("/outputs")
 _engine: Any | None = None
 
-
-def download_models(
-    model_repository: str,
-    model_revision: str,
-    layout_repository: str,
-    layout_revision: str,
-) -> None:
-    from huggingface_hub import snapshot_download
-
-    snapshot_download(
-        repo_id=model_repository,
-        revision=model_revision,
-        local_dir=MODEL_ROOT / "model",
+MODEL_DOWNLOAD_SCRIPT = "\n".join(
+    (
+        "from huggingface_hub import snapshot_download",
+        (
+            "snapshot_download("
+            f"repo_id={PROCESSOR.model.repository!r}, "
+            f"revision={PROCESSOR.model.revision!r}, "
+            f"local_dir={str(MODEL_ROOT / 'model')!r})"
+        ),
+        (
+            "snapshot_download("
+            f"repo_id={PROCESSOR.layout_model.repository!r}, "
+            f"revision={PROCESSOR.layout_model.revision!r}, "
+            f"local_dir={str(MODEL_ROOT / 'layout_model')!r})"
+        ),
     )
-    snapshot_download(
-        repo_id=layout_repository,
-        revision=layout_revision,
-        local_dir=MODEL_ROOT / "layout_model",
-    )
+)
 
 
 image = (
@@ -48,17 +45,10 @@ image = (
         frozen=True,
         uv_version="0.11.30",
     )
-    .run_function(
-        download_models,
-        args=(
-            PROCESSOR.model.repository,
-            PROCESSOR.model.revision,
-            PROCESSOR.layout_model.repository,
-            PROCESSOR.layout_model.revision,
-        ),
-    )
+    .run_commands(["python", "-c", MODEL_DOWNLOAD_SCRIPT])
     .add_local_dir("ocr/runners/glm_ocr/runner", str(RUNNER_ROOT / "runner"))
     .add_local_dir("ocr/src/document_ocr", str(RUNNER_ROOT / "document_ocr"))
+    .env({"PYTHONPATH": str(RUNNER_ROOT)})
 )
 output_volume = modal.Volume.from_name(RUNNER.output_volume, create_if_missing=True)
 app = modal.App(RUNNER.app_name)
@@ -85,7 +75,6 @@ def _committed_output(job: Any, target: Path) -> str | None:
 def run_ocr(job_json: str) -> str:
     """Execute one idempotent document run and commit its manifest last."""
     global _engine
-    sys.path.insert(0, str(RUNNER_ROOT))
     from document_ocr.protocol import OcrJob
     from runner.engine import InferenceEngine
     from runner.job import run
