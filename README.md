@@ -183,6 +183,11 @@ Kaggle runner source is a release asset, not a per-document payload. Run
 published Dataset version in the OCR configuration. Each document run submits only its validated
 job and a small launcher; provider SDKs own remote execution and log streaming.
 
+Modal uses a persistent deployed app because `Function.from_name()` cannot resolve an ephemeral
+runner. Run `make ocr-modal-runner-deploy` when its runner, model, or configuration changes. The
+command reads the existing OCR workload identity and provider secret, then deploys the configured
+app and function to the explicitly configured Modal environment.
+
 ## Add a source
 
 1. Add `platform/contracts/sources/<source>.yaml` and, when needed,

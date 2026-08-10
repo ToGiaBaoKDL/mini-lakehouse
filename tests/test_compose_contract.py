@@ -388,6 +388,7 @@ def test_makefile_exposes_owned_operational_entrypoints() -> None:
         "dbt-research-build:",
         "emr-jobs-package:",
         "ocr-kaggle-runner-publish:",
+        "ocr-modal-runner-deploy:",
         "workload-identities-install:",
     ):
         assert target in makefile

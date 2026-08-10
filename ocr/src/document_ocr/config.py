@@ -39,7 +39,7 @@ class ModalRunnerConfig(ConfigModel):
     app_name: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{2,62}$")
     function_name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
     output_volume: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{2,62}$")
-    environment: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]+$")
+    environment: str = Field(pattern=r"^[A-Za-z0-9_-]+$")
     gpu: Literal["A100", "A100-40GB", "A100-80GB"]
     timeout_seconds: int = Field(ge=300, le=24 * 60 * 60)
     scaledown_window_seconds: int = Field(ge=0, le=20 * 60)

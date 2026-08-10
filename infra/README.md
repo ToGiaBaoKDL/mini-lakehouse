@@ -200,6 +200,13 @@ gh workflow run release-arxiv-inspector.yml --ref main
 gh workflow run deploy-cloudflare.yml --ref main
 ```
 
+Deploy the remote GPU runner after its provider secret and the local `ocr-worker` workload identity
+are available. Re-running this command updates the same persistent Modal app in place:
+
+```bash
+AWS_PROFILE=tgbao-dev make ocr-modal-runner-deploy
+```
+
 The EMR workflow publishes an immutable contract/job bundle and updates its SSM pointer only after
 the checksum manifest is complete. Component workflows build multi-architecture images, publish
 immutable Git-SHA tags to ECR, resolve their digests, and deploy only the selected component over

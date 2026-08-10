@@ -63,6 +63,10 @@ def _provider() -> ModalProvider:
     )
 
 
+def test_modal_runner_has_an_explicit_deployment_environment() -> None:
+    assert load_ocr_config("arxiv_glm_ocr").runner.modal.environment == "main"
+
+
 def test_modal_provider_submits_and_waits_for_the_exact_function_call(
     monkeypatch: Any,
     tmp_path: Path,

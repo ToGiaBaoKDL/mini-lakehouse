@@ -41,7 +41,7 @@ runner:
     app_name: document-ocr-arxiv-glm-ocr
     function_name: run_ocr
     output_volume: document-ocr-outputs
-    environment: null
+    environment: main
     gpu: A100-40GB
     timeout_seconds: 14400
     scaledown_window_seconds: 300

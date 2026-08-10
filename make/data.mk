@@ -2,6 +2,7 @@ DBT_PROJECT_DIRS := $(patsubst %/,%,$(dir $(wildcard dbt/*/dbt_project.yml)))
 OCR_AWS_CONFIG := $(AWS_IDENTITY_DIR)/ocr-worker/host-config
 
 .PHONY: catalog-apply catalog-validate ocr-kaggle-runner-publish \
+	ocr-modal-runner-deploy \
 	dbt-deps dbt-validate dbt-build \
 	emr-jobs-package
 
@@ -24,6 +25,23 @@ ocr-kaggle-runner-publish: preflight ## Publish an immutable Kaggle OCR runner D
 		KAGGLE_USERNAME="$$(printf '%s' "$${CREDENTIALS}" | jq -er '.username | select(type == "string" and length > 0)')" \
 		KAGGLE_API_TOKEN="$$(printf '%s' "$${CREDENTIALS}" | jq -er '.api_token | select(type == "string" and length > 0)')" \
 			uv run --project ocr --extra kaggle-publish python ocr/runners/kaggle/glm_ocr/publish.py
+
+ocr-modal-runner-deploy: preflight ## Deploy the persistent Modal OCR runner.
+	@test -r "$(OCR_AWS_CONFIG)" || { printf '%s\n' "Render the ocr-worker identity first."; exit 1; }
+	@set -eu; \
+		SECRET_ID="$$(env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+			AWS_CONFIG_FILE="$(OCR_AWS_CONFIG)" AWS_PROFILE=default aws ssm get-parameter \
+			--name "$(RUNTIME_PARAMETER_PREFIX)/ocr/providers/modal_secret_id" \
+			--query Parameter.Value --output text)"; \
+		CREDENTIALS="$$(env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+			AWS_CONFIG_FILE="$(OCR_AWS_CONFIG)" AWS_PROFILE=default aws secretsmanager get-secret-value \
+			--secret-id "$${SECRET_ID}" --query SecretString --output text)"; \
+		MODAL_ENVIRONMENT="$$(uv run --project ocr python -c \
+			'from document_ocr.config import load_ocr_config; print(load_ocr_config("arxiv_glm_ocr").runner.modal.environment)')"; \
+		MODAL_TOKEN_ID="$$(printf '%s' "$${CREDENTIALS}" | jq -er '.token_id | select(type == "string" and length > 0)')" \
+		MODAL_TOKEN_SECRET="$$(printf '%s' "$${CREDENTIALS}" | jq -er '.token_secret | select(type == "string" and length > 0)')" \
+			uv run --project ocr --extra worker modal deploy \
+				--env "$${MODAL_ENVIRONMENT}" ocr/runners/modal/glm_ocr/app.py
 
 dbt-deps: ## Install locked dbt packages.
 	@set -eu; for project in $(DBT_PROJECT_DIRS); do \
