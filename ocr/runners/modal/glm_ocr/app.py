@@ -1,6 +1,7 @@
 """Deploy GLM-OCR on Modal with pinned models baked into the image."""
 
 import json
+import shlex
 import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -17,7 +18,7 @@ MODEL_ROOT = Path("/models")
 OUTPUT_ROOT = Path("/outputs")
 _engine: Any | None = None
 
-MODEL_DOWNLOAD_SCRIPT = "\n".join(
+MODEL_DOWNLOAD_SCRIPT = ";".join(
     (
         "from huggingface_hub import snapshot_download",
         (
@@ -34,6 +35,7 @@ MODEL_DOWNLOAD_SCRIPT = "\n".join(
         ),
     )
 )
+MODEL_DOWNLOAD_COMMAND = shlex.join(("python", "-c", MODEL_DOWNLOAD_SCRIPT))
 
 
 image = (
@@ -45,10 +47,10 @@ image = (
         frozen=True,
         uv_version="0.11.30",
     )
-    .run_commands(["python", "-c", MODEL_DOWNLOAD_SCRIPT])
+    .run_commands(MODEL_DOWNLOAD_COMMAND)
+    .env({"PYTHONPATH": str(RUNNER_ROOT)})
     .add_local_dir("ocr/runners/glm_ocr/runner", str(RUNNER_ROOT / "runner"))
     .add_local_dir("ocr/src/document_ocr", str(RUNNER_ROOT / "document_ocr"))
-    .env({"PYTHONPATH": str(RUNNER_ROOT)})
 )
 output_volume = modal.Volume.from_name(RUNNER.output_volume, create_if_missing=True)
 app = modal.App(RUNNER.app_name)

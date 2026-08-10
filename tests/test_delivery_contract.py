@@ -82,7 +82,10 @@ def test_modal_runner_keeps_models_cached_before_application_source() -> None:
     source = Path("ocr/runners/modal/glm_ocr/app.py").read_text(encoding="utf-8")
 
     assert ".run_function(" not in source
-    assert source.index(".run_commands(") < source.index(".add_local_dir(")
+    assert source.index(".run_commands(") < source.index(".env(") < source.index(".add_local_dir(")
+    assert 'MODEL_DOWNLOAD_COMMAND = shlex.join(("python", "-c", MODEL_DOWNLOAD_SCRIPT))' in source
+    assert ".run_commands(MODEL_DOWNLOAD_COMMAND)" in source
+    assert 'MODEL_DOWNLOAD_SCRIPT = ";".join(' in source
     assert '.env({"PYTHONPATH": str(RUNNER_ROOT)})' in source
 
 
