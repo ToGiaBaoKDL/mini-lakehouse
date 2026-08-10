@@ -11,14 +11,28 @@ data "aws_iam_policy_document" "catalog_admin_trust" {
 }
 
 locals {
-  external_runtime_workloads = toset([
+  dbt_workloads = toset([
+    for workload in keys(var.workload_data_access.analytics) : workload
+    if startswith(workload, "dbt_")
+  ])
+  external_runtime_workloads = setunion(toset([
     "airflow",
     "arxiv_inspector",
     "metadata_postgres",
     "services_deployer",
-    "dbt_transformer",
     "ocr_worker",
-  ])
+  ]), local.dbt_workloads)
+}
+
+check "dbt_workload_configuration" {
+  assert {
+    condition = alltrue([
+      for workload in local.dbt_workloads :
+      contains(keys(var.parameter_arns), workload) &&
+      contains(keys(var.athena_result_prefixes), workload)
+    ])
+    error_message = "Every dbt workload needs exact Parameter Store and Athena result-prefix grants."
+  }
 }
 
 data "aws_iam_policy_document" "external_runtime_trust" {
@@ -132,10 +146,10 @@ locals {
     "${var.bucket_arns.curated}/*/tables/*/metadata/*",
   ]
   analytics_metadata_prefixes = [
-    "tables",
-    "tables/*",
+    "*/tables",
+    "*/tables/*",
   ]
   analytics_metadata_object_arns = [
-    "${var.bucket_arns.analytics}/tables/*/metadata/*",
+    "${var.bucket_arns.analytics}/*/tables/*/metadata/*",
   ]
 }

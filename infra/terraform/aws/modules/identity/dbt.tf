@@ -1,10 +1,14 @@
-resource "aws_iam_role" "dbt_transformer" {
-  name               = "${var.name_prefix}-dbt-transformer"
-  assume_role_policy = data.aws_iam_policy_document.external_runtime_trust["dbt_transformer"].json
+resource "aws_iam_role" "dbt_domain" {
+  for_each = local.dbt_workloads
+
+  name               = "${var.name_prefix}-${replace(each.key, "_", "-")}"
+  assume_role_policy = data.aws_iam_policy_document.external_runtime_trust[each.key].json
   tags               = var.tags
 }
 
-data "aws_iam_policy_document" "dbt_transformer" {
+data "aws_iam_policy_document" "dbt_domain" {
+  for_each = local.dbt_workloads
+
   statement {
     sid = "RunAthenaQueries"
     actions = [
@@ -28,8 +32,8 @@ data "aws_iam_policy_document" "dbt_transformer" {
     ]
     resources = concat(
       [local.glue_catalog_arn],
-      local.curated_database_arns_by_workload.dbt_transformer,
-      local.curated_table_arns_by_workload.dbt_transformer,
+      local.curated_database_arns_by_workload[each.key],
+      local.curated_table_arns_by_workload[each.key],
     )
   }
   statement {
@@ -46,14 +50,14 @@ data "aws_iam_policy_document" "dbt_transformer" {
     ]
     resources = concat(
       [local.glue_catalog_arn],
-      local.analytics_database_arns_by_workload.dbt_transformer,
-      local.analytics_table_arns_by_workload.dbt_transformer,
+      local.analytics_database_arns_by_workload[each.key],
+      local.analytics_table_arns_by_workload[each.key],
     )
   }
   statement {
     sid       = "ReadRuntimeParameters"
     actions   = ["ssm:GetParameter", "ssm:GetParameters"]
-    resources = var.parameter_arns.dbt_transformer
+    resources = var.parameter_arns[each.key]
   }
   statement {
     sid     = "GetTransformerBucketLocations"
@@ -71,7 +75,7 @@ data "aws_iam_policy_document" "dbt_transformer" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = local.curated_prefixes_by_workload.dbt_transformer
+      values   = local.curated_prefixes_by_workload[each.key]
     }
   }
   statement {
@@ -81,7 +85,7 @@ data "aws_iam_policy_document" "dbt_transformer" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = local.analytics_prefixes_by_workload.dbt_transformer
+      values   = local.analytics_prefixes_by_workload[each.key]
     }
   }
   statement {
@@ -92,8 +96,8 @@ data "aws_iam_policy_document" "dbt_transformer" {
       test     = "StringLike"
       variable = "s3:prefix"
       values = [
-        var.athena_result_prefixes.dbt_transformer,
-        "${var.athena_result_prefixes.dbt_transformer}/*",
+        var.athena_result_prefixes[each.key],
+        "${var.athena_result_prefixes[each.key]}/*",
       ]
     }
   }
@@ -101,9 +105,9 @@ data "aws_iam_policy_document" "dbt_transformer" {
     sid     = "ReadTransformerObjects"
     actions = ["s3:GetObject"]
     resources = concat(
-      local.curated_object_arns_by_workload.dbt_transformer,
-      local.analytics_object_arns_by_workload.dbt_transformer,
-      ["${var.bucket_arns.query_results}/${var.athena_result_prefixes.dbt_transformer}/*"],
+      local.curated_object_arns_by_workload[each.key],
+      local.analytics_object_arns_by_workload[each.key],
+      ["${var.bucket_arns.query_results}/${var.athena_result_prefixes[each.key]}/*"],
     )
   }
   statement {
@@ -113,12 +117,12 @@ data "aws_iam_policy_document" "dbt_transformer" {
       "s3:DeleteObject",
       "s3:PutObject",
     ]
-    resources = local.analytics_object_arns_by_workload.dbt_transformer
+    resources = local.analytics_object_arns_by_workload[each.key]
   }
   statement {
     sid       = "WriteQueryResults"
     actions   = ["s3:AbortMultipartUpload", "s3:PutObject"]
-    resources = ["${var.bucket_arns.query_results}/${var.athena_result_prefixes.dbt_transformer}/*"]
+    resources = ["${var.bucket_arns.query_results}/${var.athena_result_prefixes[each.key]}/*"]
   }
   statement {
     sid       = "UseLakehouseKey"
@@ -127,7 +131,9 @@ data "aws_iam_policy_document" "dbt_transformer" {
   }
 }
 
-resource "aws_iam_role_policy" "dbt_transformer" {
-  role   = aws_iam_role.dbt_transformer.id
-  policy = data.aws_iam_policy_document.dbt_transformer.json
+resource "aws_iam_role_policy" "dbt_domain" {
+  for_each = local.dbt_workloads
+
+  role   = aws_iam_role.dbt_domain[each.key].id
+  policy = data.aws_iam_policy_document.dbt_domain[each.key].json
 }

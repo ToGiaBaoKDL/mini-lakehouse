@@ -35,6 +35,8 @@ def test_component_release_is_environment_protected_and_digest_driven() -> None:
     assert "imageTag=$GITHUB_SHA" in release
     assert "aws ecr batch-get-image" in release
     assert "cancel-in-progress: false" in release
+    assert 'dbt-engineering) [[ "$BUILD_ARGS" == "DBT_PROJECT=engineering" ]]' in release
+    assert 'dbt-research) [[ "$BUILD_ARGS" == "DBT_PROJECT=research" ]]' in release
     assert "^[0-9]{12}\\.dkr\\.ecr\\." in action
     assert "tag:tgbao-dev-ci" in action
     assert "tailscale ssh ubuntu@tgbao-dev-services" in action
@@ -74,7 +76,7 @@ def test_each_component_owns_its_deployment_operation() -> None:
             "apps/arxiv_inspector/deploy/reconcile",
         )
     )
-    dbt = Path("dbt/analytics/deploy/deploy").read_text(encoding="utf-8")
+    dbt = Path("dbt/deploy/deploy").read_text(encoding="utf-8")
     ocr = Path("ocr/deploy/deploy").read_text(encoding="utf-8")
     postgres = Path("infra/runtime/postgres/deploy").read_text(encoding="utf-8")
     cloudflare = Path("infra/runtime/cloudflare/deploy").read_text(encoding="utf-8")
@@ -87,7 +89,7 @@ def test_each_component_owns_its_deployment_operation() -> None:
     assert "compose logs --no-color --tail 200 airflow-volumes-init airflow-init" in airflow
     assert "docker compose --project-name metadata-postgres" in postgres
     assert "docker compose --project-name arxiv-inspector" in inspector
-    assert "dbt-task:runtime" in dbt
+    assert '"$component:runtime"' in dbt
     assert "ocr-worker:runtime" in ocr
     assert "docker compose --project-name cloudflare" in cloudflare
     assert "--token-file" in Path("infra/runtime/cloudflare/compose.yaml").read_text(
@@ -129,9 +131,15 @@ def test_each_custom_component_has_a_thin_release_caller() -> None:
             "component: arxiv-inspector",
             "dockerfile: apps/arxiv_inspector/Dockerfile",
         ),
-        "release-dbt-task.yml": (
-            "component: dbt-task",
-            "dockerfile: dbt/analytics/Dockerfile",
+        "release-dbt-engineering.yml": (
+            "component: dbt-engineering",
+            "dockerfile: dbt/Dockerfile",
+            "build_args: DBT_PROJECT=engineering",
+        ),
+        "release-dbt-research.yml": (
+            "component: dbt-research",
+            "dockerfile: dbt/Dockerfile",
+            "build_args: DBT_PROJECT=research",
         ),
         "release-ocr-worker.yml": (
             "component: ocr-worker",

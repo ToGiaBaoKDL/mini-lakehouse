@@ -112,9 +112,10 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
     assert "hashicorp/random" not in environment
     assert 'parameter_prefix = "/lakehouse/${local.environment}"' in normalized_environment
     assert 'athena_workgroup = "primary"' in normalized_environment
-    assert 'dbt_transformer = "dbt"' in normalized_environment
+    assert "analytics_domains = {" in environment
+    assert '"dbt_${domain}" => "dbt/${domain}"' in environment
     assert 'arxiv_inspector = "arxiv-inspector"' in normalized_environment
-    assert '"athena/dbt_output_uri"' in environment
+    assert 'domain => "athena/dbt_${domain}_output_uri"' in runtime
     assert '"athena/arxiv_inspector_output_uri"' in environment
     assert '"airflow/remote_log_uri"' in environment
     assert '"deployment/release_manifest"' not in environment
@@ -130,7 +131,6 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
         "airflow",
         "catalog-admin",
         "services-deployer",
-        "dbt-transformer",
         "arxiv-inspector",
         "metadata-postgres",
         "ocr-worker",
@@ -138,12 +138,13 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
         "github-emr-publisher",
     ):
         assert f'name = "${{var.name_prefix}}-{role}"' in normalized_identity
+    assert 'name = "${var.name_prefix}-${replace(each.key, "_", "-")}"' in normalized_identity
 
     assert identity.count("resources = [var.athena_workgroup_arn]") == 2
     assert "lightdash" not in identity.lower()
     assert "curated_object_arns_by_workload" in identity
     assert "analytics_object_arns_by_workload" in identity
-    assert "athena_result_prefixes.dbt_transformer" in identity
+    assert "athena_result_prefixes[each.key]" in identity
     assert "athena_result_prefixes.arxiv_inspector" in identity
 
 
@@ -212,10 +213,9 @@ def test_service_images_are_immutable_bounded_and_published_by_one_role() -> Non
     registry = _terraform_sources(Path("infra/terraform/aws/modules/container_registry"))
     identity = _terraform_sources(Path("infra/terraform/aws/modules/identity"))
 
-    assert (
-        'repositories         = ["airflow", "arxiv-inspector", "dbt-task", "ocr-worker"]'
-        in environment
-    )
+    for repository in ("airflow", "arxiv-inspector", "ocr-worker"):
+        assert f'"{repository}"' in environment
+    assert '"dbt-${domain}"' in environment
     assert 'image_tag_mutability = "IMMUTABLE"' in registry
     assert "scan_on_push = true" in registry
     assert 'encryption_type = "AES256"' in registry
@@ -286,10 +286,11 @@ def test_data_consumers_use_reviewed_database_and_prefix_entitlements() -> None:
         encoding="utf-8"
     )
 
-    assert "local.curated_database_arns_by_workload.dbt_transformer" in dbt
-    assert "local.analytics_database_arns_by_workload.dbt_transformer" in dbt
-    assert "local.curated_prefixes_by_workload.dbt_transformer" in dbt
-    assert "local.analytics_prefixes_by_workload.dbt_transformer" in dbt
+    assert "for_each = local.dbt_workloads" in dbt
+    assert "local.curated_database_arns_by_workload[each.key]" in dbt
+    assert "local.analytics_database_arns_by_workload[each.key]" in dbt
+    assert "local.curated_prefixes_by_workload[each.key]" in dbt
+    assert "local.analytics_prefixes_by_workload[each.key]" in dbt
     assert '"${var.bucket_arns.curated}/*"' not in dbt
     assert '"${var.bucket_arns.analytics}/*"' not in dbt
     assert "local.curated_database_arns_by_workload.arxiv_inspector" in inspector
@@ -449,12 +450,14 @@ def test_reviewable_policy_is_not_hidden_in_tfvars() -> None:
         encoding="utf-8"
     )
 
-    assert 'databases = ["curated_arxiv"]' in environment
-    assert 'databases = ["curated_github"]' in environment
-    assert 'databases = ["analytics_engineering"]' in environment
-    assert 'prefixes  = ["arxiv"]' in environment
-    assert 'prefixes  = ["github"]' in environment
-    assert 'prefixes  = ["tables"]' in environment
+    assert 'curated_databases  = ["curated_github"]' in environment
+    assert 'curated_databases  = ["curated_arxiv"]' in environment
+    assert 'analytics_database = "analytics_engineering"' in environment
+    assert 'analytics_database = "analytics_research"' in environment
+    assert 'curated_prefixes   = ["github"]' in environment
+    assert 'curated_prefixes   = ["arxiv"]' in environment
+    assert 'analytics_prefix   = "engineering"' in environment
+    assert 'analytics_prefix   = "research"' in environment
     assert "notification_destinations" not in environment
     assert "arxiv_inspector_access" not in example
     assert "workload_data_access" not in example
@@ -471,7 +474,7 @@ def test_catalog_admin_mutates_contract_tiers_but_only_reads_analytics_metadata(
     assert "local.analytics_table_arns" in catalog
     assert 'sid       = "ReadAnalyticsMetadata"' in catalog
     assert 'actions   = ["s3:GetObject"]' in catalog
-    assert '"${var.bucket_arns.analytics}/tables/*/metadata/*"' in identity
+    assert '"${var.bucket_arns.analytics}/*/tables/*/metadata/*"' in identity
     assert "local.ingestion_metadata_object_arns" in catalog
     assert '"${var.bucket_arns.landing}/*/*/tables/*/metadata/*"' in identity
     assert '"${var.bucket_arns.curated}/*/tables/*/metadata/*"' in identity

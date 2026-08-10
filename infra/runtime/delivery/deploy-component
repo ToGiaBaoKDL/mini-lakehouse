@@ -26,8 +26,10 @@ case "$component" in
     cloudflare)
         deploy="$bundle_root/infra/runtime/cloudflare/deploy"
         ;;
-    dbt-task)
-        deploy="$bundle_root/dbt/analytics/deploy/deploy"
+    dbt-engineering|dbt-research)
+        "$bundle_root/dbt/deploy/deploy" "$component" "$image"
+        printf '%s\n' "Deployed $component as $image"
+        exit 0
         ;;
     ocr-worker)
         deploy="$bundle_root/ocr/deploy/deploy"

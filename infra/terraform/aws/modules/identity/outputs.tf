@@ -28,9 +28,9 @@ output "arxiv_inspector_role_arn" {
   value       = aws_iam_role.arxiv_inspector.arn
 }
 
-output "dbt_transformer_role_arn" {
-  description = "IAM role used by dbt to read curated data and manage analytics."
-  value       = aws_iam_role.dbt_transformer.arn
+output "dbt_domain_role_arns" {
+  description = "Least-privilege IAM roles keyed by independently owned dbt domain workload."
+  value       = { for workload, role in aws_iam_role.dbt_domain : workload => role.arn }
 }
 
 output "ocr_worker_role_arn" {

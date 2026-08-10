@@ -95,14 +95,12 @@ variable "athena_workgroup_arn" {
 }
 
 variable "athena_result_prefixes" {
-  type = object({
-    dbt_transformer = string
-    arxiv_inspector = string
-  })
+  type        = map(string)
   description = "Isolated S3 query-result prefixes for each Athena workload."
 
   validation {
     condition = (
+      contains(keys(var.athena_result_prefixes), "arxiv_inspector") &&
       alltrue([
         for prefix in values(var.athena_result_prefixes) :
         length(prefix) > 0 && trim(prefix, "/") == prefix
@@ -174,10 +172,18 @@ variable "workload_data_access" {
   validation {
     condition = (
       alltrue([
-        for workload in ["arxiv_inspector", "dbt_transformer", "ocr_worker"] :
+        for workload in ["arxiv_inspector", "ocr_worker"] :
         contains(keys(var.workload_data_access.curated), workload)
       ]) &&
-      contains(keys(var.workload_data_access.analytics), "dbt_transformer") &&
+      length([
+        for workload in keys(var.workload_data_access.analytics) : workload
+        if startswith(workload, "dbt_")
+      ]) > 0 &&
+      alltrue([
+        for workload in keys(var.workload_data_access.analytics) :
+        contains(keys(var.workload_data_access.curated), workload)
+        if startswith(workload, "dbt_")
+      ]) &&
       alltrue([
         for access in concat(
           values(var.workload_data_access.curated),

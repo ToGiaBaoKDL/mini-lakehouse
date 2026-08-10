@@ -1,36 +1,37 @@
 locals {
-  runtime_parameters = {
+  dbt_output_parameter_names = {
+    for domain in keys(local.analytics_domains) :
+    domain => "athena/dbt_${domain}_output_uri"
+  }
+  runtime_parameters = merge({
     "storage/landing_uri"               = "s3://${module.storage.bucket_names.landing}"
     "storage/curated_uri"               = "s3://${module.storage.bucket_names.curated}"
     "storage/analytics_uri"             = "s3://${module.storage.bucket_names.analytics}"
-    "athena/dbt_output_uri"             = "s3://${module.storage.bucket_names["query-results"]}/${local.athena_workload_prefixes.dbt_transformer}"
     "athena/arxiv_inspector_output_uri" = "s3://${module.storage.bucket_names["query-results"]}/${local.athena_workload_prefixes.arxiv_inspector}"
     "airflow/remote_log_uri"            = "s3://${module.storage.bucket_names.logs}/airflow/task-logs"
     "emr/application_id"                = module.emr_serverless.application_id
     "emr/execution_role_arn"            = module.identity.emr_runtime_role_arn
     "ocr/providers/kaggle_secret_id"    = aws_secretsmanager_secret.ocr["kaggle"].name
     "ocr/providers/modal_secret_id"     = aws_secretsmanager_secret.ocr["modal"].name
-  }
-  parameter_names_by_workload = {
-    airflow = [
+    }, {
+    for domain, parameter_name in local.dbt_output_parameter_names : parameter_name =>
+    "s3://${module.storage.bucket_names["query-results"]}/${local.athena_workload_prefixes["dbt_${domain}"]}"
+  })
+  parameter_names_by_workload = merge({
+    airflow = concat([
       "storage/landing_uri",
       "storage/analytics_uri",
-      "athena/dbt_output_uri",
       "emr/application_id",
       "emr/execution_role_arn",
       "airflow/remote_log_uri",
       "emr/code_uri",
-    ]
+    ], values(local.dbt_output_parameter_names))
     catalog_admin = [
       "storage/landing_uri",
       "storage/curated_uri",
     ]
     emr_publisher = [
       "emr/code_uri",
-    ]
-    dbt_transformer = [
-      "storage/analytics_uri",
-      "athena/dbt_output_uri",
     ]
     arxiv_inspector = [
       "storage/curated_uri",
@@ -41,7 +42,12 @@ locals {
       "ocr/providers/kaggle_secret_id",
       "ocr/providers/modal_secret_id",
     ]
-  }
+    }, {
+    for domain, parameter_name in local.dbt_output_parameter_names : "dbt_${domain}" => [
+      "storage/analytics_uri",
+      parameter_name,
+    ]
+  })
   parameter_arn_prefix = "arn:${data.aws_partition.current.partition}:ssm:${local.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${local.parameter_prefix}"
   external_parameter_names = toset([
     "emr/code_uri",

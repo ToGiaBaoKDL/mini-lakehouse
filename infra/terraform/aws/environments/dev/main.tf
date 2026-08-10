@@ -23,29 +23,45 @@ locals {
     logs            = "${local.name_prefix}-logs-71k0oc"
     "query-results" = "${local.name_prefix}-query-results-q2034x"
   }
-  athena_workload_prefixes = {
-    dbt_transformer = "dbt"
-    arxiv_inspector = "arxiv-inspector"
+  analytics_domains = {
+    engineering = {
+      curated_databases  = ["curated_github"]
+      curated_prefixes   = ["github"]
+      analytics_database = "analytics_engineering"
+      analytics_prefix   = "engineering"
+    }
+    research = {
+      curated_databases  = ["curated_arxiv"]
+      curated_prefixes   = ["arxiv"]
+      analytics_database = "analytics_research"
+      analytics_prefix   = "research"
+    }
   }
+  athena_workload_prefixes = merge({
+    arxiv_inspector = "arxiv-inspector"
+    }, {
+    for domain in keys(local.analytics_domains) : "dbt_${domain}" => "dbt/${domain}"
+  })
   workload_data_access = {
-    curated = {
+    curated = merge({
       arxiv_inspector = {
         databases = ["curated_arxiv"]
         prefixes  = ["arxiv"]
-      }
-      dbt_transformer = {
-        databases = ["curated_github"]
-        prefixes  = ["github"]
       }
       ocr_worker = {
         databases = ["curated_arxiv"]
         prefixes  = ["arxiv"]
       }
-    }
+      }, {
+      for domain, access in local.analytics_domains : "dbt_${domain}" => {
+        databases = access.curated_databases
+        prefixes  = access.curated_prefixes
+      }
+    })
     analytics = {
-      dbt_transformer = {
-        databases = ["analytics_engineering"]
-        prefixes  = ["tables"]
+      for domain, access in local.analytics_domains : "dbt_${domain}" => {
+        databases = [access.analytics_database]
+        prefixes  = [access.analytics_prefix]
       }
     }
   }
@@ -70,9 +86,12 @@ module "storage" {
 }
 
 module "container_registry" {
-  source               = "../../modules/container_registry"
-  name_prefix          = local.name_prefix
-  repositories         = ["airflow", "arxiv-inspector", "dbt-task", "ocr-worker"]
+  source      = "../../modules/container_registry"
+  name_prefix = local.name_prefix
+  repositories = setunion(
+    toset(["airflow", "arxiv-inspector", "ocr-worker"]),
+    toset([for domain in keys(local.analytics_domains) : "dbt-${domain}"]),
+  )
   retained_image_count = 20
   force_delete         = true
   tags                 = local.tags

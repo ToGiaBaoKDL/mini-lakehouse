@@ -43,8 +43,8 @@ runs:
           cloudflare)
             bundle+=(infra/runtime/cloudflare)
             ;;
-          dbt-task)
-            bundle+=(dbt/analytics/deploy)
+          dbt-engineering|dbt-research)
+            bundle+=(dbt/deploy)
             ;;
           ocr-worker)
             bundle+=(ocr/deploy)

@@ -15,6 +15,11 @@ on:
         description: Environment-qualified ECR repository name
         required: true
         type: string
+      build_args:
+        description: Optional component-owned Docker build arguments
+        required: false
+        type: string
+        default: ""
 
 jobs:
   release:
@@ -43,14 +48,20 @@ jobs:
           COMPONENT: ${{ inputs.component }}
           DOCKERFILE: ${{ inputs.dockerfile }}
           REPOSITORY: ${{ inputs.repository }}
+          BUILD_ARGS: ${{ inputs.build_args }}
         run: |
           set -euo pipefail
           case "$COMPONENT" in
-            airflow|arxiv-inspector|dbt-task|ocr-worker) ;;
+            airflow|arxiv-inspector|dbt-engineering|dbt-research|ocr-worker) ;;
             *) exit 2 ;;
           esac
           [[ "$REPOSITORY" == "tgbao-dev-$COMPONENT" ]]
           [[ -f "$DOCKERFILE" ]]
+          case "$COMPONENT" in
+            dbt-engineering) [[ "$BUILD_ARGS" == "DBT_PROJECT=engineering" ]] ;;
+            dbt-research) [[ "$BUILD_ARGS" == "DBT_PROJECT=research" ]] ;;
+            *) [[ -z "$BUILD_ARGS" ]] ;;
+          esac
 
       - name: Assume the image publisher role
         uses: aws-actions/configure-aws-credentials@acca2b1b2070338fb9fd1ca27ecee81d687e58e5 # v6.1.2
@@ -95,6 +106,7 @@ jobs:
         with:
           context: .
           file: ${{ inputs.dockerfile }}
+          build-args: ${{ inputs.build_args }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.ecr.outputs.registry }}/${{ inputs.repository }}:${{ github.sha }}

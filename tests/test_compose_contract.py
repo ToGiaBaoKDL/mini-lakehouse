@@ -221,7 +221,7 @@ def test_arxiv_inspector_receives_only_its_explicit_environment() -> None:
 
 def test_all_container_images_are_immutable() -> None:
     airflow_dockerfile = (AIRFLOW_RUNTIME / "Dockerfile").read_text(encoding="utf-8")
-    dbt_dockerfile = Path("dbt/analytics/Dockerfile").read_text(encoding="utf-8")
+    dbt_dockerfile = Path("dbt/Dockerfile").read_text(encoding="utf-8")
     inspector_dockerfile = Path("apps/arxiv_inspector/Dockerfile").read_text(encoding="utf-8")
     ocr_dockerfile = Path("ocr/Dockerfile").read_text(encoding="utf-8")
     emr_dockerfile = Path("jobs/emr/Dockerfile").read_text(encoding="utf-8")
@@ -238,7 +238,8 @@ def test_all_container_images_are_immutable() -> None:
     assert "uv pip sync --python /home/airflow/.local/bin/python" in airflow_dockerfile
     assert "USER airflow" in airflow_dockerfile
     assert 'ENTRYPOINT ["dbt"]' in dbt_dockerfile
-    assert "dbt/analytics/uv.lock" in dbt_dockerfile
+    assert "dbt/runtime/uv.lock" in dbt_dockerfile
+    assert "ARG DBT_PROJECT=engineering" in dbt_dockerfile
     assert "dbt deps" in dbt_dockerfile
     assert "USER dbt" in dbt_dockerfile
     assert 'ENTRYPOINT ["document-ocr"]' in ocr_dockerfile
@@ -266,7 +267,7 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
     platform = Path("platform/pyproject.toml").read_text(encoding="utf-8")
     orchestration = (AIRFLOW_RUNTIME / "pyproject.toml").read_text(encoding="utf-8")
     inspector = Path("apps/arxiv_inspector/pyproject.toml").read_text(encoding="utf-8")
-    analytics = Path("dbt/analytics/pyproject.toml").read_text(encoding="utf-8")
+    analytics = Path("dbt/runtime/pyproject.toml").read_text(encoding="utf-8")
     ocr = Path("ocr/pyproject.toml").read_text(encoding="utf-8")
 
     assert "apache-airflow" not in workspace
@@ -302,10 +303,9 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
     assert '"dbt-athena==1.11.0"' in analytics
     assert 'members = ["apps/arxiv_inspector", "ocr", "platform"]' in workspace
     assert (
-        'exclude = ["dbt/analytics", "jobs/emr", "ocr/runners/glm_ocr", "orchestration"]'
-        in workspace
+        'exclude = ["dbt/runtime", "jobs/emr", "ocr/runners/glm_ocr", "orchestration"]' in workspace
     )
-    assert Path("dbt/analytics/uv.lock").is_file()
+    assert Path("dbt/runtime/uv.lock").is_file()
     assert (AIRFLOW_RUNTIME / "uv.lock").is_file()
     assert "apache-airflow" not in Path("uv.lock").read_text(encoding="utf-8")
     assert "opentelemetry" not in Path("uv.lock").read_text(encoding="utf-8")
@@ -384,7 +384,8 @@ def test_makefile_exposes_owned_operational_entrypoints() -> None:
         "catalog-validate:",
         "airflow-secrets-init:",
         "ocr-worker-build:",
-        "dbt-task-build:",
+        "dbt-engineering-build:",
+        "dbt-research-build:",
         "emr-jobs-package:",
         "ocr-kaggle-runner-publish:",
         "workload-identities-install:",
@@ -399,7 +400,7 @@ def test_makefile_exposes_owned_operational_entrypoints() -> None:
     assert "component-image-pull:" not in makefile
     assert "airflow-deploy:" not in makefile
     assert "arxiv-inspector-deploy:" not in makefile
-    assert "dbt-task-install:" not in makefile
+    assert "dbt-install:" not in makefile
     assert "ocr-worker-install:" not in makefile
     assert "ocr-worker:runtime" in makefile
     assert "AIRFLOW_PARALLELISM ?=" not in makefile

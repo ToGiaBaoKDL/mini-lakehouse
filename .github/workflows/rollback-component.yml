@@ -10,7 +10,8 @@ on:
         options:
           - airflow
           - arxiv-inspector
-          - dbt-task
+          - dbt-engineering
+          - dbt-research
           - ocr-worker
       image:
         description: Exact ECR image reference by digest
@@ -84,7 +85,7 @@ jobs:
             infra/runtime/postgres
             orchestration/deploy
             apps/arxiv_inspector/deploy
-            dbt/analytics/deploy
+            dbt/deploy
             ocr/deploy
       - name: Verify the deployment bundle was reviewed on main
         shell: bash

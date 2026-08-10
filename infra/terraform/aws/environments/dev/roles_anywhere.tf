@@ -1,12 +1,11 @@
 locals {
-  external_workload_roles = {
+  external_workload_roles = merge({
     airflow           = module.identity.airflow_role_arn
     arxiv_inspector   = module.identity.arxiv_inspector_role_arn
     metadata_postgres = module.identity.metadata_postgres_role_arn
     services_deployer = module.identity.services_deployer_role_arn
-    dbt_transformer   = module.identity.dbt_transformer_role_arn
     ocr_worker        = module.identity.ocr_worker_role_arn
-  }
+  }, module.identity.dbt_domain_role_arns)
 }
 
 resource "aws_rolesanywhere_trust_anchor" "workloads" {
