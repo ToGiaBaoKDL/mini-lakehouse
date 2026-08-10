@@ -24,7 +24,6 @@ data "aws_iam_policy_document" "dbt_domain" {
     sid = "ReadCuratedCatalog"
     actions = [
       "glue:GetDatabase",
-      "glue:GetDatabases",
       "glue:GetTable",
       "glue:GetTables",
       "glue:GetTableVersion",
@@ -34,6 +33,15 @@ data "aws_iam_policy_document" "dbt_domain" {
       [local.glue_catalog_arn],
       local.curated_database_arns_by_workload[each.key],
       local.curated_table_arns_by_workload[each.key],
+    )
+  }
+  statement {
+    sid     = "ListOwnedDatabases"
+    actions = ["glue:GetDatabases"]
+    resources = concat(
+      [local.glue_catalog_arn],
+      local.curated_database_arns_by_workload[each.key],
+      local.analytics_database_arns_by_workload[each.key],
     )
   }
   statement {

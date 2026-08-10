@@ -291,6 +291,9 @@ def test_data_consumers_use_reviewed_database_and_prefix_entitlements() -> None:
     assert "local.analytics_database_arns_by_workload[each.key]" in dbt
     assert "local.curated_prefixes_by_workload[each.key]" in dbt
     assert "local.analytics_prefixes_by_workload[each.key]" in dbt
+    assert 'sid     = "ListOwnedDatabases"' in dbt
+    assert 'actions = ["glue:GetDatabases"]' in dbt
+    assert '"glue:CreateDatabase"' not in dbt
     assert '"${var.bucket_arns.curated}/*"' not in dbt
     assert '"${var.bucket_arns.analytics}/*"' not in dbt
     assert "local.curated_database_arns_by_workload.arxiv_inspector" in inspector
