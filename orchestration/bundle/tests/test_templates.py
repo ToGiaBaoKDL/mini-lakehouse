@@ -2,18 +2,24 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from airflow.sdk.execution_time import macros
-from airflow_bundle.config.templates import previous_local_date, runtime_value
+from airflow_bundle.config.templates import (
+    DAG_START_DATE,
+    LOCAL_TIMEZONE,
+    previous_local_date,
+    runtime_value,
+)
 from jinja2 import StrictUndefined
 from jinja2.sandbox import SandboxedEnvironment
 
 
 def _render_source_date(source_date: str | None) -> str:
     run_at = datetime(2026, 8, 5, 17, 30, tzinfo=UTC)
+    logical_date = datetime(2026, 8, 4, 17, 30, tzinfo=UTC)
     return (
         SandboxedEnvironment()
         .from_string(previous_local_date())
         .render(
-            dag_run=SimpleNamespace(logical_date=run_at, run_after=run_at),
+            dag_run=SimpleNamespace(logical_date=logical_date, run_after=run_at),
             macros=macros,
             params={"source_date": source_date},
         )
@@ -22,6 +28,10 @@ def _render_source_date(source_date: str | None) -> str:
 
 def test_previous_local_date_accepts_standard_datetime() -> None:
     assert _render_source_date(None) == "2026-08-05"
+
+
+def test_dag_start_date_uses_the_canonical_local_timezone() -> None:
+    assert DAG_START_DATE.timezone_name == LOCAL_TIMEZONE
 
 
 def test_explicit_source_date_takes_precedence() -> None:

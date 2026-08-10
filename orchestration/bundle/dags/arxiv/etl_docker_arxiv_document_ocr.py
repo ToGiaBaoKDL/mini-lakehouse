@@ -2,7 +2,6 @@
 
 from datetime import timedelta
 
-import pendulum
 from airflow.sdk import DAG, Param
 from airflow.sdk.definitions.param import ParamsDict
 from airflow_bundle.callbacks.notifications import (
@@ -10,6 +9,7 @@ from airflow_bundle.callbacks.notifications import (
     dag_success_callbacks,
 )
 from airflow_bundle.config.assets import CURATED_ARXIV_METADATA, CURATED_ARXIV_OCR
+from airflow_bundle.config.templates import DAG_START_DATE
 from airflow_bundle.operators.docker import docker_task
 
 OCR_IMAGE = "ocr-worker:runtime"
@@ -18,7 +18,7 @@ with DAG(
     dag_id="etl_docker_arxiv_document_ocr",
     description="Run and publish OCR for exactly one curated ArXiv PDF.",
     schedule=None,
-    start_date=pendulum.datetime(2026, 1, 1, tz="Asia/Ho_Chi_Minh"),
+    start_date=DAG_START_DATE,
     catchup=False,
     max_active_runs=1,
     on_failure_callback=dag_failure_callbacks(),

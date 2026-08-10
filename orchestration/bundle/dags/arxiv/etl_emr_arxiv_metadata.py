@@ -1,11 +1,10 @@
 """Daily ArXiv metadata source-to-curated processing on EMR Serverless."""
 
-import pendulum
 from airflow.sdk import DAG, Param
 from airflow.sdk.definitions.param import ParamsDict
 from airflow_bundle.callbacks.notifications import dag_failure_callbacks, dag_success_callbacks
 from airflow_bundle.config.assets import CURATED_ARXIV_METADATA
-from airflow_bundle.config.templates import previous_local_date, runtime_value
+from airflow_bundle.config.templates import DAG_START_DATE, previous_local_date, runtime_value
 from airflow_bundle.operators.emr import emr_spark_job
 
 SOURCE_DATE = previous_local_date()
@@ -13,8 +12,8 @@ SOURCE_DATE = previous_local_date()
 with DAG(
     dag_id="etl_emr_arxiv_metadata",
     description="Harvest one ArXiv OAI day into landing and curated Iceberg tables.",
-    schedule="0 10 * * *",
-    start_date=pendulum.datetime(2026, 1, 1, tz="Asia/Ho_Chi_Minh"),
+    schedule="0 11 * * *",
+    start_date=DAG_START_DATE,
     catchup=False,
     max_active_runs=1,
     on_failure_callback=dag_failure_callbacks(),

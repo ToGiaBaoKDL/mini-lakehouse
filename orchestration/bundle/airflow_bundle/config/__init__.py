@@ -1,1 +1,1 @@
-"""Assets and templates owned by the DAG bundle."""
+"""Logical assets and shared DAG settings owned by the bundle."""

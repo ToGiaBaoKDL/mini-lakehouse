@@ -1,50 +1,47 @@
-"""Build engineering analytics after the curated GitHub product is published."""
+"""Build Engineering analytics when its curated product is published."""
 
 from datetime import timedelta
 
-import pendulum
 from airflow.sdk import DAG
 from airflow_bundle.callbacks.notifications import (
     dag_failure_callbacks,
     dag_success_callbacks,
 )
 from airflow_bundle.config.assets import ANALYTICS_ENGINEERING, CURATED_GITHUB
-from airflow_bundle.config.templates import runtime_value
+from airflow_bundle.config.templates import DAG_START_DATE, runtime_value
 from airflow_bundle.operators.docker import docker_task
-
-DBT_IMAGE = "dbt-task:runtime"
 
 DBT_ENVIRONMENT = {
     "DBT_ANALYTICS_URI": runtime_value("storage/analytics_uri"),
-    "DBT_QUERY_RESULTS_URI": runtime_value("athena/dbt_output_uri"),
+    "DBT_QUERY_RESULTS_URI": runtime_value("athena/dbt_engineering_output_uri"),
 }
 
 
 with DAG(
     dag_id="tl_docker_engineering_analytics",
-    description="Validate curated freshness and build engineering analytics with dbt.",
-    schedule=[CURATED_GITHUB],
-    start_date=pendulum.datetime(2026, 1, 1, tz="Asia/Ho_Chi_Minh"),
+    description="Validate GitHub freshness and build Engineering analytics.",
+    schedule=CURATED_GITHUB,
+    start_date=DAG_START_DATE,
     catchup=False,
     max_active_runs=1,
     on_failure_callback=dag_failure_callbacks(),
     on_success_callback=dag_success_callbacks(),
-    tags=["engineering", "analytics", "dbt", "docker"],
+    tags=["engineering", "tl", "dbt", "docker"],
 ) as dag:
     freshness = docker_task(
         task_id="check_source_freshness",
-        image=DBT_IMAGE,
+        image="dbt-engineering:runtime",
         command=["source", "freshness"],
-        workload="dbt-transformer",
-        execution_timeout=timedelta(hours=2),
+        workload="dbt-engineering",
+        execution_timeout=timedelta(minutes=30),
         environment=DBT_ENVIRONMENT,
         inlets=[CURATED_GITHUB],
     )
     build = docker_task(
         task_id="build_analytics",
-        image=DBT_IMAGE,
+        image="dbt-engineering:runtime",
         command=["build"],
-        workload="dbt-transformer",
+        workload="dbt-engineering",
         execution_timeout=timedelta(hours=2),
         environment=DBT_ENVIRONMENT,
         inlets=[CURATED_GITHUB],
