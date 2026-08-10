@@ -192,7 +192,8 @@ against missing artifacts or task images.
 
 ```bash
 gh workflow run release-emr-jobs.yml --ref main
-gh workflow run release-dbt-task.yml --ref main
+gh workflow run release-dbt-engineering.yml --ref main
+gh workflow run release-dbt-research.yml --ref main
 gh workflow run release-ocr-worker.yml --ref main
 gh workflow run release-airflow.yml --ref main
 gh workflow run release-arxiv-inspector.yml --ref main

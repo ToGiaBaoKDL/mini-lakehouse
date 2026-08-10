@@ -46,7 +46,9 @@ flowchart LR
 | `orchestration/bundle/` | Workflow definitions | Versionable Airflow DAGs and DAG-only support code |
 | `orchestration/runtime/` | Runtime platform | Airflow image, providers, and runtime integrations |
 | `orchestration/deploy/` | Runtime platform | Self-hosted Airflow deployment definition |
-| `dbt/analytics/` | Analytics engineering | Isolated curated-to-analytics task image, models, and tests through Athena |
+| `dbt/runtime/` | Analytics platform | Shared pinned dbt/Athena runtime used by domain images |
+| `dbt/engineering/` | Engineering analytics | GitHub-facing models, tests, profile, and release ownership |
+| `dbt/research/` | Research analytics | ArXiv-facing models, tests, profile, and release ownership |
 | `ocr/` | Document processing | Provider-neutral protocol, adapters, configuration, and portable GPU runtimes |
 | `apps/arxiv_inspector/` | Data application | UI plus its read-only Athena/S3 access layer |
 
@@ -54,9 +56,10 @@ Terraform never creates Glue databases or Iceberg tables. PyIceberg applies the 
 Spark owns source-to-landing and source-to-curated writes; the isolated OCR worker owns its curated
 OCR tables through PyIceberg. dbt owns analytics tables. Airflow contains only orchestration.
 
-Each deployable domain owns its Dockerfile and runtime dependencies. Airflow, dbt, EMR, and the
-remote OCR runner keep independent lockfiles because their runtimes differ. The root workspace is
-limited to the compatible platform, OCR, and ArXiv Inspector packages.
+Each deployable boundary owns its runtime dependencies. The dbt domains share one pinned execution
+lock and Dockerfile, while each owns its project, profile, models, ECR image, runtime identity, and
+release lifecycle. Airflow, EMR, and the remote OCR runner keep independent lockfiles because their
+runtimes differ. The root workspace is limited to compatible platform, OCR, and Inspector packages.
 
 ## Data layout
 
@@ -72,7 +75,7 @@ s3://<project>-<env>-curated-<suffix>/
   <product>/artifacts/<processor>/<document>/<processing-id>/...
 
 s3://<project>-<env>-analytics-<suffix>/
-  tables/<analytics database and table>/...
+  <domain>/tables/<table>/...
 
 s3://<project>-<env>-artifacts-<suffix>/
   emr/jobs/<release>/
@@ -139,7 +142,7 @@ Each component workflow builds one multi-architecture image under an immutable G
 provenance/SBOM, and deploys its digest through a port-22-only Tailscale identity. Deployments are
 serialized per component; reruns reuse the existing immutable image. Component rollback verifies
 that the digest belongs to its reviewed Git revision, and EMR rollback restores only a completed
-reviewed release. Airflow, Inspector, dbt, and OCR cannot accidentally move together, and the OCI
+reviewed release. Airflow, Inspector, each dbt domain, and OCR cannot accidentally move together, and the OCI
 host never reads Terraform state. CI streams only the selected component-owned deployment bundle;
 the host does not clone the repository or run its root Makefile.
 Airflow reconciliation also brings up its metadata PostgreSQL dependency before migrating Airflow.
@@ -148,9 +151,10 @@ multi-architecture digest directly, without a custom image or ECR repository.
 
 Airflow uses the official versioned `GitDagBundle` and tracks the reviewed `main` ref under
 `orchestration/bundle`. A DAG-only merge is fetched by the DAG processor without rebuilding or
-restarting Airflow; active and retried runs retain their original Git commit by default. The
-Airflow image contains providers and runtime integrations only. Changing bundle code to require a
-new provider still requires a compatible runtime image release first.
+restarting Airflow. Bundle versioning remains enabled, while cleared tasks and backfills default to
+the latest reviewed version. The Airflow image contains providers and runtime integrations only;
+changing bundle code to require a new provider still requires a compatible runtime image release
+first.
 
 Terraform creates secret containers but never secret values. Shared PostgreSQL bootstrap, the
 Airflow database owner, and the Airflow runtime each have a separate secret boundary. PostgreSQL is
@@ -160,12 +164,14 @@ secrets; SimpleAuthManager never generates or logs a password.
 The Cloudflare Tunnel token is synchronized explicitly into its AWS secret container and exposed to
 the connector only as a read-only file; the Cloudflare API token remains an operator credential.
 
-Producer tasks emit centrally declared logical assets only after successful completion. The GitHub
-curated asset triggers the dbt task DAG, which runs source freshness before `dbt build`; ArXiv
-metadata, OCR, and engineering analytics expose separate lineage assets. Shared operator factories
-own Docker and EMR lifecycle defaults. The weekly maintenance DAG compacts only recent partitions,
-expires snapshots, and removes sufficiently old orphan files. Catalog validation reports stale
-objects carrying platform ownership but never drops them.
+Producer tasks emit centrally declared logical assets only after successful completion. GitHub
+curated publication independently triggers Engineering analytics; ArXiv metadata or OCR publication
+independently triggers Research analytics. Each domain validates only its own sources and runs with
+an IAM role restricted to its curated input, Glue database, analytics prefix, and Athena result
+prefix. Research marts cover current papers, daily publication trends, and OCR execution/content observability. Shared
+operator factories own Docker and EMR lifecycle defaults. The weekly maintenance DAG compacts only
+recent partitions, expires snapshots, and removes sufficiently old orphan files. Catalog validation
+reports stale objects carrying platform ownership but never drops them.
 
 The manual `etl_docker_arxiv_document_ocr` DAG requires one non-empty `arxiv_id` and one provider.
 Airflow starts the pinned OCR worker image through `DockerOperator`; that container submits the
