@@ -9,9 +9,9 @@ os.environ.setdefault("HOST_AWS_IDENTITY_DIR", "/tmp")
 os.environ["LAKEHOUSE_ENVIRONMENT"] = "ci"
 
 from airflow.models import DagBag
-from airflow.providers.amazon.aws.operators.emr import EmrServerlessStartJobOperator
-from airflow.providers.docker.operators.docker import DockerOperator
 from airflow.sdk import DAG
+from airflow_bundle.operators.docker import LoggedDockerOperator
+from airflow_bundle.operators.emr import LoggedEmrServerlessStartJobOperator
 from jinja2 import StrictUndefined
 from jinja2.sandbox import SandboxedEnvironment
 
@@ -70,7 +70,8 @@ def test_source_dags_are_bounded_parameterized_emr_jobs() -> None:
         assert dag.max_active_runs == 1
         assert "source_date" in dag.params
         task = dag.tasks[0]
-        assert isinstance(task, EmrServerlessStartJobOperator)
+        assert isinstance(task, LoggedEmrServerlessStartJobOperator)
+        assert task.wait_for_completion is True
         assert task.deferrable is False
         assert task.cancel_on_kill is True
         assert task.enable_application_ui_links is True
@@ -133,8 +134,8 @@ def test_curated_assets_schedule_isolated_domain_builds_after_freshness() -> Non
     for dag, expected in expectations.items():
         freshness = dag.get_task("check_source_freshness")
         build = dag.get_task("build_analytics")
-        assert isinstance(freshness, DockerOperator)
-        assert isinstance(build, DockerOperator)
+        assert isinstance(freshness, LoggedDockerOperator)
+        assert isinstance(build, LoggedDockerOperator)
         assert freshness.image == build.image == expected["image"]
         assert freshness.command == ["source", "freshness"]
         assert build.command == ["build"]
@@ -164,7 +165,7 @@ def test_manual_ocr_dag_processes_exactly_one_requested_document() -> None:
     assert set(dag.params) == {"arxiv_id", "provider"}
 
     task = dag.get_task("process_arxiv_pdf")
-    assert isinstance(task, DockerOperator)
+    assert isinstance(task, LoggedDockerOperator)
     assert task.image == "ocr-worker:runtime"
     assert task.command == [
         "--arxiv-id",
@@ -185,7 +186,8 @@ def test_maintenance_dag_uses_the_shared_emr_lifecycle() -> None:
     assert dag.max_active_runs == 1
 
     task = dag.get_task("maintain_contract_tables")
-    assert isinstance(task, EmrServerlessStartJobOperator)
+    assert isinstance(task, LoggedEmrServerlessStartJobOperator)
+    assert task.wait_for_completion is True
     assert task.deferrable is False
     assert task.job_driver["sparkSubmit"]["entryPoint"].endswith(
         "/entrypoints/iceberg_maintenance.py"

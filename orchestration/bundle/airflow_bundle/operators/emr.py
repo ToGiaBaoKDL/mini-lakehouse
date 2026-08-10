@@ -2,15 +2,25 @@
 
 from collections.abc import Mapping, Sequence
 from datetime import timedelta
+from typing import Any
 
 from airflow.providers.amazon.aws.operators.emr import EmrServerlessStartJobOperator
-from airflow.sdk import Asset
+from airflow.sdk import Asset, Context
 
 from airflow_bundle.callbacks.notifications import task_failure_callbacks
 from airflow_bundle.config.templates import runtime_value
 
 EMR_JOB_TIMEOUT_MINUTES = 120
 AIRFLOW_TASK_TIMEOUT_MINUTES = 130
+
+
+class LoggedEmrServerlessStartJobOperator(EmrServerlessStartJobOperator):
+    """Add an explicit terminal message after the provider waiter succeeds."""
+
+    def execute(self, context: Context, event: dict[str, Any] | None = None) -> str | None:
+        job_id = super().execute(context, event)
+        self.log.info("EMR Serverless job completed successfully: %s", job_id)
+        return job_id
 
 
 def emr_spark_job(
@@ -21,7 +31,7 @@ def emr_spark_job(
     entry_point_arguments: Sequence[str],
     spark_conf: Mapping[str, str],
     outlets: Sequence[Asset] = (),
-) -> EmrServerlessStartJobOperator:
+) -> LoggedEmrServerlessStartJobOperator:
     code_uri = runtime_value("emr/code_uri")
     effective_spark_conf = {
         "spark.executor.instances": "1",
@@ -46,7 +56,7 @@ def emr_spark_job(
             ),
         ]
     )
-    return EmrServerlessStartJobOperator(
+    return LoggedEmrServerlessStartJobOperator(
         task_id=task_id,
         name=job_name,
         application_id=runtime_value("emr/application_id"),
@@ -64,6 +74,7 @@ def emr_spark_job(
         },
         config={"executionTimeoutMinutes": EMR_JOB_TIMEOUT_MINUTES},
         aws_conn_id=None,
+        wait_for_completion=True,
         deferrable=False,
         enable_application_ui_links=True,
         cancel_on_kill=True,
