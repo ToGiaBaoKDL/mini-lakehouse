@@ -1,0 +1,10 @@
+version: 1
+name: research
+database: analytics_research
+owner: research-analytics
+contact:
+  name: Research Analytics
+  email: baokdl2226@gmail.com
+business_owner: research
+description: Consumer-facing research publication and document-processing analytics.
+upstream_curated_products: [arxiv]

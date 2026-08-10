@@ -1,0 +1,122 @@
+version: 2
+
+sources:
+  - name: arxiv
+    description: Canonical current ArXiv metadata and OCR results.
+    database: awsdatacatalog
+    schema: curated_arxiv
+    loader: emr-serverless
+    config:
+      tags: [arxiv, research]
+    meta:
+      owner: data-platform
+      contact: baokdl2226@gmail.com
+    tables:
+      - name: papers
+        description: Latest canonical metadata at one row per ArXiv article.
+        config:
+          loaded_at_field: curated_at
+          freshness:
+            warn_after: {count: 96, period: hour}
+            error_after: {count: 168, period: hour}
+        columns:
+          - name: arxiv_id
+            data_tests: [not_null, unique]
+          - name: oai_identifier
+            data_tests: [not_null, unique]
+          - name: oai_datestamp
+            data_tests: [not_null]
+          - name: pdf_url
+            data_tests: [not_null]
+          - name: is_deleted
+            data_tests: [not_null]
+          - name: source_record_sha256
+            data_tests: [not_null]
+          - name: curated_at
+            data_tests: [not_null]
+
+      - name: paper_authors
+        description: Ordered author occurrences for current paper metadata.
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [arxiv_id, author_position]
+        columns:
+          - name: arxiv_id
+            data_tests:
+              - not_null
+              - relationships:
+                  arguments:
+                    to: source('arxiv', 'papers')
+                    field: arxiv_id
+          - name: author_position
+            data_tests: [not_null]
+          - name: keyname
+            data_tests: [not_null]
+
+      - name: paper_categories
+        description: Category memberships for current paper metadata.
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [arxiv_id, category]
+        columns:
+          - name: arxiv_id
+            data_tests:
+              - not_null
+              - relationships:
+                  arguments:
+                    to: source('arxiv', 'papers')
+                    field: arxiv_id
+          - name: category
+            data_tests: [not_null]
+          - name: is_primary
+            data_tests: [not_null]
+
+      - name: ocr_document_runs
+        description: Durable state for one remote OCR attempt over one ArXiv PDF.
+        columns:
+          - name: run_id
+            data_tests: [not_null, unique]
+          - name: request_id
+            data_tests: [not_null]
+          - name: arxiv_id
+            data_tests:
+              - not_null
+              - relationships:
+                  arguments:
+                    to: source('arxiv', 'papers')
+                    field: arxiv_id
+          - name: state
+            data_tests: [not_null]
+          - name: attempt
+            data_tests: [not_null]
+          - name: started_at
+            data_tests: [not_null]
+          - name: provider
+            data_tests: [not_null]
+
+      - name: ocr_document_elements
+        description: Canonical layout/content elements for successful OCR processing.
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [processing_id, element_id]
+        columns:
+          - name: processing_id
+            data_tests: [not_null]
+          - name: element_id
+            data_tests: [not_null]
+          - name: arxiv_id
+            data_tests:
+              - not_null
+              - relationships:
+                  arguments:
+                    to: source('arxiv', 'papers')
+                    field: arxiv_id
+          - name: page_number
+            data_tests: [not_null]
+          - name: reading_order
+            data_tests: [not_null]
+          - name: element_type
+            data_tests: [not_null]

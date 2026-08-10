@@ -16,12 +16,13 @@ WORKDIR /app
 
 COPY --from=uv /uv /uvx /bin/
 COPY infra/runtime/identity/install-aws-signing-helper /tmp/install-aws-signing-helper
-COPY dbt/analytics/pyproject.toml dbt/analytics/uv.lock ./
+COPY dbt/runtime/pyproject.toml dbt/runtime/uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
 
-COPY dbt/analytics/dbt_project.yml dbt/analytics/profiles.yml ./
-COPY dbt/analytics/packages.yml dbt/analytics/package-lock.yml ./
-COPY dbt/analytics/models ./models
+ARG DBT_PROJECT=engineering
+COPY dbt/${DBT_PROJECT}/dbt_project.yml dbt/${DBT_PROJECT}/profiles.yml ./
+COPY dbt/${DBT_PROJECT}/packages.yml dbt/${DBT_PROJECT}/package-lock.yml ./
+COPY dbt/${DBT_PROJECT}/models ./models
 RUN --mount=type=cache,target=/tmp/.cache/dbt dbt deps \
     && /tmp/install-aws-signing-helper "$TARGETARCH" \
     && rm -f /bin/uv /bin/uvx /tmp/install-aws-signing-helper

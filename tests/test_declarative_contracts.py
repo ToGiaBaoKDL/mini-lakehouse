@@ -18,6 +18,7 @@ def test_repository_contracts_form_one_glue_registry() -> None:
         "events",
     )
     assert contracts.domain("engineering").database == "analytics_engineering"
+    assert contracts.domain("research").database == "analytics_research"
 
 
 def test_primary_keys_compile_to_iceberg_identifier_fields() -> None:
@@ -53,6 +54,7 @@ def test_contract_layout_excludes_cloud_identity_and_maintenance_policy() -> Non
         "curated/arxiv.yaml",
         "curated/github.yaml",
         "domains/engineering.yaml",
+        "domains/research.yaml",
         "sources/arxiv.yaml",
         "sources/github_archive.yaml",
     }

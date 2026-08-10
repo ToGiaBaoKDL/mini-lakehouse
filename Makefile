@@ -54,7 +54,7 @@ lint: ## Run formatting, linting, and static type checks.
 		orchestration/deploy/reconcile \
 		apps/arxiv_inspector/deploy/deploy \
 		apps/arxiv_inspector/deploy/reconcile \
-		dbt/analytics/deploy/deploy \
+		dbt/deploy/deploy \
 		ocr/deploy/deploy
 	uv run ruff format --check .
 	uv run ruff check .
@@ -75,7 +75,7 @@ compose-validate: ## Validate self-hosted service Compose files.
 
 check: ## Run the complete local quality gate.
 	uv lock --check
-	uv lock --check --project dbt/analytics
+	uv lock --check --project dbt/runtime
 	uv lock --check --project orchestration/runtime
 	uv lock --check --project jobs/emr
 	uv lock --check --directory ocr/runners/glm_ocr

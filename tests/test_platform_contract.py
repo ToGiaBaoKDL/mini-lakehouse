@@ -19,6 +19,7 @@ def test_glue_databases_are_derived_from_owned_contracts() -> None:
     assert namespaces[("curated_github",)]["data_product"] == "github"
     assert namespaces[("curated_arxiv",)]["data_product"] == "arxiv"
     assert namespaces[("analytics_engineering",)]["business_domain"] == "engineering"
+    assert namespaces[("analytics_research",)]["business_domain"] == "research"
 
 
 def test_table_locations_separate_raw_transport_and_iceberg_storage() -> None:

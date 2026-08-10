@@ -1,4 +1,4 @@
-DBT_AWS_CONFIG := $(AWS_IDENTITY_DIR)/dbt-transformer/host-config
+DBT_PROJECT_DIRS := $(patsubst %/,%,$(dir $(wildcard dbt/*/dbt_project.yml)))
 OCR_AWS_CONFIG := $(AWS_IDENTITY_DIR)/ocr-worker/host-config
 
 .PHONY: catalog-apply catalog-validate ocr-kaggle-runner-publish \
@@ -26,33 +26,39 @@ ocr-kaggle-runner-publish: preflight ## Publish an immutable Kaggle OCR runner D
 			uv run --project ocr --extra kaggle-publish python ocr/runners/kaggle/glm_ocr/publish.py
 
 dbt-deps: ## Install locked dbt packages.
-	uv run --project dbt/analytics dbt deps --project-dir dbt/analytics
+	@set -eu; for project in $(DBT_PROJECT_DIRS); do \
+		uv run --project dbt/runtime dbt deps --project-dir "$$project"; \
+	done
 
 dbt-validate: dbt-deps ## Parse dbt without accessing AWS data.
-	DBT_QUERY_RESULTS_URI=s3://validation/query-results DBT_ANALYTICS_URI=s3://validation \
-		uv run --project dbt/analytics dbt parse \
-			--project-dir dbt/analytics --profiles-dir dbt/analytics \
-			--no-partial-parse --show-all-deprecations
+	@set -eu; for project in $(DBT_PROJECT_DIRS); do \
+		DBT_QUERY_RESULTS_URI=s3://validation/query-results DBT_ANALYTICS_URI=s3://validation \
+			uv run --project dbt/runtime dbt parse \
+				--project-dir "$$project" --profiles-dir "$$project" \
+				--no-partial-parse --show-all-deprecations; \
+	done
 
-dbt-build: ## Build analytics with runtime references loaded from SSM.
-	@test -d dbt/analytics/dbt_packages/dbt_utils || { \
+dbt-build: ## Build DBT_DOMAIN analytics with its isolated runtime identity.
+	@test -n "$(DBT_DOMAIN)" || { printf '%s\n' "Usage: make dbt-build DBT_DOMAIN=<domain>"; exit 2; }
+	@test -f "dbt/$(DBT_DOMAIN)/dbt_project.yml" || { printf '%s\n' "Unknown dbt domain: $(DBT_DOMAIN)"; exit 2; }
+	@test -d "dbt/$(DBT_DOMAIN)/dbt_packages/dbt_utils" || { \
 		printf '%s\n' "Missing locked dbt packages; run 'make dbt-deps' first."; exit 1; \
 	}
-	@test -r "$(DBT_AWS_CONFIG)" || { printf '%s\n' "Render the dbt-transformer identity first."; exit 1; }
+	@test -r "$(AWS_IDENTITY_DIR)/dbt-$(DBT_DOMAIN)/host-config" || { printf '%s\n' "Render the dbt-$(DBT_DOMAIN) identity first."; exit 1; }
 	@set -eu; \
-		QUERY_RESULTS_NAME="$(RUNTIME_PARAMETER_PREFIX)/athena/dbt_output_uri"; \
+		QUERY_RESULTS_NAME="$(RUNTIME_PARAMETER_PREFIX)/athena/dbt_$(DBT_DOMAIN)_output_uri"; \
 		ANALYTICS_NAME="$(RUNTIME_PARAMETER_PREFIX)/storage/analytics_uri"; \
 		PARAMETERS="$$(env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
-			AWS_CONFIG_FILE="$(DBT_AWS_CONFIG)" AWS_PROFILE=default aws ssm get-parameters \
+			AWS_CONFIG_FILE="$(AWS_IDENTITY_DIR)/dbt-$(DBT_DOMAIN)/host-config" AWS_PROFILE=default aws ssm get-parameters \
 			--names "$${QUERY_RESULTS_NAME}" "$${ANALYTICS_NAME}" --output json)"; \
 		QUERY_RESULTS_URI="$$(printf '%s' "$${PARAMETERS}" | jq -er --arg name "$${QUERY_RESULTS_NAME}" \
 			'.Parameters[] | select(.Name == $$name) | .Value')"; \
 		ANALYTICS_URI="$$(printf '%s' "$${PARAMETERS}" | jq -er --arg name "$${ANALYTICS_NAME}" \
 			'.Parameters[] | select(.Name == $$name) | .Value')"; \
-		AWS_CONFIG_FILE="$(DBT_AWS_CONFIG)" AWS_PROFILE=default \
+		AWS_CONFIG_FILE="$(AWS_IDENTITY_DIR)/dbt-$(DBT_DOMAIN)/host-config" AWS_PROFILE=default \
 		DBT_QUERY_RESULTS_URI="$${QUERY_RESULTS_URI}" \
-		DBT_ANALYTICS_URI="$${ANALYTICS_URI}" uv run --project dbt/analytics dbt build \
-			--project-dir dbt/analytics --profiles-dir dbt/analytics
+		DBT_ANALYTICS_URI="$${ANALYTICS_URI}" uv run --project dbt/runtime dbt build \
+			--project-dir "dbt/$(DBT_DOMAIN)" --profiles-dir "dbt/$(DBT_DOMAIN)"
 
 emr-jobs-package: ## Build EMR artifacts in the matching EMR runtime.
 	jobs/emr/release/package

@@ -1,0 +1,89 @@
+version: 2
+
+models:
+  - name: stg_arxiv__papers
+    description: Analytics-facing projection of current canonical ArXiv paper metadata.
+    columns:
+      - {name: arxiv_id, description: Stable ArXiv article identifier., data_type: varchar}
+      - {name: oai_identifier, description: Stable OAI identifier., data_type: varchar}
+      - {name: title, description: Current normalized title., data_type: varchar}
+      - {name: abstract, description: Current normalized abstract., data_type: varchar}
+      - {name: license_uri, description: Current license URI., data_type: varchar}
+      - {name: doi, description: Current DOI., data_type: varchar}
+      - {name: journal_ref, description: Current journal reference., data_type: varchar}
+      - {name: comments, description: Current author comments., data_type: varchar}
+      - {name: created_date, description: Original submission date., data_type: date}
+      - {name: updated_date, description: Latest revision date., data_type: date}
+      - {name: oai_datestamp, description: Latest observed OAI modification date., data_type: date}
+      - {name: pdf_url, description: Canonical PDF download URL., data_type: varchar}
+      - {name: is_deleted, description: Current OAI tombstone state., data_type: boolean}
+      - {name: source_record_sha256, description: Winning landing mutation hash., data_type: varchar}
+      - {name: curated_at, description: Latest curation timestamp., data_type: timestamp}
+
+  - name: stg_arxiv__paper_authors
+    description: Analytics-facing projection of ordered current ArXiv author occurrences.
+    columns:
+      - {name: arxiv_id, description: Parent paper identifier., data_type: varchar}
+      - {name: author_position, description: One-based source author order., data_type: bigint}
+      - {name: keyname, description: Author family or key name., data_type: varchar}
+      - {name: forenames, description: Author forenames., data_type: varchar}
+      - {name: suffix, description: Author suffix., data_type: varchar}
+      - {name: affiliation, description: Source affiliation when present., data_type: varchar}
+      - {name: oai_datestamp, description: Parent metadata mutation date., data_type: date}
+      - {name: curated_at, description: Latest curation timestamp., data_type: timestamp}
+
+  - name: stg_arxiv__paper_categories
+    description: Analytics-facing projection of current ArXiv category memberships.
+    columns:
+      - {name: arxiv_id, description: Parent paper identifier., data_type: varchar}
+      - {name: category, description: ArXiv category code., data_type: varchar}
+      - {name: is_primary, description: Whether this is the primary category., data_type: boolean}
+      - {name: oai_datestamp, description: Parent metadata mutation date., data_type: date}
+      - {name: curated_at, description: Latest curation timestamp., data_type: timestamp}
+
+  - name: stg_arxiv__ocr_document_runs
+    description: Analytics-facing projection of durable ArXiv OCR attempts.
+    columns:
+      - {name: run_id, description: Deterministic request and attempt identifier., data_type: varchar}
+      - {name: request_id, description: Stable paper mutation and processor request identifier., data_type: varchar}
+      - {name: arxiv_id, description: Source paper identifier., data_type: varchar}
+      - {name: oai_datestamp, description: Selecting paper mutation date., data_type: date}
+      - {name: source_record_sha256, description: Selecting canonical metadata mutation hash., data_type: varchar}
+      - {name: pdf_url, description: Source PDF URL sent to the selected provider., data_type: varchar}
+      - {name: pdf_sha256, description: Observed source PDF hash., data_type: varchar}
+      - {name: pdf_size_bytes, description: Observed source PDF size., data_type: bigint}
+      - {name: page_count, description: Observed PDF page count., data_type: bigint}
+      - {name: processing_id, description: Paper content model and configuration identity., data_type: varchar}
+      - {name: model_repository, description: OCR model repository., data_type: varchar}
+      - {name: model_revision, description: Pinned OCR model revision., data_type: varchar}
+      - {name: layout_model_repository, description: Layout model repository., data_type: varchar}
+      - {name: layout_model_revision, description: Pinned layout model revision., data_type: varchar}
+      - {name: adapter_version, description: Canonical adapter version., data_type: varchar}
+      - {name: config_hash, description: Canonical processor configuration hash., data_type: varchar}
+      - {name: artifact_uri, description: Published per-paper artifact root., data_type: varchar}
+      - {name: manifest_sha256, description: Per-document content manifest hash., data_type: varchar}
+      - {name: state, description: Canonical document state., data_type: varchar}
+      - {name: attempt, description: Attempt ordinal for this processor request., data_type: bigint}
+      - {name: started_at, description: Durable attempt start timestamp., data_type: timestamp}
+      - {name: completed_at, description: Terminal attempt timestamp., data_type: timestamp}
+      - {name: curated_at, description: Latest state publication timestamp., data_type: timestamp}
+      - {name: provider, description: Remote execution provider., data_type: varchar}
+      - {name: provider_reference, description: Provider-owned application or job reference., data_type: varchar}
+      - {name: provider_run_id, description: Exact provider execution identifier., data_type: varchar}
+      - {name: job_json, description: Immutable validated runner request., data_type: varchar}
+
+  - name: stg_arxiv__ocr_document_elements
+    description: Analytics-facing projection of canonical ArXiv OCR content elements.
+    columns:
+      - {name: processing_id, description: Paper content model and configuration identity., data_type: varchar}
+      - {name: element_id, description: Deterministic element identifier., data_type: varchar}
+      - {name: arxiv_id, description: Source paper identifier., data_type: varchar}
+      - {name: page_number, description: One-based source page number., data_type: bigint}
+      - {name: reading_order, description: Zero-based page reading order., data_type: bigint}
+      - {name: element_type, description: Canonical block type., data_type: varchar}
+      - {name: bbox_json, description: Normalized bounding box JSON., data_type: varchar}
+      - {name: text_content, description: Normalized plain text., data_type: varchar}
+      - {name: markdown_content, description: Element Markdown when available., data_type: varchar}
+      - {name: parent_element_id, description: Canonical parent element., data_type: varchar}
+      - {name: raw_attributes_json, description: Forward-compatible model attributes., data_type: varchar}
+      - {name: curated_at, description: Publication timestamp., data_type: timestamp}

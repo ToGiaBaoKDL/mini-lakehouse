@@ -1,0 +1,12 @@
+engineering_analytics:
+  target: dev
+  outputs:
+    dev:
+      type: athena
+      database: awsdatacatalog
+      schema: analytics_engineering
+      region_name: "{{ env_var('AWS_REGION', 'ap-southeast-1') }}"
+      work_group: primary
+      s3_staging_dir: "{{ env_var('DBT_QUERY_RESULTS_URI') }}"
+      s3_data_dir: "{{ env_var('DBT_ANALYTICS_URI') }}/engineering/tables"
+      threads: "{{ env_var('DBT_THREADS', '4') | int }}"

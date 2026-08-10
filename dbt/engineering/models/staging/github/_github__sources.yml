@@ -6,6 +6,8 @@ sources:
     database: awsdatacatalog
     schema: curated_github
     loader: emr-serverless
+    config:
+      tags: [github, engineering]
     meta:
       owner: data-platform
       contact: baokdl2226@gmail.com

@@ -1,0 +1,39 @@
+version: 2
+
+models:
+  - name: int_research__papers_enriched
+    description: Current active ArXiv papers enriched with reusable publication attributes.
+    columns:
+      - {name: arxiv_id, description: Stable ArXiv article identifier., data_type: varchar}
+      - {name: oai_identifier, description: Stable OAI identifier., data_type: varchar}
+      - {name: title, description: Current normalized title., data_type: varchar}
+      - {name: abstract, description: Current normalized abstract., data_type: varchar}
+      - {name: license_uri, description: Current license URI., data_type: varchar}
+      - {name: doi, description: Current DOI., data_type: varchar}
+      - {name: journal_ref, description: Current journal reference., data_type: varchar}
+      - {name: comments, description: Current author comments., data_type: varchar}
+      - {name: created_date, description: Original submission date., data_type: date}
+      - {name: updated_date, description: Latest revision date., data_type: date}
+      - {name: oai_datestamp, description: Latest observed OAI modification date., data_type: date}
+      - {name: pdf_url, description: Canonical PDF download URL., data_type: varchar}
+      - {name: author_count, description: Number of current author occurrences., data_type: bigint}
+      - {name: category_count, description: Number of current category memberships., data_type: bigint}
+      - {name: primary_category, description: Current primary ArXiv category., data_type: varchar}
+      - {name: has_abstract, description: Whether a non-empty abstract is available., data_type: boolean}
+      - {name: has_license, description: Whether a non-empty license URI is available., data_type: boolean}
+      - {name: has_doi, description: Whether a non-empty DOI is available., data_type: boolean}
+      - {name: has_journal_reference, description: Whether a non-empty journal reference is available., data_type: boolean}
+      - {name: is_cross_listed, description: Whether the paper belongs to multiple categories., data_type: boolean}
+      - {name: revision_lag_days, description: Days from original submission to latest revision., data_type: bigint}
+      - {name: curated_at, description: Latest curation timestamp., data_type: timestamp}
+
+  - name: int_research__ocr_content_profile
+    description: Reusable OCR content measures at processing identity and paper grain.
+    columns:
+      - {name: processing_id, description: Paper content model and configuration identity., data_type: varchar}
+      - {name: arxiv_id, description: Source paper identifier., data_type: varchar}
+      - {name: observed_page_count, description: Distinct pages represented by canonical elements., data_type: bigint}
+      - {name: element_count, description: Total canonical content elements., data_type: bigint}
+      - {name: element_type_count, description: Distinct canonical element types., data_type: bigint}
+      - {name: text_character_count, description: Total normalized plain-text characters., data_type: bigint}
+      - {name: markdown_element_count, description: Elements carrying non-empty Markdown., data_type: bigint}

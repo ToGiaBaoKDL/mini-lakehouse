@@ -1,7 +1,7 @@
 [project]
-name = "analytics"
+name = "dbt-runtime"
 version = "0.1.0"
-description = "dbt analytics transformations executed through Amazon Athena."
+description = "Shared dbt Athena runtime for independently released analytics domains."
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "dbt-athena==1.11.0",

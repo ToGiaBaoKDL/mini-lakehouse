@@ -1,0 +1,104 @@
+version: 2
+
+models:
+  - name: dim_research_papers
+    description: Current active research-paper dimension at one row per ArXiv article.
+    columns:
+      - name: arxiv_id
+        description: Stable ArXiv article identifier.
+        data_type: varchar
+        data_tests: [not_null, unique]
+      - {name: oai_identifier, description: Stable OAI identifier., data_type: varchar}
+      - {name: title, description: Current normalized title., data_type: varchar}
+      - {name: abstract, description: Current normalized abstract., data_type: varchar}
+      - {name: license_uri, description: Current license URI., data_type: varchar}
+      - {name: doi, description: Current DOI., data_type: varchar}
+      - {name: journal_ref, description: Current journal reference., data_type: varchar}
+      - {name: comments, description: Current author comments., data_type: varchar}
+      - {name: created_date, description: Original submission date., data_type: date}
+      - {name: updated_date, description: Latest revision date., data_type: date}
+      - {name: oai_datestamp, description: Latest observed OAI modification date., data_type: date}
+      - {name: pdf_url, description: Canonical PDF download URL., data_type: varchar}
+      - {name: author_count, description: Number of current author occurrences., data_type: bigint}
+      - {name: category_count, description: Number of current category memberships., data_type: bigint}
+      - {name: primary_category, description: Current primary ArXiv category., data_type: varchar}
+      - {name: has_abstract, description: Whether a non-empty abstract is available., data_type: boolean}
+      - {name: has_license, description: Whether a non-empty license URI is available., data_type: boolean}
+      - {name: has_doi, description: Whether a non-empty DOI is available., data_type: boolean}
+      - {name: has_journal_reference, description: Whether a non-empty journal reference is available., data_type: boolean}
+      - {name: is_cross_listed, description: Whether the paper belongs to multiple categories., data_type: boolean}
+      - {name: revision_lag_days, description: Days from original submission to latest revision., data_type: bigint}
+      - {name: curated_at, description: Latest curation timestamp., data_type: timestamp}
+
+  - name: fct_research_publications_daily
+    description: Daily research publication measures at publication date and primary category grain.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [publication_date, primary_category]
+    columns:
+      - name: publication_date
+        description: Original ArXiv submission date.
+        data_type: date
+        data_tests: [not_null]
+      - name: primary_category
+        description: Primary ArXiv category or uncategorized when unavailable.
+        data_type: varchar
+        data_tests: [not_null]
+      - {name: paper_count, description: Papers first submitted in the date and category., data_type: bigint}
+      - {name: revised_paper_count, description: Papers with a revision after original submission., data_type: bigint}
+      - {name: cross_listed_paper_count, description: Papers assigned to multiple categories., data_type: bigint}
+      - {name: papers_with_doi_count, description: Papers carrying a DOI., data_type: bigint}
+      - {name: papers_with_journal_reference_count, description: Papers carrying a journal reference., data_type: bigint}
+      - {name: author_occurrence_count, description: Total paper-author occurrences across the group., data_type: bigint}
+      - {name: avg_author_count, description: Average author occurrences per paper., data_type: double}
+      - {name: avg_category_count, description: Average category memberships per paper., data_type: double}
+      - {name: avg_revision_lag_days, description: Average days from submission to latest revision., data_type: double}
+
+  - name: fct_document_processing_runs
+    description: OCR execution observability and published-content measures at one row per run.
+    columns:
+      - name: run_id
+        description: Deterministic OCR attempt identifier.
+        data_type: varchar
+        data_tests: [not_null, unique]
+      - {name: request_id, description: Stable paper mutation and processor request identifier., data_type: varchar}
+      - name: arxiv_id
+        description: Source paper identifier.
+        data_type: varchar
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: source('arxiv', 'papers')
+                field: arxiv_id
+      - {name: oai_datestamp, description: Selecting paper mutation date., data_type: date}
+      - {name: source_record_sha256, description: Selecting canonical metadata mutation hash., data_type: varchar}
+      - {name: pdf_sha256, description: Observed source PDF hash., data_type: varchar}
+      - {name: pdf_size_bytes, description: Observed source PDF size., data_type: bigint}
+      - {name: page_count, description: Observed PDF page count., data_type: bigint}
+      - {name: processing_id, description: Paper content model and configuration identity., data_type: varchar}
+      - {name: model_repository, description: OCR model repository., data_type: varchar}
+      - {name: model_revision, description: Pinned OCR model revision., data_type: varchar}
+      - {name: layout_model_repository, description: Layout model repository., data_type: varchar}
+      - {name: layout_model_revision, description: Pinned layout model revision., data_type: varchar}
+      - {name: adapter_version, description: Canonical adapter version., data_type: varchar}
+      - {name: config_hash, description: Canonical processor configuration hash., data_type: varchar}
+      - {name: state, description: Canonical document state., data_type: varchar}
+      - {name: attempt, description: Attempt ordinal for this processor request., data_type: bigint}
+      - {name: provider, description: Remote execution provider., data_type: varchar}
+      - {name: provider_reference, description: Provider-owned application or job reference., data_type: varchar}
+      - {name: provider_run_id, description: Exact provider execution identifier., data_type: varchar}
+      - {name: started_at, description: Durable attempt start timestamp., data_type: timestamp}
+      - {name: completed_at, description: Terminal attempt timestamp., data_type: timestamp}
+      - {name: duration_seconds, description: Non-negative terminal run duration in seconds., data_type: bigint}
+      - {name: is_terminal, description: Whether the attempt has a terminal timestamp., data_type: boolean}
+      - {name: has_published_artifact, description: Whether canonical artifact identity and manifest are present., data_type: boolean}
+      - {name: artifact_uri, description: Published per-paper artifact root., data_type: varchar}
+      - {name: manifest_sha256, description: Per-document content manifest hash., data_type: varchar}
+      - {name: observed_page_count, description: Distinct pages represented by canonical elements., data_type: bigint}
+      - {name: element_count, description: Total canonical content elements., data_type: bigint}
+      - {name: element_type_count, description: Distinct canonical element types., data_type: bigint}
+      - {name: text_character_count, description: Total normalized plain-text characters., data_type: bigint}
+      - {name: markdown_element_count, description: Elements carrying non-empty Markdown., data_type: bigint}
+      - {name: curated_at, description: Latest run-state publication timestamp., data_type: timestamp}

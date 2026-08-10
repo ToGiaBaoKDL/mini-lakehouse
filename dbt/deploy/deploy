@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 2 ]; then
+    printf '%s\n' "Usage: dbt/deploy/deploy <dbt-engineering|dbt-research> <image@sha256:digest>" >&2
+    exit 2
+fi
+
+component=$1
+image=$2
+case "$component" in
+    dbt-engineering|dbt-research) ;;
+    *) exit 2 ;;
+esac
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+bundle_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
+"$bundle_root/infra/runtime/delivery/pull-image" "$component" "$image"
+docker tag "$image" "$component:runtime"
