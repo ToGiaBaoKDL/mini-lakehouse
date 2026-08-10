@@ -185,8 +185,9 @@ job and a small launcher; provider SDKs own remote execution and log streaming.
 
 Modal uses a persistent deployed app because `Function.from_name()` cannot resolve an ephemeral
 runner. Run `make ocr-modal-runner-deploy` when its runner, model, or configuration changes. The
-command reads the existing OCR workload identity and provider secret, then deploys the configured
-app and function to the explicitly configured Modal environment.
+command uses the operator's standard AWS credential chain to read the provider secret, then deploys
+the configured app and function to the explicitly configured Modal environment. The OCR workload
+identity remains isolated to runtime data access.
 
 ## Add a source
 

@@ -49,6 +49,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+    AWS_SHARED_CREDENTIALS_FILE=/dev/null \
     AWS_CONFIG_FILE="$aws_config" AWS_PROFILE=default \
     aws ecr get-login-password \
     | DOCKER_CONFIG="$docker_config" \

@@ -200,8 +200,9 @@ gh workflow run release-arxiv-inspector.yml --ref main
 gh workflow run deploy-cloudflare.yml --ref main
 ```
 
-Deploy the remote GPU runner after its provider secret and the local `ocr-worker` workload identity
-are available. Re-running this command updates the same persistent Modal app in place:
+Deploy the remote GPU runner after its provider secret is available. This control-plane operation
+uses the selected operator AWS profile; it does not impersonate the runtime OCR role. Re-running it
+updates the same persistent Modal app in place:
 
 ```bash
 AWS_PROFILE=tgbao-dev make ocr-modal-runner-deploy

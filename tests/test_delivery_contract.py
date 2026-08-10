@@ -64,6 +64,20 @@ def test_service_pull_uses_short_lived_registry_login() -> None:
     assert "AWS CLI v2 is missing from the services host." in pull
 
 
+def test_host_workload_identities_ignore_operator_credentials() -> None:
+    sources = [
+        Path(path).read_text(encoding="utf-8")
+        for path in (
+            "infra/runtime/cloudflare/deploy",
+            "infra/runtime/delivery/pull-image",
+            "infra/runtime/postgres/deploy",
+            "orchestration/deploy/reconcile",
+        )
+    ]
+
+    assert all("AWS_SHARED_CREDENTIALS_FILE=/dev/null" in source for source in sources)
+
+
 def test_each_component_owns_its_deployment_operation() -> None:
     airflow = "\n".join(
         Path(path).read_text(encoding="utf-8")

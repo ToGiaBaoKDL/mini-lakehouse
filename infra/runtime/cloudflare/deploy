@@ -30,6 +30,7 @@ test -r "$host_config" || {
 
 aws_runtime() {
     env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+        AWS_SHARED_CREDENTIALS_FILE=/dev/null \
         AWS_CONFIG_FILE="$host_config" AWS_PROFILE=default AWS_PAGER= aws "$@"
 }
 

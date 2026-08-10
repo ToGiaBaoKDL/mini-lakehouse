@@ -1,5 +1,6 @@
 DBT_PROJECT_DIRS := $(patsubst %/,%,$(dir $(wildcard dbt/*/dbt_project.yml)))
-OCR_AWS_CONFIG := $(AWS_IDENTITY_DIR)/ocr-worker/host-config
+AWS_WORKLOAD_ENV := env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+	AWS_SHARED_CREDENTIALS_FILE=/dev/null AWS_PROFILE=default
 
 .PHONY: catalog-apply catalog-validate ocr-kaggle-runner-publish \
 	ocr-modal-runner-deploy \
@@ -13,28 +14,22 @@ catalog-validate: ## Validate Glue/Iceberg state against YAML contracts.
 	uv run --package lakehouse --extra catalog --extra cli python -m lakehouse.catalog.admin validate
 
 ocr-kaggle-runner-publish: preflight ## Publish an immutable Kaggle OCR runner Dataset version.
-	@test -r "$(OCR_AWS_CONFIG)" || { printf '%s\n' "Render the ocr-worker identity first."; exit 1; }
 	@set -eu; \
-		SECRET_ID="$$(env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
-			AWS_CONFIG_FILE="$(OCR_AWS_CONFIG)" AWS_PROFILE=default aws ssm get-parameter \
+		SECRET_ID="$$(aws ssm get-parameter \
 			--name "$(RUNTIME_PARAMETER_PREFIX)/ocr/providers/kaggle_secret_id" \
 			--query Parameter.Value --output text)"; \
-		CREDENTIALS="$$(env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
-			AWS_CONFIG_FILE="$(OCR_AWS_CONFIG)" AWS_PROFILE=default aws secretsmanager get-secret-value \
+		CREDENTIALS="$$(aws secretsmanager get-secret-value \
 			--secret-id "$${SECRET_ID}" --query SecretString --output text)"; \
 		KAGGLE_USERNAME="$$(printf '%s' "$${CREDENTIALS}" | jq -er '.username | select(type == "string" and length > 0)')" \
 		KAGGLE_API_TOKEN="$$(printf '%s' "$${CREDENTIALS}" | jq -er '.api_token | select(type == "string" and length > 0)')" \
 			uv run --project ocr --extra kaggle-publish python ocr/runners/kaggle/glm_ocr/publish.py
 
 ocr-modal-runner-deploy: preflight ## Deploy the persistent Modal OCR runner.
-	@test -r "$(OCR_AWS_CONFIG)" || { printf '%s\n' "Render the ocr-worker identity first."; exit 1; }
 	@set -eu; \
-		SECRET_ID="$$(env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
-			AWS_CONFIG_FILE="$(OCR_AWS_CONFIG)" AWS_PROFILE=default aws ssm get-parameter \
+		SECRET_ID="$$(aws ssm get-parameter \
 			--name "$(RUNTIME_PARAMETER_PREFIX)/ocr/providers/modal_secret_id" \
 			--query Parameter.Value --output text)"; \
-		CREDENTIALS="$$(env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
-			AWS_CONFIG_FILE="$(OCR_AWS_CONFIG)" AWS_PROFILE=default aws secretsmanager get-secret-value \
+		CREDENTIALS="$$(aws secretsmanager get-secret-value \
 			--secret-id "$${SECRET_ID}" --query SecretString --output text)"; \
 		MODAL_ENVIRONMENT="$$(uv run --project ocr python -c \
 			'from document_ocr.config import load_ocr_config; print(load_ocr_config("arxiv_glm_ocr").runner.modal.environment)')"; \
@@ -66,14 +61,13 @@ dbt-build: ## Build DBT_DOMAIN analytics with its isolated runtime identity.
 	@set -eu; \
 		QUERY_RESULTS_NAME="$(RUNTIME_PARAMETER_PREFIX)/athena/dbt_$(DBT_DOMAIN)_output_uri"; \
 		ANALYTICS_NAME="$(RUNTIME_PARAMETER_PREFIX)/storage/analytics_uri"; \
-		PARAMETERS="$$(env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
-			AWS_CONFIG_FILE="$(AWS_IDENTITY_DIR)/dbt-$(DBT_DOMAIN)/host-config" AWS_PROFILE=default aws ssm get-parameters \
+		PARAMETERS="$$($(AWS_WORKLOAD_ENV) AWS_CONFIG_FILE="$(AWS_IDENTITY_DIR)/dbt-$(DBT_DOMAIN)/host-config" aws ssm get-parameters \
 			--names "$${QUERY_RESULTS_NAME}" "$${ANALYTICS_NAME}" --output json)"; \
 		QUERY_RESULTS_URI="$$(printf '%s' "$${PARAMETERS}" | jq -er --arg name "$${QUERY_RESULTS_NAME}" \
 			'.Parameters[] | select(.Name == $$name) | .Value')"; \
 		ANALYTICS_URI="$$(printf '%s' "$${PARAMETERS}" | jq -er --arg name "$${ANALYTICS_NAME}" \
 			'.Parameters[] | select(.Name == $$name) | .Value')"; \
-		AWS_CONFIG_FILE="$(AWS_IDENTITY_DIR)/dbt-$(DBT_DOMAIN)/host-config" AWS_PROFILE=default \
+		$(AWS_WORKLOAD_ENV) AWS_CONFIG_FILE="$(AWS_IDENTITY_DIR)/dbt-$(DBT_DOMAIN)/host-config" \
 		DBT_QUERY_RESULTS_URI="$${QUERY_RESULTS_URI}" \
 		DBT_ANALYTICS_URI="$${ANALYTICS_URI}" uv run --project dbt/runtime dbt build \
 			--project-dir "dbt/$(DBT_DOMAIN)" --profiles-dir "dbt/$(DBT_DOMAIN)"
