@@ -24,9 +24,10 @@ def test_partitioned_table_maintenance_bounds_data_rewrite_and_metadata_pruning(
     assert "CALL glue.system.expire_snapshots" in snapshots
     assert "older_than => TIMESTAMP '2026-07-25 12:00:00'" in snapshots
     assert "retain_last => 5" in snapshots
+    assert "stream_results => true" in snapshots
     orphans = statements[2]
     assert "CALL glue.system.remove_orphan_files" in orphans
-    assert all("stream_results => true" in statement for statement in statements[1:])
+    assert "stream_results" not in orphans
 
 
 def test_unpartitioned_table_maintenance_never_triggers_a_full_data_rewrite() -> None:

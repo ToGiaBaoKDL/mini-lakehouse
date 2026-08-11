@@ -102,8 +102,7 @@ def maintenance_statements(
         CALL {CATALOG_NAME}.system.remove_orphan_files(
             table => {_string_literal(table_name)},
             older_than => {_timestamp_literal(as_of - timedelta(days=policy.orphan_days))},
-            max_concurrent_deletes => 20,
-            stream_results => true
+            max_concurrent_deletes => 20
         )
         """
     )
