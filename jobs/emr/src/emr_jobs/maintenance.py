@@ -37,10 +37,6 @@ POLICIES = {
 }
 
 
-def _timestamp(value: datetime) -> str:
-    return value.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
-
-
 def _optimize_filter(
     table: ManagedIcebergTableContract,
     cutoff: date,
@@ -50,60 +46,79 @@ def _optimize_filter(
     partition = table.partitioning[0]
     column = next(column for column in table.columns if column.name == partition.field)
     if column.data_type == "date":
-        return f"{partition.field} >= DATE ''{cutoff.isoformat()}''"
+        return f"{partition.field} >= DATE '{cutoff.isoformat()}'"
     if column.data_type == "timestamptz":
-        return f"{partition.field} >= TIMESTAMP ''{cutoff.isoformat()} 00:00:00''"
+        return f"{partition.field} >= TIMESTAMP '{cutoff.isoformat()} 00:00:00'"
     return None
 
 
-def maintenance_statements(
+def maintenance_commands(
     *,
     table_name: str,
     table: ManagedIcebergTableContract,
     policy: MaintenancePolicy,
     as_of: datetime,
-) -> tuple[str, ...]:
-    statements = []
+) -> tuple[tuple[str, dict[str, object]], ...]:
+    commands = []
     optimize_filter = _optimize_filter(table, (as_of - timedelta(days=policy.optimize_days)).date())
     if optimize_filter:
-        statements.append(
-            f"""
+        commands.append(
+            (
+                f"""
             CALL {CATALOG_NAME}.system.rewrite_data_files(
-                table => '{table_name}',
+                table => :table_name,
                 strategy => 'binpack',
                 options => map(
-                    'target-file-size-bytes', '{policy.target_file_size_bytes}',
-                    'max-file-group-size-bytes', '{5 * 1024 * 1024 * 1024}',
+                    'target-file-size-bytes', :target_file_size_bytes,
+                    'max-file-group-size-bytes', :max_file_group_size_bytes,
                     'partial-progress.enabled', 'true'
                 ),
-                where => '{optimize_filter}'
+                where => :optimize_filter
             )
-            """
+            """,
+                {
+                    "table_name": table_name,
+                    "target_file_size_bytes": str(policy.target_file_size_bytes),
+                    "max_file_group_size_bytes": str(5 * 1024 * 1024 * 1024),
+                    "optimize_filter": optimize_filter,
+                },
+            )
         )
 
-    snapshot_cutoff = _timestamp(as_of - timedelta(days=policy.snapshot_days))
-    statements.append(
-        f"""
+    commands.append(
+        (
+            f"""
         CALL {CATALOG_NAME}.system.expire_snapshots(
-            table => '{table_name}',
-            older_than => TIMESTAMP '{snapshot_cutoff}',
-            retain_last => {policy.retain_snapshots},
+            table => :table_name,
+            older_than => :snapshot_cutoff,
+            retain_last => :retain_snapshots,
             stream_results => true
         )
-        """
+        """,
+            {
+                "table_name": table_name,
+                "snapshot_cutoff": as_of - timedelta(days=policy.snapshot_days),
+                "retain_snapshots": policy.retain_snapshots,
+            },
+        )
     )
-    orphan_cutoff = _timestamp(as_of - timedelta(days=policy.orphan_days))
-    statements.append(
-        f"""
+    commands.append(
+        (
+            f"""
         CALL {CATALOG_NAME}.system.remove_orphan_files(
-            table => '{table_name}',
-            older_than => TIMESTAMP '{orphan_cutoff}',
+            table => :table_name,
+            older_than => :orphan_cutoff,
             max_concurrent_deletes => 20,
             stream_results => true
         )
-        """
+        """,
+            {
+                "table_name": table_name,
+                "orphan_cutoff": as_of - timedelta(days=policy.orphan_days),
+            },
+        )
     )
-    return tuple(statements)
+    return tuple(commands)
 
 
 def maintain_table(
@@ -114,16 +129,16 @@ def maintain_table(
     policy: MaintenancePolicy,
     as_of: datetime,
 ) -> None:
-    statements = maintenance_statements(
+    commands = maintenance_commands(
         table_name=table_name,
         table=table,
         policy=policy,
         as_of=as_of,
     )
-    if len(statements) == 2:
+    if len(commands) == 2:
         logger.info("Skipping data-file rewrite for unpartitioned table {}", table_name)
-    for statement in statements:
-        spark.sql(statement)
+    for statement, arguments in commands:
+        spark.sql(statement, args=arguments)
 
 
 def run(*, contracts_uri: str) -> None:
