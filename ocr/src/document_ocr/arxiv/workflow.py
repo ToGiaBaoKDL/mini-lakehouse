@@ -1,4 +1,4 @@
-"""Coordinate one curated ArXiv document across a remote OCR provider."""
+"""Coordinate one curated ArXiv document across a crash-safe execution backend."""
 
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,14 +9,15 @@ from loguru import logger
 
 from document_ocr.arxiv.store import IMPORTED_STATE, ArxivOcrStore
 from document_ocr.config import OcrConfig
+from document_ocr.execution import ExecutionBackend, ExecutionError
 from document_ocr.identity import request_id
 from document_ocr.output import extract_ocr_output
-from document_ocr.protocol import OcrDocumentRequest, OcrJob, OcrReuseReference
-from document_ocr.providers.base import (
-    OcrProvider,
-    OcrProviderError,
-    OcrProviderRunFailedError,
-    OcrRunNotFoundError,
+from document_ocr.protocol import (
+    DocumentJob,
+    OcrDocumentRequest,
+    OcrJob,
+    OcrReuseReference,
+    parse_document_job,
 )
 
 PROCESSING_STATE = "processing"
@@ -34,11 +35,11 @@ class ArxivOcrWorkflow:
         *,
         store: ArxivOcrStore,
         processor: OcrConfig,
-        provider: OcrProvider,
+        execution: ExecutionBackend,
     ) -> None:
         self._store = store
         self._processor = processor
-        self._provider = provider
+        self._execution = execution
 
     @staticmethod
     def _latest(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -87,7 +88,7 @@ class ArxivOcrWorkflow:
             manifest_sha256=latest["manifest_sha256"],
         )
 
-    def _job(self, arxiv_id: str) -> tuple[OcrJob | None, dict[str, Any]]:
+    def _job(self, arxiv_id: str) -> tuple[DocumentJob | None, dict[str, Any]]:
         try:
             paper = self._store.paper(arxiv_id)
         except ValueError as error:
@@ -105,11 +106,11 @@ class ArxivOcrWorkflow:
         if latest is not None and latest["state"] == IMPORTED_STATE:
             return None, latest
         if latest is not None and latest["state"] == PROCESSING_STATE:
-            job = OcrJob.model_validate_json(latest["job_json"])
+            job = parse_document_job(latest["job_json"])
             if (
                 job.run_id != latest["run_id"]
-                or latest["provider"] != self._provider.name
-                or latest["provider_reference"] != self._provider.reference
+                or latest["provider"] != self._execution.name
+                or latest["provider_reference"] != self._execution.reference
             ):
                 raise OcrError("Persisted OCR execution ownership has drifted")
             return job, latest
@@ -136,10 +137,15 @@ class ArxivOcrWorkflow:
             "pdf_size_bytes": None,
             "page_count": None,
             "processing_id": None,
-            "model_repository": job.model.repository,
-            "model_revision": job.model.revision,
-            "layout_model_repository": job.layout_model.repository,
-            "layout_model_revision": job.layout_model.revision,
+            "processor": job.adapter,
+            "model_repository": job.model.repository if isinstance(job, OcrJob) else None,
+            "model_revision": job.model.revision if isinstance(job, OcrJob) else None,
+            "layout_model_repository": (
+                job.layout_model.repository if isinstance(job, OcrJob) else None
+            ),
+            "layout_model_revision": (
+                job.layout_model.revision if isinstance(job, OcrJob) else None
+            ),
             "adapter_version": job.adapter_version,
             "config_hash": job.config_hash,
             "artifact_uri": None,
@@ -149,8 +155,8 @@ class ArxivOcrWorkflow:
             "started_at": now,
             "completed_at": None,
             "curated_at": now,
-            "provider": self._provider.name,
-            "provider_reference": self._provider.reference,
+            "provider": self._execution.name,
+            "provider_reference": self._execution.reference,
             "provider_run_id": None,
             "job_json": job.model_dump_json(),
         }
@@ -167,43 +173,32 @@ class ArxivOcrWorkflow:
     def _log(self, message: str) -> None:
         for line in message.rstrip().splitlines():
             if line:
-                logger.info("[{}] {}", self._provider.name, line)
-
-    def _wait(self, run: dict[str, Any]) -> None:
-        provider_run_id = run["provider_run_id"]
-        if not isinstance(provider_run_id, str):
-            raise RuntimeError("Submitted OCR run has no provider execution ID")
-        try:
-            self._provider.wait(provider_run_id, self._log)
-        except OcrRunNotFoundError as error:
-            self._mark_failed(run)
-            raise OcrError(str(error)) from error
-        except OcrProviderRunFailedError as error:
-            self._mark_failed(run)
-            raise OcrError(str(error)) from error
-        except OcrProviderError as error:
-            raise OcrError(str(error)) from error
+                logger.info("[{}] {}", self._execution.name, line)
 
     def run(self, arxiv_id: str) -> dict[str, Any]:
         job, run = self._job(arxiv_id)
         if job is None:
             logger.info("ArXiv {} already has imported OCR for this revision", arxiv_id)
             return run
-        if run["provider_run_id"] is None:
-            provider_run_id = self._provider.submit(job)
-            run.update(
-                provider_run_id=provider_run_id,
-            )
-            self._store.save_run(run)
-        self._wait(run)
-
         with TemporaryDirectory(prefix="arxiv-ocr-") as temporary_directory:
             temporary = Path(temporary_directory)
-            output = temporary / "provider"
-            provider_run_id = run["provider_run_id"]
-            if not isinstance(provider_run_id, str):
-                raise RuntimeError("Submitted OCR run has no provider execution ID")
-            self._provider.download_output(provider_run_id, output)
+            output = temporary / "execution"
+
+            def checkpoint(token: str) -> None:
+                run.update(provider_run_id=token)
+                self._store.save_run(run)
+
+            try:
+                self._execution.execute(
+                    job,
+                    output,
+                    self._log,
+                    resume_token=run["provider_run_id"],
+                    checkpoint=checkpoint,
+                )
+            except ExecutionError as error:
+                self._mark_failed(run)
+                raise OcrError(str(error)) from error
             extracted = temporary / "artifacts"
             output_result = extract_ocr_output(output, extracted, job=job)
             result = output_result.result

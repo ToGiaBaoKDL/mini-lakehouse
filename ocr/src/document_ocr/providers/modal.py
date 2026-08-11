@@ -6,7 +6,7 @@ from typing import Literal
 
 import modal
 
-from document_ocr.config import OcrConfig
+from document_ocr.config import GlmOcrConfig
 from document_ocr.output import OCR_RESULT_FILES
 from document_ocr.protocol import OcrJob
 from document_ocr.providers.base import (
@@ -24,7 +24,7 @@ class ModalProvider:
     def __init__(
         self,
         settings: ModalSettings,
-        processor: OcrConfig,
+        processor: GlmOcrConfig,
         *,
         client: modal.Client | None = None,
     ) -> None:

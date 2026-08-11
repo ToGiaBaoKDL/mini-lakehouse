@@ -54,10 +54,11 @@ models:
       - {name: pdf_size_bytes, description: Observed source PDF size., data_type: bigint}
       - {name: page_count, description: Observed PDF page count., data_type: bigint}
       - {name: processing_id, description: Paper content model and configuration identity., data_type: varchar}
-      - {name: model_repository, description: OCR model repository., data_type: varchar}
-      - {name: model_revision, description: Pinned OCR model revision., data_type: varchar}
-      - {name: layout_model_repository, description: Layout model repository., data_type: varchar}
-      - {name: layout_model_revision, description: Pinned layout model revision., data_type: varchar}
+      - {name: processor, description: Canonical processor adapter with historical nulls normalized to GLM-OCR., data_type: varchar}
+      - {name: model_repository, description: OCR model repository when applicable., data_type: varchar}
+      - {name: model_revision, description: Pinned OCR model revision when applicable., data_type: varchar}
+      - {name: layout_model_repository, description: Layout model repository when applicable., data_type: varchar}
+      - {name: layout_model_revision, description: Pinned layout model revision when applicable., data_type: varchar}
       - {name: adapter_version, description: Canonical adapter version., data_type: varchar}
       - {name: config_hash, description: Canonical processor configuration hash., data_type: varchar}
       - {name: artifact_uri, description: Published per-paper artifact root., data_type: varchar}
@@ -67,9 +68,9 @@ models:
       - {name: started_at, description: Durable attempt start timestamp., data_type: timestamp}
       - {name: completed_at, description: Terminal attempt timestamp., data_type: timestamp}
       - {name: curated_at, description: Latest state publication timestamp., data_type: timestamp}
-      - {name: provider, description: Remote execution provider., data_type: varchar}
-      - {name: provider_reference, description: Provider-owned application or job reference., data_type: varchar}
-      - {name: provider_run_id, description: Exact provider execution identifier., data_type: varchar}
+      - {name: provider, description: OCI or remote execution backend., data_type: varchar}
+      - {name: provider_reference, description: Backend-owned worker application or job reference., data_type: varchar}
+      - {name: provider_run_id, description: Exact backend checkpoint token., data_type: varchar}
       - {name: job_json, description: Immutable validated runner request., data_type: varchar}
 
   - name: stg_arxiv__ocr_document_elements

@@ -14,6 +14,7 @@ select
     runs.pdf_size_bytes,
     runs.page_count,
     runs.processing_id,
+    runs.processor,
     runs.model_repository,
     runs.model_revision,
     runs.layout_model_repository,

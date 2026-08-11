@@ -37,8 +37,9 @@ class OcrDocumentSummary(DocumentInspectorModel):
     attempt: int = Field(ge=1)
     page_count: int | None = Field(default=None, ge=1)
     processing_id: str | None = None
-    model_repository: str
-    model_revision: str
+    processor: str = "glm_ocr"
+    model_repository: str | None = None
+    model_revision: str | None = None
     completed_at: datetime | None = None
 
 
@@ -58,10 +59,11 @@ class OcrDocumentRun(DocumentInspectorModel):
     pdf_sha256: str | None = None
     pdf_size_bytes: int | None = Field(default=None, ge=0)
     page_count: int | None = Field(default=None, ge=1)
-    model_repository: str
-    model_revision: str
-    layout_model_repository: str
-    layout_model_revision: str
+    processor: str = "glm_ocr"
+    model_repository: str | None = None
+    model_revision: str | None = None
+    layout_model_repository: str | None = None
+    layout_model_revision: str | None = None
     adapter_version: str
     started_at: datetime
     completed_at: datetime | None = None

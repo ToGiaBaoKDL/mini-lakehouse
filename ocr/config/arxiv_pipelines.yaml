@@ -1,0 +1,13 @@
+version: 1
+default_pipeline: opendataloader_cpu
+
+pipelines:
+  opendataloader_cpu:
+    processor: arxiv_opendataloader_pdf
+    execution_backend: oci
+  glm_ocr_modal:
+    processor: arxiv_glm_ocr
+    execution_backend: modal
+  glm_ocr_kaggle:
+    processor: arxiv_glm_ocr
+    execution_backend: kaggle

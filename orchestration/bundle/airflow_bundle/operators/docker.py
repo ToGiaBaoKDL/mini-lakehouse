@@ -33,6 +33,8 @@ def docker_task(
     workload: str,
     execution_timeout: timedelta,
     environment: Mapping[str, str] | None = None,
+    cpus: float = 1.0,
+    mem_limit: str | None = None,
     inlets: Sequence[Asset] = (),
     outlets: Sequence[Asset] = (),
 ) -> LoggedDockerOperator:
@@ -48,6 +50,8 @@ def docker_task(
         command=list(command),
         docker_url="unix://var/run/docker.sock",
         environment=task_environment,
+        cpus=cpus,
+        mem_limit=mem_limit,
         mounts=[
             Mount(
                 source=f"{os.environ['HOST_AWS_IDENTITY_DIR']}/{workload}",

@@ -167,7 +167,7 @@ def test_manual_ocr_dag_processes_exactly_one_requested_document() -> None:
     dag = _dag(_bag(), "etl_docker_arxiv_document_ocr")
     assert dag.schedule is None
     assert dag.max_active_runs == 1
-    assert set(dag.params) == {"arxiv_id", "provider"}
+    assert set(dag.params) == {"arxiv_id", "pipeline"}
 
     task = dag.get_task("process_arxiv_pdf")
     assert isinstance(task, LoggedDockerOperator)
@@ -175,9 +175,11 @@ def test_manual_ocr_dag_processes_exactly_one_requested_document() -> None:
     assert task.command == [
         "--arxiv-id",
         "{{ params.arxiv_id }}",
-        "--provider",
-        "{{ params.provider }}",
+        "--pipeline",
+        "{{ params.pipeline }}",
     ]
+    assert task.cpus == 2.0
+    assert task.mem_limit == "6g"
     assert task.retries == 0
     assert task.environment["AWS_CONFIG_FILE"] == "/run/aws/config"
     assert task.mounts[0]["Source"] == "/tmp/ocr-worker"

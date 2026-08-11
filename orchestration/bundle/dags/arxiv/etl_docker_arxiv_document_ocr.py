@@ -1,4 +1,4 @@
-"""Manually OCR one curated ArXiv PDF through Kaggle or Modal."""
+"""Manually extract one curated ArXiv PDF through a configured pipeline."""
 
 from datetime import timedelta
 
@@ -16,7 +16,7 @@ OCR_IMAGE = "ocr-worker:runtime"
 
 with DAG(
     dag_id="etl_docker_arxiv_document_ocr",
-    description="Run and publish OCR for exactly one curated ArXiv PDF.",
+    description="Run and publish document extraction for exactly one curated ArXiv PDF.",
     schedule=None,
     start_date=DAG_START_DATE,
     catchup=False,
@@ -31,15 +31,15 @@ with DAG(
                 maxLength=255,
                 description="One exact ArXiv ID. This DAG never selects additional documents.",
             ),
-            "provider": Param(
-                default="kaggle",
+            "pipeline": Param(
+                default="opendataloader_cpu",
                 type="string",
-                enum=["kaggle", "modal"],
-                description="Remote GPU execution provider.",
+                enum=["opendataloader_cpu", "glm_ocr_modal", "glm_ocr_kaggle"],
+                description="YAML-configured processor and execution backend.",
             ),
         }
     ),
-    tags=["arxiv", "etl", "docker", "ocr", "gpu"],
+    tags=["arxiv", "etl", "docker", "document-extraction"],
 ) as dag:
     docker_task(
         task_id="process_arxiv_pdf",
@@ -47,10 +47,12 @@ with DAG(
         command=[
             "--arxiv-id",
             "{{ params.arxiv_id }}",
-            "--provider",
-            "{{ params.provider }}",
+            "--pipeline",
+            "{{ params.pipeline }}",
         ],
         workload="ocr-worker",
+        cpus=2.0,
+        mem_limit="6g",
         execution_timeout=timedelta(hours=5),
         inlets=[CURATED_ARXIV_METADATA],
         outlets=[CURATED_ARXIV_OCR],

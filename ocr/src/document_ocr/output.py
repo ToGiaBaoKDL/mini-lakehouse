@@ -10,9 +10,9 @@ from document_ocr.identity import canonical_json_bytes, file_sha256, processing_
 from document_ocr.protocol import (
     DOCUMENT_MANIFEST_PATH,
     PAGE_MARKDOWN_BUNDLE_PATH,
+    DocumentJob,
     OcrDocumentManifest,
     OcrElement,
-    OcrJob,
     OcrRunResult,
 )
 from document_ocr.text import (
@@ -116,7 +116,7 @@ def extract_ocr_output(
     output_directory: Path,
     destination: Path,
     *,
-    job: OcrJob,
+    job: DocumentJob,
 ) -> OcrRunResult:
     output = validate_ocr_output(
         output_directory,

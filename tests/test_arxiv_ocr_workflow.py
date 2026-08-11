@@ -14,6 +14,7 @@ import zstandard
 from botocore.exceptions import ClientError
 from document_ocr.arxiv import ArxivOcrStore, ArxivOcrWorkflow, OcrError
 from document_ocr.config import load_ocr_config
+from document_ocr.execution import RemoteExecutionBackend
 from document_ocr.identity import canonical_json_bytes, processing_id
 from document_ocr.protocol import (
     ArtifactFile,
@@ -277,7 +278,7 @@ def _workflow(
     workflow = ArxivOcrWorkflow(
         store=store,
         processor=processor,
-        provider=cast(Any, provider),
+        execution=RemoteExecutionBackend(cast(Any, provider)),
     )
     return workflow, provider, tables, product, s3
 

@@ -9,6 +9,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    TypeAdapter,
     field_validator,
     model_validator,
 )
@@ -77,16 +78,26 @@ class OcrInference(ProtocolModel):
     layout_device: Literal["cpu", "cuda:0"]
 
 
-class OcrJob(ProtocolModel):
+class OpenDataLoaderOptions(ProtocolModel):
+    """Output-affecting OpenDataLoader options pinned by processor YAML."""
+
+    reading_order: Literal["xycut"]
+    table_method: Literal["default", "cluster"]
+    image_format: Literal["png", "jpeg"]
+    include_header_footer: bool
+    keep_line_breaks: bool
+    replace_invalid_chars: str = Field(min_length=1, max_length=1)
+    use_struct_tree: bool
+    sanitize: bool
+
+
+class DocumentJobBase(ProtocolModel):
     schema_version: Literal["3.0.0"] = OCR_PROTOCOL_VERSION
     run_id: Sha256
     attempt: int = Field(ge=1)
-    model: OcrModel
-    layout_model: OcrModel
     adapter_version: str = Field(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")
     config_hash: Sha256
     limits: OcrLimits
-    inference: OcrInference
     document: OcrDocumentRequest
 
     @model_validator(mode="after")
@@ -115,6 +126,33 @@ class OcrJob(ProtocolModel):
                     f"{document.document_id}"
                 )
         return self
+
+
+class OcrJob(DocumentJobBase):
+    """Backward-compatible GLM-OCR remote runner request."""
+
+    adapter: Literal["glm_ocr"] = "glm_ocr"
+    model: OcrModel
+    layout_model: OcrModel
+    inference: OcrInference
+
+
+class OpenDataLoaderJob(DocumentJobBase):
+    """Native CPU extraction request executed by the OCI worker."""
+
+    adapter: Literal["opendataloader_pdf"]
+    options: OpenDataLoaderOptions
+
+
+type DocumentJob = Annotated[
+    OcrJob | OpenDataLoaderJob,
+    Field(discriminator="adapter"),
+]
+DOCUMENT_JOB_ADAPTER = TypeAdapter(DocumentJob)
+
+
+def parse_document_job(value: str | bytes) -> DocumentJob:
+    return DOCUMENT_JOB_ADAPTER.validate_json(value)
 
 
 class ArtifactFile(ProtocolModel):

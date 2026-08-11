@@ -13,7 +13,7 @@ from pyiceberg.table import Table
 
 from document_ocr.identity import file_sha256
 from document_ocr.output import read_elements
-from document_ocr.protocol import OcrDocumentResult, OcrJob
+from document_ocr.protocol import DocumentJob, OcrDocumentResult
 
 IMPORTED_STATE = "imported"
 
@@ -106,7 +106,7 @@ class ArxivOcrStore:
     def publish(
         self,
         *,
-        job: OcrJob,
+        job: DocumentJob,
         run: dict[str, Any],
         extracted: Path,
         result: OcrDocumentResult,

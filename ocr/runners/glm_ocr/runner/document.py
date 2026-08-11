@@ -1,46 +1,30 @@
 """Download one PDF and adapt the official GLM-OCR result to the output protocol."""
 
-import gzip
-import hashlib
-import io
 import json
-from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-import fitz
-import requests
+from document_ocr.artifacts import describe_artifacts, write_elements, write_gzip_json
+from document_ocr.errors import DocumentProcessingError
 from document_ocr.identity import (
     canonical_json_bytes,
     canonical_json_sha256,
-    file_sha256,
     processing_id,
 )
 from document_ocr.protocol import (
     PAGE_MARKDOWN_BUNDLE_PATH,
-    ArtifactFile,
     OcrDocumentManifest,
     OcrDocumentRequest,
     OcrDocumentResult,
     OcrElement,
     OcrJob,
-    OcrPageMarkdownBundle,
 )
+from document_ocr.source import download_pdf, pdf_page_sizes
 from document_ocr.text import build_page_markdown_bundle
 from glmocr import GlmOcr
 
-MEDIA_TYPES = {
-    ".gz": "application/gzip",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png": "image/png",
-}
-
-
-class DocumentError(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(f"{code}: {message}")
+DocumentError = DocumentProcessingError
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,79 +37,8 @@ class PreparedDocument:
     page_count: int
 
 
-def _pdf_session() -> requests.Session:
-    session = requests.Session()
-    session.headers["User-Agent"] = "document-ocr-arxiv/1.0"
-    return session
-
-
-PDF_SESSION = _pdf_session()
-
-
-def download_pdf(
-    request: OcrDocumentRequest,
-    destination: Path,
-    max_bytes: int,
-) -> tuple[str, int]:
-    try:
-        with PDF_SESSION.get(request.pdf_url, stream=True, timeout=(30, 180)) as response:
-            if response.status_code == 404:
-                raise DocumentError("pdf_not_found", "ArXiv returned HTTP 404")
-            if response.status_code == 429 or response.status_code >= 500:
-                raise DocumentError(
-                    "pdf_source_unavailable",
-                    f"ArXiv returned HTTP {response.status_code}",
-                )
-            response.raise_for_status()
-            if not response.url.startswith("https://"):
-                raise DocumentError(
-                    "unsafe_pdf_redirect",
-                    "ArXiv redirected the PDF to a non-HTTPS URL",
-                )
-            declared_size = int(response.headers.get("content-length", "0"))
-            if declared_size > max_bytes:
-                raise DocumentError(
-                    "pdf_too_large",
-                    f"PDF declares {declared_size} bytes; maximum is {max_bytes}",
-                )
-            digest = hashlib.sha256()
-            size = 0
-            with destination.open("xb") as output:
-                for chunk in response.iter_content(chunk_size=1024 * 1024):
-                    if not chunk:
-                        continue
-                    size += len(chunk)
-                    if size > max_bytes:
-                        raise DocumentError(
-                            "pdf_too_large",
-                            f"PDF exceeds the {max_bytes}-byte limit",
-                        )
-                    digest.update(chunk)
-                    output.write(chunk)
-    except DocumentError:
-        raise
-    except (OSError, requests.RequestException) as error:
-        raise DocumentError("pdf_download_failed", str(error)) from error
-    with destination.open("rb") as source:
-        if source.read(5) != b"%PDF-":
-            raise DocumentError("invalid_pdf", "Downloaded content is not a PDF")
-    return digest.hexdigest(), size
-
-
 def pdf_page_count(path: Path, maximum: int) -> int:
-    try:
-        with fitz.open(path) as document:
-            pages = document.page_count
-    except Exception as error:
-        raise DocumentError("invalid_pdf", str(error)) from error
-    if pages < 1:
-        raise DocumentError("empty_pdf", "PDF has no pages")
-    if pages > maximum:
-        raise DocumentError(
-            "pdf_too_many_pages",
-            f"PDF has {pages} pages; maximum is {maximum}",
-        )
-    return pages
+    return len(pdf_page_sizes(path, maximum))
 
 
 def prepare_document(
@@ -307,26 +220,6 @@ def _canonical_elements(
     return tuple(elements)
 
 
-def _write_gzip_json(path: Path, value: OcrPageMarkdownBundle) -> None:
-    with (
-        path.open("xb") as raw,
-        gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed,
-        io.TextIOWrapper(compressed, encoding="utf-8") as output,
-    ):
-        output.write(value.model_dump_json())
-
-
-def _write_elements(path: Path, elements: Iterable[OcrElement]) -> None:
-    with (
-        path.open("xb") as raw,
-        gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed,
-        io.TextIOWrapper(compressed, encoding="utf-8") as output,
-    ):
-        for element in elements:
-            output.write(element.model_dump_json())
-            output.write("\n")
-
-
 def _save_sdk_images(parsed: Any, destination: Path, expected_pages: int) -> None:
     visualizations = parsed.layout_vis_images or {}
     expected = set(range(expected_pages))
@@ -356,31 +249,6 @@ def _save_sdk_images(parsed: Any, destination: Path, expected_pages: int) -> Non
         image.save(image_target / name)
 
 
-def _artifact_files(root: Path, maximum_bytes: int) -> tuple[ArtifactFile, ...]:
-    files: list[ArtifactFile] = []
-    total = 0
-    for path in sorted(item for item in root.rglob("*") if item.is_file()):
-        size = path.stat().st_size
-        total += size
-        if total > maximum_bytes:
-            raise DocumentError(
-                "ocr_output_too_large",
-                f"OCR output exceeds the {maximum_bytes}-byte limit",
-            )
-        files.append(
-            ArtifactFile(
-                relative_path=path.relative_to(root).as_posix(),
-                sha256=file_sha256(path),
-                size_bytes=size,
-                media_type=MEDIA_TYPES.get(
-                    path.suffix.lower(),
-                    "application/octet-stream",
-                ),
-            )
-        )
-    return tuple(files)
-
-
 def process_document(
     job: OcrJob,
     prepared: PreparedDocument,
@@ -405,13 +273,13 @@ def process_document(
             _normalized_layout(parsed.json_result, prepared.page_count),
             current_processing_id,
         )
-        _write_gzip_json(
+        write_gzip_json(
             document_root.joinpath(*PAGE_MARKDOWN_BUNDLE_PATH.parts),
             build_page_markdown_bundle(elements, page_count=prepared.page_count),
         )
-        _write_elements(document_root / "elements.jsonl.gz", elements)
+        write_elements(document_root / "elements.jsonl.gz", elements)
         _save_sdk_images(parsed, document_root, prepared.page_count)
-        files = _artifact_files(document_root, job.limits.max_output_bytes)
+        files = describe_artifacts(document_root, job.limits.max_output_bytes)
     except DocumentError:
         raise
     except (OSError, ValueError) as error:

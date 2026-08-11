@@ -35,7 +35,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 FROM dependencies
 ARG TARGETARCH
 ENV HOME=/tmp
-RUN groupadd --gid 10001 worker \
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends \
+        fontconfig \
+        fonts-dejavu-core \
+        openjdk-21-jre-headless \
+    && rm -rf /var/lib/apt/lists/* \
+    && java -version \
+    && groupadd --gid 10001 worker \
     && useradd --uid 10001 --gid worker --create-home --shell /usr/sbin/nologin worker
 COPY --from=platform-wheel /dist /dist
 COPY --from=ocr-wheel /dist /dist

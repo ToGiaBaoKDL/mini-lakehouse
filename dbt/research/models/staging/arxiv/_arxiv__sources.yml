@@ -74,7 +74,7 @@ sources:
             data_tests: [not_null]
 
       - name: ocr_document_runs
-        description: Durable state for one remote OCR attempt over one ArXiv PDF.
+        description: Durable state for one document-processing attempt over one ArXiv PDF.
         columns:
           - name: run_id
             data_tests: [not_null, unique]
@@ -97,7 +97,7 @@ sources:
             data_tests: [not_null]
 
       - name: ocr_document_elements
-        description: Canonical layout/content elements for successful OCR processing.
+        description: Canonical layout/content elements for successful document processing.
         data_tests:
           - dbt_utils.unique_combination_of_columns:
               arguments:

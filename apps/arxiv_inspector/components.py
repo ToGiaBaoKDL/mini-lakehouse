@@ -16,7 +16,7 @@ def render_hero() -> None:
     st.markdown(
         """
         <section class="ocr-hero">
-          <div class="ocr-eyebrow">ArXiv · GLM-OCR</div>
+          <div class="ocr-eyebrow">ArXiv · Document Extraction</div>
           <h1>ArXiv Inspector</h1>
           <p>Inspect immutable OCR outputs, annotated pages, and extracted content.</p>
         </section>

@@ -78,17 +78,18 @@ models:
       - {name: pdf_size_bytes, description: Observed source PDF size., data_type: bigint}
       - {name: page_count, description: Observed PDF page count., data_type: bigint}
       - {name: processing_id, description: Paper content model and configuration identity., data_type: varchar}
-      - {name: model_repository, description: OCR model repository., data_type: varchar}
-      - {name: model_revision, description: Pinned OCR model revision., data_type: varchar}
-      - {name: layout_model_repository, description: Layout model repository., data_type: varchar}
-      - {name: layout_model_revision, description: Pinned layout model revision., data_type: varchar}
+      - {name: processor, description: Canonical document processor adapter., data_type: varchar}
+      - {name: model_repository, description: OCR model repository when applicable., data_type: varchar}
+      - {name: model_revision, description: Pinned OCR model revision when applicable., data_type: varchar}
+      - {name: layout_model_repository, description: Layout model repository when applicable., data_type: varchar}
+      - {name: layout_model_revision, description: Pinned layout model revision when applicable., data_type: varchar}
       - {name: adapter_version, description: Canonical adapter version., data_type: varchar}
       - {name: config_hash, description: Canonical processor configuration hash., data_type: varchar}
       - {name: state, description: Canonical document state., data_type: varchar}
       - {name: attempt, description: Attempt ordinal for this processor request., data_type: bigint}
-      - {name: provider, description: Remote execution provider., data_type: varchar}
-      - {name: provider_reference, description: Provider-owned application or job reference., data_type: varchar}
-      - {name: provider_run_id, description: Exact provider execution identifier., data_type: varchar}
+      - {name: provider, description: OCI or remote execution backend., data_type: varchar}
+      - {name: provider_reference, description: Backend-owned worker application or job reference., data_type: varchar}
+      - {name: provider_run_id, description: Exact backend checkpoint token., data_type: varchar}
       - {name: started_at, description: Durable attempt start timestamp., data_type: timestamp}
       - {name: completed_at, description: Terminal attempt timestamp., data_type: timestamp}
       - {name: duration_seconds, description: Non-negative terminal run duration in seconds., data_type: bigint}

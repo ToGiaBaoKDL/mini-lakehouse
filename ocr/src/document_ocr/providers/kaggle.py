@@ -6,7 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Literal
 
-from document_ocr.config import OcrConfig
+from document_ocr.config import GlmOcrConfig
 from document_ocr.output import OCR_ARCHIVE_FILE, OCR_RESULT_FILE
 from document_ocr.protocol import OcrJob, OcrRunResult
 from document_ocr.providers.base import (
@@ -49,7 +49,7 @@ class KaggleProvider:
     def __init__(
         self,
         settings: KaggleSettings,
-        processor: OcrConfig,
+        processor: GlmOcrConfig,
         *,
         api: Any | None = None,
     ) -> None:

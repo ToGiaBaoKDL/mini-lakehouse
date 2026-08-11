@@ -9,6 +9,7 @@ select
     pdf_size_bytes,
     page_count,
     processing_id,
+    coalesce(processor, 'glm_ocr') as processor,
     model_repository,
     model_revision,
     layout_model_repository,

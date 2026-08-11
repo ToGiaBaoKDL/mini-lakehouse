@@ -5,13 +5,15 @@ build-backend = "uv_build"
 [project]
 name = "document-ocr"
 version = "3.0.0"
-description = "Document OCR workflows, protocol, remote providers, and portable GPU runtimes."
+description = "Document extraction workflows with native CPU and remote GPU runtimes."
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "loguru==0.7.3",
     "pydantic>=2.12,<3",
     "pydantic-settings>=2.12,<3",
+    "pymupdf>=1.28,<2",
     "pyyaml>=6.0.3,<7",
+    "requests>=2.32,<3",
     "zstandard>=0.23,<1",
 ]
 
@@ -23,6 +25,7 @@ worker = [
     "kaggle>=2.2.3,<3",
     "lakehouse",
     "modal>=1.5.3,<1.6",
+    "opendataloader-pdf==2.5.0",
     "pyarrow>=23,<26",
     "pyiceberg[glue,pyarrow]>=0.10,<0.12",
     "typer==0.25.1",

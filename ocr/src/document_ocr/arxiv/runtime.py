@@ -13,7 +13,6 @@ from loguru import logger
 from pyiceberg.table import Table
 
 from document_ocr import (
-    OcrConfig,
     OcrProvider,
     OcrProviderError,
     OcrProviderName,
@@ -21,6 +20,8 @@ from document_ocr import (
 )
 from document_ocr.arxiv.store import ArxivOcrStore
 from document_ocr.arxiv.workflow import ArxivOcrWorkflow
+from document_ocr.config import GlmOcrConfig, OpenDataLoaderConfig, load_pipeline_registry
+from document_ocr.execution import OciExecutionBackend, RemoteExecutionBackend
 from document_ocr.providers.kaggle import KaggleProvider
 from document_ocr.providers.modal import ModalProvider
 from document_ocr.settings import KaggleSettings, ModalSettings
@@ -42,24 +43,33 @@ def _provider_credentials(name: OcrProviderName) -> dict[str, object]:
     return cast(dict[str, object], payload)
 
 
-def _provider(name: OcrProviderName, processor: OcrConfig) -> OcrProvider:
+def _provider(name: OcrProviderName, processor: GlmOcrConfig) -> OcrProvider:
     credentials = _provider_credentials(name)
     if name == "kaggle":
         return KaggleProvider(KaggleSettings.model_validate(credentials), processor)
     return ModalProvider(ModalSettings.model_validate(credentials), processor)
 
 
-def run_arxiv_ocr(arxiv_id: str, provider_name: str) -> dict[str, object]:
-    """Run and publish OCR for exactly one curated ArXiv document."""
+def run_arxiv_ocr(arxiv_id: str, pipeline_name: str | None = None) -> dict[str, object]:
+    """Run and publish one configured extraction pipeline for one ArXiv PDF."""
     document_id = arxiv_id.strip()
     if not document_id:
         raise ValueError("arxiv_id must not be empty")
-    if provider_name not in {"kaggle", "modal"}:
-        raise ValueError(f"Unsupported OCR provider {provider_name!r}")
-
     settings = get_settings()
-    processor = load_ocr_config("arxiv_glm_ocr")
-    provider = _provider(cast(OcrProviderName, provider_name), processor)
+    registry = load_pipeline_registry()
+    selected_pipeline = registry.default_pipeline if pipeline_name is None else pipeline_name
+    pipeline = registry.pipeline(selected_pipeline)
+    processor = load_ocr_config(pipeline.processor)
+    provider: OcrProvider | None = None
+    if pipeline.execution_backend == "oci":
+        if not isinstance(processor, OpenDataLoaderConfig):
+            raise RuntimeError("OCI pipeline processor configuration has drifted")
+        execution = OciExecutionBackend()
+    else:
+        if not isinstance(processor, GlmOcrConfig):
+            raise RuntimeError("Remote pipeline processor configuration has drifted")
+        provider = _provider(pipeline.execution_backend, processor)
+        execution = RemoteExecutionBackend(provider)
     curated_uri = get_runtime_parameter(settings.environment, "storage/curated_uri")
     catalog = load_iceberg_catalog(region_name=settings.aws_region)
     product = load_contracts(settings.contracts_dir).curated_product("arxiv")
@@ -91,12 +101,13 @@ def run_arxiv_ocr(arxiv_id: str, provider_name: str) -> dict[str, object]:
         result = ArxivOcrWorkflow(
             store=store,
             processor=processor,
-            provider=provider,
+            execution=execution,
         ).run(document_id)
     finally:
         signal.signal(signal.SIGTERM, previous_sigterm)
     return {
         "arxiv_id": document_id,
+        "pipeline": selected_pipeline,
         "run_id": result["run_id"],
         "state": result["state"],
     }

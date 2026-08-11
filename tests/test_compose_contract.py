@@ -243,6 +243,8 @@ def test_all_container_images_are_immutable() -> None:
     assert "dbt deps" in dbt_dockerfile
     assert "USER dbt" in dbt_dockerfile
     assert 'ENTRYPOINT ["document-ocr"]' in ocr_dockerfile
+    assert "openjdk-21-jre-headless" in ocr_dockerfile
+    assert "&& java -version" in ocr_dockerfile
     assert "USER worker" in ocr_dockerfile
     assert "USER inspector" in inspector_dockerfile
     assert "HEALTHCHECK" in inspector_dockerfile

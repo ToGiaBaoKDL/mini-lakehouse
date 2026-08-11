@@ -69,6 +69,7 @@ class ArxivDocumentRepository:
                     document.attempt,
                     document.page_count,
                     document.processing_id,
+                    coalesce(document.processor, 'glm_ocr') AS processor,
                     document.model_repository,
                     document.model_revision,
                     document.completed_at,
@@ -90,6 +91,7 @@ class ArxivDocumentRepository:
                 run.attempt,
                 run.page_count,
                 run.processing_id,
+                run.processor,
                 run.model_repository,
                 run.model_revision,
                 run.completed_at
@@ -130,6 +132,7 @@ class ArxivDocumentRepository:
                 document.pdf_sha256,
                 document.pdf_size_bytes,
                 document.page_count,
+                coalesce(document.processor, 'glm_ocr') AS processor,
                 document.model_repository,
                 document.model_revision,
                 document.layout_model_repository,

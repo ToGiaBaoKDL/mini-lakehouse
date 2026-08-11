@@ -1,8 +1,6 @@
 """Single-document execution and commit protocol for the GLM-OCR runner."""
 
 import json
-import os
-import tarfile
 import tempfile
 import time
 from contextlib import suppress
@@ -11,7 +9,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-import zstandard
+from document_ocr.artifacts import create_archive, write_run_result
 from document_ocr.identity import file_sha256
 from document_ocr.output import OCR_ARCHIVE_FILE, OCR_RESULT_FILE
 from document_ocr.protocol import (
@@ -44,39 +42,6 @@ def emit(event: str, started_at: float, **fields: object) -> None:
             ),
             flush=True,
         )
-
-
-def _create_archive(source: Path, destination: Path) -> None:
-    temporary = destination.with_name(f".{destination.name}.{os.getpid()}.partial")
-    temporary.unlink(missing_ok=True)
-    try:
-        with (
-            temporary.open("xb") as raw_output,
-            zstandard.ZstdCompressor(level=9, write_checksum=True).stream_writer(
-                raw_output
-            ) as output,
-            tarfile.open(fileobj=output, mode="w|") as bundle,
-        ):
-            for path in sorted(item for item in source.rglob("*") if item.is_file()):
-                info = tarfile.TarInfo(path.relative_to(source).as_posix())
-                info.size = path.stat().st_size
-                info.mode = 0o644
-                info.mtime = 0
-                with path.open("rb") as file:
-                    bundle.addfile(info, file)
-        os.replace(temporary, destination)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
-def _write_result(destination: Path, result: OcrRunResult) -> None:
-    temporary = destination.with_name(f".{destination.name}.{os.getpid()}.partial")
-    temporary.unlink(missing_ok=True)
-    try:
-        temporary.write_text(result.model_dump_json(indent=2), encoding="utf-8")
-        os.replace(temporary, destination)
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 def run(
@@ -169,9 +134,9 @@ def run(
 
         artifacts.mkdir(exist_ok=True)
         archive_started_at = time.perf_counter()
-        _create_archive(artifacts, archive)
+        create_archive(artifacts, archive)
         emit("archive_created", archive_started_at, run_id=job.run_id)
-        _write_result(
+        write_run_result(
             result_path,
             OcrRunResult(
                 run_id=job.run_id,

@@ -348,6 +348,7 @@ def test_cloud_roots_have_isolated_state_and_private_access_host() -> None:
     assert "  - git" not in cloud_init
     assert "  - make" not in cloud_init
     assert "  - awscli" not in cloud_init
+    assert "openjdk" not in cloud_init
     assert "/usr/local/sbin/install-aws-cli" in cloud_init
     assert 'version="2.36.11"' in aws_cli_installer
     assert "awscli-exe-linux-$distribution_architecture-$version.zip" in aws_cli_installer

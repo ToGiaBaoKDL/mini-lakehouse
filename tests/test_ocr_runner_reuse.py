@@ -5,9 +5,11 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
+from document_ocr.artifacts import create_archive
 from document_ocr.config import load_ocr_config
 from document_ocr.identity import (
     canonical_json_bytes,
+    file_sha256,
     processing_id,
     request_id,
 )
@@ -260,12 +262,12 @@ def test_successful_document_publishes_the_shared_manifest(
     provider_output = tmp_path / "provider-output"
     provider_output.mkdir()
     archive = provider_output / "artifacts.tar.zst"
-    runner.job._create_archive(output_root, archive)
+    create_archive(output_root, archive)
     (provider_output / "result.json").write_text(
         OcrRunResult(
             run_id=job.run_id,
             created_at=datetime(2026, 7, 30, tzinfo=UTC),
-            archive_sha256=runner.document.file_sha256(archive),
+            archive_sha256=file_sha256(archive),
             archive_size_bytes=archive.stat().st_size,
             result=result,
             document=manifest,
