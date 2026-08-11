@@ -1,6 +1,7 @@
 """Compose the ArXiv OCR workflow from AWS-managed runtime resources."""
 
 import json
+import signal
 from typing import cast
 
 import boto3
@@ -8,9 +9,16 @@ from lakehouse.aws import get_runtime_parameter
 from lakehouse.config.settings import get_settings
 from lakehouse.contracts import load_contracts
 from lakehouse.iceberg import load_iceberg_catalog
+from loguru import logger
 from pyiceberg.table import Table
 
-from document_ocr import OcrConfig, OcrProvider, OcrProviderName, load_ocr_config
+from document_ocr import (
+    OcrConfig,
+    OcrProvider,
+    OcrProviderError,
+    OcrProviderName,
+    load_ocr_config,
+)
 from document_ocr.arxiv.store import ArxivOcrStore
 from document_ocr.arxiv.workflow import ArxivOcrWorkflow
 from document_ocr.providers.kaggle import KaggleProvider
@@ -67,11 +75,26 @@ def run_arxiv_ocr(arxiv_id: str, provider_name: str) -> dict[str, object]:
         product_name=product.name,
         s3_client=boto3.client("s3"),
     )
-    result = ArxivOcrWorkflow(
-        store=store,
-        processor=processor,
-        provider=provider,
-    ).run(document_id)
+    previous_sigterm = signal.getsignal(signal.SIGTERM)
+
+    def terminate(signum: int, _frame: object) -> None:
+        if isinstance(provider, ModalProvider):
+            try:
+                provider.cancel()
+                logger.warning("Cancelled the active Modal function call")
+            except OcrProviderError as error:
+                logger.error("Unable to cancel the active Modal function call: {}", error)
+        raise SystemExit(128 + signum)
+
+    signal.signal(signal.SIGTERM, terminate)
+    try:
+        result = ArxivOcrWorkflow(
+            store=store,
+            processor=processor,
+            provider=provider,
+        ).run(document_id)
+    finally:
+        signal.signal(signal.SIGTERM, previous_sigterm)
     return {
         "arxiv_id": document_id,
         "run_id": result["run_id"],

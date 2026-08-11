@@ -87,6 +87,7 @@ def test_modal_runner_keeps_models_cached_before_application_source() -> None:
     assert ".run_commands(MODEL_DOWNLOAD_COMMAND)" in source
     assert 'MODEL_DOWNLOAD_SCRIPT = ";".join(' in source
     assert '.env({"PYTHONPATH": str(RUNNER_ROOT)})' in source
+    assert '.add_local_dir("ocr/config", "/root/ocr/config")' in source
 
 
 def test_each_component_owns_its_deployment_operation() -> None:

@@ -37,6 +37,7 @@ class ModalProvider:
                 settings.token_secret.get_secret_value(),
             )
         self._client = client
+        self._active_call = None
 
     def _function(self, name: str):
         return modal.Function.from_name(
@@ -48,15 +49,29 @@ class ModalProvider:
 
     def _call(self, provider_run_id: str):
         try:
-            return modal.FunctionCall.from_id(provider_run_id, client=self._client)
+            call = modal.FunctionCall.from_id(provider_run_id, client=self._client)
         except modal.exception.NotFoundError as error:
             raise OcrRunNotFoundError(
                 f"Modal function call {provider_run_id!r} does not exist"
             ) from error
+        self._active_call = call
+        return call
 
     def submit(self, job: OcrJob) -> str:
         call = self._function(self._runner.function_name).spawn(job.model_dump_json())
+        self._active_call = call
         return call.object_id
+
+    def cancel(self) -> None:
+        """Cancel the active Modal call and release its GPU container."""
+        if self._active_call is None:
+            return
+        try:
+            self._active_call.cancel(terminate_containers=True)
+        except modal.exception.Error as error:
+            raise OcrProviderError(
+                f"Cannot cancel the active Modal function call: {error}"
+            ) from error
 
     def _output_prefix(self, provider_run_id: str, *, timeout: float | None) -> str:
         call = self._call(provider_run_id)
@@ -89,6 +104,7 @@ class ModalProvider:
     ) -> None:
         call = self._call(provider_run_id)
         try:
+            log(f"Modal function call: {call.get_dashboard_url()}\n")
             for entry in call.logs.stream():
                 if entry.message:
                     log(entry.message)
@@ -98,10 +114,13 @@ class ModalProvider:
                 f"Modal function call {provider_run_id!r} does not exist"
             ) from error
         except modal.exception.Error as error:
-            raise OcrProviderError(f"Cannot stream Modal logs: {error}") from error
+            message = f"Modal function call failed: {error}"
+            log(f"{message}\n")
+            raise OcrProviderRunFailedError(message[:2000]) from error
         except OcrRunNotFoundError:
             raise
         except OcrProviderError as error:
+            log(f"Modal function call failed: {error}\n")
             raise OcrProviderRunFailedError(str(error)[:2000]) from error
 
     def download_output(self, provider_run_id: str, destination: Path) -> None:

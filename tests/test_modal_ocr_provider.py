@@ -19,12 +19,19 @@ class _FakeCall:
     def __init__(self, result: object | None = None, *, active: bool = False) -> None:
         self._result = result
         self._active = active
+        self.cancelled = False
         self.logs = _FakeLogs()
 
     def get(self, timeout: float | None) -> object:
         if self._active:
             raise modal.exception.TimeoutError("still running")
         return self._result
+
+    def get_dashboard_url(self) -> str:
+        return "https://modal.com/id/fc-test"
+
+    def cancel(self, terminate_containers: bool = False) -> None:
+        self.cancelled = terminate_containers
 
 
 class _FakeLogEntry:
@@ -99,7 +106,26 @@ def test_modal_provider_submits_and_waits_for_the_exact_function_call(
     assert provider_run_id == "fc-test"
     assert function.job_json == '{"run_id":"run"}'
     assert result is None
-    assert logs == ["runner started\n"]
+    assert logs == [
+        "Modal function call: https://modal.com/id/fc-test\n",
+        "runner started\n",
+    ]
+
+
+def test_modal_provider_cancels_the_active_function_call(monkeypatch: Any) -> None:
+    active_call = _FakeCall(active=True)
+    function = _FakeFunction(active_call)
+    monkeypatch.setattr(
+        modal,
+        "Function",
+        type("Function", (), {"from_name": staticmethod(lambda *_args, **_kwargs: function)}),
+    )
+    provider = _provider()
+
+    provider.submit(cast(Any, SimpleNamespace(model_dump_json=lambda: "{}")))
+    provider.cancel()
+
+    assert active_call.cancelled is True
 
 
 def test_modal_provider_downloads_only_the_committed_protocol_files(

@@ -51,6 +51,7 @@ image = (
     .env({"PYTHONPATH": str(RUNNER_ROOT)})
     .add_local_dir("ocr/runners/glm_ocr/runner", str(RUNNER_ROOT / "runner"))
     .add_local_dir("ocr/src/document_ocr", str(RUNNER_ROOT / "document_ocr"))
+    .add_local_dir("ocr/config", "/root/ocr/config")
 )
 output_volume = modal.Volume.from_name(RUNNER.output_volume, create_if_missing=True)
 app = modal.App(RUNNER.app_name)
