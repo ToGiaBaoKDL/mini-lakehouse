@@ -14,7 +14,9 @@ from lakehouse.catalog.tables import (
 from lakehouse.contracts import ManagedIcebergTableContract, load_contracts
 from pyiceberg.catalog import Catalog
 from pyiceberg.partitioning import PartitionSpec
+from pyiceberg.schema import Schema
 from pyiceberg.table import Table
+from pyiceberg.types import NestedField
 
 
 def _binding(identifier: tuple[str, ...]):
@@ -54,7 +56,7 @@ def test_apply_creates_missing_table_from_contract() -> None:
     cast(Any, table.transaction).assert_not_called()
 
 
-def test_apply_never_auto_migrates_schema_or_partition_drift() -> None:
+def test_apply_never_auto_migrates_partition_drift() -> None:
     identifier, location, contract = _binding(("curated_github", "events"))
     catalog = create_autospec(Catalog, instance=True)
     table = _matching_table(contract, location)
@@ -65,6 +67,73 @@ def test_apply_never_auto_migrates_schema_or_partition_drift() -> None:
         apply_table(catalog, identifier, location, contract)
 
     cast(Any, table.transaction).assert_not_called()
+    cast(Any, table.update_schema).assert_not_called()
+
+
+def test_apply_reconciles_backward_compatible_schema_evolution() -> None:
+    identifier, location, contract = _binding(("curated_arxiv", "ocr_document_runs"))
+    expected = iceberg_schema(contract.columns, contract.primary_key)
+    model_fields = {
+        "model_repository",
+        "model_revision",
+        "layout_model_repository",
+        "layout_model_revision",
+    }
+    previous = Schema(
+        *[
+            NestedField(
+                field_id=field.field_id,
+                name=field.name,
+                field_type=field.field_type,
+                required=True if field.name in model_fields else field.required,
+            )
+            for field in expected.fields
+            if field.name != "processor"
+        ],
+        identifier_field_ids=expected.identifier_field_ids,
+    )
+    catalog = create_autospec(Catalog, instance=True)
+    table = _matching_table(contract, location)
+    cast(Any, table.schema).side_effect = [
+        previous,
+        previous,
+        previous,
+        expected,
+        expected,
+    ]
+    catalog.create_table_if_not_exists.return_value = table
+
+    apply_table(catalog, identifier, location, contract)
+
+    update = cast(Any, table.update_schema).return_value
+    update.union_by_name.assert_called_once_with(expected)
+    update.commit.assert_called_once_with()
+    cast(Any, table.refresh).assert_called_once_with()
+
+
+def test_apply_rejects_incompatible_schema_before_mutation() -> None:
+    identifier, location, contract = _binding(("curated_arxiv", "ocr_document_runs"))
+    expected = iceberg_schema(contract.columns, contract.primary_key)
+    first = expected.fields[0]
+    incompatible = Schema(
+        NestedField(
+            field_id=first.field_id,
+            name="renamed_run_id",
+            field_type=first.field_type,
+            required=first.required,
+        ),
+        *expected.fields[1:],
+        identifier_field_ids=expected.identifier_field_ids,
+    )
+    catalog = create_autospec(Catalog, instance=True)
+    table = _matching_table(contract, location)
+    cast(Any, table.schema).side_effect = [incompatible, incompatible, incompatible]
+    catalog.create_table_if_not_exists.return_value = table
+
+    with pytest.raises(RuntimeError, match=r"explicit migration: schema"):
+        apply_table(catalog, identifier, location, contract)
+
+    cast(Any, table.update_schema).assert_not_called()
 
 
 def test_curated_primary_keys_are_iceberg_identifier_fields() -> None:

@@ -3,6 +3,7 @@
 from collections.abc import Mapping
 
 from pyiceberg.catalog import Catalog
+from pyiceberg.schema import Schema
 from pyiceberg.table import Table
 
 from lakehouse.catalog.layout import managed_tables, namespace_properties
@@ -39,6 +40,21 @@ def _expected_schema(
         (field.field_id, field.name, field.field_type, field.required)
         for field in iceberg_schema(contract.columns, contract.primary_key).fields
     )
+
+
+def _compatible_schema_update(current: Schema, expected: Schema) -> bool:
+    """Allow only append-only optional fields and required-to-optional relaxation."""
+    if len(current.fields) > len(expected.fields):
+        return False
+    for current_field, expected_field in zip(current.fields, expected.fields, strict=False):
+        if (
+            current_field.field_id != expected_field.field_id
+            or current_field.name != expected_field.name
+            or current_field.field_type != expected_field.field_type
+            or (current_field.optional and expected_field.required)
+        ):
+            return False
+    return all(field.optional for field in expected.fields[len(current.fields) :])
 
 
 def _partition_fingerprint(table: Table) -> tuple[tuple[object, ...], ...]:
@@ -94,20 +110,36 @@ def apply_table(
     location: str,
     contract: ManagedIcebergTableContract,
 ) -> None:
+    expected_schema = iceberg_schema(contract.columns, contract.primary_key)
     table = catalog.create_table_if_not_exists(
         identifier=identifier.iceberg,
-        schema=iceberg_schema(contract.columns, contract.primary_key),
+        schema=expected_schema,
         location=location,
         partition_spec=partition_spec(contract.columns, contract.partitioning),
         properties={"format-version": str(FORMAT_VERSION), **TABLE_PROPERTIES},
     )
     drift = table_drift(table, location, contract)
-    unsafe = [item for item in drift if not item.startswith("properties.")]
+    unsafe = [item for item in drift if item != "schema" and not item.startswith("properties.")]
     if unsafe:
         raise RuntimeError(
             f"Iceberg table {'.'.join(identifier.iceberg)} requires an explicit migration: "
             + ", ".join(unsafe)
         )
+    if "schema" in drift:
+        if not _compatible_schema_update(table.schema(), expected_schema):
+            raise RuntimeError(
+                f"Iceberg table {'.'.join(identifier.iceberg)} requires an explicit migration: "
+                "schema"
+            )
+        update = table.update_schema()
+        update.union_by_name(expected_schema)
+        update.commit()
+        table.refresh()
+        if "schema" in table_drift(table, location, contract):
+            raise RuntimeError(
+                f"Iceberg table {'.'.join(identifier.iceberg)} schema remains incompatible "
+                "after safe reconciliation"
+            )
     updates = {
         key: value
         for key, value in TABLE_PROPERTIES.items()
