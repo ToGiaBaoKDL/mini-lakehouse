@@ -4,7 +4,7 @@ from datetime import date, datetime
 from enum import StrEnum
 from urllib.parse import quote
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
 
 class OcrRunState(StrEnum):
@@ -28,6 +28,11 @@ class OcrDocumentFilter(DocumentInspectorModel):
     search: str = Field(default="", max_length=200)
     state: OcrStateFilter = OcrStateFilter.ALL
     limit: int = Field(default=50, ge=1, le=200)
+
+    @field_validator("search")
+    @classmethod
+    def normalize_search(cls, value: str) -> str:
+        return value.strip().lower()
 
 
 class OcrDocumentSummary(DocumentInspectorModel):

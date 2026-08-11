@@ -8,10 +8,12 @@ from typing import Protocol
 from urllib.parse import urlparse
 
 import boto3
+from document_ocr.output import read_elements
 from document_ocr.protocol import (
     PAGE_MARKDOWN_BUNDLE_PATH,
     ArtifactFile,
     OcrDocumentManifest,
+    OcrElement,
     OcrPageMarkdownBundle,
 )
 from document_ocr.text import read_page_markdown_bundle
@@ -20,6 +22,7 @@ from apps.arxiv_inspector.data.models import OcrDocumentRun
 
 MANIFEST_MAX_BYTES = 2 * 1024 * 1024
 MARKDOWN_MAX_BYTES = 64 * 1024 * 1024
+ELEMENTS_MAX_BYTES = 128 * 1024 * 1024
 IMAGE_MAX_BYTES = 32 * 1024 * 1024
 
 
@@ -130,6 +133,22 @@ class OcrArtifactReader:
         if len(bundle.pages) != manifest.page_count:
             raise RuntimeError("OCR page Markdown count does not match its manifest")
         return bundle
+
+    def elements(
+        self,
+        run: OcrDocumentRun,
+        manifest: OcrDocumentManifest,
+    ) -> tuple[OcrElement, ...]:
+        content = self._read_declared(
+            run,
+            manifest.file("elements.jsonl.gz"),
+            max_bytes=ELEMENTS_MAX_BYTES,
+        )
+        return read_elements(
+            BytesIO(content.data),
+            max_uncompressed_bytes=ELEMENTS_MAX_BYTES,
+            expected_page_count=manifest.page_count,
+        )
 
     def _validated_artifact_uri(self, run: OcrDocumentRun) -> str:
         if not run.artifacts_available or run.artifact_uri is None:

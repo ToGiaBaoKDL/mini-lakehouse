@@ -40,16 +40,12 @@ class ArxivDocumentService:
     def document_run(self, arxiv_id: str) -> OcrDocumentRun | None:
         return self._repository.document_run(arxiv_id)
 
-    def page_elements(
+    def elements(
         self,
-        *,
-        processing_id: str,
-        page_number: int,
+        run: OcrDocumentRun,
+        manifest: OcrDocumentManifest,
     ) -> tuple[OcrElement, ...]:
-        return self._repository.page_elements(
-            processing_id=processing_id,
-            page_number=page_number,
-        )
+        return self._artifacts.elements(run, manifest)
 
     def manifest(self, run: OcrDocumentRun) -> OcrDocumentManifest:
         return self._artifacts.manifest(run)

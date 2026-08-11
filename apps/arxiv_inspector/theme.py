@@ -29,10 +29,10 @@ _CSS = """
     margin: .75rem 0 0;
     max-width: 48rem;
 }
-.st-key-document-filters button {
+section[data-testid="stSidebar"] button[data-testid="stBaseButton-primaryFormSubmit"] {
     color: #08110c !important;
 }
-.st-key-document-filters button * {
+section[data-testid="stSidebar"] button[data-testid="stBaseButton-primaryFormSubmit"] * {
     color: inherit !important;
 }
 div[data-testid="stMarkdownContainer"] h2.ocr-paper-title {

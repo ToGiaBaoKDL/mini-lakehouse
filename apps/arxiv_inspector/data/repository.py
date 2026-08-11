@@ -4,7 +4,6 @@ from collections.abc import Mapping
 from typing import Any, Protocol
 
 import pandas as pd
-from document_ocr.protocol import OcrElement
 from lakehouse.aws import get_runtime_parameter
 from lakehouse.config.settings import Settings
 from lakehouse.contracts import DataContracts, load_contracts
@@ -59,7 +58,7 @@ class ArxivDocumentRepository:
         self,
         filters: OcrDocumentFilter,
     ) -> tuple[OcrDocumentSummary, ...]:
-        search = filters.search.strip().lower()
+        search = filters.search
         frame = self._reader.query(
             f"""
             WITH ranked_runs AS (
@@ -155,36 +154,3 @@ class ArxivDocumentRepository:
         )
         records = _records(frame)
         return OcrDocumentRun.model_validate(records[0]) if records else None
-
-    def page_elements(
-        self,
-        *,
-        processing_id: str,
-        page_number: int,
-    ) -> tuple[OcrElement, ...]:
-        if page_number < 1:
-            raise ValueError("page_number must be positive")
-        frame = self._reader.query(
-            f"""
-            SELECT
-                element_id,
-                page_number,
-                reading_order,
-                element_type,
-                bbox_json,
-                text_content,
-                markdown_content,
-                parent_element_id,
-                raw_attributes_json
-            FROM {self._relation("ocr_document_elements")}
-            WHERE processing_id = :processing_id
-              AND page_number = :page_number
-            ORDER BY reading_order, element_id
-            """,
-            database=self._database,
-            parameters={
-                "processing_id": processing_id,
-                "page_number": page_number,
-            },
-        )
-        return tuple(OcrElement.model_validate(record) for record in _records(frame))

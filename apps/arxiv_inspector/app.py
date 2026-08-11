@@ -51,12 +51,12 @@ def document_service() -> ArxivDocumentService:
     return ArxivDocumentService(SETTINGS)
 
 
-@st.cache_data(ttl=30, max_entries=64, show_spinner=False)
+@st.cache_data(max_entries=64, show_spinner=False)
 def load_documents(filters: OcrDocumentFilter) -> tuple[OcrDocumentSummary, ...]:
     return document_service().documents(filters)
 
 
-@st.cache_data(ttl=30, max_entries=128, show_spinner=False)
+@st.cache_data(max_entries=128, show_spinner=False)
 def load_run(arxiv_id: str) -> OcrDocumentRun | None:
     return document_service().document_run(arxiv_id)
 
@@ -83,12 +83,12 @@ def load_page_markdowns(
     return document_service().page_markdowns(run, manifest)
 
 
-@st.cache_data(ttl=300, max_entries=64, show_spinner=False)
-def load_page_elements(processing_id: str, page_number: int) -> tuple[OcrElement, ...]:
-    return document_service().page_elements(
-        processing_id=processing_id,
-        page_number=page_number,
-    )
+@st.cache_data(ttl=300, max_entries=8, show_spinner=False)
+def load_elements(
+    run: OcrDocumentRun,
+    manifest: OcrDocumentManifest,
+) -> tuple[OcrElement, ...]:
+    return document_service().elements(run, manifest)
 
 
 def on_document_change() -> None:
@@ -178,6 +178,7 @@ def select_page(page_count: int) -> int:
     return int(selected)
 
 
+@st.fragment
 def render_artifacts(run: OcrDocumentRun) -> None:
     assert run.processing_id is not None
     assert run.page_count is not None
@@ -195,7 +196,11 @@ def render_artifacts(run: OcrDocumentRun) -> None:
     try:
         image = load_page_image(run, manifest, page_number)
         markdown = load_page_markdowns(run, manifest).markdown(page_number)
-        elements = load_page_elements(run.processing_id, page_number)
+        elements = tuple(
+            element
+            for element in load_elements(run, manifest)
+            if element.page_number == page_number
+        )
 
         page_column, markdown_column = st.columns(2, gap="large")
         with page_column:

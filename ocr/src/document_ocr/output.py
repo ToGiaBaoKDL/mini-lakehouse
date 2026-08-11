@@ -3,6 +3,7 @@
 import gzip
 import tarfile
 from pathlib import Path, PurePosixPath
+from typing import BinaryIO
 
 import zstandard
 
@@ -27,6 +28,12 @@ OCR_RESULT_FILES = (OCR_RESULT_FILE, OCR_ARCHIVE_FILE)
 
 class InvalidOcrArchiveError(ValueError):
     pass
+
+
+def _gzip_reader(source: Path | BinaryIO) -> gzip.GzipFile:
+    if isinstance(source, Path):
+        return gzip.open(source, "rb")
+    return gzip.GzipFile(fileobj=source, mode="rb")
 
 
 def validate_ocr_output(
@@ -219,7 +226,7 @@ def _validate_document(
 
 
 def read_elements(
-    path: Path,
+    source: Path | BinaryIO,
     *,
     max_uncompressed_bytes: int,
     expected_page_count: int,
@@ -227,8 +234,8 @@ def read_elements(
     elements: list[OcrElement] = []
     consumed = 0
     try:
-        with gzip.open(path, "rb") as source:
-            for line_number, line in enumerate(source, start=1):
+        with _gzip_reader(source) as compressed:
+            for line_number, line in enumerate(compressed, start=1):
                 consumed += len(line)
                 if consumed > max_uncompressed_bytes:
                     raise InvalidOcrArchiveError(

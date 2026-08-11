@@ -11,6 +11,7 @@ import pytest
 from document_ocr.identity import canonical_json_bytes
 from document_ocr.protocol import (
     ArtifactFile,
+    OcrElement,
     OcrPageMarkdown,
     OcrPageMarkdownBundle,
 )
@@ -158,6 +159,14 @@ def test_document_repository_loads_only_the_latest_run() -> None:
 
 def test_artifact_reader_uses_verified_manifest_and_declared_page_path() -> None:
     image = b"annotated-page"
+    element = OcrElement(
+        element_id="7" * 64,
+        page_number=1,
+        reading_order=0,
+        element_type="text",
+        text_content="Page one",
+    )
+    elements = gzip.compress((element.model_dump_json() + "\n").encode(), mtime=0)
     page_markdown = gzip.compress(
         OcrPageMarkdownBundle(
             pages=(OcrPageMarkdown(page_number=1, markdown="# Page one\n"),),
@@ -169,8 +178,8 @@ def test_artifact_reader_uses_verified_manifest_and_declared_page_path() -> None
     files = (
         ArtifactFile(
             relative_path="elements.jsonl.gz",
-            sha256="1" * 64,
-            size_bytes=1,
+            sha256=hashlib.sha256(elements).hexdigest(),
+            size_bytes=len(elements),
             media_type="application/gzip",
         ),
         ArtifactFile(
@@ -201,6 +210,7 @@ def test_artifact_reader_uses_verified_manifest_and_declared_page_path() -> None
     store = _ObjectStore(
         {
             f"{root}/manifest.json": manifest_payload,
+            f"{root}/elements.jsonl.gz": elements,
             f"{root}/pages.json.gz": page_markdown,
             f"{root}/layout_vis/page-0001.jpg": image,
         }
@@ -214,6 +224,7 @@ def test_artifact_reader_uses_verified_manifest_and_declared_page_path() -> None
     assert page.data == image
     assert page.media_type == "image/jpeg"
     assert reader.page_markdowns(run, manifest).markdown(1) == "# Page one\n"
+    assert reader.elements(run, manifest) == (element,)
     with pytest.raises(RuntimeError, match="lineage"):
         reader.manifest(run.model_copy(update={"pdf_size_bytes": 101}))
 
@@ -315,7 +326,10 @@ def test_arxiv_inspector_owns_config_and_bounded_caches() -> None:
     assert 'st.form("document-filters"' in source
     assert "max_entries=24" in source
     assert "max_entries=12" in source
+    assert "max_entries=8" in source
+    assert "@st.cache_data(ttl=30," not in source
+    assert "@st.fragment\ndef render_artifacts" in source
     assert "{error}" not in source
     assert "Processing run" not in source
-    assert ".st-key-document-filters button" in theme
+    assert 'button[data-testid="stBaseButton-primaryFormSubmit"]' in theme
     assert "color: #08110c !important" in theme
