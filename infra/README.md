@@ -42,6 +42,47 @@ aws login --profile "$AWS_PROFILE"
 aws sts get-caller-identity
 ```
 
+## AWS identities and permissions
+
+No AWS access key is stored in GitHub, Airflow, a dbt profile, or the repository. CI exchanges a
+GitHub OIDC token for short-lived STS credentials. Workloads on the OCI host use isolated leaf
+certificates with IAM Roles Anywhere; `aws_signing_helper` supplies temporary credentials through
+the standard AWS `credential_process` chain.
+
+| Identity | Authentication | Allowed responsibility |
+|---|---|---|
+| `github-emr-publisher` | GitHub OIDC, restricted to the protected `dev` environment | Read/write immutable `artifacts/emr/jobs/*`, update only the `emr/code_uri` SSM pointer, and use the lakehouse KMS key. It cannot submit EMR jobs or access data buckets. |
+| `github-image-publisher` | GitHub OIDC, restricted to the protected `dev` environment | Authenticate to ECR and push/pull only component repositories. It has no lakehouse data access. |
+| `services-deployer` | Roles Anywhere certificate on the OCI host | Pull reviewed ECR images and read only infrastructure connector secrets. It cannot read application secrets or data. |
+| `airflow` | Roles Anywhere certificate mounted read-only at `/run/aws` | Start, inspect, and cancel jobs in the owned EMR Serverless application; pass only `emr-runtime`; read its SSM parameters and Airflow secrets; read/write only the Airflow task-log prefix. It has no landing, curated, or analytics access. |
+| `emr-runtime` | AWS service role assumed by EMR Serverless | Read immutable EMR artifacts; read/write landing and curated objects; read/update the corresponding Glue Iceberg tables; use the lakehouse KMS key. |
+| `dbt-<domain>` | Separate Roles Anywhere certificate mounted into each ephemeral dbt container | Run Athena queries; read only the domain's curated databases/prefixes; manage only its analytics database/prefix; write only its Athena result prefix; read only its SSM parameters. |
+| `arxiv-inspector` | Roles Anywhere certificate mounted into the application | Read ArXiv curated catalog/objects, run Athena, and manage only its query-result prefix. |
+| `ocr-worker` | Roles Anywhere certificate mounted into the task container | Read OCR provider secrets and update only ArXiv curated catalog/object prefixes. |
+| `metadata-postgres` | Roles Anywhere certificate on the OCI host | Read only metadata PostgreSQL secrets. |
+| `catalog-admin` | Explicit operator `AssumeRole` | Apply and validate contract-owned Glue/Iceberg metadata. It does not run scheduled workloads. |
+
+The EMR release workflow does not run Spark. It uploads
+`emr/jobs/<commit-sha>/`, writes the checksum completion marker, and then updates
+`/lakehouse/<env>/emr/code_uri`. Airflow reads that pointer and submits the job with its own role;
+EMR Serverless subsequently assumes `emr-runtime` for the Spark process.
+
+On the OCI host, workload bundles live outside the repository under
+`~/.config/lakehouse/<env>/aws/<workload>/`. Airflow mounts `airflow/`; Docker tasks mount the exact
+workload directory such as `dbt-engineering/` or `dbt-research/`. The container sees only:
+
+```text
+/run/aws/
+  certificate.pem
+  private-key.pem
+  config              # credential_process -> aws_signing_helper -> temporary STS session
+```
+
+AWS SDKs and the dbt Athena adapter use this default credential chain; no Airflow AWS connection or
+role field is required. Secrets Manager contains secret values, while SSM Parameter Store contains
+non-secret runtime references such as storage URIs, EMR identifiers, and query-result URIs. The
+action-level source of truth is `terraform/aws/modules/identity/`.
+
 ## First deployment
 
 Run each plan, review it, then apply it. An interrupted apply is resumable; do not delete state or

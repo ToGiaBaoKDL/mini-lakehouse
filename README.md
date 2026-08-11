@@ -126,6 +126,8 @@ non-secret release variables. Its API token stays in the provider credential cha
 Terraform configuration or state. Pull requests only validate; a reviewed merge publishes only
 affected images or EMR artifacts. GitHub exchanges OIDC tokens for short-lived AWS and Tailscale
 credentials, so CI stores no AWS key, Tailscale OAuth secret, or SSH key.
+The complete release/runtime identity flow and least-privilege permission matrix are documented in
+[infra/README.md](infra/README.md#aws-identities-and-permissions).
 
 The one-time backend bootstrap keeps its small local state at
 `~/.cache/lakehouse/terraform/state/aws-bootstrap.tfstate`; this is the unavoidable state needed to
