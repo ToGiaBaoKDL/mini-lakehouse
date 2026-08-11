@@ -112,12 +112,6 @@ def _run(manifest_sha256: str) -> OcrDocumentRun:
     )
 
 
-def test_run_label_normalizes_athena_timestamp_to_display_timezone() -> None:
-    run = _run("9" * 64).model_copy(update={"completed_at": pd.Timestamp("2026-07-26T01:00:00Z")})
-
-    assert components.run_label(run).startswith("26 Jul 2026 · 08:00")
-
-
 def test_document_repository_keeps_search_and_state_parameterized() -> None:
     frame = pd.DataFrame(
         [
@@ -148,6 +142,18 @@ def test_document_repository_keeps_search_and_state_parameterized() -> None:
     assert "strpos" in reader.statement
     assert " LIKE " not in reader.statement
     assert "document.*" not in reader.statement
+
+
+def test_document_repository_loads_only_the_latest_run() -> None:
+    reader = _QueryReader(pd.DataFrame([_run("9" * 64).model_dump(exclude_computed_fields=True)]))
+
+    run = ArxivDocumentRepository(Settings(environment="dev"), reader=reader).document_run(
+        "2607.20571"
+    )
+
+    assert run is not None
+    assert run.run_id == "2" * 64
+    assert "LIMIT 1" in reader.statement
 
 
 def test_artifact_reader_uses_verified_manifest_and_declared_page_path() -> None:
@@ -255,13 +261,10 @@ def test_document_session_resets_dependent_selection_consistently() -> None:
     state.initialize(session)
 
     assert state.reconcile_document(session, ("paper-a", "paper-b")) == "paper-a"
-    session[state.SessionKey.RUN_ID] = "old-run"
     session[state.SessionKey.PAGE_NUMBER] = 7
 
     assert state.reconcile_document(session, ("paper-b",)) == "paper-b"
-    assert session[state.SessionKey.RUN_ID] == ""
     assert session[state.SessionKey.PAGE_NUMBER] == 1
-    assert state.reconcile_run(session, ("new-run",)) == "new-run"
     session[state.SessionKey.PAGE_NUMBER] = 99
     assert state.clamp_page(session, 3) == 3
 
@@ -313,5 +316,6 @@ def test_arxiv_inspector_owns_config_and_bounded_caches() -> None:
     assert "max_entries=24" in source
     assert "max_entries=12" in source
     assert "{error}" not in source
-    assert 'div[data-testid="stForm"] button[kind="primary"]' in theme
+    assert "Processing run" not in source
+    assert ".st-key-document-filters button" in theme
     assert "color: #08110c !important" in theme

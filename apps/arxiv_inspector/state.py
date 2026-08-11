@@ -10,7 +10,6 @@ class SessionKey(StrEnum):
     STATE_FILTER = "arxiv_inspector.state_filter"
     RESULT_LIMIT = "arxiv_inspector.result_limit"
     DOCUMENT_ID = "arxiv_inspector.document_id"
-    RUN_ID = "arxiv_inspector.run_id"
     PAGE_NUMBER = "arxiv_inspector.page_number"
 
 
@@ -19,7 +18,6 @@ DEFAULTS: dict[SessionKey, object] = {
     SessionKey.STATE_FILTER: "all",
     SessionKey.RESULT_LIMIT: 50,
     SessionKey.DOCUMENT_ID: "",
-    SessionKey.RUN_ID: "",
     SessionKey.PAGE_NUMBER: 1,
 }
 
@@ -36,11 +34,6 @@ def initialize(state: SessionState) -> None:
     for key, value in DEFAULTS.items():
         if key not in state:
             state[key] = value
-
-
-def reset_run(state: SessionState) -> None:
-    state[SessionKey.RUN_ID] = ""
-    state[SessionKey.PAGE_NUMBER] = 1
 
 
 def reset_page(state: SessionState) -> None:
@@ -60,28 +53,12 @@ def reconcile_document(
 ) -> str | None:
     if not available_ids:
         state[SessionKey.DOCUMENT_ID] = ""
-        reset_run(state)
+        reset_page(state)
         return None
     current = str(_get(state, SessionKey.DOCUMENT_ID, ""))
     if current not in available_ids:
         current = available_ids[0]
         state[SessionKey.DOCUMENT_ID] = current
-        reset_run(state)
-    return current
-
-
-def reconcile_run(
-    state: SessionState,
-    available_keys: Sequence[str],
-) -> str | None:
-    if not available_keys:
-        state[SessionKey.RUN_ID] = ""
-        reset_page(state)
-        return None
-    current = str(_get(state, SessionKey.RUN_ID, ""))
-    if current not in available_keys:
-        current = available_keys[0]
-        state[SessionKey.RUN_ID] = current
         reset_page(state)
     return current
 

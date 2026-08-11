@@ -303,3 +303,31 @@ def test_compatible_inference_engine_reuses_one_vllm_server(
     assert first is second
     assert starts == [process]
     assert stops == [process]
+
+
+def test_vllm_disables_the_jit_flashinfer_sampler(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runner = _runner_modules(monkeypatch)
+    captured: dict[str, object] = {}
+
+    class _FailedProcess:
+        returncode = 1
+
+        def poll(self) -> int:
+            return self.returncode
+
+    def popen(*args: object, **kwargs: object) -> _FailedProcess:
+        captured.update(kwargs)
+        return _FailedProcess()
+
+    monkeypatch.setattr(runner.engine.subprocess, "Popen", popen)
+    log_path = tmp_path / "vllm.log"
+
+    with pytest.raises(RuntimeError, match="vLLM exited with status 1"):
+        runner.engine.start_vllm(_job(), tmp_path / "model", log_path)
+
+    environment = captured["env"]
+    assert isinstance(environment, dict)
+    assert environment["VLLM_USE_FLASHINFER_SAMPLER"] == "0"

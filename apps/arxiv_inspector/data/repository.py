@@ -111,7 +111,7 @@ class ArxivDocumentRepository:
         )
         return tuple(OcrDocumentSummary.model_validate(record) for record in _records(frame))
 
-    def document_runs(self, arxiv_id: str) -> tuple[OcrDocumentRun, ...]:
+    def document_run(self, arxiv_id: str) -> OcrDocumentRun | None:
         frame = self._reader.query(
             f"""
             SELECT
@@ -145,12 +145,13 @@ class ArxivDocumentRepository:
                 document.started_at DESC,
                 document.attempt DESC,
                 document.run_id DESC
-            LIMIT 100
+            LIMIT 1
             """,
             database=self._database,
             parameters={"arxiv_id": arxiv_id},
         )
-        return tuple(OcrDocumentRun.model_validate(record) for record in _records(frame))
+        records = _records(frame)
+        return OcrDocumentRun.model_validate(records[0]) if records else None
 
     def page_elements(
         self,

@@ -1,6 +1,7 @@
 """Lifecycle of the local vLLM service and the official GLM-OCR SDK."""
 
 import json
+import os
 import subprocess
 import sys
 import time
@@ -16,6 +17,7 @@ from glmocr import GlmOcr
 from glmocr.config import GlmOcrConfig
 
 DIAGNOSTIC_CHARACTERS = 32_000
+DIAGNOSTIC_MAX_CHARACTERS = 8_000
 STARTUP_TIMEOUT_SECONDS = 15 * 60
 
 
@@ -95,14 +97,27 @@ def start_vllm(
         _vllm_command(job, model_path),
         stdout=log_file,
         stderr=subprocess.STDOUT,
+        env={**os.environ, "VLLM_USE_FLASHINFER_SAMPLER": "0"},
     )
     endpoint = f"http://127.0.0.1:{job.inference.api_port}/v1/models"
     deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         if process.poll() is not None:
-            diagnostic = log_path.read_text(encoding="utf-8", errors="replace")[
+            log_tail = log_path.read_text(encoding="utf-8", errors="replace")[
                 -DIAGNOSTIC_CHARACTERS:
             ]
+            failures = [
+                line
+                for line in log_tail.splitlines()
+                if any(
+                    marker in line
+                    for marker in (" ERROR ", "Error:", "Exception", "failed", "Traceback")
+                )
+            ]
+            diagnostic = (
+                "\n".join(failures)[-DIAGNOSTIC_MAX_CHARACTERS:]
+                or log_tail[-DIAGNOSTIC_MAX_CHARACTERS:]
+            )
             log_file.close()
             raise RuntimeError(
                 f"vLLM exited with status {process.returncode}; log tail: {diagnostic}"

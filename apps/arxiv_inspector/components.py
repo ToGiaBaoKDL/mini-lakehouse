@@ -1,8 +1,6 @@
 """Reusable presentation components without storage or SQL knowledge."""
 
-from datetime import UTC, datetime
 from html import escape
-from zoneinfo import ZoneInfo
 
 import streamlit as st
 from document_ocr.protocol import OcrElement
@@ -12,8 +10,6 @@ from apps.arxiv_inspector.data import (
     OcrDocumentSummary,
     OcrRunState,
 )
-
-DISPLAY_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 
 
 def render_hero() -> None:
@@ -34,12 +30,6 @@ def document_label(document: OcrDocumentSummary) -> str:
     if len(title) > 72:
         title = f"{title[:69]}…"
     return f"{document.arxiv_id} · {title}"
-
-
-def run_label(run: OcrDocumentRun) -> str:
-    timestamp = _display_datetime(run.completed_at or run.started_at)
-    revision = run.model_revision[:8]
-    return f"{timestamp} · {run.state.replace('_', ' ')} · {revision} · attempt {run.attempt}"
 
 
 def render_run_header(run: OcrDocumentRun) -> None:
@@ -87,14 +77,6 @@ def render_elements(elements: tuple[OcrElement, ...]) -> None:
             "Bounding box": st.column_config.TextColumn(width="medium"),
         },
     )
-
-
-def _display_datetime(value: datetime | None) -> str:
-    if value is None:
-        return "—"
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=UTC)
-    return value.astimezone(DISPLAY_TIMEZONE).strftime("%d %b %Y · %H:%M")
 
 
 def _display_bytes(value: int | None) -> str:

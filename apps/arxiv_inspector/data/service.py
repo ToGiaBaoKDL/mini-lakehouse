@@ -37,8 +37,8 @@ class ArxivDocumentService:
     def documents(self, filters: OcrDocumentFilter) -> tuple[OcrDocumentSummary, ...]:
         return self._repository.documents(filters)
 
-    def document_runs(self, arxiv_id: str) -> tuple[OcrDocumentRun, ...]:
-        return self._repository.document_runs(arxiv_id)
+    def document_run(self, arxiv_id: str) -> OcrDocumentRun | None:
+        return self._repository.document_run(arxiv_id)
 
     def page_elements(
         self,

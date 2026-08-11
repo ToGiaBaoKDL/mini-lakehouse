@@ -16,7 +16,6 @@ from apps.arxiv_inspector.components import (
     render_elements,
     render_hero,
     render_run_header,
-    run_label,
 )
 from apps.arxiv_inspector.data import (
     ArxivDocumentService,
@@ -58,8 +57,8 @@ def load_documents(filters: OcrDocumentFilter) -> tuple[OcrDocumentSummary, ...]
 
 
 @st.cache_data(ttl=30, max_entries=128, show_spinner=False)
-def load_runs(arxiv_id: str) -> tuple[OcrDocumentRun, ...]:
-    return document_service().document_runs(arxiv_id)
+def load_run(arxiv_id: str) -> OcrDocumentRun | None:
+    return document_service().document_run(arxiv_id)
 
 
 @st.cache_data(ttl=300, max_entries=64, show_spinner=False)
@@ -93,17 +92,13 @@ def load_page_elements(processing_id: str, page_number: int) -> tuple[OcrElement
 
 
 def on_document_change() -> None:
-    state.reset_run(st.session_state)
-
-
-def on_run_change() -> None:
     state.reset_page(st.session_state)
 
 
 def refresh_document_data() -> None:
     """Refresh mutable Iceberg state while retaining immutable artifact caches."""
     load_documents.clear()
-    load_runs.clear()
+    load_run.clear()
 
 
 def render_sidebar() -> OcrDocumentFilter:
@@ -169,22 +164,6 @@ def select_document(
             on_change=on_document_change,
         )
     return document_by_id[str(st.session_state[state.SessionKey.DOCUMENT_ID])]
-
-
-def select_run(runs: tuple[OcrDocumentRun, ...]) -> OcrDocumentRun | None:
-    run_by_id = {run.run_id: run for run in runs}
-    selected_id = state.reconcile_run(st.session_state, tuple(run_by_id))
-    if selected_id is None:
-        return None
-    with st.sidebar:
-        st.selectbox(
-            "Processing run",
-            tuple(run_by_id),
-            format_func=lambda run_id: run_label(run_by_id[run_id]),
-            key=state.SessionKey.RUN_ID,
-            on_change=on_run_change,
-        )
-    return run_by_id[str(st.session_state[state.SessionKey.RUN_ID])]
 
 
 def select_page(page_count: int) -> int:
@@ -260,14 +239,13 @@ def main() -> None:
         return
 
     try:
-        runs = load_runs(document.arxiv_id)
+        run = load_run(document.arxiv_id)
     except Exception:
-        LOGGER.exception("Cannot list OCR runs for {}", document.arxiv_id)
-        st.error("Cannot query processing history. Check the application logs.")
+        LOGGER.exception("Cannot load the latest OCR run for {}", document.arxiv_id)
+        st.error("Cannot query the latest OCR run. Check the application logs.")
         return
-    run = select_run(runs)
     if run is None:
-        st.info("This paper does not have a processing run.")
+        st.info("This paper does not have an OCR run.")
         return
 
     render_run_header(run)

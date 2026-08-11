@@ -29,12 +29,10 @@ _CSS = """
     margin: .75rem 0 0;
     max-width: 48rem;
 }
-div[data-testid="stForm"] button[kind="primary"],
-div[data-testid="stForm"] button[data-testid="stBaseButton-primary"] {
+.st-key-document-filters button {
     color: #08110c !important;
 }
-div[data-testid="stForm"] button[kind="primary"] *,
-div[data-testid="stForm"] button[data-testid="stBaseButton-primary"] * {
+.st-key-document-filters button * {
     color: inherit !important;
 }
 div[data-testid="stMarkdownContainer"] h2.ocr-paper-title {
