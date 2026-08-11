@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 from datetime import timedelta
 from typing import Any
 
+from airflow.providers.amazon.aws.links.emr import get_serverless_dashboard_url
 from airflow.providers.amazon.aws.operators.emr import EmrServerlessStartJobOperator
 from airflow.sdk import Asset, Context
 
@@ -15,10 +16,34 @@ AIRFLOW_TASK_TIMEOUT_MINUTES = 130
 
 
 class LoggedEmrServerlessStartJobOperator(EmrServerlessStartJobOperator):
-    """Add an explicit terminal message after the provider waiter succeeds."""
+    """Expose the terminal state and an ephemeral driver-log URL in task logs."""
+
+    def _log_driver_stdout_url(self) -> None:
+        job_id = getattr(self, "job_id", None)
+        if not job_id:
+            return
+        try:
+            dashboard_url = get_serverless_dashboard_url(
+                emr_serverless_client=self.hook.conn,
+                application_id=self.application_id,
+                job_run_id=job_id,
+            )
+            if dashboard_url:
+                driver_url = dashboard_url._replace(path="/logs/SPARK_DRIVER/stdout.gz")
+                self.log.info(
+                    "Spark driver stdout (single-use URL, expires in one hour): %s",
+                    driver_url.geturl(),
+                )
+        except Exception:
+            self.log.warning("Unable to create the Spark driver-log URL", exc_info=True)
 
     def execute(self, context: Context, event: dict[str, Any] | None = None) -> str | None:
-        job_id = super().execute(context, event)
+        try:
+            job_id = super().execute(context, event)
+        except Exception:
+            self._log_driver_stdout_url()
+            raise
+        self._log_driver_stdout_url()
         self.log.info("EMR Serverless job completed successfully: %s", job_id)
         return job_id
 

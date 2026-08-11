@@ -3,6 +3,10 @@ import re
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock, PropertyMock, patch
+from urllib.parse import ParseResult, urlparse
+
+import pytest
 
 os.environ.setdefault("AIRFLOW_HOME", "/tmp/lakehouse-airflow-tests")
 os.environ.setdefault("HOST_AWS_IDENTITY_DIR", "/tmp")
@@ -10,6 +14,7 @@ os.environ["LAKEHOUSE_ENVIRONMENT"] = "ci"
 
 from airflow.models import DagBag
 from airflow.sdk import DAG
+from airflow_bundle.operators import emr as emr_module
 from airflow_bundle.operators.docker import LoggedDockerOperator
 from airflow_bundle.operators.emr import LoggedEmrServerlessStartJobOperator
 from jinja2 import StrictUndefined
@@ -193,3 +198,38 @@ def test_maintenance_dag_uses_the_shared_emr_lifecycle() -> None:
         "/entrypoints/iceberg_maintenance.py"
     )
     assert "--catalog-name" not in task.job_driver["sparkSubmit"]["entryPointArguments"]
+
+
+def test_emr_operator_logs_an_ephemeral_driver_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task = _dag(_bag(), "man_emr_iceberg_maintenance").tasks[0]
+    assert isinstance(task, LoggedEmrServerlessStartJobOperator)
+    task.job_id = "job-123"
+    logger = Mock()
+
+    def dashboard_url(**_: object) -> ParseResult:
+        return urlparse("https://dashboard.example/?authToken=temporary")
+
+    monkeypatch.setattr(emr_module, "get_serverless_dashboard_url", dashboard_url)
+
+    with (
+        patch.object(
+            LoggedEmrServerlessStartJobOperator,
+            "hook",
+            new_callable=PropertyMock,
+            return_value=SimpleNamespace(conn=object()),
+        ),
+        patch.object(
+            LoggedEmrServerlessStartJobOperator,
+            "log",
+            new_callable=PropertyMock,
+            return_value=logger,
+        ),
+    ):
+        task._log_driver_stdout_url()  # pyright: ignore[reportPrivateUsage]
+
+    logger.info.assert_called_once_with(
+        "Spark driver stdout (single-use URL, expires in one hour): %s",
+        "https://dashboard.example/logs/SPARK_DRIVER/stdout.gz?authToken=temporary",
+    )
