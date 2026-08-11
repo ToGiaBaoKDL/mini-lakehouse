@@ -228,10 +228,21 @@ def _canonical_elements(
         for reading_order, block in enumerate(page):
             content = block.get("content", "")
             label = block.get("label")
-            if not isinstance(content, str) or not isinstance(label, str) or not label:
+            if not isinstance(label, str) or not label:
                 raise DocumentError(
                     "invalid_model_output",
-                    f"Invalid GLM-OCR block {page_index}:{reading_order}",
+                    f"Invalid GLM-OCR block {page_index}:{reading_order}: "
+                    "label must be non-empty text",
+                )
+            # glmocr 0.1.5 deliberately emits null content for skipped image
+            # regions. The SDK still treats those regions as valid and attaches
+            # their cropped asset through image_path.
+            if content is None and label == "image":
+                content = ""
+            if not isinstance(content, str):
+                raise DocumentError(
+                    "invalid_model_output",
+                    f"Invalid GLM-OCR block {page_index}:{reading_order}: content must be text",
                 )
             markdown_content = content or None
             if label == "image":

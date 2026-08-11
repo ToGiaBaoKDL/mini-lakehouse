@@ -157,6 +157,47 @@ def test_changed_pdf_is_prepared_for_inference(
     assert prepared.page_count == 4
 
 
+def test_canonical_elements_accepts_sdk_image_with_null_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _runner_modules(monkeypatch)
+
+    elements = runner.document._canonical_elements(
+        [
+            [
+                {
+                    "index": 6,
+                    "label": "image",
+                    "content": None,
+                    "bbox_2d": [10, 20, 30, 40],
+                    "image_path": "imgs/cropped_page0_idx0.jpg",
+                }
+            ]
+        ],
+        "f" * 64,
+    )
+
+    assert len(elements) == 1
+    assert elements[0].element_type == "image"
+    assert elements[0].text_content == ""
+    assert elements[0].markdown_content == "![Image 0-0](../imgs/cropped_page0_idx0.jpg)"
+
+
+def test_canonical_elements_rejects_null_content_for_non_image_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = _runner_modules(monkeypatch)
+
+    with pytest.raises(
+        runner.document.DocumentError,
+        match=r"invalid_model_output: Invalid GLM-OCR block 1:0: content must be text",
+    ):
+        runner.document._canonical_elements(
+            [[{"index": 0, "label": "text", "content": None}]],
+            "f" * 64,
+        )
+
+
 def test_successful_document_publishes_the_shared_manifest(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
