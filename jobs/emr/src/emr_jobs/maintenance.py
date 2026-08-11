@@ -52,73 +52,62 @@ def _optimize_filter(
     return None
 
 
-def maintenance_commands(
+def _string_literal(value: str) -> str:
+    """Render a Spark SQL string literal for Iceberg procedure arguments."""
+    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def _timestamp_literal(value: datetime) -> str:
+    timestamp = value.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
+    return f"TIMESTAMP {_string_literal(timestamp)}"
+
+
+def maintenance_statements(
     *,
     table_name: str,
     table: ManagedIcebergTableContract,
     policy: MaintenancePolicy,
     as_of: datetime,
-) -> tuple[tuple[str, dict[str, object]], ...]:
-    commands = []
+) -> tuple[str, ...]:
+    statements = []
     optimize_filter = _optimize_filter(table, (as_of - timedelta(days=policy.optimize_days)).date())
     if optimize_filter:
-        commands.append(
-            (
-                f"""
+        statements.append(
+            f"""
             CALL {CATALOG_NAME}.system.rewrite_data_files(
-                table => :table_name,
+                table => {_string_literal(table_name)},
                 strategy => 'binpack',
                 options => map(
-                    'target-file-size-bytes', :target_file_size_bytes,
-                    'max-file-group-size-bytes', :max_file_group_size_bytes,
+                    'target-file-size-bytes', {_string_literal(str(policy.target_file_size_bytes))},
+                    'max-file-group-size-bytes', {_string_literal(str(5 * 1024 * 1024 * 1024))},
                     'partial-progress.enabled', 'true'
                 ),
-                where => :optimize_filter
+                where => {_string_literal(optimize_filter)}
             )
-            """,
-                {
-                    "table_name": table_name,
-                    "target_file_size_bytes": str(policy.target_file_size_bytes),
-                    "max_file_group_size_bytes": str(5 * 1024 * 1024 * 1024),
-                    "optimize_filter": optimize_filter,
-                },
-            )
+            """
         )
 
-    commands.append(
-        (
-            f"""
+    statements.append(
+        f"""
         CALL {CATALOG_NAME}.system.expire_snapshots(
-            table => :table_name,
-            older_than => :snapshot_cutoff,
-            retain_last => :retain_snapshots,
+            table => {_string_literal(table_name)},
+            older_than => {_timestamp_literal(as_of - timedelta(days=policy.snapshot_days))},
+            retain_last => {policy.retain_snapshots},
             stream_results => true
         )
-        """,
-            {
-                "table_name": table_name,
-                "snapshot_cutoff": as_of - timedelta(days=policy.snapshot_days),
-                "retain_snapshots": policy.retain_snapshots,
-            },
-        )
+        """
     )
-    commands.append(
-        (
-            f"""
+    statements.append(
+        f"""
         CALL {CATALOG_NAME}.system.remove_orphan_files(
-            table => :table_name,
-            older_than => :orphan_cutoff,
+            table => {_string_literal(table_name)},
+            older_than => {_timestamp_literal(as_of - timedelta(days=policy.orphan_days))},
             max_concurrent_deletes => 20,
             stream_results => true
         )
-        """,
-            {
-                "table_name": table_name,
-                "orphan_cutoff": as_of - timedelta(days=policy.orphan_days),
-            },
-        )
+        """
     )
-    return tuple(commands)
+    return tuple(statements)
 
 
 def maintain_table(
@@ -129,16 +118,16 @@ def maintain_table(
     policy: MaintenancePolicy,
     as_of: datetime,
 ) -> None:
-    commands = maintenance_commands(
+    statements = maintenance_statements(
         table_name=table_name,
         table=table,
         policy=policy,
         as_of=as_of,
     )
-    if len(commands) == 2:
+    if len(statements) == 2:
         logger.info("Skipping data-file rewrite for unpartitioned table {}", table_name)
-    for statement, arguments in commands:
-        spark.sql(statement, args=arguments)
+    for statement in statements:
+        spark.sql(statement)
 
 
 def run(*, contracts_uri: str) -> None:
