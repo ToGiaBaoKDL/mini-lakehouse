@@ -112,6 +112,12 @@ def _run(manifest_sha256: str) -> OcrDocumentRun:
     )
 
 
+def test_run_label_normalizes_athena_timestamp_to_display_timezone() -> None:
+    run = _run("9" * 64).model_copy(update={"completed_at": pd.Timestamp("2026-07-26T01:00:00Z")})
+
+    assert components.run_label(run).startswith("26 Jul 2026 · 08:00")
+
+
 def test_document_repository_keeps_search_and_state_parameterized() -> None:
     frame = pd.DataFrame(
         [

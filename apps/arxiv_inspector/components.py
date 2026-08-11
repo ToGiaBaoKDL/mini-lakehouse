@@ -1,7 +1,8 @@
 """Reusable presentation components without storage or SQL knowledge."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 from html import escape
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 from document_ocr.protocol import OcrElement
@@ -11,6 +12,8 @@ from apps.arxiv_inspector.data import (
     OcrDocumentSummary,
     OcrRunState,
 )
+
+DISPLAY_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 
 
 def render_hero() -> None:
@@ -89,7 +92,9 @@ def render_elements(elements: tuple[OcrElement, ...]) -> None:
 def _display_datetime(value: datetime | None) -> str:
     if value is None:
         return "—"
-    return value.astimezone().strftime("%d %b %Y · %H:%M")
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(DISPLAY_TIMEZONE).strftime("%d %b %Y · %H:%M")
 
 
 def _display_bytes(value: int | None) -> str:
