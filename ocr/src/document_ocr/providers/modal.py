@@ -14,6 +14,7 @@ from document_ocr.providers.base import (
     OcrProviderError,
     OcrProviderRunFailedError,
     OcrRunNotFoundError,
+    serialize_glm_runner_job,
 )
 from document_ocr.settings import ModalSettings
 
@@ -58,7 +59,7 @@ class ModalProvider:
         return call
 
     def submit(self, job: OcrJob) -> str:
-        call = self._function(self._runner.function_name).spawn(job.model_dump_json())
+        call = self._function(self._runner.function_name).spawn(serialize_glm_runner_job(job))
         self._active_call = call
         return call.object_id
 

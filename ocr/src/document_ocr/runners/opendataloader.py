@@ -15,7 +15,7 @@ from document_ocr.adapters.opendataloader import (
 from document_ocr.artifacts import (
     create_archive,
     describe_artifacts,
-    render_layout_visualizations,
+    render_canonical_layout_visualizations,
     write_elements,
     write_gzip_json,
     write_run_result,
@@ -113,7 +113,7 @@ def _extract_document(
     )
     write_gzip_json(artifacts.joinpath(*PAGE_MARKDOWN_BUNDLE_PATH.parts), page_markdown)
     write_elements(artifacts / "elements.jsonl.gz", elements)
-    render_layout_visualizations(pdf_path, elements, artifacts)
+    render_canonical_layout_visualizations(pdf_path, elements, artifacts)
     files = describe_artifacts(artifacts, job.limits.max_output_bytes)
     manifest = OcrDocumentManifest(
         document_id=job.document.document_id,

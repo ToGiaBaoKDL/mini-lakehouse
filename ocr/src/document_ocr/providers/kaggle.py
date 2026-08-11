@@ -14,6 +14,7 @@ from document_ocr.providers.base import (
     OcrProviderError,
     OcrProviderRunFailedError,
     OcrRunNotFoundError,
+    serialize_glm_runner_job,
 )
 from document_ocr.settings import KaggleSettings
 
@@ -35,7 +36,7 @@ def render_launcher(
         "sys.path.insert(0, str(SOURCE))\n"
         "from bootstrap import main\n\n"
         "main(\n"
-        f"    job_json={job.model_dump_json()!r},\n"
+        f"    job_json={serialize_glm_runner_job(job)!r},\n"
         "    source=SOURCE,\n"
         "    model_path=MODEL,\n"
         "    layout_model_path=LAYOUT_MODEL,\n"

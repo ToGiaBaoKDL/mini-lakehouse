@@ -220,9 +220,9 @@ def test_successful_document_publishes_the_shared_manifest(
         page_count=1,
     )
 
-    class _Image:
+    class _SdkImage:
         def save(self, path: Path, **_kwargs: object) -> None:
-            path.write_bytes(b"image")
+            path.write_bytes(b"sdk-layout")
 
     parsed = SimpleNamespace(
         json_result=[
@@ -234,11 +234,14 @@ def test_successful_document_publishes_the_shared_manifest(
                 }
             ]
         ],
-        layout_vis_images={0: _Image()},
+        layout_vis_images={0: _SdkImage()},
         image_files={},
     )
 
-    def parse(*_args: object, **_kwargs: object) -> SimpleNamespace:
+    parse_options: dict[str, object] = {}
+
+    def parse(*_args: object, **kwargs: object) -> SimpleNamespace:
+        parse_options.update(kwargs)
         return parsed
 
     parser = SimpleNamespace(parse=parse)
@@ -254,6 +257,8 @@ def test_successful_document_publishes_the_shared_manifest(
     assert manifest.document_id == request.document_id
     assert manifest.processing_id == result.processing_id
     assert manifest.file("pages.json.gz").size_bytes > 0
+    assert parse_options == {"save_layout_visualization": True}
+    assert (output_root / "layout_vis/page-0001.jpg").read_bytes() == b"sdk-layout"
     assert not (output_root / "manifest.json").exists()
     assert result.manifest_sha256 == runner.document.canonical_json_sha256(
         manifest.model_dump(mode="json")

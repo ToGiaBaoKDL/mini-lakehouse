@@ -10,6 +10,11 @@ type OcrProviderName = Literal["kaggle", "modal"]
 type OcrLogSink = Callable[[str], None]
 
 
+def serialize_glm_runner_job(job: OcrJob) -> str:
+    """Serialize the stable remote-runner payload without orchestration-only fields."""
+    return job.model_dump_json(exclude={"adapter"})
+
+
 class OcrProviderError(RuntimeError):
     pass
 

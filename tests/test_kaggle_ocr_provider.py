@@ -95,11 +95,14 @@ def _provider(api: _KaggleApi) -> KaggleProvider:
 
 
 def _job(run_id: str) -> Any:
+    def model_dump_json(**_kwargs: object) -> str:
+        return '{"schema_version":"3.0.0"}'
+
     return cast(
         Any,
         SimpleNamespace(
             run_id=run_id,
-            model_dump_json=lambda: '{"schema_version":"3.0.0"}',
+            model_dump_json=model_dump_json,
         ),
     )
 

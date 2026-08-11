@@ -7,8 +7,8 @@ from typing import Any, cast
 import modal
 import pytest
 from document_ocr.config import load_ocr_config
-from document_ocr.protocol import OcrDocumentResult, OcrRunResult
-from document_ocr.providers.base import OcrProviderRunFailedError
+from document_ocr.protocol import OcrDocumentResult, OcrJob, OcrRunResult
+from document_ocr.providers.base import OcrProviderRunFailedError, serialize_glm_runner_job
 from document_ocr.providers.modal import ModalProvider
 from document_ocr.settings import ModalSettings
 
@@ -74,6 +74,12 @@ def test_modal_runner_has_an_explicit_deployment_environment() -> None:
     assert load_ocr_config("arxiv_glm_ocr").runner.modal.environment == "main"
 
 
+def test_remote_glm_payload_omits_the_orchestration_discriminator() -> None:
+    job = OcrJob.model_construct(run_id="run", adapter="glm_ocr")
+
+    assert serialize_glm_runner_job(job) == '{"schema_version":"3.0.0","run_id":"run"}'
+
+
 def test_modal_provider_submits_and_waits_for_the_exact_function_call(
     monkeypatch: Any,
     tmp_path: Path,
@@ -95,8 +101,12 @@ def test_modal_provider_submits_and_waits_for_the_exact_function_call(
         ),
     )
     provider = _provider()
+
+    def model_dump_json(**_kwargs: object) -> str:
+        return '{"run_id":"run"}'
+
     job = SimpleNamespace(
-        model_dump_json=lambda: '{"run_id":"run"}',
+        model_dump_json=model_dump_json,
     )
 
     provider_run_id = provider.submit(cast(Any, job))
@@ -122,7 +132,10 @@ def test_modal_provider_cancels_the_active_function_call(monkeypatch: Any) -> No
     )
     provider = _provider()
 
-    provider.submit(cast(Any, SimpleNamespace(model_dump_json=lambda: "{}")))
+    def model_dump_json(**_kwargs: object) -> str:
+        return "{}"
+
+    provider.submit(cast(Any, SimpleNamespace(model_dump_json=model_dump_json)))
     provider.cancel()
 
     assert active_call.cancelled is True

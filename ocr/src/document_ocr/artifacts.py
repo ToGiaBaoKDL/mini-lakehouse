@@ -70,12 +70,12 @@ def describe_artifacts(root: Path, maximum_bytes: int) -> tuple[ArtifactFile, ..
     return tuple(files)
 
 
-def render_layout_visualizations(
+def render_canonical_layout_visualizations(
     pdf_path: Path,
     elements: Iterable[OcrElement],
     output: Path,
 ) -> None:
-    """Materialize one annotated page image per PDF page."""
+    """Render fallback layout images when a processor SDK does not provide them."""
     by_page: dict[int, list[OcrElement]] = {}
     for element in elements:
         by_page.setdefault(element.page_number, []).append(element)
