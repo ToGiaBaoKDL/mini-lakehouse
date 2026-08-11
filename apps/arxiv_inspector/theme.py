@@ -29,6 +29,14 @@ _CSS = """
     margin: .75rem 0 0;
     max-width: 48rem;
 }
+div[data-testid="stForm"] button[kind="primary"],
+div[data-testid="stForm"] button[data-testid="stBaseButton-primary"] {
+    color: #08110c !important;
+}
+div[data-testid="stForm"] button[kind="primary"] *,
+div[data-testid="stForm"] button[data-testid="stBaseButton-primary"] * {
+    color: inherit !important;
+}
 div[data-testid="stMarkdownContainer"] h2.ocr-paper-title {
     font-size: clamp(1.05rem, 1.7vw, 1.3rem) !important;
     letter-spacing: -.025em;

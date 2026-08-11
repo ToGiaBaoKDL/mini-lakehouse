@@ -305,6 +305,7 @@ def test_s3_reader_uses_one_bounded_get_request(monkeypatch: pytest.MonkeyPatch)
 
 def test_arxiv_inspector_owns_config_and_bounded_caches() -> None:
     source = Path("apps/arxiv_inspector/app.py").read_text(encoding="utf-8")
+    theme = Path("apps/arxiv_inspector/theme.py").read_text(encoding="utf-8")
 
     assert Path("apps/arxiv_inspector/.streamlit/config.toml").is_file()
     assert not Path(".streamlit/config.toml").exists()
@@ -312,3 +313,5 @@ def test_arxiv_inspector_owns_config_and_bounded_caches() -> None:
     assert "max_entries=24" in source
     assert "max_entries=12" in source
     assert "{error}" not in source
+    assert 'div[data-testid="stForm"] button[kind="primary"]' in theme
+    assert "color: #08110c !important" in theme
