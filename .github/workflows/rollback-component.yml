@@ -30,7 +30,7 @@ jobs:
     timeout-minutes: 20
     environment: dev
     concurrency:
-      group: dev-${{ inputs.component }}
+      group: dev-${{ inputs.component }}-deploy
       cancel-in-progress: false
     permissions:
       contents: read

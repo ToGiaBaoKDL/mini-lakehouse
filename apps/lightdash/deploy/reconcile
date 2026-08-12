@@ -13,7 +13,6 @@ environment=${LAKEHOUSE_ENVIRONMENT:-dev}
 identity_dir=${AWS_IDENTITY_DIR:-"$HOME/.config/lakehouse/$environment/aws"}
 host_config="$identity_dir/lightdash/host-config"
 
-"$bundle_root/infra/runtime/postgres/deploy"
 test -r "$host_config" || {
     printf '%s\n' "The lightdash host identity config is missing." >&2
     exit 1
@@ -63,12 +62,14 @@ LIGHTDASH_DATABASE_PASSWORD=$(printf '%s' "$database_secret" | jq -r '.password'
 LIGHTDASH_SECRET=$(printf '%s' "$runtime_secret" | jq -r '.secret')
 export LIGHTDASH_DATABASE_PASSWORD LIGHTDASH_SECRET
 
+"$bundle_root/infra/runtime/postgres/deploy" lightdash
+
 compose() {
     docker compose --project-name lightdash -f "$script_dir/compose.yaml" "$@"
 }
 
 deploy_status=0
-compose up -d --force-recreate --remove-orphans --wait --wait-timeout 300 || deploy_status=$?
+compose up -d --remove-orphans --wait --wait-timeout 300 || deploy_status=$?
 if [ "$deploy_status" -ne 0 ]; then
     printf '%s\n' "Lightdash deployment failed; reporting service status and logs." >&2
     compose ps --all >&2 || true

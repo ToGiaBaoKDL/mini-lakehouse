@@ -17,8 +17,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     concurrency:
-      group: dev-emr-jobs
+      group: dev-emr-jobs-publish
       cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
       id-token: write

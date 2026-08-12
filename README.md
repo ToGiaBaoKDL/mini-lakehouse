@@ -156,7 +156,8 @@ that the digest belongs to its reviewed Git revision, and EMR rollback restores 
 reviewed release. Airflow, Inspector, each dbt domain, and OCR cannot accidentally move together, and the OCI
 host never reads Terraform state. CI streams only the selected component-owned deployment bundle;
 the host does not clone the repository or run its root Makefile.
-Airflow reconciliation also brings up its metadata PostgreSQL dependency before migrating Airflow.
+Airflow and Lightdash each reconcile only their owned database on the shared PostgreSQL service
+before running application migrations.
 The Cloudflare connector is the exception: a protected manual workflow deploys the pinned upstream
 multi-architecture digest directly, without a custom image or ECR repository.
 Lightdash is built unmodified from its pinned upstream commit on a native ARM runner because its

@@ -2,6 +2,8 @@ services:
   lightdash:
     image: "${LIGHTDASH_IMAGE:-lightdash:local}"
     entrypoint:
+      - dumb-init
+      - --
       - sh
       - -ec
       - |
@@ -9,15 +11,12 @@ services:
         export PGPASSWORD="$$(cat /run/secrets/lightdash_database_password)"
         exec /usr/bin/prod-entrypoint.sh "$${@}"
       - --
-    command: ["node", "dist/index.js"]
     environment:
-      ALLOW_MULTIPLE_ORGS: "false"
       ATHENA_WAREHOUSE_IAM_ROLE_AUTH: "true"
       AWS_CONFIG_FILE: /run/aws/config
       AWS_EC2_METADATA_DISABLED: "true"
       AWS_REGION: ${AWS_REGION}
       AWS_SDK_LOAD_CONFIG: "1"
-      LIGHTDASH_LOG_LEVEL: info
       PGDATABASE: lightdash
       PGHOST: metadata-postgres
       PGPORT: "5432"
@@ -25,10 +24,8 @@ services:
       PORT: "8080"
       S3_BUCKET: ${LIGHTDASH_S3_BUCKET}
       S3_ENDPOINT: https://s3.${AWS_REGION}.amazonaws.com
-      S3_FORCE_PATH_STYLE: "false"
       S3_REGION: ${AWS_REGION}
       S3_USE_CREDENTIALS_FROM: ini
-      SCHEDULER_ENABLED: "true"
       SECURE_COOKIES: "true"
       SITE_URL: ${LIGHTDASH_SITE_URL}
       TRUST_PROXY: "true"

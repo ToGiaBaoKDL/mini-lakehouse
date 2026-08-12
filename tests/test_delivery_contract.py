@@ -32,7 +32,12 @@ def test_component_release_publishes_before_protected_digest_deployment() -> Non
     assert "needs: publish" in release
     assert "image: ${{ needs.publish.outputs.image }}" in release
     publish_job = release[release.index("  publish:\n") : release.index("  deploy:\n")]
+    deploy_job = release[release.index("  deploy:\n") :]
     assert "environment:" not in publish_job
+    assert "queue: max" in publish_job
+    assert "queue: max" not in deploy_job
+    assert "dev-${{ inputs.component }}-publish" in publish_job
+    assert "dev-${{ inputs.component }}-deploy" in deploy_job
     assert "id-token: write" in release
     assert "github.ref == 'refs/heads/main'" in release
     assert "default: linux/amd64,linux/arm64" in release
@@ -42,7 +47,6 @@ def test_component_release_publishes_before_protected_digest_deployment() -> Non
     assert "imageTag=$GITHUB_SHA" in release
     assert "aws ecr batch-get-image" in release
     assert "cancel-in-progress: false" in release
-    assert "queue: max" in release
     assert 'dbt-engineering) [[ "$BUILD_ARGS" == "DBT_PROJECT=engineering" ]]' in release
     assert 'dbt-research) [[ "$BUILD_ARGS" == "DBT_PROJECT=research" ]]' in release
     assert "^[0-9]{12}\\.dkr\\.ecr\\." in action
@@ -121,14 +125,16 @@ def test_each_component_owns_its_deployment_operation() -> None:
     cloudflare = Path("infra/runtime/cloudflare/deploy").read_text(encoding="utf-8")
 
     assert "docker compose --project-name airflow" in airflow
-    assert "--force-recreate" in airflow
+    assert "--force-recreate" not in airflow
     assert "--remove-orphans" in airflow
     assert "airflow/remote_log_uri" in airflow
     assert "infra/runtime/postgres/deploy" in airflow
     assert "compose logs --no-color --tail 200 airflow-volumes-init airflow-init" in airflow
     assert "docker compose --project-name metadata-postgres" in postgres
+    assert '"$bundle_root/infra/runtime/postgres/deploy" airflow' in airflow
     assert "docker compose --project-name lightdash" in lightdash
-    assert "infra/runtime/postgres/deploy" in lightdash
+    assert '"$bundle_root/infra/runtime/postgres/deploy" lightdash' in lightdash
+    assert "--force-recreate" not in lightdash
     assert "docker compose --project-name arxiv-inspector" in inspector
     assert '"$component:runtime"' in dbt
     assert "ocr-worker:runtime" in ocr
@@ -217,7 +223,7 @@ def test_lightdash_release_builds_the_pinned_upstream_source_natively() -> None:
     assert f"LIGHTDASH_BUILD_CONTEXT := {upstream}" in images_makefile
     assert "--tag lightdash:local" in images_makefile
     assert "lightdash/lightdash:latest" not in lightdash
-    assert "timeout_minutes: 120" in lightdash
+    assert "build_timeout_minutes: 120" in lightdash
 
 
 def test_lightdash_skills_match_the_pinned_runtime_cli() -> None:
@@ -240,6 +246,8 @@ def test_emr_has_an_independent_release_pointer() -> None:
 
     assert "AWS_EMR_PUBLISHER_ROLE_ARN" in source
     assert "environment: dev" not in source
+    assert "dev-emr-jobs-publish" in source
+    assert "queue: max" in source
     assert "EMR_ARTIFACTS_URI" in source
     assert "EMR_CODE_PARAMETER_NAME" in source
     assert "jobs/emr/release/package" in source
@@ -257,6 +265,7 @@ def test_manual_rollback_requires_an_exact_image_and_revision() -> None:
 
     assert "workflow_dispatch:" in source
     assert "environment: dev" in source
+    assert "dev-${{ inputs.component }}-deploy" in source
     assert "image:" in source
     assert "revision:" in source
     assert "ref: ${{ inputs.revision }}" in source
@@ -274,7 +283,8 @@ def test_manual_emr_rollback_restores_only_a_published_main_revision() -> None:
     source = _workflow("rollback-emr-jobs.yml")
 
     assert "workflow_dispatch:" in source
-    assert "environment: dev" in source
+    assert "environment: dev" not in source
+    assert "dev-emr-jobs-publish" in source
     assert "fetch-depth: 0" in source
     assert 'git merge-base --is-ancestor "$REVISION" origin/main' in source
     assert "aws s3api head-object" in source

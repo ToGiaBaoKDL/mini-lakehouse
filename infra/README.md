@@ -7,7 +7,7 @@ terraform/
   aws/bootstrap/state/          one-time S3 backend bootstrap
   aws/environments/dev/         AWS data plane and workload IAM
   tailscale/environments/dev/   private access and host enrollment
-  github/environments/dev/      protected release configuration
+  github/environments/dev/      release variables and protected OCI deployment
   oci/environments/dev/         private ARM services host
   cloudflare/environments/dev/  public edge, DNS, and identity access
 ```
@@ -51,8 +51,8 @@ the standard AWS `credential_process` chain.
 
 | Identity | Authentication | Allowed responsibility |
 |---|---|---|
-| `github-emr-publisher` | GitHub OIDC, restricted to the protected `dev` environment | Read/write immutable `artifacts/emr/jobs/*`, update only the `emr/code_uri` SSM pointer, and use the lakehouse KMS key. It cannot submit EMR jobs or access data buckets. |
-| `github-image-publisher` | GitHub OIDC, restricted to the protected `dev` environment | Authenticate to ECR and push/pull only component repositories. It has no lakehouse data access. |
+| `github-emr-publisher` | GitHub OIDC, restricted to this repository's `main` branch | Read/write immutable `artifacts/emr/jobs/*`, update only the `emr/code_uri` SSM pointer, and use the lakehouse KMS key. It cannot submit EMR jobs or access data buckets. |
+| `github-image-publisher` | GitHub OIDC, restricted to `main` for publishing and protected `dev` jobs for rollback verification | Authenticate to ECR and push/pull only component repositories. It has no lakehouse data access. |
 | `services-deployer` | Roles Anywhere certificate on the OCI host | Pull reviewed ECR images and read only infrastructure connector secrets. It cannot read application secrets or data. |
 | `airflow` | Roles Anywhere certificate mounted read-only at `/run/aws` | Start, inspect, and cancel jobs in the owned EMR Serverless application; pass only `emr-runtime`; read its SSM parameters and Airflow secrets; read/write only the Airflow task-log prefix. It has no landing, curated, or analytics access. |
 | `emr-runtime` | AWS service role assumed by EMR Serverless | Read immutable EMR artifacts; read/write landing and curated objects; read/update the corresponding Glue Iceberg tables; use the lakehouse KMS key. |
@@ -128,12 +128,15 @@ rerun plan/apply with the same credential and do not import the policy again.
 ### 3. GitHub release configuration
 
 The GitHub root depends on both AWS and Tailscale state. Use a fine-grained PAT owned by
-`ToGiaBaoKDL`, restricted to `mini-lakehouse`, with repository permissions `Administration: write`
-and `Environments: write` (`Metadata: read` is automatic). The first permission owns the deployment
-environment and branch policy; the second owns its non-secret Actions variables.
+`ToGiaBaoKDL`, restricted to `mini-lakehouse`, with repository permissions `Administration: write`,
+`Environments: write`, and `Variables: write` (`Metadata: read` is automatic). These permissions
+own the protected environment and policy, its deploy variables, and the repository publish
+variables respectively; `Actions: write` is not required.
 
 ```bash
-export GITHUB_TOKEN='<fine-grained-token>'
+read -rsp 'GitHub token: ' GITHUB_TOKEN
+printf '\n'
+export GITHUB_TOKEN
 make github-plan
 make github-apply
 unset GITHUB_TOKEN
@@ -192,8 +195,8 @@ AWS_PROFILE=tgbao-dev-catalog make catalog-validate
 ## Runtime secrets
 
 Terraform creates Secrets Manager containers but deliberately does not own secret values. After
-the AWS root has been applied, generate the PostgreSQL, Airflow, and Lightdash runtime values
-idempotently:
+the AWS root has been applied, initialize the PostgreSQL bootstrap credential and each
+application-owned database/runtime pair idempotently:
 
 ```bash
 AWS_PROFILE=tgbao-dev make metadata-postgres-secrets-init
@@ -230,9 +233,8 @@ AWS_PROFILE=tgbao-dev aws secretsmanager put-secret-value \
 
 ## Initial releases
 
-Push the reviewed revision to `main`, then dispatch and approve the protected `dev` workflows in
-this order. Wait for each workflow before starting the next one so Airflow cannot schedule work
-against missing artifacts or task images.
+Merges to `main` automatically publish only changed artifacts. On a fresh environment whose current
+revision has no releases yet, dispatch the missing publishers explicitly:
 
 ```bash
 gh workflow run release-emr-jobs.yml --ref main
@@ -242,6 +244,14 @@ gh workflow run release-ocr-worker.yml --ref main
 gh workflow run release-airflow.yml --ref main
 gh workflow run release-arxiv-inspector.yml --ref main
 gh workflow run release-lightdash.yml --ref main
+```
+
+Image and EMR publish jobs do not require approval. Wait for EMR, dbt, and OCR publishing to
+complete; then approve the protected OCI deploy jobs for dbt and OCR before Airflow. Inspector and
+Lightdash are independent and may be approved afterward. Deploy the Cloudflare connector once its
+Terraform resources and secret are ready:
+
+```bash
 gh workflow run deploy-cloudflare.yml --ref main
 ```
 
@@ -257,7 +267,7 @@ The Lightdash workflow builds the unmodified upstream `1.134.0` commit on a nati
 runner, publishes only the OCI A1-compatible ARM64 image, and deploys it by digest. The official
 release image is not used because it does not publish an ARM64 manifest. The EMR workflow publishes
 an immutable contract/job bundle and updates its SSM pointer only after
-the checksum manifest is complete. Component workflows build multi-architecture images, publish
+the checksum manifest is complete. Component workflows build their required architectures, publish
 immutable Git-SHA tags to ECR, resolve their digests, and deploy only the selected component over
 Tailscale SSH. The host receives deployment bundles, not a repository checkout or Terraform state.
 The Cloudflare workflow does not build an image: it deploys the reviewed upstream image digest,
@@ -318,7 +328,8 @@ UI first. Then use `lightdash download`, commit the generated YAML, run `lightda
 - Runtime, task, and application changes publish only their component image. A Lightdash version
   upgrade must update its release workflow commit, CLI/skill version, and validation together.
 - EMR job changes publish a new immutable S3 release; they do not rebuild service images.
-- Use the component or EMR rollback workflow with an exact reviewed revision/digest.
+- Use the protected component rollback for OCI changes, or the EMR pointer rollback, with an exact
+  reviewed revision/digest.
 - Re-run contract validation after contract or catalog changes.
 
 The services deployer can pull reviewed ECR digests and read only the Cloudflare connector token;

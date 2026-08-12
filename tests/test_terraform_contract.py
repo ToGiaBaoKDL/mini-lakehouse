@@ -218,6 +218,19 @@ def test_runtime_parameters_and_trust_are_bounded_by_workload() -> None:
     assert "github_environment_subject" in identity
     assert "github_main_subject" in environment
     assert "github_main_subject" in identity
+    assert "github_main_trust" in identity
+    assert "github_image_publisher_trust" in identity
+    github_identity = Path("infra/terraform/aws/modules/identity/github.tf").read_text(
+        encoding="utf-8"
+    )
+    assert (
+        "assume_role_policy = data.aws_iam_policy_document.github_main_trust.json"
+        in github_identity
+    )
+    assert (
+        "assume_role_policy = data.aws_iam_policy_document.github_image_publisher_trust.json"
+        in github_identity
+    )
 
 
 def test_service_images_are_immutable_bounded_and_published_by_one_role() -> None:

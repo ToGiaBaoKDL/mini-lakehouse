@@ -5,7 +5,7 @@ LIGHTDASH_COMPOSE := docker compose --project-name lightdash -f apps/lightdash/d
 CLOUDFLARE_COMPOSE := docker compose --project-name cloudflare -f infra/runtime/cloudflare/compose.yaml
 CLOUDFLARE_CONNECTOR_IMAGE := $(shell sed -n '1p' infra/runtime/cloudflare/image)
 
-METADATA_POSTGRES_COMPOSE_CONFIG := METADATA_POSTGRES_PASSWORD=unused AIRFLOW_DATABASE_PASSWORD=unused LIGHTDASH_DATABASE_PASSWORD=unused $(METADATA_POSTGRES_COMPOSE)
+METADATA_POSTGRES_COMPOSE_CONFIG := METADATA_POSTGRES_PASSWORD=unused $(METADATA_POSTGRES_COMPOSE)
 AIRFLOW_COMPOSE_CONFIG := AIRFLOW_DATABASE_PASSWORD=unused AIRFLOW_FERNET_KEY=unused AIRFLOW_JWT_SECRET=unused AIRFLOW_ADMIN_PASSWORDS='{"admin":"unused"}' AIRFLOW_REMOTE_LOG_URI=s3://validation/airflow $(AIRFLOW_COMPOSE)
 LIGHTDASH_COMPOSE_CONFIG := AWS_REGION=ap-southeast-1 LIGHTDASH_DATABASE_PASSWORD=unused LIGHTDASH_IMAGE=lightdash:local LIGHTDASH_S3_BUCKET=validation LIGHTDASH_SECRET=unused-unused-unused-unused-unused-unused LIGHTDASH_SITE_URL=https://analytics.tgblab.io.vn $(LIGHTDASH_COMPOSE)
 CLOUDFLARE_COMPOSE_CONFIG := CLOUDFLARE_IMAGE=$(CLOUDFLARE_CONNECTOR_IMAGE) CLOUDFLARE_TUNNEL_TOKEN_FILE=/dev/null LOCAL_GID=0 $(CLOUDFLARE_COMPOSE)
@@ -16,16 +16,18 @@ CLOUDFLARE_COMPOSE_CONFIG := CLOUDFLARE_IMAGE=$(CLOUDFLARE_CONNECTOR_IMAGE) CLOU
 	lightdash-secrets-init lightdash-up lightdash-down lightdash-logs \
 	services-up services-down services-ps
 
-metadata-postgres-secrets-init: ## Initialize shared PostgreSQL secrets exactly once.
-	infra/runtime/postgres/initialize-secrets
+metadata-postgres-secrets-init: ## Initialize the PostgreSQL bootstrap credential exactly once.
+	infra/runtime/postgres/initialize-secrets bootstrap
 
-airflow-secrets-init: ## Initialize Airflow runtime secrets exactly once.
+airflow-secrets-init: ## Initialize Airflow database and runtime secrets exactly once.
+	infra/runtime/postgres/initialize-secrets airflow
 	orchestration/deploy/initialize-secrets
 
-lightdash-secrets-init: ## Initialize the stable Lightdash encryption secret exactly once.
+lightdash-secrets-init: ## Initialize Lightdash database and runtime secrets exactly once.
+	infra/runtime/postgres/initialize-secrets lightdash
 	apps/lightdash/deploy/initialize-secrets
 
-metadata-postgres-up: preflight ## Start shared metadata PostgreSQL and reconcile the Airflow database.
+metadata-postgres-up: preflight ## Start shared metadata PostgreSQL without changing application databases.
 	infra/runtime/postgres/deploy
 
 metadata-postgres-down: ## Stop shared metadata PostgreSQL while preserving data.

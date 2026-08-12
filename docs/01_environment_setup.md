@@ -39,12 +39,12 @@ export AWS_PROFILE='<terraform-admin-profile>'
 export TAILSCALE_OAUTH_CLIENT_ID='<scoped-client-id>'
 export TAILSCALE_OAUTH_CLIENT_SECRET='<scoped-client-secret>'
 export TAILSCALE_TAILNET='<tailnet-name>'
-export GITHUB_TOKEN='<fine-grained-repository-token>'
 export OCI_CONFIG_FILE_PROFILE='<oci-cli-profile>'
 ```
 
 The Tailscale OAuth client must be scoped to manage the checked-in ACL policy, auth keys, and the
-GitHub federated identity. Unset credentials for providers that are not part of the current root.
+GitHub federated identity. Prompt for the GitHub token only in the GitHub section below so it does
+not enter shell history. Unset credentials for providers that are not part of the current root.
 
 ## Workload identities
 
@@ -74,14 +74,14 @@ AWS_PROFILE=custom-terraform-admin make aws-plan
 
 ## Secrets
 
-Terraform creates secret containers but never secret values. PostgreSQL bootstrap and the Airflow
-database each use an independent object:
+Terraform creates secret containers but never secret values. PostgreSQL bootstrap plus the Airflow
+and Lightdash databases each use an independent object:
 
 ```json
 {"version": 1, "password": "<random password>"}
 ```
 
-The Airflow runtime secret is separate from its database credential:
+Application runtime secrets are separate from database credentials. Airflow uses:
 
 ```json
 {
@@ -92,17 +92,20 @@ The Airflow runtime secret is separate from its database credential:
 }
 ```
 
+Lightdash uses `{"version": 1, "secret": "<stable encryption secret>"}`.
+
 Initialize them once without printing values or putting them in Terraform state:
 
 ```bash
 AWS_PROFILE=your-terraform-admin make metadata-postgres-secrets-init
 AWS_PROFILE=your-terraform-admin make airflow-secrets-init
+AWS_PROFILE=your-terraform-admin make lightdash-secrets-init
 ```
 
-Both targets preserve an existing valid `AWSCURRENT` version. The metadata PostgreSQL deployment
-idempotently reconciles the Airflow owner/database and rotates only that role password. Airflow owns
-and runs its schema migrations. The Airflow init container writes the SimpleAuthManager password
-file before startup, so the UI password is never generated or logged by Airflow.
+All targets preserve an existing valid `AWSCURRENT` version. Each application deployment reconciles
+only its own PostgreSQL owner/database and reapplies only that role's stored password. Airflow and Lightdash
+then run their own schema migrations. The Airflow init container writes the SimpleAuthManager
+password file before startup, so the UI password is never generated or logged by Airflow.
 
 Populate notification connections independently:
 
@@ -128,8 +131,8 @@ aws secretsmanager put-secret-value \
   --secret-string 'file://<0600-temporary-modal.json>'
 ```
 
-The three PostgreSQL/Airflow runtime credentials are generated locally by the idempotent Make
-targets. Slack, SMTP, Kaggle, and Modal are the only operator-supplied secret values. No secret or
+The five PostgreSQL, Airflow, and Lightdash credentials are generated locally by the idempotent
+Make targets. Slack, SMTP, Kaggle, and Modal are the only operator-supplied secret values. No secret or
 provider credential belongs in tfvars, GitHub variables, Compose, a command-line literal, or a
 repository `.env` file. Delete each temporary file immediately after Secrets Manager accepts it.
 The OCR schemas are `{"username":"...","api_token":"..."}` for Kaggle and
@@ -142,12 +145,17 @@ GitHub publishes the changed component immediately under the exact main-branch O
 subsequent OCI deployment waits for approval from the protected `dev` environment. AWS and
 Tailscale access use OIDC; there are no long-lived CI credentials.
 
-After applying AWS and Tailscale, apply the isolated GitHub root with a fine-grained token that can
-manage Actions environments and variables for this repository:
+After applying AWS and Tailscale, apply the isolated GitHub root with a fine-grained token restricted
+to this repository and granted `Administration: write`, `Environments: write`, and
+`Variables: write` (`Metadata: read` is automatic):
 
 ```bash
-GITHUB_TOKEN='<fine-grained token>' make github-plan
-GITHUB_TOKEN='<fine-grained token>' make github-apply
+read -rsp 'GitHub token: ' GITHUB_TOKEN
+printf '\n'
+export GITHUB_TOKEN
+make github-plan
+make github-apply
+unset GITHUB_TOKEN
 ```
 
 The repository-level variables are `AWS_IMAGE_PUBLISHER_ROLE_ARN`,
@@ -168,9 +176,10 @@ over Tailscale SSH; the services host never clones the monorepo or invokes its r
 
 No release uses `latest`, and there is no global service manifest. Component path filters cover
 only files that affect that component; changing a shared CI helper does not rebuild unrelated
-images. The protected rollback workflows restore either a verified component image/deployment
-pair or a completed EMR release. Airflow and Inspector reconcile their own Compose services;
-Airflow first reconciles metadata PostgreSQL. The dbt and OCR deployments advance their stable
+images. Protected component rollback restores a verified image/deployment pair on OCI; EMR rollback
+only restores a completed release pointer and therefore does not enter the OCI environment. Airflow,
+Inspector, and Lightdash reconcile their own Compose services; each database-backed app reconciles
+only its PostgreSQL database. The dbt and OCR deployments advance their stable
 host-local aliases only after pulling an exact digest, so DAG files never contain image SHAs.
 
 Airflow uses the official versioned `GitDagBundle` for `orchestration/bundle`. A DAG-only merge is

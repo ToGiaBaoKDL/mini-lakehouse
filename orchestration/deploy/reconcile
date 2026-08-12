@@ -13,7 +13,6 @@ environment=${LAKEHOUSE_ENVIRONMENT:-dev}
 identity_dir=${AWS_IDENTITY_DIR:-"$HOME/.config/lakehouse/$environment/aws"}
 host_config="$identity_dir/airflow/host-config"
 
-"$bundle_root/infra/runtime/postgres/deploy"
 test -r "$host_config" || {
     printf '%s\n' "The airflow host identity config is missing." >&2
     exit 1
@@ -59,12 +58,14 @@ AIRFLOW_JWT_SECRET=$(printf '%s' "$runtime_secret" | jq -r '.jwt_secret')
 AIRFLOW_ADMIN_PASSWORDS=$(printf '%s' "$runtime_secret" | jq -c '{admin: .admin_password}')
 export AIRFLOW_DATABASE_PASSWORD AIRFLOW_FERNET_KEY AIRFLOW_JWT_SECRET AIRFLOW_ADMIN_PASSWORDS
 
+"$bundle_root/infra/runtime/postgres/deploy" airflow
+
 compose() {
     docker compose --project-name airflow -f "$script_dir/compose.yaml" "$@"
 }
 
 deploy_status=0
-compose up -d --force-recreate --remove-orphans --wait --wait-timeout 300 || deploy_status=$?
+compose up -d --remove-orphans --wait --wait-timeout 300 || deploy_status=$?
 if [ "$deploy_status" -ne 0 ]; then
     printf '%s\n' "Airflow deployment failed; reporting init status and logs." >&2
     compose ps --all >&2 || true

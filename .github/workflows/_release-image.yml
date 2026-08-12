@@ -35,8 +35,8 @@ on:
         required: false
         type: string
         default: ubuntu-24.04
-      timeout_minutes:
-        description: Build and deployment timeout
+      build_timeout_minutes:
+        description: Image build timeout
         required: false
         type: number
         default: 60
@@ -45,7 +45,11 @@ jobs:
   publish:
     if: github.ref == 'refs/heads/main'
     runs-on: ${{ inputs.runner }}
-    timeout-minutes: ${{ inputs.timeout_minutes }}
+    timeout-minutes: ${{ inputs.build_timeout_minutes }}
+    concurrency:
+      group: dev-${{ inputs.component }}-publish
+      cancel-in-progress: false
+      queue: max
     outputs:
       image: ${{ steps.release.outputs.image }}
     permissions:
@@ -167,11 +171,11 @@ jobs:
   deploy:
     needs: publish
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     environment: dev
     concurrency:
-      group: dev-${{ inputs.component }}
+      group: dev-${{ inputs.component }}-deploy
       cancel-in-progress: false
-      queue: max
     permissions:
       contents: read
       id-token: write

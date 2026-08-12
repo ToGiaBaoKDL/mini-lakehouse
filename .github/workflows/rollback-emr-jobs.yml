@@ -13,10 +13,10 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    environment: dev
     concurrency:
-      group: dev-emr-jobs
+      group: dev-emr-jobs-publish
       cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
       id-token: write

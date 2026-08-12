@@ -1,6 +1,20 @@
 #!/bin/sh
 set -eu
 
+if [ "$#" -gt 1 ]; then
+    printf '%s\n' "Usage: infra/runtime/postgres/deploy [airflow|lightdash]" >&2
+    exit 2
+fi
+
+application=${1:-}
+case "$application" in
+    ""|airflow|lightdash) ;;
+    *)
+        printf '%s\n' "Unknown metadata database: $application" >&2
+        exit 2
+        ;;
+esac
+
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 environment=${LAKEHOUSE_ENVIRONMENT:-dev}
 identity_dir=${AWS_IDENTITY_DIR:-"$HOME/.config/lakehouse/$environment/aws"}
@@ -19,25 +33,27 @@ aws_runtime() {
 postgres_secret=$(aws_runtime secretsmanager get-secret-value \
     --secret-id "lakehouse/$environment/metadata-postgres/bootstrap" \
     --query SecretString --output text)
-airflow_secret=$(aws_runtime secretsmanager get-secret-value \
-    --secret-id "lakehouse/$environment/metadata-postgres/airflow" \
-    --query SecretString --output text)
-lightdash_secret=$(aws_runtime secretsmanager get-secret-value \
-    --secret-id "lakehouse/$environment/metadata-postgres/lightdash" \
-    --query SecretString --output text)
 printf '%s' "$postgres_secret" | jq -e \
-    '.version == 1 and (.password | type == "string" and length > 0)' >/dev/null
-printf '%s' "$airflow_secret" | jq -e \
-    '.version == 1 and (.password | type == "string" and length > 0)' >/dev/null
-printf '%s' "$lightdash_secret" | jq -e \
     '.version == 1 and (.password | type == "string" and length > 0)' >/dev/null
 
 METADATA_POSTGRES_PASSWORD=$(printf '%s' "$postgres_secret" | jq -r '.password')
-AIRFLOW_DATABASE_PASSWORD=$(printf '%s' "$airflow_secret" | jq -r '.password')
-LIGHTDASH_DATABASE_PASSWORD=$(printf '%s' "$lightdash_secret" | jq -r '.password')
-export METADATA_POSTGRES_PASSWORD AIRFLOW_DATABASE_PASSWORD LIGHTDASH_DATABASE_PASSWORD
+export METADATA_POSTGRES_PASSWORD
+
+if [ -n "$application" ]; then
+    application_secret=$(aws_runtime secretsmanager get-secret-value \
+        --secret-id "lakehouse/$environment/metadata-postgres/$application" \
+        --query SecretString --output text)
+    printf '%s' "$application_secret" | jq -e \
+        '.version == 1 and (.password | type == "string" and length > 0)' >/dev/null
+    APPLICATION_DATABASE_PASSWORD=$(printf '%s' "$application_secret" | jq -r '.password')
+    POSTGRES_APPLICATION=$application
+    export APPLICATION_DATABASE_PASSWORD POSTGRES_APPLICATION
+fi
 
 docker compose --project-name metadata-postgres -f "$script_dir/compose.yaml" \
     up -d --wait --wait-timeout 180 metadata-postgres
-docker compose --project-name metadata-postgres -f "$script_dir/compose.yaml" \
-    run --rm metadata-postgres-bootstrap
+
+if [ -n "$application" ]; then
+    docker compose --project-name metadata-postgres -f "$script_dir/compose.yaml" \
+        run --rm metadata-postgres-bootstrap
+fi

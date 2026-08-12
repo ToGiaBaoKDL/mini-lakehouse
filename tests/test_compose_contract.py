@@ -144,6 +144,9 @@ def test_airflow_runtime_secrets_are_service_scoped_files() -> None:
     assert "admin_password" in airflow_secrets
     assert "AIRFLOW_ADMIN_PASSWORDS" in airflow_reconcile
     assert "infra/runtime/postgres/initialize-secrets" in services_makefile
+    assert "infra/runtime/postgres/initialize-secrets bootstrap" in services_makefile
+    assert "infra/runtime/postgres/initialize-secrets airflow" in services_makefile
+    assert "infra/runtime/postgres/initialize-secrets lightdash" in services_makefile
     assert "orchestration/deploy/initialize-secrets" in services_makefile
     assert "secretsmanager put-secret-value" not in services_makefile
 
@@ -157,11 +160,28 @@ def test_airflow_runtime_components_have_role_appropriate_healthchecks() -> None
     assert "healthcheck" not in services["airflow-init"]
     postgres = _compose(POSTGRES_COMPOSE)["services"]
     assert "healthcheck" in postgres["metadata-postgres"]
-    assert postgres["metadata-postgres-bootstrap"]["restart"] == "no"
+    bootstrap = postgres["metadata-postgres-bootstrap"]
+    assert bootstrap["restart"] == "no"
+    assert set(bootstrap["secrets"]) == {
+        "application_database_password",
+        "postgres_password",
+    }
+    assert "${POSTGRES_APPLICATION}.sql" in bootstrap["command"][-1]
+    assert set(_compose(POSTGRES_COMPOSE)["secrets"]) == {
+        "application_database_password",
+        "postgres_password",
+    }
     assert {path.name for path in Path("infra/runtime/postgres/bootstrap").glob("*.sql")} == {
         "airflow.sql",
         "lightdash.sql",
     }
+    for path in Path("infra/runtime/postgres/bootstrap").glob("*.sql"):
+        source = path.read_text(encoding="utf-8")
+        database = path.stem
+        assert "REVOKE CONNECT ON DATABASE postgres FROM PUBLIC" in source
+        assert f"REVOKE CONNECT ON DATABASE {database} FROM PUBLIC" in source
+        assert f"GRANT CONNECT ON DATABASE {database} TO {database}" in source
+        assert "REVOKE CREATE ON SCHEMA public FROM PUBLIC" in source
 
 
 def test_compose_uses_aws_credential_chain_without_static_keys() -> None:
@@ -183,6 +203,8 @@ def test_lightdash_uses_owned_database_storage_and_sdk_credentials() -> None:
     environment = service["environment"]
 
     assert service["image"] == "${LIGHTDASH_IMAGE:-lightdash:local}"
+    assert service["entrypoint"][:2] == ["dumb-init", "--"]
+    assert "command" not in service
     assert service["ports"] == ["${HOST_BIND_ADDRESS:-127.0.0.1}:8081:8080"]
     assert service["networks"] == ["metadata"]
     assert payload["networks"]["metadata"]["external"] is True
@@ -192,6 +214,10 @@ def test_lightdash_uses_owned_database_storage_and_sdk_credentials() -> None:
     assert environment["S3_USE_CREDENTIALS_FROM"] == "ini"
     assert environment["SECURE_COOKIES"] == "true"
     assert environment["TRUST_PROXY"] == "true"
+    assert "ALLOW_MULTIPLE_ORGS" not in environment
+    assert "LIGHTDASH_LOG_LEVEL" not in environment
+    assert "S3_FORCE_PATH_STYLE" not in environment
+    assert "SCHEDULER_ENABLED" not in environment
     assert "S3_ACCESS_KEY" not in environment
     assert "S3_SECRET_KEY" not in environment
     assert set(payload["secrets"]) == {"lightdash_database_password", "lightdash_secret"}
