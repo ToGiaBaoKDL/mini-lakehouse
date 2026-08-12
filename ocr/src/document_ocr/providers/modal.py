@@ -86,6 +86,10 @@ class ModalProvider:
             ) from error
         except modal.exception.Error as error:
             raise OcrProviderError(str(error)) from error
+        except Exception as error:
+            # Modal deliberately deserializes and re-raises the original user-code
+            # exception, so terminal runner failures are not Modal Error instances.
+            raise OcrProviderRunFailedError(str(error)[:2000]) from error
         if not isinstance(value, str):
             raise OcrProviderError("Modal OCR returned an invalid output prefix")
         path = PurePosixPath(value)
@@ -119,6 +123,9 @@ class ModalProvider:
             log(f"{message}\n")
             raise OcrProviderRunFailedError(message[:2000]) from error
         except OcrRunNotFoundError:
+            raise
+        except OcrProviderRunFailedError as error:
+            log(f"Modal function call failed: {error}\n")
             raise
         except OcrProviderError as error:
             log(f"Modal function call failed: {error}\n")

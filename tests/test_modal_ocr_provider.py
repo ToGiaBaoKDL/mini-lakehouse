@@ -16,15 +16,24 @@ from document_ocr.settings import ModalSettings
 class _FakeCall:
     object_id = "fc-test"
 
-    def __init__(self, result: object | None = None, *, active: bool = False) -> None:
+    def __init__(
+        self,
+        result: object | None = None,
+        *,
+        active: bool = False,
+        error: Exception | None = None,
+    ) -> None:
         self._result = result
         self._active = active
+        self._error = error
         self.cancelled = False
         self.logs = _FakeLogs()
 
     def get(self, timeout: float | None) -> object:
         if self._active:
             raise modal.exception.TimeoutError("still running")
+        if self._error is not None:
+            raise self._error
         return self._result
 
     def get_dashboard_url(self) -> str:
@@ -214,3 +223,21 @@ def test_modal_provider_maps_an_invalid_remote_result_to_failed(monkeypatch: Any
 
     with pytest.raises(OcrProviderRunFailedError, match="invalid output prefix"):
         provider.wait("fc-test", lambda _message: None)
+
+
+def test_modal_provider_maps_deserialized_user_code_exception_to_failed(
+    monkeypatch: Any,
+) -> None:
+    call = _FakeCall(error=ValueError("invalid runner payload"))
+    provider = _provider()
+    logs: list[str] = []
+
+    def find_call(_provider_run_id: str) -> _FakeCall:
+        return call
+
+    monkeypatch.setattr(provider, "_call", find_call)
+
+    with pytest.raises(OcrProviderRunFailedError, match="invalid runner payload"):
+        provider.wait("fc-test", logs.append)
+
+    assert logs[-1] == "Modal function call failed: invalid runner payload\n"

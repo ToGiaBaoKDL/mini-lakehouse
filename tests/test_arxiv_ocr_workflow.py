@@ -303,11 +303,15 @@ def test_arxiv_workflow_runs_and_publishes_exactly_one_document() -> None:
 
 
 def test_arxiv_workflow_fails_a_missing_remote_run() -> None:
-    workflow, _, tables, product, _ = _workflow(_MissingProvider)
+    workflow, provider, tables, product, _ = _workflow(_MissingProvider)
 
+    with pytest.raises(OcrError, match="is missing"):
+        workflow.run("2607.00001")
     with pytest.raises(OcrError, match="is missing"):
         workflow.run("2607.00001")
 
     runs = tables[product.table_identifier("ocr_document_runs").iceberg]
-    assert len(runs.rows) == 1
-    assert runs.rows[0]["state"] == "failed"
+    assert len(runs.rows) == 2
+    assert provider.submissions == 2
+    assert {row["attempt"] for row in runs.rows} == {1, 2}
+    assert {row["state"] for row in runs.rows} == {"failed"}
