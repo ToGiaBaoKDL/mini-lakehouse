@@ -20,6 +20,8 @@ jobs:
       build_context: https://github.com/lightdash/lightdash.git#297295a75ae34e79a3b72539f82ea361d47d0293
       component: lightdash
       dockerfile: dockerfile
+      external_source_revision: 297295a75ae34e79a3b72539f82ea361d47d0293
+      external_source_url: https://github.com/lightdash/lightdash
       platforms: linux/arm64
       repository: tgbao-dev-lightdash
       runner: ubuntu-24.04-arm

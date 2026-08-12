@@ -162,6 +162,8 @@ The Cloudflare connector is the exception: a protected manual workflow deploys t
 multi-architecture digest directly, without a custom image or ECR repository.
 Lightdash is built unmodified from its pinned upstream commit on a native ARM runner because its
 official release image is amd64-only; only the ARM64 image needed by the OCI A1 host is published.
+Its upstream revision is also an immutable ECR build identity, so deployment-only changes reuse the
+same digest server-side while retaining a tag for the reviewed repository revision and rollback.
 
 Airflow uses the official versioned `GitDagBundle` and tracks the reviewed `main` ref under
 `orchestration/bundle`. A DAG-only merge is fetched by the DAG processor without rebuilding or

@@ -265,7 +265,9 @@ AWS_PROFILE=tgbao-dev make ocr-modal-runner-deploy
 
 The Lightdash workflow builds the unmodified upstream `1.134.0` commit on a native ARM GitHub
 runner, publishes only the OCI A1-compatible ARM64 image, and deploys it by digest. The official
-release image is not used because it does not publish an ARM64 manifest. The EMR workflow publishes
+release image is not used because it does not publish an ARM64 manifest. The pinned upstream commit
+is the image build identity: deployment-only revisions add their immutable Git-SHA tag to the same
+ECR manifest without pulling, rebuilding, or pushing its layers. The EMR workflow publishes
 an immutable contract/job bundle and updates its SSM pointer only after
 the checksum manifest is complete. Component workflows build their required architectures, publish
 immutable Git-SHA tags to ECR, resolve their digests, and deploy only the selected component over

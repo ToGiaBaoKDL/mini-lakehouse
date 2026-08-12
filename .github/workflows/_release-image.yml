@@ -25,6 +25,16 @@ on:
         required: false
         type: string
         default: .
+      external_source_revision:
+        description: Optional immutable external source revision used to deduplicate builds
+        required: false
+        type: string
+        default: ""
+      external_source_url:
+        description: Canonical source URL required with an external source revision
+        required: false
+        type: string
+        default: ""
       platforms:
         description: Comma-separated target platforms
         required: false
@@ -70,6 +80,8 @@ jobs:
           REPOSITORY: ${{ inputs.repository }}
           BUILD_ARGS: ${{ inputs.build_args }}
           BUILD_CONTEXT: ${{ inputs.build_context }}
+          EXTERNAL_SOURCE_REVISION: ${{ inputs.external_source_revision }}
+          EXTERNAL_SOURCE_URL: ${{ inputs.external_source_url }}
           PLATFORMS: ${{ inputs.platforms }}
           RUNNER: ${{ inputs.runner }}
         run: |
@@ -86,12 +98,16 @@ jobs:
           esac
           case "$COMPONENT" in
             lightdash)
-              [[ "$BUILD_CONTEXT" =~ ^https://github.com/lightdash/lightdash\.git#[0-9a-f]{40}$ ]]
+              [[ "$EXTERNAL_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+              [[ "$EXTERNAL_SOURCE_URL" == "https://github.com/lightdash/lightdash" ]]
+              [[ "$BUILD_CONTEXT" == "$EXTERNAL_SOURCE_URL.git#$EXTERNAL_SOURCE_REVISION" ]]
               [[ "$DOCKERFILE" == "dockerfile" ]]
               [[ "$PLATFORMS" == "linux/arm64" ]]
               [[ "$RUNNER" == "ubuntu-24.04-arm" ]]
               ;;
             *)
+              [[ -z "$EXTERNAL_SOURCE_REVISION" ]]
+              [[ -z "$EXTERNAL_SOURCE_URL" ]]
               [[ "$BUILD_CONTEXT" == "." ]]
               [[ -f "$DOCKERFILE" ]]
               [[ "$PLATFORMS" == "linux/amd64,linux/arm64" ]]
@@ -115,6 +131,7 @@ jobs:
         shell: bash
         env:
           REPOSITORY: ${{ inputs.repository }}
+          SOURCE_TAG: ${{ inputs.external_source_revision != '' && format('source-{0}', inputs.external_source_revision) || '' }}
         run: |
           set -euo pipefail
           response=$(aws ecr batch-get-image \
@@ -122,6 +139,29 @@ jobs:
             --image-ids "imageTag=$GITHUB_SHA" \
             --output json)
           digest=$(jq -r '.images[0].imageId.imageDigest // empty' <<<"$response")
+          if [[ -n "$SOURCE_TAG" ]] && [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            source_response=$(aws ecr batch-get-image \
+              --repository-name "$REPOSITORY" \
+              --image-ids "imageTag=$SOURCE_TAG" \
+              --output json)
+            source_digest=$(jq -r '.images[0].imageId.imageDigest // empty' <<<"$source_response")
+            manifest=$(jq -r '.images[0].imageManifest // empty' <<<"$source_response")
+            media_type=$(jq -r '.images[0].imageManifestMediaType // empty' <<<"$source_response")
+            if [[ "$source_digest" =~ ^sha256:[0-9a-f]{64}$ && -n "$manifest" ]]; then
+              put_image=(
+                aws ecr put-image
+                --repository-name "$REPOSITORY"
+                --image-tag "$GITHUB_SHA"
+                --image-manifest "$manifest"
+              )
+              if [[ -n "$media_type" ]]; then
+                put_image+=(--image-manifest-media-type "$media_type")
+              fi
+              retagged=$("${put_image[@]}")
+              digest=$(jq -r '.image.imageId.imageDigest // empty' <<<"$retagged")
+              [[ "$digest" == "$source_digest" ]]
+            fi
+          fi
           if [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "digest=$digest" >> "$GITHUB_OUTPUT"
             echo "exists=true" >> "$GITHUB_OUTPUT"
@@ -145,14 +185,16 @@ jobs:
           build-args: ${{ inputs.build_args }}
           platforms: ${{ inputs.platforms }}
           push: true
-          tags: ${{ steps.ecr.outputs.registry }}/${{ inputs.repository }}:${{ github.sha }}
+          tags: |
+            ${{ steps.ecr.outputs.registry }}/${{ inputs.repository }}:${{ github.sha }}
+            ${{ inputs.external_source_revision != '' && format('{0}/{1}:source-{2}', steps.ecr.outputs.registry, inputs.repository, inputs.external_source_revision) || '' }}
           cache-from: type=gha,scope=${{ inputs.component }}
           cache-to: type=gha,mode=max,scope=${{ inputs.component }}
           provenance: mode=max
           sbom: true
           labels: |
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ inputs.external_source_revision || github.sha }}
+            org.opencontainers.image.source=${{ inputs.external_source_url || format('{0}/{1}', github.server_url, github.repository) }}
 
       - name: Resolve deployment reference
         id: release

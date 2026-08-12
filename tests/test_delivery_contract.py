@@ -46,6 +46,8 @@ def test_component_release_publishes_before_protected_digest_deployment() -> Non
     assert "sbom: true" in release
     assert "imageTag=$GITHUB_SHA" in release
     assert "aws ecr batch-get-image" in release
+    assert "aws ecr put-image" in release
+    assert "source-{0}" in release
     assert "cancel-in-progress: false" in release
     assert 'dbt-engineering) [[ "$BUILD_ARGS" == "DBT_PROJECT=engineering" ]]' in release
     assert 'dbt-research) [[ "$BUILD_ARGS" == "DBT_PROJECT=research" ]]' in release
@@ -195,6 +197,8 @@ def test_each_custom_component_has_a_thin_release_caller() -> None:
         "release-lightdash.yml": (
             "component: lightdash",
             "dockerfile: dockerfile",
+            "external_source_revision: 297295a75ae34e79a3b72539f82ea361d47d0293",
+            "external_source_url: https://github.com/lightdash/lightdash",
             "platforms: linux/arm64",
             "runner: ubuntu-24.04-arm",
         ),
@@ -218,8 +222,14 @@ def test_lightdash_release_builds_the_pinned_upstream_source_natively() -> None:
     images_makefile = Path("make/images.mk").read_text(encoding="utf-8")
 
     upstream = "https://github.com/lightdash/lightdash.git#297295a75ae34e79a3b72539f82ea361d47d0293"
-    assert "lightdash\\.git#[0-9a-f]{40}" in reusable
+    assert (
+        '[[ "$BUILD_CONTEXT" == "$EXTERNAL_SOURCE_URL.git#$EXTERNAL_SOURCE_REVISION" ]]' in reusable
+    )
     assert f"build_context: {upstream}" in lightdash
+    assert "external_source_revision: 297295a75ae34e79a3b72539f82ea361d47d0293" in lightdash
+    assert "external_source_url: https://github.com/lightdash/lightdash" in lightdash
+    assert "SOURCE_TAG:" in reusable
+    assert "--image-manifest-media-type" in reusable
     assert f"LIGHTDASH_BUILD_CONTEXT := {upstream}" in images_makefile
     assert "--tag lightdash:local" in images_makefile
     assert "lightdash/lightdash:latest" not in lightdash
