@@ -11,6 +11,7 @@ services:
         export PGPASSWORD="$$(cat /run/secrets/lightdash_database_password)"
         exec /usr/bin/prod-entrypoint.sh "$${@}"
       - --
+    command: ["node", "dist/index.js"]
     environment:
       ATHENA_WAREHOUSE_IAM_ROLE_AUTH: "true"
       AWS_CONFIG_FILE: /run/aws/config
