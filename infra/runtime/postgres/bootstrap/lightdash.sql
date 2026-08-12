@@ -12,5 +12,7 @@ GRANT CONNECT ON DATABASE lightdash TO lightdash;
 
 \connect lightdash
 
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT USAGE, CREATE ON SCHEMA public TO lightdash;

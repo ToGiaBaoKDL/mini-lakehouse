@@ -183,6 +183,11 @@ def test_airflow_runtime_components_have_role_appropriate_healthchecks() -> None
         assert f"GRANT CONNECT ON DATABASE {database} TO {database}" in source
         assert "REVOKE CREATE ON SCHEMA public FROM PUBLIC" in source
 
+    lightdash_bootstrap = Path("infra/runtime/postgres/bootstrap/lightdash.sql").read_text(
+        encoding="utf-8"
+    )
+    assert 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"' in lightdash_bootstrap
+
 
 def test_compose_uses_aws_credential_chain_without_static_keys() -> None:
     rendered = "\n".join(
