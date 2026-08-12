@@ -6,6 +6,8 @@ GITHUB_TERRAFORM_DIR := infra/terraform/github/environments/$(LAKEHOUSE_ENVIRONM
 CLOUDFLARE_TERRAFORM_DIR := infra/terraform/cloudflare/environments/$(LAKEHOUSE_ENVIRONMENT)
 TERRAFORM_CACHE_DIR ?= $(HOME)/.cache/lakehouse/terraform
 TF_PLUGIN_CACHE_DIR ?= $(TERRAFORM_CACHE_DIR)/plugins
+TF_REGISTRY_CLIENT_TIMEOUT ?= 30
+TF_REGISTRY_DISCOVERY_RETRY ?= 3
 AWS_STATE_FILE := $(TERRAFORM_CACHE_DIR)/state/aws-bootstrap.tfstate
 AWS_STATE_TERRAFORM_DATA_DIR := $(TERRAFORM_CACHE_DIR)/data/aws-state
 AWS_TERRAFORM_DATA_DIR := $(TERRAFORM_CACHE_DIR)/data/aws-$(LAKEHOUSE_ENVIRONMENT)
@@ -34,6 +36,8 @@ SERVICES_HOST_USER ?= ubuntu
 	workload-identities-install
 
 export TF_PLUGIN_CACHE_DIR
+export TF_REGISTRY_CLIENT_TIMEOUT
+export TF_REGISTRY_DISCOVERY_RETRY
 
 terraform-cache:
 	@install -d -m 0700 "$(TF_PLUGIN_CACHE_DIR)" "$(dir $(AWS_STATE_FILE))"
