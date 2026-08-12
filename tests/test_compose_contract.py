@@ -211,8 +211,9 @@ def test_lightdash_uses_owned_database_storage_and_sdk_credentials() -> None:
     assert service["entrypoint"][:2] == ["dumb-init", "--"]
     assert service["command"] == ["node", "dist/index.js"]
     assert service["ports"] == ["${HOST_BIND_ADDRESS:-127.0.0.1}:8081:8080"]
-    assert service["networks"] == ["metadata"]
+    assert set(service["networks"]) == {"metadata", "runtime"}
     assert payload["networks"]["metadata"]["external"] is True
+    assert payload["networks"]["runtime"] is None
     assert environment["PGDATABASE"] == "lightdash"
     assert environment["PGHOST"] == "metadata-postgres"
     assert environment["ATHENA_WAREHOUSE_IAM_ROLE_AUTH"] == "true"

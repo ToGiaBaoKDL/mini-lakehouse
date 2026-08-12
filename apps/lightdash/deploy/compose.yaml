@@ -40,6 +40,7 @@ services:
       - "${HOST_BIND_ADDRESS:-127.0.0.1}:8081:8080"
     networks:
       - metadata
+      - runtime
     healthcheck:
       test:
         - CMD
@@ -62,6 +63,7 @@ networks:
   metadata:
     external: true
     name: lakehouse-metadata
+  runtime:
 
 secrets:
   lightdash_database_password:
