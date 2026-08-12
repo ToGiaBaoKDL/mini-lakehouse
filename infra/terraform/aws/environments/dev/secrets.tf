@@ -12,13 +12,25 @@ locals {
       connection => "lakehouse/${local.environment}/airflow/connections/${connection}"
     },
   )
+  metadata_postgres_secret_descriptions = {
+    airflow   = "Database credential owned by the Airflow metadata database."
+    bootstrap = "Bootstrap credential for the shared metadata PostgreSQL server."
+    lightdash = "Database credential owned by the Lightdash metadata database."
+  }
 }
 
 resource "aws_secretsmanager_secret" "metadata_postgres" {
-  for_each = toset(["airflow", "bootstrap"])
+  for_each = local.metadata_postgres_secret_descriptions
 
   name                    = "lakehouse/${local.environment}/metadata-postgres/${each.key}"
-  description             = each.key == "bootstrap" ? "Bootstrap credential for the shared metadata PostgreSQL server." : "Database credential owned by the Airflow metadata database."
+  description             = each.value
+  recovery_window_in_days = 7
+  tags                    = local.tags
+}
+
+resource "aws_secretsmanager_secret" "lightdash" {
+  name                    = "lakehouse/${local.environment}/lightdash/runtime"
+  description             = "Stable encryption secret for the self-hosted Lightdash service."
   recovery_window_in_days = 7
   tags                    = local.tags
 }

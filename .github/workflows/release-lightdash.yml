@@ -1,0 +1,26 @@
+name: Release Lightdash
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/release-lightdash.yml
+      - apps/lightdash/deploy/**
+      - infra/runtime/identity/install-aws-signing-helper
+      - infra/runtime/postgres/**
+  workflow_dispatch:
+
+jobs:
+  release:
+    uses: ./.github/workflows/_release-image.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      build_context: https://github.com/lightdash/lightdash.git#297295a75ae34e79a3b72539f82ea361d47d0293
+      component: lightdash
+      dockerfile: dockerfile
+      platforms: linux/arm64
+      repository: tgbao-dev-lightdash
+      runner: ubuntu-24.04-arm
+      timeout_minutes: 120

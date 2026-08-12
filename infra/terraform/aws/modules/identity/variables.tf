@@ -37,16 +37,26 @@ variable "catalog_admin_principal_arns" {
 
 variable "github_oidc_provider_arn" {
   type        = string
-  description = "GitHub Actions OIDC provider trusted by environment-scoped release roles."
+  description = "GitHub Actions OIDC provider trusted by release publisher roles."
 }
 
 variable "github_environment_subject" {
   type        = string
-  description = "Exact immutable GitHub OIDC subject for the protected release environment."
+  description = "Exact immutable GitHub OIDC subject for protected rollback and deployment jobs."
 
   validation {
     condition     = startswith(var.github_environment_subject, "repo:") && strcontains(var.github_environment_subject, ":environment:")
     error_message = "github_environment_subject must identify one repository environment."
+  }
+}
+
+variable "github_main_subject" {
+  type        = string
+  description = "Exact immutable GitHub OIDC subject allowed to publish releases from main."
+
+  validation {
+    condition     = startswith(var.github_main_subject, "repo:") && endswith(var.github_main_subject, ":ref:refs/heads/main")
+    error_message = "github_main_subject must identify the repository main branch."
   }
 }
 
@@ -61,6 +71,7 @@ variable "bucket_arns" {
     curated       = string
     analytics     = string
     artifacts     = string
+    lightdash     = string
     logs          = string
     query_results = string
   })
@@ -128,6 +139,16 @@ variable "metadata_postgres_secret_arns" {
   validation {
     condition     = length(var.metadata_postgres_secret_arns) > 0
     error_message = "Metadata PostgreSQL requires at least one managed secret."
+  }
+}
+
+variable "lightdash_secret_arns" {
+  type        = set(string)
+  description = "Runtime and database secrets readable by Lightdash."
+
+  validation {
+    condition     = length(var.lightdash_secret_arns) == 2
+    error_message = "Lightdash requires its runtime and database secrets."
   }
 }
 

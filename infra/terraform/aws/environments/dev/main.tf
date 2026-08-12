@@ -15,11 +15,13 @@ locals {
     id       = "1313563456"
   }
   github_environment_subject = "repo:${local.github_repository.owner}@${local.github_repository.owner_id}/${local.github_repository.name}@${local.github_repository.id}:environment:${local.environment}"
+  github_main_subject        = "repo:${local.github_repository.owner}@${local.github_repository.owner_id}/${local.github_repository.name}@${local.github_repository.id}:ref:refs/heads/main"
   bucket_names = {
     landing         = "${local.name_prefix}-landing-cy8j1c"
     curated         = "${local.name_prefix}-curated-za7rju"
     analytics       = "${local.name_prefix}-analytics-vt77zs"
     artifacts       = "${local.name_prefix}-artifacts-uhiv2y"
+    lightdash       = "${local.name_prefix}-lightdash-p4m8xs"
     logs            = "${local.name_prefix}-logs-71k0oc"
     "query-results" = "${local.name_prefix}-query-results-q2034x"
   }
@@ -39,6 +41,7 @@ locals {
   }
   athena_workload_prefixes = merge({
     arxiv_inspector = "arxiv-inspector"
+    lightdash       = "lightdash"
     }, {
     for domain in keys(local.analytics_domains) : "dbt_${domain}" => "dbt/${domain}"
   })
@@ -58,12 +61,17 @@ locals {
         prefixes  = access.curated_prefixes
       }
     })
-    analytics = {
+    analytics = merge({
+      lightdash = {
+        databases = [for access in values(local.analytics_domains) : access.analytics_database]
+        prefixes  = [for access in values(local.analytics_domains) : access.analytics_prefix]
+      }
+      }, {
       for domain, access in local.analytics_domains : "dbt_${domain}" => {
         databases = [access.analytics_database]
         prefixes  = [access.analytics_prefix]
       }
-    }
+    })
   }
   athena_workgroup_arn = "arn:${data.aws_partition.current.partition}:athena:${local.aws_region}:${data.aws_caller_identity.current.account_id}:workgroup/${local.athena_workgroup}"
   tags = {
@@ -89,7 +97,7 @@ module "container_registry" {
   source      = "../../modules/container_registry"
   name_prefix = local.name_prefix
   repositories = setunion(
-    toset(["airflow", "arxiv-inspector", "ocr-worker"]),
+    toset(["airflow", "arxiv-inspector", "lightdash", "ocr-worker"]),
     toset([for domain in keys(local.analytics_domains) : "dbt-${domain}"]),
   )
   retained_image_count = 20
@@ -130,6 +138,7 @@ module "identity" {
   catalog_admin_principal_arns    = var.catalog_admin_principal_arns
   github_oidc_provider_arn        = aws_iam_openid_connect_provider.github.arn
   github_environment_subject      = local.github_environment_subject
+  github_main_subject             = local.github_main_subject
   roles_anywhere_trust_anchor_arn = aws_rolesanywhere_trust_anchor.workloads.arn
   parameter_arns                  = local.parameter_arns
   kms_key_arn                     = module.storage.kms_key_arn
@@ -141,6 +150,7 @@ module "identity" {
     curated       = module.storage.bucket_arns.curated
     analytics     = module.storage.bucket_arns.analytics
     artifacts     = module.storage.bucket_arns.artifacts
+    lightdash     = module.storage.bucket_arns.lightdash
     logs          = module.storage.bucket_arns.logs
     query_results = module.storage.bucket_arns["query-results"]
   }
@@ -150,6 +160,10 @@ module "identity" {
   ))
   metadata_postgres_secret_arns = toset([
     for secret in aws_secretsmanager_secret.metadata_postgres : secret.arn
+  ])
+  lightdash_secret_arns = toset([
+    aws_secretsmanager_secret.lightdash.arn,
+    aws_secretsmanager_secret.metadata_postgres["lightdash"].arn,
   ])
   ocr_secret_arns = toset([for secret in aws_secretsmanager_secret.ocr : secret.arn])
   services_deployer_secret_arns = toset([

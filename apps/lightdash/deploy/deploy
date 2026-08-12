@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 1 ]; then
+    printf '%s\n' "Usage: apps/lightdash/deploy/deploy <image@sha256:digest>" >&2
+    exit 2
+fi
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+bundle_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
+"$bundle_root/infra/runtime/delivery/pull-image" lightdash "$1"
+"$script_dir/reconcile" "$1"

@@ -54,6 +54,9 @@ lint: ## Run formatting, linting, and static type checks.
 		orchestration/deploy/reconcile \
 		apps/arxiv_inspector/deploy/deploy \
 		apps/arxiv_inspector/deploy/reconcile \
+		apps/lightdash/deploy/deploy \
+		apps/lightdash/deploy/initialize-secrets \
+		apps/lightdash/deploy/reconcile \
 		dbt/deploy/deploy \
 		ocr/deploy/deploy
 	uv run ruff format --check .
@@ -71,6 +74,7 @@ compose-validate: ## Validate self-hosted service Compose files.
 	$(METADATA_POSTGRES_COMPOSE_CONFIG) config --quiet
 	$(AIRFLOW_COMPOSE_CONFIG) config --quiet
 	$(INSPECTOR_COMPOSE) config --quiet
+	$(LIGHTDASH_COMPOSE_CONFIG) config --quiet
 	$(CLOUDFLARE_COMPOSE_CONFIG) config --quiet
 
 check: ## Run the complete local quality gate.

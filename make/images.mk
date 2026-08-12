@@ -1,5 +1,7 @@
+LIGHTDASH_BUILD_CONTEXT := https://github.com/lightdash/lightdash.git#297295a75ae34e79a3b72539f82ea361d47d0293
+
 .PHONY: images-check airflow-build arxiv-inspector-build dbt-engineering-build \
-	dbt-research-build ocr-worker-build images-build
+	dbt-research-build lightdash-build ocr-worker-build images-build
 
 images-check: ## Validate every Dockerfile without building image layers.
 	docker buildx build --check --file orchestration/runtime/Dockerfile .
@@ -23,7 +25,10 @@ dbt-research-build: ## Build the isolated Research analytics task image.
 	docker build --build-arg DBT_PROJECT=research --file dbt/Dockerfile \
 		--tag dbt-research:local --tag dbt-research:runtime .
 
+lightdash-build: ## Build the pinned upstream Lightdash image for local use.
+	docker build --file dockerfile --tag lightdash:local "$(LIGHTDASH_BUILD_CONTEXT)"
+
 ocr-worker-build: ## Build the isolated OCR task image.
 	docker build --file ocr/Dockerfile --tag ocr-worker:local --tag ocr-worker:runtime .
 
-images-build: airflow-build arxiv-inspector-build dbt-engineering-build dbt-research-build ocr-worker-build ## Build all local images.
+images-build: airflow-build arxiv-inspector-build dbt-engineering-build dbt-research-build lightdash-build ocr-worker-build ## Build all local images.

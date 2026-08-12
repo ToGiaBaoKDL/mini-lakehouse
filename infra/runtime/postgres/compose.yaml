@@ -32,9 +32,10 @@ services:
       PGUSER: postgres
     secrets:
       - airflow_database_password
+      - lightdash_database_password
       - postgres_password
     volumes:
-      - ./bootstrap.sql:/opt/lakehouse/bootstrap.sql:ro
+      - ./bootstrap:/opt/lakehouse/bootstrap:ro
     networks:
       - metadata
     depends_on:
@@ -45,9 +46,12 @@ services:
       - -ec
       - >-
         export PGPASSWORD="$$(cat /run/secrets/postgres_password)";
+        psql --dbname postgres --set ON_ERROR_STOP=1
+        --set application_password="$$(cat /run/secrets/airflow_database_password)"
+        --file /opt/lakehouse/bootstrap/airflow.sql;
         exec psql --dbname postgres --set ON_ERROR_STOP=1
-        --set airflow_password="$$(cat /run/secrets/airflow_database_password)"
-        --file /opt/lakehouse/bootstrap.sql
+        --set application_password="$$(cat /run/secrets/lightdash_database_password)"
+        --file /opt/lakehouse/bootstrap/lightdash.sql
     restart: "no"
     deploy:
       resources:
@@ -68,3 +72,5 @@ secrets:
     environment: METADATA_POSTGRES_PASSWORD
   airflow_database_password:
     environment: AIRFLOW_DATABASE_PASSWORD
+  lightdash_database_password:
+    environment: LIGHTDASH_DATABASE_PASSWORD

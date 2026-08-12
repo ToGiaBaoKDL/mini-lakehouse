@@ -1,0 +1,72 @@
+services:
+  lightdash:
+    image: "${LIGHTDASH_IMAGE:-lightdash:local}"
+    entrypoint:
+      - sh
+      - -ec
+      - |
+        export LIGHTDASH_SECRET="$$(cat /run/secrets/lightdash_secret)"
+        export PGPASSWORD="$$(cat /run/secrets/lightdash_database_password)"
+        exec /usr/bin/prod-entrypoint.sh "$${@}"
+      - --
+    command: ["node", "dist/index.js"]
+    environment:
+      ALLOW_MULTIPLE_ORGS: "false"
+      ATHENA_WAREHOUSE_IAM_ROLE_AUTH: "true"
+      AWS_CONFIG_FILE: /run/aws/config
+      AWS_EC2_METADATA_DISABLED: "true"
+      AWS_REGION: ${AWS_REGION}
+      AWS_SDK_LOAD_CONFIG: "1"
+      LIGHTDASH_LOG_LEVEL: info
+      PGDATABASE: lightdash
+      PGHOST: metadata-postgres
+      PGPORT: "5432"
+      PGUSER: lightdash
+      PORT: "8080"
+      S3_BUCKET: ${LIGHTDASH_S3_BUCKET}
+      S3_ENDPOINT: https://s3.${AWS_REGION}.amazonaws.com
+      S3_FORCE_PATH_STYLE: "false"
+      S3_REGION: ${AWS_REGION}
+      S3_USE_CREDENTIALS_FROM: ini
+      SCHEDULER_ENABLED: "true"
+      SECURE_COOKIES: "true"
+      SITE_URL: ${LIGHTDASH_SITE_URL}
+      TRUST_PROXY: "true"
+    secrets:
+      - lightdash_database_password
+      - lightdash_secret
+    volumes:
+      - ${AWS_IDENTITY_DIR}/lightdash:/run/aws:ro
+      - /usr/local/bin/aws_signing_helper:/usr/local/bin/aws_signing_helper:ro
+    ports:
+      - "${HOST_BIND_ADDRESS:-127.0.0.1}:8081:8080"
+    networks:
+      - metadata
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://localhost:8080/api/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s
+    restart: unless-stopped
+    stop_grace_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 2G
+
+networks:
+  metadata:
+    external: true
+    name: lakehouse-metadata
+
+secrets:
+  lightdash_database_password:
+    environment: LIGHTDASH_DATABASE_PASSWORD
+  lightdash_secret:
+    environment: LIGHTDASH_SECRET

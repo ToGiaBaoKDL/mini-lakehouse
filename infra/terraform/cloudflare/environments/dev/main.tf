@@ -9,6 +9,10 @@ locals {
       hostname = "arxiv.tgblab.io.vn"
       origin   = "http://127.0.0.1:8501"
     }
+    lightdash = {
+      hostname = "analytics.tgblab.io.vn"
+      origin   = "http://127.0.0.1:8081"
+    }
   }
 }
 

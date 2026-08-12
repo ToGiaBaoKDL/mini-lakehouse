@@ -137,9 +137,10 @@ The OCR schemas are `{"username":"...","api_token":"..."}` for Kaggle and
 
 ## Component releases
 
-ECR repositories are immutable and retain the newest 20 releases. GitHub publishes and deploys only
-the changed component after the protected `dev` environment is approved. AWS and Tailscale access
-uses OIDC; there are no long-lived CI credentials.
+ECR repositories are immutable and retain the newest 20 releases. After a change reaches `main`,
+GitHub publishes the changed component immediately under the exact main-branch OIDC subject. The
+subsequent OCI deployment waits for approval from the protected `dev` environment. AWS and
+Tailscale access use OIDC; there are no long-lived CI credentials.
 
 After applying AWS and Tailscale, apply the isolated GitHub root with a fine-grained token that can
 manage Actions environments and variables for this repository:
@@ -149,14 +150,17 @@ GITHUB_TOKEN='<fine-grained token>' make github-plan
 GITHUB_TOKEN='<fine-grained token>' make github-apply
 ```
 
-The variable names are `AWS_IMAGE_PUBLISHER_ROLE_ARN`, `AWS_EMR_PUBLISHER_ROLE_ARN`,
-`EMR_ARTIFACTS_URI`, `EMR_CODE_PARAMETER_NAME`, `TAILSCALE_CLIENT_ID`, and
-`TAILSCALE_AUDIENCE`. Terraform reads them directly from the AWS and Tailscale remote states and
-owns the `dev` environment, owner reviewer, and exact `main` deployment policy. The token is provider
-authentication only: keep it in the process environment, never in tfvars or Terraform state. A
-GitHub App can replace the local token if repository administration is automated later.
+The repository-level variables are `AWS_IMAGE_PUBLISHER_ROLE_ARN`,
+`AWS_EMR_PUBLISHER_ROLE_ARN`, `EMR_ARTIFACTS_URI`, and `EMR_CODE_PARAMETER_NAME`; they let the exact
+main-branch OIDC subject publish dev artifacts without environment approval. Only
+`TAILSCALE_CLIENT_ID` and `TAILSCALE_AUDIENCE` belong to the protected `dev` environment because
+they are used to deploy OCI services. Terraform reads every value directly from the AWS and
+Tailscale remote states and owns the `dev` environment, owner reviewer, and exact `main` deployment
+policy. The token is provider authentication only: keep it in the process environment, never in
+tfvars or Terraform state. A GitHub App can replace the local token if repository administration is
+automated later.
 
-Protected GitHub workflows are the only release publishers. Image rollback accepts an immutable
+Main-branch GitHub workflows are the only release publishers. Image rollback accepts an immutable
 digest and verifies that it is the image tagged by the reviewed Git revision. EMR rollback accepts a
 reviewed revision only after its completed checksum manifest is found. There are no duplicate human
 image or EMR publishing targets to drift from CI. CI streams only the selected deployment files
@@ -180,6 +184,7 @@ For unpublished local iteration:
 make images-build
 make airflow-up
 make arxiv-inspector-up
+make lightdash-up
 ```
 
 Only the Airflow scheduler receives the Docker socket because `LocalExecutor` launches task

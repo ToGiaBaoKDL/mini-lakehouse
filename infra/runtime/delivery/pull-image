@@ -10,7 +10,7 @@ component=$1
 image=$2
 
 case "$component" in
-    airflow|arxiv-inspector|dbt-engineering|dbt-research|ocr-worker) ;;
+    airflow|arxiv-inspector|dbt-engineering|dbt-research|lightdash|ocr-worker) ;;
     *)
         printf '%s\n' "Unknown component: $component" >&2
         exit 2

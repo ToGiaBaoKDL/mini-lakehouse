@@ -12,6 +12,7 @@ on:
           - arxiv-inspector
           - dbt-engineering
           - dbt-research
+          - lightdash
           - ocr-worker
       image:
         description: Exact ECR image reference by digest
@@ -85,6 +86,7 @@ jobs:
             infra/runtime/postgres
             orchestration/deploy
             apps/arxiv_inspector/deploy
+            apps/lightdash/deploy
             dbt/deploy
             ocr/deploy
       - name: Verify the deployment bundle was reviewed on main

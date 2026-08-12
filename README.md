@@ -21,7 +21,8 @@ flowchart LR
     Q --> N[(S3 analytics)]
     N -. Iceberg metadata .-> G
     G --> D[Data applications]
-    F[Cloudflare Access + Tunnel] --> A & D
+    N --> H[Lightdash semantic layer]
+    F[Cloudflare Access + Tunnel] --> A & D & H
 
     T[Terraform] -. AWS data plane .-> L & C & N & E & Q
     O[OCI A1 + Tailscale] --> A & D
@@ -51,6 +52,7 @@ flowchart LR
 | `dbt/research/` | Research analytics | ArXiv-facing models, tests, profile, and release ownership |
 | `ocr/` | Document processing | Provider-neutral protocol, adapters, configuration, and portable GPU runtimes |
 | `apps/arxiv_inspector/` | Data application | UI plus its read-only Athena/S3 access layer |
+| `apps/lightdash/` | Analytics application | Self-hosted Lightdash runtime and deployment boundary |
 
 Terraform never creates Glue databases or Iceberg tables. PyIceberg applies the YAML contracts.
 Spark owns source-to-landing and source-to-curated writes; the isolated OCR worker owns its curated
@@ -80,12 +82,16 @@ s3://<project>-<env>-analytics-<suffix>/
 s3://<project>-<env>-artifacts-<suffix>/
   emr/jobs/<release>/
 
+s3://<project>-<env>-lightdash-<suffix>/
+  ...                                  # Lightdash-owned exports and cached files
+
 s3://<project>-<env>-logs-<suffix>/
   airflow/task-logs/                  # 30-day dev retention
 
 s3://<project>-<env>-query-results-<suffix>/
   dbt/
   arxiv-inspector/
+  lightdash/
 ```
 
 Glue database names are explicit contract fields, such as `landing_<source>`,
@@ -116,16 +122,18 @@ For unpublished workstation iteration only:
 make images-build
 make airflow-up
 make arxiv-inspector-up
+make lightdash-up
 ```
 
 ## Delivery
 
 The GitHub Terraform root reads the applied AWS and Tailscale remote states, creates the protected
-`dev` environment, restricts deployments to `main`, requires owner approval, and writes its six
-non-secret release variables. Its API token stays in the provider credential chain and never enters
-Terraform configuration or state. Pull requests only validate; a reviewed merge publishes only
-affected images or EMR artifacts. GitHub exchanges OIDC tokens for short-lived AWS and Tailscale
-credentials, so CI stores no AWS key, Tailscale OAuth secret, or SSH key.
+`dev` environment, restricts deployments to `main`, requires owner approval for OCI promotion, and
+writes the non-secret release variables. Its API token stays in the provider credential chain and
+never enters Terraform configuration or state. Pull requests only validate; a reviewed merge
+immediately publishes affected immutable images, then waits for approval before deploying them.
+GitHub exchanges OIDC tokens for short-lived AWS and Tailscale credentials, so CI stores no AWS key,
+Tailscale OAuth secret, or SSH key.
 The complete release/runtime identity flow and least-privilege permission matrix are documented in
 [infra/README.md](infra/README.md#aws-identities-and-permissions).
 
@@ -140,8 +148,9 @@ The EMR release workflow uploads entrypoints, locked dependencies, and the exact
 update `/lakehouse/<env>/emr/code_uri` in SSM. Rerunning a completed revision reuses it, while a
 failed partial upload can be repaired before the completion marker is written.
 
-Each component workflow builds one multi-architecture image under an immutable Git-SHA tag, records
-provenance/SBOM, and deploys its digest through a port-22-only Tailscale identity. Deployments are
+Each first-party component workflow builds one image under an immutable Git-SHA tag, records
+provenance/SBOM, and deploys its digest through a port-22-only Tailscale identity. Images are
+multi-architecture except for Lightdash's OCI-specific ARM64 build. Deployments are
 serialized per component; reruns reuse the existing immutable image. Component rollback verifies
 that the digest belongs to its reviewed Git revision, and EMR rollback restores only a completed
 reviewed release. Airflow, Inspector, each dbt domain, and OCR cannot accidentally move together, and the OCI
@@ -150,6 +159,8 @@ the host does not clone the repository or run its root Makefile.
 Airflow reconciliation also brings up its metadata PostgreSQL dependency before migrating Airflow.
 The Cloudflare connector is the exception: a protected manual workflow deploys the pinned upstream
 multi-architecture digest directly, without a custom image or ECR repository.
+Lightdash is built unmodified from its pinned upstream commit on a native ARM runner because its
+official release image is amd64-only; only the ARM64 image needed by the OCI A1 host is published.
 
 Airflow uses the official versioned `GitDagBundle` and tracks the reviewed `main` ref under
 `orchestration/bundle`. A DAG-only merge is fetched by the DAG processor without rebuilding or

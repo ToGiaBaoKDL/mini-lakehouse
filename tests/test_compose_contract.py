@@ -6,6 +6,7 @@ import yaml
 
 AIRFLOW_COMPOSE = "orchestration/deploy/compose.yaml"
 INSPECTOR_COMPOSE = "apps/arxiv_inspector/deploy/compose.yaml"
+LIGHTDASH_COMPOSE = "apps/lightdash/deploy/compose.yaml"
 POSTGRES_COMPOSE = "infra/runtime/postgres/compose.yaml"
 CLOUDFLARE_COMPOSE = "infra/runtime/cloudflare/compose.yaml"
 AIRFLOW_RUNTIME = Path("orchestration/runtime")
@@ -29,6 +30,7 @@ def test_compose_owns_only_self_hosted_application_services() -> None:
         "airflow-dag-processor",
     }
     assert set(_compose(INSPECTOR_COMPOSE)["services"]) == {"arxiv-inspector"}
+    assert set(_compose(LIGHTDASH_COMPOSE)["services"]) == {"lightdash"}
     assert set(_compose(POSTGRES_COMPOSE)["services"]) == {
         "metadata-postgres",
         "metadata-postgres-bootstrap",
@@ -156,13 +158,16 @@ def test_airflow_runtime_components_have_role_appropriate_healthchecks() -> None
     postgres = _compose(POSTGRES_COMPOSE)["services"]
     assert "healthcheck" in postgres["metadata-postgres"]
     assert postgres["metadata-postgres-bootstrap"]["restart"] == "no"
-    assert Path("infra/runtime/postgres/bootstrap.sql").is_file()
+    assert {path.name for path in Path("infra/runtime/postgres/bootstrap").glob("*.sql")} == {
+        "airflow.sql",
+        "lightdash.sql",
+    }
 
 
 def test_compose_uses_aws_credential_chain_without_static_keys() -> None:
     rendered = "\n".join(
         Path(path).read_text(encoding="utf-8")
-        for path in (AIRFLOW_COMPOSE, INSPECTOR_COMPOSE, POSTGRES_COMPOSE)
+        for path in (AIRFLOW_COMPOSE, INSPECTOR_COMPOSE, LIGHTDASH_COMPOSE, POSTGRES_COMPOSE)
     )
 
     assert "AWS_ACCESS_KEY_ID" not in rendered
@@ -170,6 +175,33 @@ def test_compose_uses_aws_credential_chain_without_static_keys() -> None:
     assert "AWS_PROFILE" not in rendered
     assert "AWS_IDENTITY_DIR" in rendered
     assert "AWS_CONFIG_FILE" in rendered
+
+
+def test_lightdash_uses_owned_database_storage_and_sdk_credentials() -> None:
+    payload = _compose(LIGHTDASH_COMPOSE)
+    service = payload["services"]["lightdash"]
+    environment = service["environment"]
+
+    assert service["image"] == "${LIGHTDASH_IMAGE:-lightdash:local}"
+    assert service["ports"] == ["${HOST_BIND_ADDRESS:-127.0.0.1}:8081:8080"]
+    assert service["networks"] == ["metadata"]
+    assert payload["networks"]["metadata"]["external"] is True
+    assert environment["PGDATABASE"] == "lightdash"
+    assert environment["PGHOST"] == "metadata-postgres"
+    assert environment["ATHENA_WAREHOUSE_IAM_ROLE_AUTH"] == "true"
+    assert environment["S3_USE_CREDENTIALS_FROM"] == "ini"
+    assert environment["SECURE_COOKIES"] == "true"
+    assert environment["TRUST_PROXY"] == "true"
+    assert "S3_ACCESS_KEY" not in environment
+    assert "S3_SECRET_KEY" not in environment
+    assert set(payload["secrets"]) == {"lightdash_database_password", "lightdash_secret"}
+    assert all("environment" in secret for secret in payload["secrets"].values())
+    assert (
+        "/usr/local/bin/aws_signing_helper:/usr/local/bin/aws_signing_helper:ro"
+        in service["volumes"]
+    )
+    assert "/api/v1/health" in service["healthcheck"]["test"][-1]
+    assert service["deploy"]["resources"]["limits"] == {"cpus": "1.0", "memory": "2G"}
 
 
 def test_cloudflare_connector_is_pinned_hardened_and_file_secret_driven() -> None:
@@ -376,6 +408,8 @@ def test_makefile_exposes_owned_operational_entrypoints() -> None:
         "airflow-down:",
         "arxiv-inspector-up:",
         "arxiv-inspector-down:",
+        "lightdash-up:",
+        "lightdash-down:",
         "services-up:",
         "services-down:",
         "services-ps:",
@@ -385,6 +419,8 @@ def test_makefile_exposes_owned_operational_entrypoints() -> None:
         "catalog-apply:",
         "catalog-validate:",
         "airflow-secrets-init:",
+        "lightdash-secrets-init:",
+        "lightdash-build:",
         "ocr-worker-build:",
         "dbt-engineering-build:",
         "dbt-research-build:",

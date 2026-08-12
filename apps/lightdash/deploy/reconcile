@@ -1,0 +1,77 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -gt 1 ]; then
+    printf '%s\n' "Usage: apps/lightdash/deploy/reconcile [image]" >&2
+    exit 2
+fi
+
+image=${1:-lightdash:local}
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+bundle_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
+environment=${LAKEHOUSE_ENVIRONMENT:-dev}
+identity_dir=${AWS_IDENTITY_DIR:-"$HOME/.config/lakehouse/$environment/aws"}
+host_config="$identity_dir/lightdash/host-config"
+
+"$bundle_root/infra/runtime/postgres/deploy"
+test -r "$host_config" || {
+    printf '%s\n' "The lightdash host identity config is missing." >&2
+    exit 1
+}
+test -r "$identity_dir/lightdash/config" || {
+    printf '%s\n' "The lightdash container identity config is missing." >&2
+    exit 1
+}
+test -x /usr/local/bin/aws_signing_helper || {
+    printf '%s\n' "aws_signing_helper is missing from the services host." >&2
+    exit 1
+}
+
+aws_runtime() {
+    env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+        AWS_SHARED_CREDENTIALS_FILE=/dev/null \
+        AWS_CONFIG_FILE="$host_config" AWS_PROFILE=default aws "$@"
+}
+
+runtime_secret=$(aws_runtime secretsmanager get-secret-value \
+    --secret-id "lakehouse/$environment/lightdash/runtime" \
+    --query SecretString --output text)
+database_secret=$(aws_runtime secretsmanager get-secret-value \
+    --secret-id "lakehouse/$environment/metadata-postgres/lightdash" \
+    --query SecretString --output text)
+storage_uri=$(aws_runtime ssm get-parameter \
+    --name "/lakehouse/$environment/storage/lightdash_uri" \
+    --query Parameter.Value --output text)
+
+printf '%s' "$runtime_secret" | jq -e \
+    '.version == 1 and (.secret | type == "string" and length >= 32)' >/dev/null
+printf '%s' "$database_secret" | jq -e \
+    '.version == 1 and (.password | type == "string" and length > 0)' >/dev/null
+printf '%s' "$storage_uri" | grep -Eq '^s3://[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$' || {
+    printf '%s\n' "The Lightdash storage parameter must contain a bucket S3 URI." >&2
+    exit 1
+}
+
+export AWS_IDENTITY_DIR=$identity_dir
+export AWS_REGION=${AWS_REGION:-ap-southeast-1}
+export HOST_BIND_ADDRESS=${HOST_BIND_ADDRESS:-127.0.0.1}
+export LAKEHOUSE_ENVIRONMENT=$environment
+export LIGHTDASH_IMAGE=$image
+export LIGHTDASH_S3_BUCKET=${storage_uri#s3://}
+export LIGHTDASH_SITE_URL=${LIGHTDASH_SITE_URL:-https://analytics.tgblab.io.vn}
+LIGHTDASH_DATABASE_PASSWORD=$(printf '%s' "$database_secret" | jq -r '.password')
+LIGHTDASH_SECRET=$(printf '%s' "$runtime_secret" | jq -r '.secret')
+export LIGHTDASH_DATABASE_PASSWORD LIGHTDASH_SECRET
+
+compose() {
+    docker compose --project-name lightdash -f "$script_dir/compose.yaml" "$@"
+}
+
+deploy_status=0
+compose up -d --force-recreate --remove-orphans --wait --wait-timeout 300 || deploy_status=$?
+if [ "$deploy_status" -ne 0 ]; then
+    printf '%s\n' "Lightdash deployment failed; reporting service status and logs." >&2
+    compose ps --all >&2 || true
+    compose logs --no-color --tail 200 lightdash >&2 || true
+    exit "$deploy_status"
+fi

@@ -58,6 +58,7 @@ the standard AWS `credential_process` chain.
 | `emr-runtime` | AWS service role assumed by EMR Serverless | Read immutable EMR artifacts; read/write landing and curated objects; read/update the corresponding Glue Iceberg tables; use the lakehouse KMS key. |
 | `dbt-<domain>` | Separate Roles Anywhere certificate mounted into each ephemeral dbt container | Run Athena queries; read only the domain's curated databases/prefixes; manage only its analytics database/prefix; write only its Athena result prefix; read only its SSM parameters. |
 | `arxiv-inspector` | Roles Anywhere certificate mounted into the application | Read ArXiv curated catalog/objects, run Athena, and manage only its query-result prefix. |
+| `lightdash` | Roles Anywhere certificate mounted into the application | Read Engineering and Research analytics only, run Athena, manage its query-result prefix and its dedicated S3 application bucket, and read its two runtime secrets. |
 | `ocr-worker` | Roles Anywhere certificate mounted into the task container | Read OCR provider secrets and update only ArXiv curated catalog/object prefixes. |
 | `metadata-postgres` | Roles Anywhere certificate on the OCI host | Read only metadata PostgreSQL secrets. |
 | `catalog-admin` | Explicit operator `AssumeRole` | Apply and validate contract-owned Glue/Iceberg metadata. It does not run scheduled workloads. |
@@ -157,7 +158,7 @@ CA private key never leaves the operator machine.
 
 ### 5. Cloudflare edge
 
-Cloudflare manages one remotely configured tunnel for both applications. DNS and Access policy are
+Cloudflare manages one remotely configured tunnel for all applications. DNS and Access policy are
 generated from the same reviewed application map, and the final catch-all ingress returns 404.
 
 ```bash
@@ -191,11 +192,13 @@ AWS_PROFILE=tgbao-dev-catalog make catalog-validate
 ## Runtime secrets
 
 Terraform creates Secrets Manager containers but deliberately does not own secret values. After
-the AWS root has been applied, generate the PostgreSQL and Airflow runtime values idempotently:
+the AWS root has been applied, generate the PostgreSQL, Airflow, and Lightdash runtime values
+idempotently:
 
 ```bash
 AWS_PROFILE=tgbao-dev make metadata-postgres-secrets-init
 AWS_PROFILE=tgbao-dev make airflow-secrets-init
+AWS_PROFILE=tgbao-dev make lightdash-secrets-init
 ```
 
 Populate optional integration credentials only when their workloads are enabled. Local payloads
@@ -238,6 +241,7 @@ gh workflow run release-dbt-research.yml --ref main
 gh workflow run release-ocr-worker.yml --ref main
 gh workflow run release-airflow.yml --ref main
 gh workflow run release-arxiv-inspector.yml --ref main
+gh workflow run release-lightdash.yml --ref main
 gh workflow run deploy-cloudflare.yml --ref main
 ```
 
@@ -249,7 +253,10 @@ updates the same persistent Modal app in place:
 AWS_PROFILE=tgbao-dev make ocr-modal-runner-deploy
 ```
 
-The EMR workflow publishes an immutable contract/job bundle and updates its SSM pointer only after
+The Lightdash workflow builds the unmodified upstream `1.134.0` commit on a native ARM GitHub
+runner, publishes only the OCI A1-compatible ARM64 image, and deploys it by digest. The official
+release image is not used because it does not publish an ARM64 manifest. The EMR workflow publishes
+an immutable contract/job bundle and updates its SSM pointer only after
 the checksum manifest is complete. Component workflows build multi-architecture images, publish
 immutable Git-SHA tags to ECR, resolve their digests, and deploy only the selected component over
 Tailscale SSH. The host receives deployment bundles, not a repository checkout or Terraform state.
@@ -265,16 +272,51 @@ tailscale ping tgbao-dev-services
 tailscale ssh ubuntu@tgbao-dev-services 'docker ps'
 ```
 
-Open Airflow at `https://airflow.tgblab.io.vn` and ArXiv Inspector at
-`https://arxiv.tgblab.io.vn`; Cloudflare Access restricts both applications to the reviewed email
+Open Airflow at `https://airflow.tgblab.io.vn`, ArXiv Inspector at
+`https://arxiv.tgblab.io.vn`, and Lightdash at `https://analytics.tgblab.io.vn`; Cloudflare Access
+restricts all applications to the reviewed email
 set. Tailnet endpoints remain available for private diagnosis. Airflow task logs are stored in the
 KMS-encrypted logs bucket with 30-day dev retention.
+
+### Bootstrap Lightdash projects
+
+After the first Lightdash release, open the application through Cloudflare Access and create the
+initial organization and administrator. Create two projects, `Engineering` and `Research`, using
+Athena IAM role authentication. Both use region `ap-southeast-1`, catalog `AwsDataCatalog`,
+workgroup `primary`, and the Lightdash query-result URI from
+`/lakehouse/dev/athena/lightdash_output_uri`; their schemas are `analytics_engineering` and
+`analytics_research`, respectively. Do not enter static AWS access keys.
+
+Authenticate Lightdash CLI `1.134.0` against `analytics.tgblab.io.vn`, verify the selected project,
+then deploy each dbt semantic layer:
+
+```bash
+pnpm dlx @lightdash/cli@1.134.0 login analytics.tgblab.io.vn
+
+pnpm dlx @lightdash/cli@1.134.0 config set-project --name Engineering
+pnpm dlx @lightdash/cli@1.134.0 config get-project
+DBT_QUERY_RESULTS_URI=s3://validation/lightdash DBT_ANALYTICS_URI=s3://validation \
+  pnpm dlx @lightdash/cli@1.134.0 deploy \
+    --project-dir dbt/engineering --profiles-dir dbt/engineering
+
+pnpm dlx @lightdash/cli@1.134.0 config set-project --name Research
+pnpm dlx @lightdash/cli@1.134.0 config get-project
+DBT_QUERY_RESULTS_URI=s3://validation/lightdash DBT_ANALYTICS_URI=s3://validation \
+  pnpm dlx @lightdash/cli@1.134.0 deploy \
+    --project-dir dbt/research --profiles-dir dbt/research
+```
+
+The placeholder S3 values are compile-only; warehouse queries execute in Lightdash with its
+certificate-backed IAM role and the project connection above. Build charts and dashboards in the
+UI first. Then use `lightdash download`, commit the generated YAML, run `lightdash lint`, and use
+`lightdash upload`; do not hand-author content or filter values before querying the live warehouse.
 
 ## Day-two changes
 
 - Review and apply only the Terraform root whose ownership changed.
 - DAG-only changes are fetched from the versioned Git DAG bundle; they do not rebuild Airflow.
-- Runtime, task, and application changes publish only their component image.
+- Runtime, task, and application changes publish only their component image. A Lightdash version
+  upgrade must update its release workflow commit, CLI/skill version, and validation together.
 - EMR job changes publish a new immutable S3 release; they do not rebuild service images.
 - Use the component or EMR rollback workflow with an exact reviewed revision/digest.
 - Re-run contract validation after contract or catalog changes.

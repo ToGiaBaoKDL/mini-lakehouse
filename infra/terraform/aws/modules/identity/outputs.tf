@@ -28,6 +28,11 @@ output "arxiv_inspector_role_arn" {
   value       = aws_iam_role.arxiv_inspector.arn
 }
 
+output "lightdash_role_arn" {
+  description = "Read-only analytics and owned-storage role for Lightdash."
+  value       = aws_iam_role.lightdash.arn
+}
+
 output "dbt_domain_role_arns" {
   description = "Least-privilege IAM roles keyed by independently owned dbt domain workload."
   value       = { for workload, role in aws_iam_role.dbt_domain : workload => role.arn }

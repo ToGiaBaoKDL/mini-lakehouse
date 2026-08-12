@@ -18,6 +18,7 @@ locals {
   external_runtime_workloads = setunion(toset([
     "airflow",
     "arxiv_inspector",
+    "lightdash",
     "metadata_postgres",
     "services_deployer",
     "ocr_worker",

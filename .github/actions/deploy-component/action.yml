@@ -43,6 +43,9 @@ runs:
           cloudflare)
             bundle+=(infra/runtime/cloudflare)
             ;;
+          lightdash)
+            bundle+=(infra/runtime/postgres apps/lightdash/deploy)
+            ;;
           dbt-engineering|dbt-research)
             bundle+=(dbt/deploy)
             ;;

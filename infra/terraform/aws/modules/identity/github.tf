@@ -1,4 +1,4 @@
-data "aws_iam_policy_document" "github_environment_trust" {
+data "aws_iam_policy_document" "github_publisher_trust" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
     principals {
@@ -13,14 +13,17 @@ data "aws_iam_policy_document" "github_environment_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = [var.github_environment_subject]
+      values = [
+        var.github_environment_subject,
+        var.github_main_subject,
+      ]
     }
   }
 }
 
 resource "aws_iam_role" "github_image_publisher" {
   name               = "${var.name_prefix}-github-image-publisher"
-  assume_role_policy = data.aws_iam_policy_document.github_environment_trust.json
+  assume_role_policy = data.aws_iam_policy_document.github_publisher_trust.json
   tags               = var.tags
 }
 
@@ -31,7 +34,7 @@ resource "aws_iam_role_policy" "github_image_publisher" {
 
 resource "aws_iam_role" "github_emr_publisher" {
   name               = "${var.name_prefix}-github-emr-publisher"
-  assume_role_policy = data.aws_iam_policy_document.github_environment_trust.json
+  assume_role_policy = data.aws_iam_policy_document.github_publisher_trust.json
   tags               = var.tags
 }
 

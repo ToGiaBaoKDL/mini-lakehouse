@@ -26,6 +26,10 @@ case "$component" in
     cloudflare)
         deploy="$bundle_root/infra/runtime/cloudflare/deploy"
         ;;
+    lightdash)
+        export LIGHTDASH_SITE_URL=${LIGHTDASH_SITE_URL:-https://analytics.tgblab.io.vn}
+        deploy="$bundle_root/apps/lightdash/deploy/deploy"
+        ;;
     dbt-engineering|dbt-research)
         "$bundle_root/dbt/deploy/deploy" "$component" "$image"
         printf '%s\n' "Deployed $component as $image"

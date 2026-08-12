@@ -89,11 +89,13 @@ def test_secret_containers_never_manage_secret_values() -> None:
 
     assert 'resource "aws_secretsmanager_secret" "airflow"' in environment
     assert 'resource "aws_secretsmanager_secret" "metadata_postgres"' in environment
+    assert 'resource "aws_secretsmanager_secret" "lightdash"' in environment
     assert 'resource "aws_secretsmanager_secret" "ocr"' in environment
     assert 'resource "aws_secretsmanager_secret" "cloudflare_tunnel"' in environment
     assert '"lakehouse/${local.environment}/airflow/runtime"' in environment
     assert '"lakehouse/${local.environment}/airflow/connections/${connection}"' in environment
     assert '"lakehouse/${local.environment}/metadata-postgres/${each.key}"' in environment
+    assert '"lakehouse/${local.environment}/lightdash/runtime"' in environment
     assert '"lakehouse/${local.environment}/ocr/providers/${each.key}"' in environment
     assert '"lakehouse/${local.environment}/cloudflare/tunnel-token"' in environment
     assert "aws_secretsmanager_secret_version" not in environment
@@ -107,7 +109,15 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
     normalized_identity = " ".join(identity.split())
 
     assert 'name_prefix = "${local.project}-${local.environment}"' in normalized_environment
-    for tier in ("landing", "curated", "analytics", "artifacts", "logs", "query-results"):
+    for tier in (
+        "landing",
+        "curated",
+        "analytics",
+        "artifacts",
+        "lightdash",
+        "logs",
+        "query-results",
+    ):
         assert f"${{local.name_prefix}}-{tier}-" in normalized_environment
     assert "hashicorp/random" not in environment
     assert 'parameter_prefix = "/lakehouse/${local.environment}"' in normalized_environment
@@ -132,6 +142,7 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
         "catalog-admin",
         "services-deployer",
         "arxiv-inspector",
+        "lightdash",
         "metadata-postgres",
         "ocr-worker",
         "github-image-publisher",
@@ -140,8 +151,7 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
         assert f'name = "${{var.name_prefix}}-{role}"' in normalized_identity
     assert 'name = "${var.name_prefix}-${replace(each.key, "_", "-")}"' in normalized_identity
 
-    assert identity.count("resources = [var.athena_workgroup_arn]") == 2
-    assert "lightdash" not in identity.lower()
+    assert identity.count("resources = [var.athena_workgroup_arn]") == 3
     assert "curated_object_arns_by_workload" in identity
     assert "analytics_object_arns_by_workload" in identity
     assert "athena_result_prefixes[each.key]" in identity
@@ -206,6 +216,8 @@ def test_runtime_parameters_and_trust_are_bounded_by_workload() -> None:
     assert 'variable = "token.actions.githubusercontent.com:sub"' in identity
     assert "github_environment_subject" in environment
     assert "github_environment_subject" in identity
+    assert "github_main_subject" in environment
+    assert "github_main_subject" in identity
 
 
 def test_service_images_are_immutable_bounded_and_published_by_one_role() -> None:
@@ -213,7 +225,7 @@ def test_service_images_are_immutable_bounded_and_published_by_one_role() -> Non
     registry = _terraform_sources(Path("infra/terraform/aws/modules/container_registry"))
     identity = _terraform_sources(Path("infra/terraform/aws/modules/identity"))
 
-    for repository in ("airflow", "arxiv-inspector", "ocr-worker"):
+    for repository in ("airflow", "arxiv-inspector", "lightdash", "ocr-worker"):
         assert f'"{repository}"' in environment
     assert '"dbt-${domain}"' in environment
     assert 'image_tag_mutability = "IMMUTABLE"' in registry
@@ -285,6 +297,9 @@ def test_data_consumers_use_reviewed_database_and_prefix_entitlements() -> None:
     inspector = Path("infra/terraform/aws/modules/identity/arxiv_inspector.tf").read_text(
         encoding="utf-8"
     )
+    lightdash = Path("infra/terraform/aws/modules/identity/lightdash.tf").read_text(
+        encoding="utf-8"
+    )
 
     assert "for_each = local.dbt_workloads" in dbt
     assert "local.curated_database_arns_by_workload[each.key]" in dbt
@@ -298,6 +313,11 @@ def test_data_consumers_use_reviewed_database_and_prefix_entitlements() -> None:
     assert '"${var.bucket_arns.analytics}/*"' not in dbt
     assert "local.curated_database_arns_by_workload.arxiv_inspector" in inspector
     assert "local.curated_prefixes_by_workload.arxiv_inspector" in inspector
+    assert "local.analytics_database_arns_by_workload.lightdash" in lightdash
+    assert "local.analytics_object_arns_by_workload.lightdash" in lightdash
+    assert "local.curated_object_arns_by_workload" not in lightdash
+    assert "var.bucket_arns.lightdash" in lightdash
+    assert '"glue:CreateTable"' not in lightdash
 
 
 def test_cloud_roots_have_isolated_state_and_private_access_host() -> None:
@@ -379,6 +399,8 @@ def test_cloudflare_edge_uses_current_tunnel_and_access_resources() -> None:
     )
     assert 'type = "public"' in cloudflare
     assert 'decision   = "allow"' in cloudflare
+    assert 'hostname = "analytics.tgblab.io.vn"' in cloudflare
+    assert 'origin   = "http://127.0.0.1:8081"' in cloudflare
     assert "self_hosted_domains" not in cloudflare
     assert 'variable "cloudflare_api_token"' not in cloudflare
     assert "tunnel_secret" not in cloudflare
@@ -401,7 +423,10 @@ def test_github_delivery_configuration_is_terraform_owned_and_state_derived() ->
     assert "users = [data.github_user.owner.id]" in github
     assert 'data "terraform_remote_state" "aws"' in github
     assert 'data "terraform_remote_state" "tailscale"' in github
-    assert 'resource "github_actions_environment_variable" "release"' in github
+    assert 'resource "github_actions_environment_variable" "deploy"' in github
+    assert 'resource "github_actions_variable" "publish"' in github
+    assert "repository_variables" in github
+    assert "from = github_actions_environment_variable.release" in github
     for variable in (
         "AWS_EMR_PUBLISHER_ROLE_ARN",
         "AWS_IMAGE_PUBLISHER_ROLE_ARN",

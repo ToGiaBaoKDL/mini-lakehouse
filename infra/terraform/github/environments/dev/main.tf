@@ -59,20 +59,35 @@ resource "github_repository_environment_deployment_policy" "main" {
 
 locals {
   environment_variables = {
+    TAILSCALE_AUDIENCE  = data.terraform_remote_state.tailscale.outputs.github_deployer_audience
+    TAILSCALE_CLIENT_ID = data.terraform_remote_state.tailscale.outputs.github_deployer_client_id
+  }
+  repository_variables = {
     AWS_EMR_PUBLISHER_ROLE_ARN   = data.terraform_remote_state.aws.outputs.github_ci_role_arns.emr_publisher
     AWS_IMAGE_PUBLISHER_ROLE_ARN = data.terraform_remote_state.aws.outputs.github_ci_role_arns.image_publisher
     EMR_ARTIFACTS_URI            = data.terraform_remote_state.aws.outputs.emr_artifacts_uri
     EMR_CODE_PARAMETER_NAME      = data.terraform_remote_state.aws.outputs.emr_code_parameter_name
-    TAILSCALE_AUDIENCE           = data.terraform_remote_state.tailscale.outputs.github_deployer_audience
-    TAILSCALE_CLIENT_ID          = data.terraform_remote_state.tailscale.outputs.github_deployer_client_id
   }
 }
 
-resource "github_actions_environment_variable" "release" {
+resource "github_actions_environment_variable" "deploy" {
   for_each = local.environment_variables
 
   repository    = data.github_repository.this.name
   environment   = github_repository_environment.dev.environment
   variable_name = each.key
   value         = each.value
+}
+
+resource "github_actions_variable" "publish" {
+  for_each = local.repository_variables
+
+  repository    = data.github_repository.this.name
+  variable_name = each.key
+  value         = each.value
+}
+
+moved {
+  from = github_actions_environment_variable.release
+  to   = github_actions_environment_variable.deploy
 }

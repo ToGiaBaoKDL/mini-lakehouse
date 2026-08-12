@@ -3,6 +3,19 @@ version: 2
 models:
   - name: fct_repository_activity_daily
     description: Daily engineering activity at the stable activity_date + repository_id grain.
+    config:
+      meta:
+        default_time_dimension:
+          field: activity_date
+          interval: DAY
+        group_label: Engineering
+        label: Repository activity
+        metrics:
+          repository_activity_records:
+            description: Number of repository-day activity records.
+            label: Repository activity records
+            type: count
+        primary_key: [activity_date, repository_id]
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -12,6 +25,12 @@ models:
         description: UTC date on which the repository activity occurred.
         data_type: date
         data_tests: [not_null]
+        config:
+          meta:
+            dimension:
+              label: Activity date
+              time_intervals: [DAY, WEEK, MONTH, QUARTER, YEAR]
+              type: date
       - name: repository_id
         description: Stable GitHub repository identifier.
         data_type: bigint
@@ -24,27 +43,71 @@ models:
       - name: event_count
         description: Total GitHub events observed for the repository on the activity date.
         data_type: bigint
+        config:
+          meta:
+            metrics:
+              total_events:
+                description: Total GitHub events across the selected repository activity records.
+                label: Total events
+                type: sum
       - name: push_event_count
         description: Push events observed for the repository on the activity date.
         data_type: bigint
+        config:
+          meta:
+            metrics:
+              total_push_events:
+                label: Total push events
+                type: sum
       - name: pushed_commit_count
         description: Commits reported by push events for the repository on the activity date.
         data_type: bigint
+        config:
+          meta:
+            metrics:
+              total_pushed_commits:
+                label: Total pushed commits
+                type: sum
       - name: pull_request_event_count
         description: Pull-request events observed for the repository on the activity date.
         data_type: bigint
+        config:
+          meta:
+            metrics:
+              total_pull_request_events:
+                label: Total pull-request events
+                type: sum
       - name: unique_pull_request_count
         description: Distinct pull-request numbers observed for the repository on the activity date.
         data_type: bigint
       - name: issue_event_count
         description: Issue events observed for the repository on the activity date.
         data_type: bigint
+        config:
+          meta:
+            metrics:
+              total_issue_events:
+                label: Total issue events
+                type: sum
       - name: issue_comment_event_count
         description: Issue-comment events observed for the repository on the activity date.
         data_type: bigint
+        config:
+          meta:
+            metrics:
+              total_issue_comment_events:
+                label: Total issue-comment events
+                type: sum
       - name: active_actor_count
         description: Distinct identified actors active in the repository on the activity date.
         data_type: bigint
+        config:
+          meta:
+            metrics:
+              average_daily_active_actors:
+                label: Average daily active actors
+                round: 1
+                type: average
       - name: repository_name
         description: Latest known full repository name at model build time.
         data_type: varchar
@@ -54,6 +117,19 @@ models:
 
   - name: fct_contributor_activity_daily
     description: Daily engineering activity at the stable activity_date + actor_id grain.
+    config:
+      meta:
+        default_time_dimension:
+          field: activity_date
+          interval: DAY
+        group_label: Engineering
+        label: Contributor activity
+        metrics:
+          contributor_activity_records:
+            description: Number of contributor-day activity records.
+            label: Contributor activity records
+            type: count
+        primary_key: [activity_date, actor_id]
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -63,6 +139,12 @@ models:
         description: UTC date on which the contributor activity occurred.
         data_type: date
         data_tests: [not_null]
+        config:
+          meta:
+            dimension:
+              label: Activity date
+              time_intervals: [DAY, WEEK, MONTH, QUARTER, YEAR]
+              type: date
       - name: actor_id
         description: Stable GitHub actor identifier.
         data_type: bigint
@@ -75,24 +157,68 @@ models:
       - name: event_count
         description: Total GitHub events generated by the actor on the activity date.
         data_type: bigint
+        config:
+          meta:
+            metrics:
+              total_events:
+                description: Total GitHub events across the selected contributor activity records.
+                label: Total events
+                type: sum
       - name: active_repository_count
         description: Distinct repositories in which the actor was active on the activity date.
         data_type: bigint
+        config:
+          meta:
+            metrics:
+              average_daily_active_repositories:
+                label: Average daily active repositories
+                round: 1
+                type: average
       - name: push_event_count
         description: Push events generated by the actor on the activity date.
         data_type: bigint
+        config:
+          meta:
+            metrics:
+              total_push_events:
+                label: Total push events
+                type: sum
       - name: pushed_commit_count
         description: Commits reported by the actor's push events on the activity date.
         data_type: bigint
+        config:
+          meta:
+            metrics:
+              total_pushed_commits:
+                label: Total pushed commits
+                type: sum
       - name: pull_request_event_count
         description: Pull-request events generated by the actor on the activity date.
         data_type: bigint
+        config:
+          meta:
+            metrics:
+              total_pull_request_events:
+                label: Total pull-request events
+                type: sum
       - name: issue_event_count
         description: Issue events generated by the actor on the activity date.
         data_type: bigint
+        config:
+          meta:
+            metrics:
+              total_issue_events:
+                label: Total issue events
+                type: sum
       - name: issue_comment_event_count
         description: Issue-comment events generated by the actor on the activity date.
         data_type: bigint
+        config:
+          meta:
+            metrics:
+              total_issue_comment_events:
+                label: Total issue-comment events
+                type: sum
       - name: actor_login
         description: Latest known actor login at model build time.
         data_type: varchar

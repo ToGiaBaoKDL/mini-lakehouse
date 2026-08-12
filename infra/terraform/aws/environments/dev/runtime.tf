@@ -7,7 +7,9 @@ locals {
     "storage/landing_uri"               = "s3://${module.storage.bucket_names.landing}"
     "storage/curated_uri"               = "s3://${module.storage.bucket_names.curated}"
     "storage/analytics_uri"             = "s3://${module.storage.bucket_names.analytics}"
+    "storage/lightdash_uri"             = "s3://${module.storage.bucket_names.lightdash}"
     "athena/arxiv_inspector_output_uri" = "s3://${module.storage.bucket_names["query-results"]}/${local.athena_workload_prefixes.arxiv_inspector}"
+    "athena/lightdash_output_uri"       = "s3://${module.storage.bucket_names["query-results"]}/${local.athena_workload_prefixes.lightdash}"
     "airflow/remote_log_uri"            = "s3://${module.storage.bucket_names.logs}/airflow/task-logs"
     "emr/application_id"                = module.emr_serverless.application_id
     "emr/execution_role_arn"            = module.identity.emr_runtime_role_arn
@@ -36,6 +38,10 @@ locals {
     arxiv_inspector = [
       "storage/curated_uri",
       "athena/arxiv_inspector_output_uri",
+    ]
+    lightdash = [
+      "storage/lightdash_uri",
+      "athena/lightdash_output_uri",
     ]
     ocr_worker = [
       "storage/curated_uri",

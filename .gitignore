@@ -35,5 +35,10 @@ dbt/**/logs/
 dist/
 plans/
 .agents/
-.codex/
+.codex/*
+!.codex/skills/
+!.codex/skills/developing-in-lightdash/
+!.codex/skills/developing-in-lightdash/**
+!.codex/skills/effective-dbt-sql/
+!.codex/skills/effective-dbt-sql/**
 .claude/

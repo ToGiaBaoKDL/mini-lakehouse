@@ -2,6 +2,7 @@ locals {
   external_workload_roles = merge({
     airflow           = module.identity.airflow_role_arn
     arxiv_inspector   = module.identity.arxiv_inspector_role_arn
+    lightdash         = module.identity.lightdash_role_arn
     metadata_postgres = module.identity.metadata_postgres_role_arn
     services_deployer = module.identity.services_deployer_role_arn
     ocr_worker        = module.identity.ocr_worker_role_arn

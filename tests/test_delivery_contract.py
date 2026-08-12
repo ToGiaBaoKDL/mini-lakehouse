@@ -1,3 +1,4 @@
+import json
 import re
 from pathlib import Path
 
@@ -21,20 +22,27 @@ def test_external_github_actions_are_pinned_by_commit() -> None:
     assert workflows.count("actions/checkout@") == workflows.count("persist-credentials: false")
 
 
-def test_component_release_is_environment_protected_and_digest_driven() -> None:
+def test_component_release_publishes_before_protected_digest_deployment() -> None:
     release = _workflow("_release-image.yml")
     action = Path(".github/actions/deploy-component/action.yml").read_text(encoding="utf-8")
     script = Path("infra/runtime/delivery/deploy-component").read_text(encoding="utf-8")
 
     assert "environment: dev" in release
+    assert release.index("  publish:\n") < release.index("  deploy:\n")
+    assert "needs: publish" in release
+    assert "image: ${{ needs.publish.outputs.image }}" in release
+    publish_job = release[release.index("  publish:\n") : release.index("  deploy:\n")]
+    assert "environment:" not in publish_job
     assert "id-token: write" in release
     assert "github.ref == 'refs/heads/main'" in release
-    assert "platforms: linux/amd64,linux/arm64" in release
+    assert "default: linux/amd64,linux/arm64" in release
+    assert "platforms: ${{ inputs.platforms }}" in release
     assert "provenance: mode=max" in release
     assert "sbom: true" in release
     assert "imageTag=$GITHUB_SHA" in release
     assert "aws ecr batch-get-image" in release
     assert "cancel-in-progress: false" in release
+    assert "queue: max" in release
     assert 'dbt-engineering) [[ "$BUILD_ARGS" == "DBT_PROJECT=engineering" ]]' in release
     assert 'dbt-research) [[ "$BUILD_ARGS" == "DBT_PROJECT=research" ]]' in release
     assert "^[0-9]{12}\\.dkr\\.ecr\\." in action
@@ -72,6 +80,7 @@ def test_host_workload_identities_ignore_operator_credentials() -> None:
             "infra/runtime/delivery/pull-image",
             "infra/runtime/postgres/deploy",
             "orchestration/deploy/reconcile",
+            "apps/lightdash/deploy/reconcile",
         )
     ]
 
@@ -105,6 +114,10 @@ def test_each_component_owns_its_deployment_operation() -> None:
     dbt = Path("dbt/deploy/deploy").read_text(encoding="utf-8")
     ocr = Path("ocr/deploy/deploy").read_text(encoding="utf-8")
     postgres = Path("infra/runtime/postgres/deploy").read_text(encoding="utf-8")
+    lightdash = "\n".join(
+        Path(path).read_text(encoding="utf-8")
+        for path in ("apps/lightdash/deploy/deploy", "apps/lightdash/deploy/reconcile")
+    )
     cloudflare = Path("infra/runtime/cloudflare/deploy").read_text(encoding="utf-8")
 
     assert "docker compose --project-name airflow" in airflow
@@ -114,6 +127,8 @@ def test_each_component_owns_its_deployment_operation() -> None:
     assert "infra/runtime/postgres/deploy" in airflow
     assert "compose logs --no-color --tail 200 airflow-volumes-init airflow-init" in airflow
     assert "docker compose --project-name metadata-postgres" in postgres
+    assert "docker compose --project-name lightdash" in lightdash
+    assert "infra/runtime/postgres/deploy" in lightdash
     assert "docker compose --project-name arxiv-inspector" in inspector
     assert '"$component:runtime"' in dbt
     assert "ocr-worker:runtime" in ocr
@@ -121,7 +136,7 @@ def test_each_component_owns_its_deployment_operation() -> None:
     assert "--token-file" in Path("infra/runtime/cloudflare/compose.yaml").read_text(
         encoding="utf-8"
     )
-    assert "git " not in airflow + inspector + dbt + ocr + postgres + cloudflare
+    assert "git " not in airflow + inspector + lightdash + dbt + ocr + postgres + cloudflare
 
 
 def test_cloudflare_connector_has_a_deploy_only_workflow() -> None:
@@ -171,6 +186,12 @@ def test_each_custom_component_has_a_thin_release_caller() -> None:
             "component: ocr-worker",
             "dockerfile: ocr/Dockerfile",
         ),
+        "release-lightdash.yml": (
+            "component: lightdash",
+            "dockerfile: dockerfile",
+            "platforms: linux/arm64",
+            "runner: ubuntu-24.04-arm",
+        ),
     }
 
     for workflow, assertions in expected.items():
@@ -185,6 +206,32 @@ def test_each_custom_component_has_a_thin_release_caller() -> None:
     assert "apps/arxiv_inspector/pyproject.toml" in _workflow("release-ocr-worker.yml")
 
 
+def test_lightdash_release_builds_the_pinned_upstream_source_natively() -> None:
+    reusable = _workflow("_release-image.yml")
+    lightdash = _workflow("release-lightdash.yml")
+    images_makefile = Path("make/images.mk").read_text(encoding="utf-8")
+
+    upstream = "https://github.com/lightdash/lightdash.git#297295a75ae34e79a3b72539f82ea361d47d0293"
+    assert "lightdash\\.git#[0-9a-f]{40}" in reusable
+    assert f"build_context: {upstream}" in lightdash
+    assert f"LIGHTDASH_BUILD_CONTEXT := {upstream}" in images_makefile
+    assert "--tag lightdash:local" in images_makefile
+    assert "lightdash/lightdash:latest" not in lightdash
+    assert "timeout_minutes: 120" in lightdash
+
+
+def test_lightdash_skills_match_the_pinned_runtime_cli() -> None:
+    for skill in ("developing-in-lightdash", "effective-dbt-sql"):
+        manifest = json.loads(
+            Path(f".codex/skills/{skill}/.lightdash-skill-manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert manifest["version"] == "1.134.0"
+
+    assert "@lightdash/cli@1.134.0" in Path("infra/README.md").read_text(encoding="utf-8")
+
+
 def test_emr_has_an_independent_release_pointer() -> None:
     source = _workflow("release-emr-jobs.yml")
     makefile = Path("make/data.mk").read_text(encoding="utf-8")
@@ -192,6 +239,7 @@ def test_emr_has_an_independent_release_pointer() -> None:
     publish = Path("jobs/emr/release/publish").read_text(encoding="utf-8")
 
     assert "AWS_EMR_PUBLISHER_ROLE_ARN" in source
+    assert "environment: dev" not in source
     assert "EMR_ARTIFACTS_URI" in source
     assert "EMR_CODE_PARAMETER_NAME" in source
     assert "jobs/emr/release/package" in source
