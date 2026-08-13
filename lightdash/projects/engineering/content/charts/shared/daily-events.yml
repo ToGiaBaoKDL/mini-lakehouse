@@ -1,0 +1,38 @@
+chartConfig:
+  config:
+    eChartsConfig:
+      series:
+        - color: "#4C6EF5"
+          encode:
+            xRef:
+              field: fct_repository_activity_daily_activity_date_day
+            yRef:
+              field: fct_repository_activity_daily_total_events
+          name: Total events
+          smooth: true
+          type: line
+    layout:
+      showGridY: true
+      xField: fct_repository_activity_daily_activity_date_day
+      yField:
+        - fct_repository_activity_daily_total_events
+  type: cartesian
+contentType: chart
+dashboardSlug: engineering-overview
+metricQuery:
+  dimensions:
+    - fct_repository_activity_daily_activity_date_day
+  exploreName: fct_repository_activity_daily
+  filters: {}
+  limit: 500
+  metrics:
+    - fct_repository_activity_daily_total_events
+  sorts:
+    - descending: false
+      fieldId: fct_repository_activity_daily_activity_date_day
+  tableCalculations: []
+name: Daily event activity
+slug: engineering-daily-events
+spaceSlug: shared
+tableName: fct_repository_activity_daily
+version: 1

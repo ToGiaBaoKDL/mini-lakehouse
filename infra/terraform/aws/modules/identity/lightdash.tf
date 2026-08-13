@@ -17,6 +17,17 @@ data "aws_iam_policy_document" "lightdash" {
     resources = [var.athena_workgroup_arn]
   }
   statement {
+    sid = "ReadAthenaCatalogMetadata"
+    actions = [
+      "athena:GetDataCatalog",
+      "athena:GetDatabase",
+      "athena:GetTableMetadata",
+      "athena:ListDatabases",
+      "athena:ListTableMetadata",
+    ]
+    resources = [var.athena_data_catalog_arn]
+  }
+  statement {
     sid = "ReadAnalyticsCatalog"
     actions = [
       "glue:GetDatabase",

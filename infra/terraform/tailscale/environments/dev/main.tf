@@ -8,10 +8,15 @@ locals {
     id       = "1313563456"
   }
   github_environment_subject = "repo:${local.github_repository.owner}@${local.github_repository.owner_id}/${local.github_repository.name}@${local.github_repository.id}:environment:dev"
-  services_ports = [
+  operator_services_ports = [
     "tcp:22",
     "tcp:8080",
+    "tcp:8081",
     "tcp:8501",
+  ]
+  ci_services_ports = [
+    "tcp:22",
+    "tcp:8081",
   ]
 }
 
@@ -25,12 +30,12 @@ resource "tailscale_acl" "policy" {
       {
         src = [var.owner]
         dst = [local.services_tag]
-        ip  = local.services_ports
+        ip  = local.operator_services_ports
       },
       {
         src = [local.ci_tag]
         dst = [local.services_tag]
-        ip  = ["tcp:22"]
+        ip  = local.ci_services_ports
       },
     ]
     ssh = [
@@ -53,12 +58,16 @@ resource "tailscale_acl" "policy" {
         accept = [
           "${local.services_tag}:22",
           "${local.services_tag}:8080",
+          "${local.services_tag}:8081",
           "${local.services_tag}:8501",
         ]
       },
       {
-        src    = local.ci_tag
-        accept = ["${local.services_tag}:22"]
+        src = local.ci_tag
+        accept = [
+          "${local.services_tag}:22",
+          "${local.services_tag}:8081",
+        ]
         deny = [
           "${local.services_tag}:8080",
           "${local.services_tag}:8501",

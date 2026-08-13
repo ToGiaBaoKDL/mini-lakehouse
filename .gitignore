@@ -28,6 +28,9 @@ dbt/**/target/
 dbt/**/dbt_packages/
 dbt/**/logs/
 
+# Lightdash
+lightdash/**/.lightdash-metadata.json
+
 # License files
 *.license
 

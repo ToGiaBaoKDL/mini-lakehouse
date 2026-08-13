@@ -2,6 +2,8 @@ import json
 import re
 from pathlib import Path
 
+import yaml
+
 WORKFLOWS = Path(".github/workflows")
 
 
@@ -246,6 +248,82 @@ def test_lightdash_skills_match_the_pinned_runtime_cli() -> None:
         assert manifest["version"] == "1.146.0"
 
     assert "@lightdash/cli@1.146.0" in Path("infra/README.md").read_text(encoding="utf-8")
+
+
+def test_lightdash_content_and_runtime_have_separate_owners() -> None:
+    release = _workflow("release-lightdash.yml")
+    project_delivery = _workflow("deploy-lightdash-projects.yml")
+
+    assert Path("lightdash/projects/engineering/content").is_dir()
+    assert Path("lightdash/projects/research/content").is_dir()
+    assert not Path("lightdash/deploy/projects.py").exists()
+    assert not Path("lightdash/deploy/environments/dev.yml").exists()
+    assert "lightdash/projects/**" not in release
+    assert "apps/lightdash/deploy/**" not in project_delivery
+    assert "lightdash/projects/**" in project_delivery
+    assert "lightdash/deploy/**" not in project_delivery
+
+
+def test_lightdash_projects_use_protected_stateless_delivery() -> None:
+    workflow = _workflow("deploy-lightdash-projects.yml")
+    workflow_config = yaml.safe_load(workflow)
+    github_environment = Path("infra/terraform/github/environments/dev/main.tf").read_text(
+        encoding="utf-8"
+    )
+
+    assert "environment: dev" in workflow
+    assert "github.ref == 'refs/heads/main'" in workflow
+    assert "id-token: write" in workflow
+    assert "AWS_LIGHTDASH_DEPLOYER_ROLE_ARN" in workflow
+    assert (
+        "aws-actions/aws-secretsmanager-get-secrets@"
+        "2cb1a461cbd4865ac4299648312e4704c646cd53" in workflow
+    )
+    assert "LIGHTDASH_CI_SECRET_ID" in workflow
+    assert "tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888" in workflow
+    assert "ping: tgbao-dev-services" in workflow
+    assert "npm install --global @lightdash/cli@1.146.0" in workflow
+    assert "cancel-in-progress: false" in workflow
+    assert "strategy:" in workflow
+    assert "fail-fast: false" in workflow
+    assert "max-parallel: 2" in workflow
+    assert "LIGHTDASH_PROJECT: ${{ matrix.project_uuid }}" in workflow
+    assert "lightdash config get-project" in workflow
+    assert workflow.count("lightdash deploy") == 1
+    assert workflow.count("lightdash upload") == 1
+    assert workflow.count("lightdash validate") == 1
+    assert workflow.count("--force") == 1
+    assert workflow.count("--skip-dbt-compile") == 2
+    assert workflow.count("--skip-warehouse-catalog") == 2
+    assert workflow.count("--no-partial-compilation") == 2
+    assert workflow.count("--show-chart-configuration-warnings") == 1
+    projects = workflow_config["jobs"]["deploy"]["strategy"]["matrix"]["include"]
+    managed_domains = {path.name for path in Path("lightdash/projects").iterdir() if path.is_dir()}
+    assert {project["domain"] for project in projects} == managed_domains
+    assert len({project["project_uuid"] for project in projects}) == len(projects)
+    for project in projects:
+        domain = project["domain"]
+        assert project["dbt_project_dir"] == f"dbt/{domain}"
+        assert project["content_dir"] == f"lightdash/projects/{domain}/content"
+        assert re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", project["project_uuid"])
+    assert "lightdash login" not in workflow
+    for variable in ("LIGHTDASH_CI_SECRET_ID", "LIGHTDASH_URL"):
+        assert variable in github_environment
+    assert "LIGHTDASH_ENGINEERING_PROJECT" not in github_environment
+    assert "LIGHTDASH_RESEARCH_PROJECT" not in github_environment
+    assert "http://tgbao-dev-services:8081" in github_environment
+
+
+def test_lightdash_ci_token_has_an_owned_secret_sync_boundary() -> None:
+    sync = Path("lightdash/deploy/sync-ci-secret").read_text(encoding="utf-8")
+    services = Path("make/services.mk").read_text(encoding="utf-8")
+
+    assert 'secret_id="lakehouse/$environment/lightdash/ci"' in sync
+    assert 'keys | sort == ["api_key", "version"]' in sync
+    assert 'startswith("ldpat_")' in sync
+    assert '--secret-string "file://$payload_file"' in sync
+    assert "lightdash-ci-secret-sync:" in services
+    assert ".secrets/$(LAKEHOUSE_ENVIRONMENT)/lightdash/ci.json" in services
 
 
 def test_emr_has_an_independent_release_pointer() -> None:

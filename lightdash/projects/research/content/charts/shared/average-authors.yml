@@ -1,0 +1,22 @@
+chartConfig:
+  config:
+    label: Average authors per paper
+    selectedField: dim_research_papers_average_authors_per_paper
+    showBigNumberLabel: true
+  type: big_number
+contentType: chart
+dashboardSlug: research-overview
+metricQuery:
+  dimensions: []
+  exploreName: dim_research_papers
+  filters: {}
+  limit: 1
+  metrics:
+    - dim_research_papers_average_authors_per_paper
+  sorts: []
+  tableCalculations: []
+name: Average authors per paper
+slug: research-average-authors
+spaceSlug: shared
+tableName: dim_research_papers
+version: 1

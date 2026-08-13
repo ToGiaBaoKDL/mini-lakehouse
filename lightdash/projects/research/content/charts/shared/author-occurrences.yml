@@ -1,0 +1,23 @@
+chartConfig:
+  config:
+    label: Author occurrences
+    selectedField: dim_research_papers_total_author_occurrences
+    showBigNumberLabel: true
+    style: K
+  type: big_number
+contentType: chart
+dashboardSlug: research-overview
+metricQuery:
+  dimensions: []
+  exploreName: dim_research_papers
+  filters: {}
+  limit: 1
+  metrics:
+    - dim_research_papers_total_author_occurrences
+  sorts: []
+  tableCalculations: []
+name: Author occurrences
+slug: research-author-occurrences
+spaceSlug: shared
+tableName: dim_research_papers
+version: 1

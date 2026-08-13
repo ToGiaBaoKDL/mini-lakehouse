@@ -100,6 +100,11 @@ variable "emr_application_arn" {
   description = "EMR Serverless application operated by Airflow."
 }
 
+variable "athena_data_catalog_arn" {
+  type        = string
+  description = "Athena Data Catalog available to metadata-reading workloads."
+}
+
 variable "athena_workgroup_arn" {
   type        = string
   description = "Athena workgroup available to query workloads."
@@ -149,6 +154,16 @@ variable "lightdash_secret_arns" {
   validation {
     condition     = length(var.lightdash_secret_arns) == 2
     error_message = "Lightdash requires its runtime and database secrets."
+  }
+}
+
+variable "lightdash_ci_secret_arn" {
+  type        = string
+  description = "Exact Secrets Manager resource readable by protected Lightdash deployment jobs."
+
+  validation {
+    condition     = startswith(var.lightdash_ci_secret_arn, "arn:")
+    error_message = "lightdash_ci_secret_arn must be an ARN."
   }
 }
 

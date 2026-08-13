@@ -1,4 +1,5 @@
 DBT_PROJECT_DIRS := $(patsubst %/,%,$(dir $(wildcard dbt/*/dbt_project.yml)))
+DBT_RUNTIME := env -u VIRTUAL_ENV uv run --project dbt/runtime
 AWS_WORKLOAD_ENV := env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
 	AWS_SHARED_CREDENTIALS_FILE=/dev/null AWS_PROFILE=default
 
@@ -40,13 +41,13 @@ ocr-modal-runner-deploy: preflight ## Deploy the persistent Modal OCR runner.
 
 dbt-deps: ## Install locked dbt packages.
 	@set -eu; for project in $(DBT_PROJECT_DIRS); do \
-		uv run --project dbt/runtime dbt deps --project-dir "$$project"; \
+		$(DBT_RUNTIME) dbt deps --project-dir "$$project"; \
 	done
 
 dbt-validate: dbt-deps ## Parse dbt without accessing AWS data.
 	@set -eu; for project in $(DBT_PROJECT_DIRS); do \
 		DBT_QUERY_RESULTS_URI=s3://validation/query-results DBT_ANALYTICS_URI=s3://validation \
-			uv run --project dbt/runtime dbt parse \
+			$(DBT_RUNTIME) dbt parse \
 				--project-dir "$$project" --profiles-dir "$$project" \
 				--no-partial-parse --show-all-deprecations; \
 	done
@@ -69,7 +70,7 @@ dbt-build: ## Build DBT_DOMAIN analytics with its isolated runtime identity.
 			'.Parameters[] | select(.Name == $$name) | .Value')"; \
 		$(AWS_WORKLOAD_ENV) AWS_CONFIG_FILE="$(AWS_IDENTITY_DIR)/dbt-$(DBT_DOMAIN)/host-config" \
 		DBT_QUERY_RESULTS_URI="$${QUERY_RESULTS_URI}" \
-		DBT_ANALYTICS_URI="$${ANALYTICS_URI}" uv run --project dbt/runtime dbt build \
+		DBT_ANALYTICS_URI="$${ANALYTICS_URI}" $(DBT_RUNTIME) dbt build \
 			--project-dir "dbt/$(DBT_DOMAIN)" --profiles-dir "dbt/$(DBT_DOMAIN)"
 
 emr-jobs-package: ## Build EMR artifacts in the matching EMR runtime.

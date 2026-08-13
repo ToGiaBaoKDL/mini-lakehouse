@@ -2,12 +2,13 @@ data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
 locals {
-  project          = "tgbao"
-  environment      = "dev"
-  aws_region       = "ap-southeast-1"
-  name_prefix      = "${local.project}-${local.environment}"
-  parameter_prefix = "/lakehouse/${local.environment}"
-  athena_workgroup = "primary"
+  project             = "tgbao"
+  environment         = "dev"
+  aws_region          = "ap-southeast-1"
+  name_prefix         = "${local.project}-${local.environment}"
+  parameter_prefix    = "/lakehouse/${local.environment}"
+  athena_data_catalog = "AwsDataCatalog"
+  athena_workgroup    = "primary"
   github_repository = {
     owner    = "ToGiaBaoKDL"
     owner_id = "136962009"
@@ -73,7 +74,8 @@ locals {
       }
     })
   }
-  athena_workgroup_arn = "arn:${data.aws_partition.current.partition}:athena:${local.aws_region}:${data.aws_caller_identity.current.account_id}:workgroup/${local.athena_workgroup}"
+  athena_data_catalog_arn = "arn:${data.aws_partition.current.partition}:athena:${local.aws_region}:${data.aws_caller_identity.current.account_id}:datacatalog/${local.athena_data_catalog}"
+  athena_workgroup_arn    = "arn:${data.aws_partition.current.partition}:athena:${local.aws_region}:${data.aws_caller_identity.current.account_id}:workgroup/${local.athena_workgroup}"
   tags = {
     Project     = local.project
     Environment = local.environment
@@ -143,6 +145,7 @@ module "identity" {
   parameter_arns                  = local.parameter_arns
   kms_key_arn                     = module.storage.kms_key_arn
   emr_application_arn             = module.emr_serverless.application_arn
+  athena_data_catalog_arn         = local.athena_data_catalog_arn
   athena_workgroup_arn            = local.athena_workgroup_arn
   athena_result_prefixes          = local.athena_workload_prefixes
   bucket_arns = {
@@ -165,7 +168,8 @@ module "identity" {
     aws_secretsmanager_secret.lightdash.arn,
     aws_secretsmanager_secret.metadata_postgres["lightdash"].arn,
   ])
-  ocr_secret_arns = toset([for secret in aws_secretsmanager_secret.ocr : secret.arn])
+  lightdash_ci_secret_arn = aws_secretsmanager_secret.lightdash_ci.arn
+  ocr_secret_arns         = toset([for secret in aws_secretsmanager_secret.ocr : secret.arn])
   services_deployer_secret_arns = toset([
     aws_secretsmanager_secret.cloudflare_tunnel.arn,
   ])

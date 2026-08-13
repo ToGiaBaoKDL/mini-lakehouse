@@ -1,0 +1,23 @@
+chartConfig:
+  config:
+    label: Artifact elements
+    selectedField: fct_document_processing_runs_total_elements
+    showBigNumberLabel: true
+    style: K
+  type: big_number
+contentType: chart
+dashboardSlug: research-overview
+metricQuery:
+  dimensions: []
+  exploreName: fct_document_processing_runs
+  filters: {}
+  limit: 1
+  metrics:
+    - fct_document_processing_runs_total_elements
+  sorts: []
+  tableCalculations: []
+name: Artifact elements
+slug: research-artifact-elements
+spaceSlug: shared
+tableName: fct_document_processing_runs
+version: 1

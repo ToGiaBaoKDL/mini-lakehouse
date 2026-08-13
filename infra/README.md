@@ -53,6 +53,7 @@ the standard AWS `credential_process` chain.
 |---|---|---|
 | `github-emr-publisher` | GitHub OIDC, restricted to this repository's `main` branch | Read/write immutable `artifacts/emr/jobs/*`, update only the `emr/code_uri` SSM pointer, and use the lakehouse KMS key. It cannot submit EMR jobs or access data buckets. |
 | `github-image-publisher` | GitHub OIDC, restricted to `main` for publishing and protected `dev` jobs for rollback verification | Authenticate to ECR and push/pull only component repositories. It has no lakehouse data access. |
+| `github-lightdash-deployer` | GitHub OIDC, restricted to the protected `dev` environment | Read only the Lightdash CI token secret and deliver reviewed semantic layers and content over Tailscale. It has no lakehouse data access. |
 | `services-deployer` | Roles Anywhere certificate on the OCI host | Pull reviewed ECR images and read only infrastructure connector secrets. It cannot read application secrets or data. |
 | `airflow` | Roles Anywhere certificate mounted read-only at `/run/aws` | Start, inspect, and cancel jobs in the owned EMR Serverless application; pass only `emr-runtime`; read its SSM parameters and Airflow secrets; read/write only the Airflow task-log prefix. It has no landing, curated, or analytics access. |
 | `emr-runtime` | AWS service role assumed by EMR Serverless | Read immutable EMR artifacts; read/write landing and curated objects; read/update the corresponding Glue Iceberg tables; use the lakehouse KMS key. |
@@ -208,12 +209,18 @@ Populate optional integration credentials only when their workloads are enabled.
 under `.secrets/dev` are ignored by Git and must not be uploaded while they still contain
 `REPLACE_...` placeholders:
 
+- Lightdash CI `api_key` is a personal access token created from the dedicated CI user's Lightdash
+  settings. One token can deploy both projects when that user has Developer access to both. Its
+  local payload is exactly `{"version":1,"api_key":"ldpat_..."}`; service accounts require
+  Lightdash Enterprise and are not enabled by this community deployment.
 - Slack `password` is the installed app's `xoxb-...` Bot User OAuth Token, not its client secret.
 - SMTP `password` is the Gmail app password; `from_email` must be the authenticated account or an
   approved alias.
 - Kaggle and Modal payloads contain their provider API credentials.
 
 ```bash
+AWS_PROFILE=tgbao-dev make lightdash-ci-secret-sync
+
 AWS_PROFILE=tgbao-dev aws secretsmanager put-secret-value \
   --secret-id lakehouse/dev/airflow/connections/slack_api_default \
   --secret-string file://.secrets/dev/airflow/slack_api_default.json
@@ -299,29 +306,27 @@ workgroup `primary`, and the Lightdash query-result URI from
 `/lakehouse/dev/athena/lightdash_output_uri`; their schemas are `analytics_engineering` and
 `analytics_research`, respectively. Do not enter static AWS access keys.
 
-Authenticate Lightdash CLI `1.146.0` against `analytics.tgblab.io.vn`, verify the selected project,
-then deploy each dbt semantic layer:
+Create a personal access token named `github-actions-dev` for a dedicated CI user with access to
+both projects. Replace `REPLACE_LIGHTDASH_API_KEY` in `.secrets/dev/lightdash/ci.json`, then run
+`AWS_PROFILE=tgbao-dev make lightdash-ci-secret-sync`. The ignored local file is the operator
+handoff only; protected GitHub jobs retrieve the value from `lakehouse/dev/lightdash/ci` through
+their environment-scoped OIDC role.
+
+Terraform publishes the private delivery endpoint, secret identifier, and OIDC identity references
+as protected GitHub environment variables. The workflow matrix owns the non-secret mapping from a
+domain to its dbt project, managed content, and immutable Lightdash project UUID. Validate managed
+content without cloud access:
 
 ```bash
-pnpm dlx @lightdash/cli@1.146.0 login analytics.tgblab.io.vn
-
-pnpm dlx @lightdash/cli@1.146.0 config set-project --name Engineering
-pnpm dlx @lightdash/cli@1.146.0 config get-project
-DBT_QUERY_RESULTS_URI=s3://validation/lightdash DBT_ANALYTICS_URI=s3://validation \
-  pnpm dlx @lightdash/cli@1.146.0 deploy \
-    --project-dir dbt/engineering --profiles-dir dbt/engineering
-
-pnpm dlx @lightdash/cli@1.146.0 config set-project --name Research
-pnpm dlx @lightdash/cli@1.146.0 config get-project
-DBT_QUERY_RESULTS_URI=s3://validation/lightdash DBT_ANALYTICS_URI=s3://validation \
-  pnpm dlx @lightdash/cli@1.146.0 deploy \
-    --project-dir dbt/research --profiles-dir dbt/research
+npm install --global @lightdash/cli@1.146.0
+make lightdash-validate
 ```
 
-The placeholder S3 values are compile-only; warehouse queries execute in Lightdash with its
-certificate-backed IAM role and the project connection above. Build charts and dashboards in the
-UI first. Then use `lightdash download`, commit the generated YAML, run `lightdash lint`, and use
-`lightdash upload`; do not hand-author content or filter values before querying the live warehouse.
+After the one-time bootstrap, `.github/workflows/deploy-lightdash-projects.yml` is the normal
+delivery path. It uses the protected `dev` environment, short-lived AWS and Tailscale identities,
+and the PAT stored at `lakehouse/dev/lightdash/ci`; no CLI login state or custom deployment wrapper
+is used. Managed content lives under `lightdash/projects/<domain>/content`. Treat Git as the source
+of truth for the managed `Shared` spaces and keep ordinary UI-authored content in other spaces.
 
 ## Day-two changes
 

@@ -1,0 +1,149 @@
+contentType: dashboard
+config:
+  dateZoomGranularities:
+    - Day
+    - Week
+    - Month
+    - Quarter
+    - Year
+  defaultDateZoomGranularity: Month
+  isAddFilterDisabled: false
+  isDateZoomDisabled: false
+description: ArXiv publication coverage and document-processing observability.
+filters:
+  dimensions: []
+name: Research overview
+slug: research-overview
+spaceSlug: shared
+tabs:
+  - hidden: false
+    name: Publications
+    order: 0
+    uuid: 36ec7e36-e6ad-4f52-890f-40fcf3447fd1
+  - hidden: false
+    name: OCR
+    order: 1
+    uuid: 1ad2af29-30eb-4338-85ce-76759813940f
+tiles:
+  - h: 3
+    properties:
+      chartName: Papers
+      chartSlug: research-paper-count
+      hideTitle: false
+      title: Papers
+    tabUuid: 36ec7e36-e6ad-4f52-890f-40fcf3447fd1
+    type: saved_chart
+    w: 9
+    x: 0
+    y: 0
+  - h: 3
+    properties:
+      chartName: Author occurrences
+      chartSlug: research-author-occurrences
+      hideTitle: false
+      title: Author occurrences
+    tabUuid: 36ec7e36-e6ad-4f52-890f-40fcf3447fd1
+    type: saved_chart
+    w: 9
+    x: 9
+    y: 0
+  - h: 3
+    properties:
+      chartName: Average authors per paper
+      chartSlug: research-average-authors
+      hideTitle: false
+      title: Average authors per paper
+    tabUuid: 36ec7e36-e6ad-4f52-890f-40fcf3447fd1
+    type: saved_chart
+    w: 9
+    x: 18
+    y: 0
+  - h: 3
+    properties:
+      chartName: Average categories per paper
+      chartSlug: research-average-categories
+      hideTitle: false
+      title: Average categories per paper
+    tabUuid: 36ec7e36-e6ad-4f52-890f-40fcf3447fd1
+    type: saved_chart
+    w: 9
+    x: 27
+    y: 0
+  - h: 8
+    properties:
+      chartName: Monthly publications
+      chartSlug: research-publication-trend
+      hideTitle: false
+      title: Monthly publications
+    tabUuid: 36ec7e36-e6ad-4f52-890f-40fcf3447fd1
+    type: saved_chart
+    w: 24
+    x: 0
+    y: 3
+  - h: 8
+    properties:
+      chartName: Top primary categories
+      chartSlug: research-top-categories
+      hideTitle: false
+      title: Top primary categories
+    tabUuid: 36ec7e36-e6ad-4f52-890f-40fcf3447fd1
+    type: saved_chart
+    w: 12
+    x: 24
+    y: 3
+  - h: 3
+    properties:
+      chartName: Processing runs
+      chartSlug: research-run-count
+      hideTitle: false
+      title: Processing runs
+    tabUuid: 1ad2af29-30eb-4338-85ce-76759813940f
+    type: saved_chart
+    w: 12
+    x: 0
+    y: 0
+  - h: 3
+    properties:
+      chartName: Average processing duration
+      chartSlug: research-average-duration
+      hideTitle: false
+      title: Average processing duration
+    tabUuid: 1ad2af29-30eb-4338-85ce-76759813940f
+    type: saved_chart
+    w: 12
+    x: 12
+    y: 0
+  - h: 3
+    properties:
+      chartName: Artifact elements
+      chartSlug: research-artifact-elements
+      hideTitle: false
+      title: Artifact elements
+    tabUuid: 1ad2af29-30eb-4338-85ce-76759813940f
+    type: saved_chart
+    w: 12
+    x: 24
+    y: 0
+  - h: 8
+    properties:
+      chartName: Daily processing runs
+      chartSlug: research-ocr-runs-trend
+      hideTitle: false
+      title: Daily processing runs
+    tabUuid: 1ad2af29-30eb-4338-85ce-76759813940f
+    type: saved_chart
+    w: 18
+    x: 0
+    y: 3
+  - h: 8
+    properties:
+      chartName: Processing runs by state
+      chartSlug: research-ocr-runs-by-state
+      hideTitle: false
+      title: Processing runs by state
+    tabUuid: 1ad2af29-30eb-4338-85ce-76759813940f
+    type: saved_chart
+    w: 18
+    x: 18
+    y: 3
+version: 1

@@ -1,0 +1,22 @@
+chartConfig:
+  config:
+    label: Average categories per paper
+    selectedField: dim_research_papers_average_categories_per_paper
+    showBigNumberLabel: true
+  type: big_number
+contentType: chart
+dashboardSlug: research-overview
+metricQuery:
+  dimensions: []
+  exploreName: dim_research_papers
+  filters: {}
+  limit: 1
+  metrics:
+    - dim_research_papers_average_categories_per_paper
+  sorts: []
+  tableCalculations: []
+name: Average categories per paper
+slug: research-average-categories
+spaceSlug: shared
+tableName: dim_research_papers
+version: 1

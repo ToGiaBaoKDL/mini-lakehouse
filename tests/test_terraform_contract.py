@@ -94,12 +94,14 @@ def test_secret_containers_never_manage_secret_values() -> None:
     assert 'resource "aws_secretsmanager_secret" "airflow"' in environment
     assert 'resource "aws_secretsmanager_secret" "metadata_postgres"' in environment
     assert 'resource "aws_secretsmanager_secret" "lightdash"' in environment
+    assert 'resource "aws_secretsmanager_secret" "lightdash_ci"' in environment
     assert 'resource "aws_secretsmanager_secret" "ocr"' in environment
     assert 'resource "aws_secretsmanager_secret" "cloudflare_tunnel"' in environment
     assert '"lakehouse/${local.environment}/airflow/runtime"' in environment
     assert '"lakehouse/${local.environment}/airflow/connections/${connection}"' in environment
     assert '"lakehouse/${local.environment}/metadata-postgres/${each.key}"' in environment
     assert '"lakehouse/${local.environment}/lightdash/runtime"' in environment
+    assert '"lakehouse/${local.environment}/lightdash/ci"' in environment
     assert '"lakehouse/${local.environment}/ocr/providers/${each.key}"' in environment
     assert '"lakehouse/${local.environment}/cloudflare/tunnel-token"' in environment
     assert "aws_secretsmanager_secret_version" not in environment
@@ -125,6 +127,8 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
         assert f"${{local.name_prefix}}-{tier}-" in normalized_environment
     assert "hashicorp/random" not in environment
     assert 'parameter_prefix = "/lakehouse/${local.environment}"' in normalized_environment
+    assert 'athena_data_catalog = "AwsDataCatalog"' in normalized_environment
+    assert "athena_data_catalog_arn = local.athena_data_catalog_arn" in normalized_environment
     assert 'athena_workgroup = "primary"' in normalized_environment
     assert "analytics_domains = {" in environment
     assert '"dbt_${domain}" => "dbt/${domain}"' in environment
@@ -151,11 +155,21 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
         "ocr-worker",
         "github-image-publisher",
         "github-emr-publisher",
+        "github-lightdash-deployer",
     ):
         assert f'name = "${{var.name_prefix}}-{role}"' in normalized_identity
     assert 'name = "${var.name_prefix}-${replace(each.key, "_", "-")}"' in normalized_identity
 
     assert identity.count("resources = [var.athena_workgroup_arn]") == 3
+    assert "resources = [var.athena_data_catalog_arn]" in identity
+    for action in (
+        "athena:GetDataCatalog",
+        "athena:GetDatabase",
+        "athena:GetTableMetadata",
+        "athena:ListDatabases",
+        "athena:ListTableMetadata",
+    ):
+        assert f'"{action}"' in identity
     assert "curated_object_arns_by_workload" in identity
     assert "analytics_object_arns_by_workload" in identity
     assert "athena_result_prefixes[each.key]" in identity
@@ -218,6 +232,7 @@ def test_runtime_parameters_and_trust_are_bounded_by_workload() -> None:
     assert 'actions = ["sts:AssumeRoleWithWebIdentity"]' in identity
     assert 'variable = "token.actions.githubusercontent.com:aud"' in identity
     assert 'variable = "token.actions.githubusercontent.com:sub"' in identity
+    assert "resources = [var.lightdash_ci_secret_arn]" in identity
     assert "github_environment_subject" in environment
     assert "github_environment_subject" in identity
     assert "github_main_subject" in environment
@@ -372,7 +387,10 @@ def test_cloud_roots_have_isolated_state_and_private_access_host() -> None:
     assert 'version = "~> 0.29.2"' in tailscale
     assert '"tcp:22"' in tailscale
     assert '"tcp:8080"' in tailscale
+    assert '"tcp:8081"' in tailscale
     assert '"tcp:8501"' in tailscale
+    assert "operator_services_ports" in tailscale
+    assert "ci_services_ports" in tailscale
     assert "reusable            = false" in tailscale
     assert 'recreate_if_invalid = "always"' in tailscale
     assert 'services_tag = "tag:tgbao-dev-services"' in tailscale
@@ -447,8 +465,11 @@ def test_github_delivery_configuration_is_terraform_owned_and_state_derived() ->
     for variable in (
         "AWS_EMR_PUBLISHER_ROLE_ARN",
         "AWS_IMAGE_PUBLISHER_ROLE_ARN",
+        "AWS_LIGHTDASH_DEPLOYER_ROLE_ARN",
         "EMR_ARTIFACTS_URI",
         "EMR_CODE_PARAMETER_NAME",
+        "LIGHTDASH_CI_SECRET_ID",
+        "LIGHTDASH_URL",
         "TAILSCALE_AUDIENCE",
         "TAILSCALE_CLIENT_ID",
     ):

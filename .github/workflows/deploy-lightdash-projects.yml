@@ -1,0 +1,118 @@
+name: Deploy Lightdash projects
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/deploy-lightdash-projects.yml
+      - dbt/runtime/**
+      - dbt/*/dbt_project.yml
+      - dbt/*/macros/**
+      - dbt/*/models/**
+      - dbt/*/package-lock.yml
+      - dbt/*/packages.yml
+      - dbt/*/profiles.yml
+      - lightdash/projects/**
+  workflow_dispatch:
+
+concurrency:
+  group: dev-lightdash-projects-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Deploy ${{ matrix.domain }}
+    if: github.ref == 'refs/heads/main'
+    environment: dev
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - content_dir: lightdash/projects/engineering/content
+            dbt_project_dir: dbt/engineering
+            domain: engineering
+            project_uuid: bde2b242-ad5d-495b-a581-7a1f74787902
+          - content_dir: lightdash/projects/research/content
+            dbt_project_dir: dbt/research
+            domain: research
+            project_uuid: 25cf6684-ade3-4c39-b2ac-cb1d8b1ce383
+    env:
+      CI: "true"
+      LIGHTDASH_PROJECT: ${{ matrix.project_uuid }}
+      LIGHTDASH_URL: ${{ vars.LIGHTDASH_URL }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          version: "0.11.30"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version-file: .python-version
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: uv sync --frozen --project dbt/runtime
+      - run: npm install --global @lightdash/cli@1.146.0
+      - uses: aws-actions/configure-aws-credentials@acca2b1b2070338fb9fd1ca27ecee81d687e58e5 # v6.1.2
+        with:
+          aws-region: ap-southeast-1
+          role-to-assume: ${{ vars.AWS_LIGHTDASH_DEPLOYER_ROLE_ARN }}
+      - uses: aws-actions/aws-secretsmanager-get-secrets@2cb1a461cbd4865ac4299648312e4704c646cd53 # v3.0.1
+        with:
+          parse-json-secrets: true
+          secret-ids: |
+            LIGHTDASH, ${{ vars.LIGHTDASH_CI_SECRET_ID }}
+      - uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+        with:
+          oauth-client-id: ${{ vars.TAILSCALE_CLIENT_ID }}
+          audience: ${{ vars.TAILSCALE_AUDIENCE }}
+          tags: tag:tgbao-dev-ci
+          ping: tgbao-dev-services
+      - name: Compile ${{ matrix.domain }} semantic layer
+        env:
+          DBT_ANALYTICS_URI: s3://validation
+          DBT_QUERY_RESULTS_URI: s3://validation/lightdash
+        run: |
+          env -u VIRTUAL_ENV uv run --project dbt/runtime dbt deps \
+            --project-dir "${{ matrix.dbt_project_dir }}"
+          env -u VIRTUAL_ENV uv run --project dbt/runtime dbt parse \
+            --project-dir "${{ matrix.dbt_project_dir }}" \
+            --profiles-dir "${{ matrix.dbt_project_dir }}" \
+            --no-partial-parse \
+            --show-all-deprecations
+          lightdash lint --path "${{ matrix.content_dir }}"
+      - name: Deploy ${{ matrix.domain }} project
+        run: |
+          lightdash config get-project
+          lightdash deploy \
+            --project-dir "${{ matrix.dbt_project_dir }}" \
+            --profiles-dir "${{ matrix.dbt_project_dir }}" \
+            --skip-dbt-compile \
+            --skip-warehouse-catalog \
+            --no-partial-compilation \
+            --assume-yes \
+            --gzip
+          lightdash upload \
+            --path "${{ matrix.content_dir }}" \
+            --force \
+            --concurrency 4 \
+            --gzip
+          lightdash validate \
+            --project-dir "${{ matrix.dbt_project_dir }}" \
+            --profiles-dir "${{ matrix.dbt_project_dir }}" \
+            --skip-dbt-compile \
+            --skip-warehouse-catalog \
+            --only tables charts dashboards \
+            --show-chart-configuration-warnings \
+            --no-partial-compilation

@@ -1,0 +1,37 @@
+chartConfig:
+  config:
+    eChartsConfig:
+      series:
+        - color: "#15AABF"
+          encode:
+            xRef:
+              field: fct_contributor_activity_daily_actor_login
+            yRef:
+              field: fct_contributor_activity_daily_total_events
+          name: Total events
+          type: bar
+    layout:
+      flipAxes: true
+      xField: fct_contributor_activity_daily_actor_login
+      yField:
+        - fct_contributor_activity_daily_total_events
+  type: cartesian
+contentType: chart
+dashboardSlug: engineering-overview
+metricQuery:
+  dimensions:
+    - fct_contributor_activity_daily_actor_login
+  exploreName: fct_contributor_activity_daily
+  filters: {}
+  limit: 10
+  metrics:
+    - fct_contributor_activity_daily_total_events
+  sorts:
+    - descending: true
+      fieldId: fct_contributor_activity_daily_total_events
+  tableCalculations: []
+name: Top contributors by events
+slug: engineering-top-contributors
+spaceSlug: shared
+tableName: fct_contributor_activity_daily
+version: 1

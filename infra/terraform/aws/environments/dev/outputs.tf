@@ -16,9 +16,15 @@ output "catalog_admin_role_arn" {
 output "github_ci_role_arns" {
   description = "Environment-scoped GitHub Actions roles keyed by release responsibility."
   value = {
-    emr_publisher   = module.identity.github_emr_publisher_role_arn
-    image_publisher = module.identity.github_image_publisher_role_arn
+    emr_publisher      = module.identity.github_emr_publisher_role_arn
+    image_publisher    = module.identity.github_image_publisher_role_arn
+    lightdash_deployer = module.identity.github_lightdash_deployer_role_arn
   }
+}
+
+output "lightdash_ci_secret_id" {
+  description = "Secrets Manager identifier populated with the Lightdash CI personal access token."
+  value       = aws_secretsmanager_secret.lightdash_ci.name
 }
 
 output "container_repository_urls" {

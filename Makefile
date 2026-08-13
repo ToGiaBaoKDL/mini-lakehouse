@@ -9,6 +9,8 @@ AWS_IDENTITY_DIR ?= $(HOME)/.config/lakehouse/$(LAKEHOUSE_ENVIRONMENT)/aws
 HOST_BIND_ADDRESS ?= 127.0.0.1
 AIRFLOW_BASE_URL ?= http://$(HOST_BIND_ADDRESS):8080
 RUNTIME_PARAMETER_PREFIX := /lakehouse/$(LAKEHOUSE_ENVIRONMENT)
+LIGHTDASH_CLI_VERSION := 1.146.0
+LIGHTDASH_CONTENT_DIRS := $(wildcard lightdash/projects/*/content)
 
 export LAKEHOUSE_ENVIRONMENT
 export LOCAL_UID
@@ -22,7 +24,7 @@ include make/images.mk
 include make/services.mk
 include make/data.mk
 
-.PHONY: help preflight platform-validate lint test compose-validate check
+.PHONY: help preflight platform-validate lightdash-validate lint test compose-validate check
 
 help: ## Show available commands.
 	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-28s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -35,6 +37,14 @@ preflight: ## Verify local tools required by service operations.
 
 platform-validate: ## Validate settings and YAML contracts without AWS I/O.
 	uv run --package lakehouse --extra cli python -m lakehouse.validate
+
+lightdash-validate: ## Validate managed Lightdash content with the pinned CLI.
+	@test "$$(lightdash --version | sed -n '1p')" = "$(LIGHTDASH_CLI_VERSION)" || { \
+		printf '%s\n' "Lightdash CLI $(LIGHTDASH_CLI_VERSION) is required."; exit 1; \
+	}
+	@set -eu; for content in $(LIGHTDASH_CONTENT_DIRS); do \
+		lightdash lint --path "$$content"; \
+	done
 
 lint: ## Run formatting, linting, and static type checks.
 	bash -n jobs/emr/release/publish
@@ -57,6 +67,7 @@ lint: ## Run formatting, linting, and static type checks.
 		apps/lightdash/deploy/deploy \
 		apps/lightdash/deploy/initialize-secrets \
 		apps/lightdash/deploy/reconcile \
+		lightdash/deploy/sync-ci-secret \
 		dbt/deploy/deploy \
 		ocr/deploy/deploy
 	uv run ruff format --check .
@@ -85,6 +96,7 @@ check: ## Run the complete local quality gate.
 	uv lock --check --directory ocr/runners/glm_ocr
 	$(MAKE) platform-validate
 	$(MAKE) dbt-validate
+	$(MAKE) lightdash-validate
 	$(MAKE) lint
 	$(MAKE) test
 	$(MAKE) terraform-fmt

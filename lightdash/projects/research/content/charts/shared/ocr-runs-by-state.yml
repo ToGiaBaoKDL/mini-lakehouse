@@ -1,0 +1,39 @@
+chartConfig:
+  config:
+    eChartsConfig:
+      series:
+        - encode:
+            xRef:
+              field: fct_document_processing_runs_state
+            yRef:
+              field: fct_document_processing_runs_run_count
+          name: Runs
+          type: bar
+    layout:
+      categoryColorOverrides:
+        failed: "#FA5252"
+        imported: "#40C057"
+      colorByCategory: true
+      xField: fct_document_processing_runs_state
+      yField:
+        - fct_document_processing_runs_run_count
+  type: cartesian
+contentType: chart
+dashboardSlug: research-overview
+metricQuery:
+  dimensions:
+    - fct_document_processing_runs_state
+  exploreName: fct_document_processing_runs
+  filters: {}
+  limit: 20
+  metrics:
+    - fct_document_processing_runs_run_count
+  sorts:
+    - descending: true
+      fieldId: fct_document_processing_runs_run_count
+  tableCalculations: []
+name: Processing runs by state
+slug: research-ocr-runs-by-state
+spaceSlug: shared
+tableName: fct_document_processing_runs
+version: 1

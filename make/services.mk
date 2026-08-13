@@ -13,7 +13,8 @@ CLOUDFLARE_COMPOSE_CONFIG := CLOUDFLARE_IMAGE=$(CLOUDFLARE_CONNECTOR_IMAGE) CLOU
 .PHONY: metadata-postgres-secrets-init metadata-postgres-up metadata-postgres-down metadata-postgres-logs \
 	airflow-secrets-init airflow-up airflow-down airflow-logs airflow-dags \
 	arxiv-inspector-up arxiv-inspector-down arxiv-inspector-logs \
-	lightdash-secrets-init lightdash-up lightdash-down lightdash-logs \
+	lightdash-secrets-init lightdash-ci-secret-sync \
+	lightdash-up lightdash-down lightdash-logs \
 	services-up services-down services-ps
 
 metadata-postgres-secrets-init: ## Initialize the PostgreSQL bootstrap credential exactly once.
@@ -26,6 +27,9 @@ airflow-secrets-init: ## Initialize Airflow database and runtime secrets exactly
 lightdash-secrets-init: ## Initialize Lightdash database and runtime secrets exactly once.
 	infra/runtime/postgres/initialize-secrets lightdash
 	apps/lightdash/deploy/initialize-secrets
+
+lightdash-ci-secret-sync: ## Store the local Lightdash CI token payload in Secrets Manager.
+	lightdash/deploy/sync-ci-secret ".secrets/$(LAKEHOUSE_ENVIRONMENT)/lightdash/ci.json"
 
 metadata-postgres-up: preflight ## Start shared metadata PostgreSQL without changing application databases.
 	infra/runtime/postgres/deploy

@@ -246,8 +246,10 @@ models:
           meta:
             metrics:
               total_elements:
-                label: Total extracted elements
-                type: sum
+                description: Total elements across unique published OCR artifacts.
+                distinct_keys: [processing_id, arxiv_id]
+                label: Total artifact elements
+                type: sum_distinct
       - {name: element_type_count, description: Distinct canonical element types., data_type: bigint}
       - name: text_character_count
         description: Total normalized plain-text characters.
@@ -256,7 +258,9 @@ models:
           meta:
             metrics:
               total_text_characters:
-                label: Total text characters
-                type: sum
+                description: Total text characters across unique published OCR artifacts.
+                distinct_keys: [processing_id, arxiv_id]
+                label: Total artifact text characters
+                type: sum_distinct
       - {name: markdown_element_count, description: Elements carrying non-empty Markdown., data_type: bigint}
       - {name: curated_at, description: Latest run-state publication timestamp., data_type: timestamp}

@@ -1,0 +1,23 @@
+chartConfig:
+  config:
+    label: Total events
+    selectedField: fct_repository_activity_daily_total_events
+    showBigNumberLabel: true
+    style: M
+  type: big_number
+contentType: chart
+dashboardSlug: engineering-overview
+metricQuery:
+  dimensions: []
+  exploreName: fct_repository_activity_daily
+  filters: {}
+  limit: 1
+  metrics:
+    - fct_repository_activity_daily_total_events
+  sorts: []
+  tableCalculations: []
+name: Total events
+slug: engineering-total-events
+spaceSlug: shared
+tableName: fct_repository_activity_daily
+version: 1

@@ -1,0 +1,22 @@
+chartConfig:
+  config:
+    label: Average duration (seconds)
+    selectedField: fct_document_processing_runs_average_duration_seconds
+    showBigNumberLabel: true
+  type: big_number
+contentType: chart
+dashboardSlug: research-overview
+metricQuery:
+  dimensions: []
+  exploreName: fct_document_processing_runs
+  filters: {}
+  limit: 1
+  metrics:
+    - fct_document_processing_runs_average_duration_seconds
+  sorts: []
+  tableCalculations: []
+name: Average processing duration
+slug: research-average-duration
+spaceSlug: shared
+tableName: fct_document_processing_runs
+version: 1

@@ -1,0 +1,103 @@
+contentType: dashboard
+config:
+  dateZoomGranularities:
+    - Day
+    - Week
+    - Month
+  defaultDateZoomGranularity: Day
+  isAddFilterDisabled: false
+  isDateZoomDisabled: false
+description: GitHub engineering activity across repositories and contributors.
+filters:
+  dimensions:
+    - disabled: false
+      label: Activity window
+      operator: inThePast
+      required: false
+      settings:
+        completed: false
+        unitOfTime: days
+      target:
+        fieldId: fct_repository_activity_daily_activity_date
+        tableName: fct_repository_activity_daily
+      tileTargets:
+        engineering-top-contributors:
+          fieldId: fct_contributor_activity_daily_activity_date
+          tableName: fct_contributor_activity_daily
+      values: [30]
+name: Engineering overview
+slug: engineering-overview
+spaceSlug: shared
+tabs: []
+tiles:
+  - h: 3
+    properties:
+      chartName: Total events
+      chartSlug: engineering-total-events
+      hideTitle: false
+      title: Total events
+    type: saved_chart
+    w: 9
+    x: 0
+    y: 0
+  - h: 3
+    properties:
+      chartName: Push events
+      chartSlug: engineering-push-events
+      hideTitle: false
+      title: Push events
+    type: saved_chart
+    w: 9
+    x: 9
+    y: 0
+  - h: 3
+    properties:
+      chartName: Pull-request events
+      chartSlug: engineering-pull-request-events
+      hideTitle: false
+      title: Pull-request events
+    type: saved_chart
+    w: 9
+    x: 18
+    y: 0
+  - h: 3
+    properties:
+      chartName: Issue events
+      chartSlug: engineering-issue-events
+      hideTitle: false
+      title: Issue events
+    type: saved_chart
+    w: 9
+    x: 27
+    y: 0
+  - h: 8
+    properties:
+      chartName: Daily event activity
+      chartSlug: engineering-daily-events
+      hideTitle: false
+      title: Daily event activity
+    type: saved_chart
+    w: 24
+    x: 0
+    y: 3
+  - h: 8
+    properties:
+      chartName: Top repositories by events
+      chartSlug: engineering-top-repositories
+      hideTitle: false
+      title: Top repositories by events
+    type: saved_chart
+    w: 12
+    x: 24
+    y: 3
+  - h: 8
+    properties:
+      chartName: Top contributors by events
+      chartSlug: engineering-top-contributors
+      hideTitle: false
+      title: Top contributors by events
+    type: saved_chart
+    w: 36
+    x: 0
+    y: 11
+version: 1

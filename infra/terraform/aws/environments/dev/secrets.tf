@@ -35,6 +35,13 @@ resource "aws_secretsmanager_secret" "lightdash" {
   tags                    = local.tags
 }
 
+resource "aws_secretsmanager_secret" "lightdash_ci" {
+  name                    = "lakehouse/${local.environment}/lightdash/ci"
+  description             = "Personal access token for protected Lightdash content deployments."
+  recovery_window_in_days = 7
+  tags                    = local.tags
+}
+
 resource "aws_secretsmanager_secret" "airflow" {
   for_each = local.airflow_secret_names
 

@@ -1,0 +1,38 @@
+chartConfig:
+  config:
+    eChartsConfig:
+      series:
+        - color: "#15AABF"
+          encode:
+            xRef:
+              field: fct_document_processing_runs_started_at_day
+            yRef:
+              field: fct_document_processing_runs_run_count
+          name: Runs
+          smooth: true
+          type: line
+    layout:
+      showGridY: true
+      xField: fct_document_processing_runs_started_at_day
+      yField:
+        - fct_document_processing_runs_run_count
+  type: cartesian
+contentType: chart
+dashboardSlug: research-overview
+metricQuery:
+  dimensions:
+    - fct_document_processing_runs_started_at_day
+  exploreName: fct_document_processing_runs
+  filters: {}
+  limit: 500
+  metrics:
+    - fct_document_processing_runs_run_count
+  sorts:
+    - descending: false
+      fieldId: fct_document_processing_runs_started_at_day
+  tableCalculations: []
+name: Daily processing runs
+slug: research-ocr-runs-trend
+spaceSlug: shared
+tableName: fct_document_processing_runs
+version: 1

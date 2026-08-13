@@ -48,11 +48,13 @@ default OpenDataLoader pipeline runs on CPU.
 | `orchestration/` | Airflow runtime, DAG bundle, and deployment |
 | `ocr/` | Provider-neutral document extraction and remote runners |
 | `dbt/` | Athena analytics models and their shared runtime |
-| `apps/` | ArXiv Inspector and Lightdash deployment boundaries |
+| `lightdash/` | Domain-owned BI content and its protected delivery control plane |
+| `apps/` | Application code and self-hosted service runtime boundaries |
 | `infra/` | Terraform, shared services, delivery, and operations |
 
 Ownership follows these boundaries: Terraform provisions infrastructure, YAML contracts own the
-catalog, Spark and OCR own curated data, dbt owns analytics tables, and Airflow only orchestrates.
+catalog, Spark and OCR own curated data, dbt owns analytics tables, Lightdash owns BI semantics and
+content, application deploy folders own runtimes, and Airflow only orchestrates.
 
 ## Getting started
 

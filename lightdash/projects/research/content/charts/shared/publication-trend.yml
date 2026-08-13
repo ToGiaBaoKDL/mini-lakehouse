@@ -1,0 +1,38 @@
+chartConfig:
+  config:
+    eChartsConfig:
+      series:
+        - color: "#7048E8"
+          encode:
+            xRef:
+              field: fct_research_publications_daily_publication_date_month
+            yRef:
+              field: fct_research_publications_daily_total_papers
+          name: Papers
+          smooth: true
+          type: line
+    layout:
+      showGridY: true
+      xField: fct_research_publications_daily_publication_date_month
+      yField:
+        - fct_research_publications_daily_total_papers
+  type: cartesian
+contentType: chart
+dashboardSlug: research-overview
+metricQuery:
+  dimensions:
+    - fct_research_publications_daily_publication_date_month
+  exploreName: fct_research_publications_daily
+  filters: {}
+  limit: 500
+  metrics:
+    - fct_research_publications_daily_total_papers
+  sorts:
+    - descending: false
+      fieldId: fct_research_publications_daily_publication_date_month
+  tableCalculations: []
+name: Monthly publications
+slug: research-publication-trend
+spaceSlug: shared
+tableName: fct_research_publications_daily
+version: 1

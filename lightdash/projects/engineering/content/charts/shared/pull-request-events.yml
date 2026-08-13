@@ -1,0 +1,23 @@
+chartConfig:
+  config:
+    label: Pull-request events
+    selectedField: fct_repository_activity_daily_total_pull_request_events
+    showBigNumberLabel: true
+    style: K
+  type: big_number
+contentType: chart
+dashboardSlug: engineering-overview
+metricQuery:
+  dimensions: []
+  exploreName: fct_repository_activity_daily
+  filters: {}
+  limit: 1
+  metrics:
+    - fct_repository_activity_daily_total_pull_request_events
+  sorts: []
+  tableCalculations: []
+name: Pull-request events
+slug: engineering-pull-request-events
+spaceSlug: shared
+tableName: fct_repository_activity_daily
+version: 1
