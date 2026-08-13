@@ -1,5 +1,6 @@
 import os
 import re
+import warnings
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +15,7 @@ os.environ["LAKEHOUSE_ENVIRONMENT"] = "ci"
 
 from airflow.models import DagBag
 from airflow.sdk import DAG
+from airflow.utils.file import list_py_file_paths
 from airflow_bundle.operators import emr as emr_module
 from airflow_bundle.operators.docker import LoggedDockerOperator
 from airflow_bundle.operators.emr import LoggedEmrServerlessStartJobOperator
@@ -45,6 +47,15 @@ def test_dagbag_loads_every_owned_dag_without_import_errors() -> None:
 
     assert bag.import_errors == {}
     assert set(bag.dags) == EXPECTED_DAGS
+
+
+def test_runtime_bundle_discovery_excludes_test_modules() -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        discovered = list_py_file_paths("orchestration/bundle", safe_mode=False)
+
+    assert discovered
+    assert all("/tests/" not in path for path in discovered)
 
 
 def test_dag_files_are_domain_scoped_and_follow_worker_aware_naming() -> None:

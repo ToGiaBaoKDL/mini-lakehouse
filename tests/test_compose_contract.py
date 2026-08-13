@@ -411,7 +411,7 @@ def test_airflow_bundle_and_runtime_have_one_way_ownership() -> None:
     runtime = Path("orchestration/runtime")
 
     assert (bundle / "dags").is_dir()
-    assert (bundle / ".airflowignore").read_text(encoding="utf-8").strip() == "^tests/"
+    assert (bundle / ".airflowignore").read_text(encoding="utf-8").strip() == "tests/"
     assert (bundle / "airflow_bundle/operators").is_dir()
     assert (bundle / "airflow_bundle/callbacks").is_dir()
     assert (runtime / "airflow_runtime/secrets.py").is_file()
