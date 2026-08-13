@@ -1,231 +1,84 @@
-# Lakehouse Platform
+# Mini Lakehouse
 
-A production-shaped data engineering monorepo using AWS data services and a private OCI services
-host. It separates infrastructure, catalog contracts, source processing, orchestration, analytics,
-and data applications while keeping local development simple.
+Mini Lakehouse is a production-shaped, open-source data platform for learning from and running a
+modern lakehouse without hiding the operational details. It combines an AWS data plane with a
+small self-hosted OCI runtime and keeps infrastructure, data contracts, processing, analytics, and
+applications independently deployable.
+
+The included reference workloads ingest GitHub Archive and ArXiv data, extract PDF content, build
+Iceberg tables and dbt models, and expose the results through Lightdash and a Streamlit inspector.
+
+## What is included
+
+- Infrastructure as code for AWS, OCI, Tailscale, Cloudflare, and GitHub Actions.
+- Contract-driven Glue and Apache Iceberg catalogs defined in YAML.
+- Spark ingestion and transformation on EMR Serverless.
+- Self-hosted Airflow with versioned DAG bundles and isolated task images.
+- CPU-native PDF extraction with OpenDataLoader and optional remote GLM-OCR GPU runners.
+- Athena and dbt analytics projects for engineering and research datasets.
+- Self-hosted Lightdash and a read-only ArXiv inspection application.
+- Immutable image and job releases, workload-scoped identities, and reproducible local checks.
+
+## Architecture
 
 ```mermaid
 flowchart LR
-    S[Sources] --> A[Self-hosted Airflow on OCI]
-    B[Versioned Git DAG bundle] --> A
-    A --> M[(Shared metadata PostgreSQL)]
-    A --> E[EMR Serverless / Spark<br/>dedicated HTTPS egress network]
-    A --> W[Ephemeral local task containers]
-    A --> Z[(S3 Airflow task logs)]
-    W --> R[Remote GPU document processing]
-    E --> L[(S3 landing)]
-    E --> C[(S3 curated)]
-    R --> C
-    L & C -. Iceberg metadata .-> G[Glue Data Catalog]
-    C --> Q[Athena + dbt task]
-    Q --> N[(S3 analytics)]
-    N -. Iceberg metadata .-> G
-    G --> D[Data applications]
-    N --> H[Lightdash semantic layer]
-    F[Cloudflare Access + Tunnel] --> A & D & H
-
-    T[Terraform] -. AWS data plane .-> L & C & N & E & Q
-    O[OCI A1 + Tailscale] --> A & D
-    X[ECR immutable images] --> A & W & D
-    Y[YAML contracts] --> P[PyIceberg control plane]
-    P -. databases, tables, drift .-> G
+    S[GitHub Archive and ArXiv] --> A[Airflow]
+    A --> E[EMR Serverless]
+    A --> O[Document extraction]
+    E --> I[(S3 + Iceberg)]
+    O --> I
+    I --> Q[Athena + dbt]
+    Q --> D[Lightdash and data apps]
+    G[Glue Data Catalog] --- I
+    T[Terraform + YAML contracts] -. manages .-> G
+    C[GitHub Actions] -. releases .-> A & E & O & D
 ```
 
-## Boundaries
+AWS owns the durable data plane. A private OCI A1 host runs Airflow, PostgreSQL, Lightdash, and the
+application services behind Tailscale and Cloudflare Access. GPU OCR is optional and remote; the
+default OpenDataLoader pipeline runs on CPU.
 
-| Area | Owner | Responsibility |
-|---|---|---|
-| `infra/terraform/aws/` | AWS platform | S3, ECR, KMS, IAM, EMR Serverless networking, SSM, Secrets Manager |
-| `infra/terraform/oci/` | Runtime platform | Rebuildable ARM services host with no public ingress |
-| `infra/terraform/tailscale/` | Network platform | Private grants, SSH policy, and enrollment |
-| `infra/terraform/github/` | Delivery platform | Protected environments, deployment policy, and release variables |
-| `infra/terraform/cloudflare/` | Edge platform | Tunnel, public DNS, and identity-aware application access |
-| `infra/runtime/cloudflare/` | Runtime platform | Pinned outbound connector and secret materialization |
-| `infra/runtime/postgres/` | Runtime platform | Shared PostgreSQL server with isolated application databases |
-| `platform/` | Data platform | YAML contracts and the contract-driven Glue/Iceberg control plane |
-| `jobs/emr/` | Source/product teams | Spark extract, landing publication, and curated business transforms |
-| `orchestration/bundle/` | Workflow definitions | Versionable Airflow DAGs and DAG-only support code |
-| `orchestration/runtime/` | Runtime platform | Airflow image, providers, and runtime integrations |
-| `orchestration/deploy/` | Runtime platform | Self-hosted Airflow deployment definition |
-| `dbt/runtime/` | Analytics platform | Shared pinned dbt/Athena runtime used by domain images |
-| `dbt/engineering/` | Engineering analytics | GitHub-facing models, tests, profile, and release ownership |
-| `dbt/research/` | Research analytics | ArXiv-facing models, tests, profile, and release ownership |
-| `ocr/` | Document processing | Provider-neutral protocol, adapters, configuration, and portable GPU runtimes |
-| `apps/arxiv_inspector/` | Data application | UI plus its read-only Athena/S3 access layer |
-| `apps/lightdash/` | Analytics application | Self-hosted Lightdash runtime and deployment boundary |
+## Repository layout
 
-Terraform never creates Glue databases or Iceberg tables. PyIceberg applies the YAML contracts.
-Spark owns source-to-landing and source-to-curated writes; the isolated OCR worker owns its curated
-OCR tables through PyIceberg. dbt owns analytics tables. Airflow contains only orchestration.
+| Path | Purpose |
+|---|---|
+| `platform/` | YAML data contracts and the PyIceberg catalog control plane |
+| `jobs/emr/` | Spark source ingestion and curated transformations |
+| `orchestration/` | Airflow runtime, DAG bundle, and deployment |
+| `ocr/` | Provider-neutral document extraction and remote runners |
+| `dbt/` | Athena analytics models and their shared runtime |
+| `apps/` | ArXiv Inspector and Lightdash deployment boundaries |
+| `infra/` | Terraform, shared services, delivery, and operations |
 
-Each deployable boundary owns its runtime dependencies. The dbt domains share one pinned execution
-lock and Dockerfile, while each owns its project, profile, models, ECR image, runtime identity, and
-release lifecycle. Airflow, EMR, and the remote OCR runner keep independent lockfiles because their
-runtimes differ. The root workspace is limited to compatible platform, OCR, and Inspector packages.
+Ownership follows these boundaries: Terraform provisions infrastructure, YAML contracts own the
+catalog, Spark and OCR own curated data, dbt owns analytics tables, and Airflow only orchestrates.
 
-## Data layout
+## Getting started
 
-Each environment owns explicit globally unique bucket names; Terraform never regenerates suffixes.
+Explore the available development and operations commands:
 
-```text
-s3://<project>-<env>-landing-<suffix>/
-  <source_type>/<source>/raw/...
-  <source_type>/<source>/tables/<table>/...
-
-s3://<project>-<env>-curated-<suffix>/
-  <product>/tables/<table>/...
-  <product>/artifacts/<processor>/<document>/<processing-id>/...
-
-s3://<project>-<env>-analytics-<suffix>/
-  <domain>/tables/<table>/...
-
-s3://<project>-<env>-artifacts-<suffix>/
-  emr/jobs/<release>/
-
-s3://<project>-<env>-lightdash-<suffix>/
-  ...                                  # Lightdash-owned exports and cached files
-
-s3://<project>-<env>-logs-<suffix>/
-  airflow/task-logs/                  # 30-day dev retention
-
-s3://<project>-<env>-query-results-<suffix>/
-  dbt/
-  arxiv-inspector/
-  lightdash/
+```bash
+make help
 ```
 
-Glue database names are explicit contract fields, such as `landing_<source>`,
-`curated_<product>`, and `analytics_<domain>`. These names are conventions, not runtime string
-generation. EMR workers use two public subnets, HTTPS-only egress, and an S3 Gateway Endpoint;
-there is no inbound rule or NAT Gateway. EMR uses AWS-managed logs; runtime resource references live under `/lakehouse/<env>/`
-in SSM Parameter Store. Airflow's remote-log URI is resolved from SSM instead of being embedded in
-Compose. Immutable service releases stay in ECR and are deployed independently by digest; SSM does
-not duplicate Git-owned image versions.
-
-## Workflows
-
-Run the complete local quality gate before publishing a change:
+Run the complete local quality gate before submitting a change:
 
 ```bash
 make check
 ```
 
-The canonical first-deployment and day-two runbook is [infra/README.md](infra/README.md). It covers
-the one-time state bootstrap, AWS, Tailscale, GitHub, OCI, workload identities, runtime secrets,
-catalog contracts, initial releases, and verification in dependency order. Use the Make targets in
-that runbook instead of running Terraform from the repository root; they keep provider data and
-state outside the worktree.
+The canonical deployment and operations guide is [infra/README.md](infra/README.md). It covers the
+bootstrap order, cloud resources, workload identities, secrets, releases, verification, and
+day-two operations. Stable configuration lives in Make, Compose, Terraform, or YAML—not `.env`
+files.
 
-For unpublished workstation iteration only:
+## Contributing
 
-```bash
-make images-build
-make airflow-up
-make arxiv-inspector-up
-make lightdash-up
-```
+Issues, documentation improvements, new sources, and focused pull requests are welcome. Keep
+changes within the owning component, add tests for behavior and contracts, run `make check`, and
+never commit credentials or generated cloud state.
 
-## Delivery
+## License
 
-The GitHub Terraform root reads the applied AWS and Tailscale remote states, creates the protected
-`dev` environment, restricts deployments to `main`, requires owner approval for OCI promotion, and
-writes the non-secret release variables. Its API token stays in the provider credential chain and
-never enters Terraform configuration or state. Pull requests only validate; a reviewed merge
-immediately publishes affected immutable images, then waits for approval before deploying them.
-GitHub exchanges OIDC tokens for short-lived AWS and Tailscale credentials, so CI stores no AWS key,
-Tailscale OAuth secret, or SSH key.
-The complete release/runtime identity flow and least-privilege permission matrix are documented in
-[infra/README.md](infra/README.md#aws-identities-and-permissions).
-
-The one-time backend bootstrap keeps its small local state at
-`~/.cache/lakehouse/terraform/state/aws-bootstrap.tfstate`; this is the unavoidable state needed to
-create the state bucket itself. AWS, Tailscale, GitHub, OCI, and Cloudflare then use isolated,
-natively locked keys in that versioned S3 bucket. OCI consumes the single-use Tailscale enrollment key directly
-from the Tailscale state, so it is never copied through a shell variable or tfvars file.
-
-The EMR release workflow uploads entrypoints, locked dependencies, and the exact contract bundle to
-`emr/jobs/<commit-sha>/`. A checksum manifest marks a complete release; only then does CI atomically
-update `/lakehouse/<env>/emr/code_uri` in SSM. Rerunning a completed revision reuses it, while a
-failed partial upload can be repaired before the completion marker is written.
-
-Each first-party component workflow builds one image under an immutable Git-SHA tag, records
-provenance/SBOM, and deploys its digest through a port-22-only Tailscale identity. Images are
-multi-architecture except for Lightdash's OCI-specific ARM64 build. Deployments are
-serialized per component; reruns reuse the existing immutable image. Component rollback verifies
-that the digest belongs to its reviewed Git revision, and EMR rollback restores only a completed
-reviewed release. Airflow, Inspector, each dbt domain, and OCR cannot accidentally move together, and the OCI
-host never reads Terraform state. CI streams only the selected component-owned deployment bundle;
-the host does not clone the repository or run its root Makefile.
-Airflow and Lightdash each reconcile only their owned database on the shared PostgreSQL service
-before running application migrations.
-The Cloudflare connector is the exception: a protected manual workflow deploys the pinned upstream
-multi-architecture digest directly, without a custom image or ECR repository.
-Lightdash is built unmodified from its pinned upstream commit on a native ARM runner because its
-official release image is amd64-only; only the ARM64 image needed by the OCI A1 host is published.
-Its upstream revision is also an immutable ECR build identity, so deployment-only changes reuse the
-same digest server-side while retaining a tag for the reviewed repository revision and rollback.
-
-Airflow uses the official versioned `GitDagBundle` and tracks the reviewed `main` ref under
-`orchestration/bundle`. A DAG-only merge is fetched by the DAG processor without rebuilding or
-restarting Airflow. Bundle versioning remains enabled, while cleared tasks and backfills default to
-the latest reviewed version. The Airflow image contains providers and runtime integrations only;
-changing bundle code to require a new provider still requires a compatible runtime image release
-first.
-
-Terraform creates secret containers but never secret values. Shared PostgreSQL bootstrap, the
-Airflow database owner, and the Airflow runtime each have a separate secret boundary. PostgreSQL is
-deployed independently and owns only storage/availability; Airflow owns its database migrations.
-`make airflow-up` materializes only the Airflow database and runtime values as service-scoped Compose
-secrets; SimpleAuthManager never generates or logs a password.
-The Cloudflare Tunnel token is synchronized explicitly into its AWS secret container and exposed to
-the connector only as a read-only file; the Cloudflare API token remains an operator credential.
-
-Producer tasks emit centrally declared logical assets only after successful completion. GitHub
-curated publication independently triggers Engineering analytics; ArXiv metadata or OCR publication
-independently triggers Research analytics. Each domain validates only its own sources and runs with
-an IAM role restricted to its curated input, Glue database, analytics prefix, and Athena result
-prefix. Research marts cover current papers, daily publication trends, and OCR execution/content observability. Shared
-operator factories own Docker and EMR lifecycle defaults. The weekly maintenance DAG compacts only
-recent partitions, expires snapshots, and removes sufficiently old orphan files. Catalog validation
-reports stale objects carrying platform ownership but never drops them.
-
-The manual `etl_docker_arxiv_document_ocr` DAG requires one non-empty `arxiv_id` and one provider.
-Airflow starts the pinned OCR worker image through `DockerOperator`; that container submits the
-remote GPU run, streams its logs, publishes validated artifacts to curated S3, and commits one
-Iceberg run row last. OCR libraries and provider SDKs are not installed in Airflow.
-
-Kaggle runner source is a release asset, not a per-document payload. Run
-`make ocr-kaggle-runner-publish` only when runner code or its lockfile changes, then pin the
-published Dataset version in the OCR configuration. Each document run submits only its validated
-job and a small launcher; provider SDKs own remote execution and log streaming.
-
-Modal uses a persistent deployed app because `Function.from_name()` cannot resolve an ephemeral
-runner. Run `make ocr-modal-runner-deploy` when its runner, model, or configuration changes. The
-command uses the operator's standard AWS credential chain to read the provider secret, then deploys
-the configured app and function to the explicitly configured Modal environment. The OCR workload
-identity remains isolated to runtime data access.
-
-## Add a source
-
-1. Add `platform/contracts/sources/<source>.yaml` and, when needed,
-   `platform/contracts/curated/<product>.yaml`.
-2. Apply contracts before any data job writes.
-3. Add source logic under `jobs/emr/src/emr_jobs/<source>/` and a thin adapter under
-   `jobs/emr/entrypoints/`.
-4. Add a thin DAG under `orchestration/bundle/dags/<domain>/` named
-   `[job_type]_[worker_type]_[description].py`.
-5. Add contract, idempotency, and business-logic tests.
-
-Shared runtime code resolves schema, table identifiers, and raw storage prefixes from the published
-contract bundle. A source job should contain only source protocol parsing and product-specific
-transformation logic.
-
-ArXiv landing publication uses deterministic day paths and partition overwrite. Replaying a day
-replaces that authoritative landing partition before the latest mutations are merged into curated.
-
-The repository does not use `.env` files. Secret values belong in Secrets Manager, runtime resource
-references belong in Parameter Store, and stable defaults live in the Makefile/Compose boundary.
-Local operator commands use the standard AWS credential chain, GitHub uses environment-scoped OIDC,
-and OCI workloads use isolated certificate-backed temporary credentials. Select a local profile at
-the command boundary with standard `AWS_PROFILE`; repository-specific profile variables do not
-exist.
+Licensed under the [Apache License 2.0](LICENSE).
