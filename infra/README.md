@@ -263,7 +263,7 @@ updates the same persistent Modal app in place:
 AWS_PROFILE=tgbao-dev make ocr-modal-runner-deploy
 ```
 
-The Lightdash workflow builds the unmodified upstream `1.134.0` commit on a native ARM GitHub
+The Lightdash workflow builds the unmodified upstream `1.146.0` commit on a native ARM GitHub
 runner, publishes only the OCI A1-compatible ARM64 image, and deploys it by digest. The official
 release image is not used because it does not publish an ARM64 manifest. The pinned upstream commit
 is the image build identity: deployment-only revisions add their immutable Git-SHA tag to the same
@@ -299,22 +299,22 @@ workgroup `primary`, and the Lightdash query-result URI from
 `/lakehouse/dev/athena/lightdash_output_uri`; their schemas are `analytics_engineering` and
 `analytics_research`, respectively. Do not enter static AWS access keys.
 
-Authenticate Lightdash CLI `1.134.0` against `analytics.tgblab.io.vn`, verify the selected project,
+Authenticate Lightdash CLI `1.146.0` against `analytics.tgblab.io.vn`, verify the selected project,
 then deploy each dbt semantic layer:
 
 ```bash
-pnpm dlx @lightdash/cli@1.134.0 login analytics.tgblab.io.vn
+pnpm dlx @lightdash/cli@1.146.0 login analytics.tgblab.io.vn
 
-pnpm dlx @lightdash/cli@1.134.0 config set-project --name Engineering
-pnpm dlx @lightdash/cli@1.134.0 config get-project
+pnpm dlx @lightdash/cli@1.146.0 config set-project --name Engineering
+pnpm dlx @lightdash/cli@1.146.0 config get-project
 DBT_QUERY_RESULTS_URI=s3://validation/lightdash DBT_ANALYTICS_URI=s3://validation \
-  pnpm dlx @lightdash/cli@1.134.0 deploy \
+  pnpm dlx @lightdash/cli@1.146.0 deploy \
     --project-dir dbt/engineering --profiles-dir dbt/engineering
 
-pnpm dlx @lightdash/cli@1.134.0 config set-project --name Research
-pnpm dlx @lightdash/cli@1.134.0 config get-project
+pnpm dlx @lightdash/cli@1.146.0 config set-project --name Research
+pnpm dlx @lightdash/cli@1.146.0 config get-project
 DBT_QUERY_RESULTS_URI=s3://validation/lightdash DBT_ANALYTICS_URI=s3://validation \
-  pnpm dlx @lightdash/cli@1.134.0 deploy \
+  pnpm dlx @lightdash/cli@1.146.0 deploy \
     --project-dir dbt/research --profiles-dir dbt/research
 ```
 

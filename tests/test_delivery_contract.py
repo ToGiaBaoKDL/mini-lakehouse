@@ -197,7 +197,7 @@ def test_each_custom_component_has_a_thin_release_caller() -> None:
         "release-lightdash.yml": (
             "component: lightdash",
             "dockerfile: dockerfile",
-            "external_source_revision: 297295a75ae34e79a3b72539f82ea361d47d0293",
+            "external_source_revision: f57276359a0ffcf38c201f95503e671bf80910cd",
             "external_source_url: https://github.com/lightdash/lightdash",
             "platforms: linux/arm64",
             "runner: ubuntu-24.04-arm",
@@ -221,12 +221,12 @@ def test_lightdash_release_builds_the_pinned_upstream_source_natively() -> None:
     lightdash = _workflow("release-lightdash.yml")
     images_makefile = Path("make/images.mk").read_text(encoding="utf-8")
 
-    upstream = "https://github.com/lightdash/lightdash.git#297295a75ae34e79a3b72539f82ea361d47d0293"
+    upstream = "https://github.com/lightdash/lightdash.git#f57276359a0ffcf38c201f95503e671bf80910cd"
     assert (
         '[[ "$BUILD_CONTEXT" == "$EXTERNAL_SOURCE_URL.git#$EXTERNAL_SOURCE_REVISION" ]]' in reusable
     )
     assert f"build_context: {upstream}" in lightdash
-    assert "external_source_revision: 297295a75ae34e79a3b72539f82ea361d47d0293" in lightdash
+    assert "external_source_revision: f57276359a0ffcf38c201f95503e671bf80910cd" in lightdash
     assert "external_source_url: https://github.com/lightdash/lightdash" in lightdash
     assert "SOURCE_TAG:" in reusable
     assert "--image-manifest-media-type" in reusable
@@ -237,15 +237,15 @@ def test_lightdash_release_builds_the_pinned_upstream_source_natively() -> None:
 
 
 def test_lightdash_skills_match_the_pinned_runtime_cli() -> None:
-    for skill in ("developing-in-lightdash", "effective-dbt-sql"):
+    for skill in ("developing-in-lightdash", "effective-dbt-sql", "upgrade-preflight"):
         manifest = json.loads(
             Path(f".codex/skills/{skill}/.lightdash-skill-manifest.json").read_text(
                 encoding="utf-8"
             )
         )
-        assert manifest["version"] == "1.134.0"
+        assert manifest["version"] == "1.146.0"
 
-    assert "@lightdash/cli@1.134.0" in Path("infra/README.md").read_text(encoding="utf-8")
+    assert "@lightdash/cli@1.146.0" in Path("infra/README.md").read_text(encoding="utf-8")
 
 
 def test_emr_has_an_independent_release_pointer() -> None:

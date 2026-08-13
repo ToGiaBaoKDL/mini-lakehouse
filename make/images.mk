@@ -1,4 +1,4 @@
-LIGHTDASH_BUILD_CONTEXT := https://github.com/lightdash/lightdash.git#297295a75ae34e79a3b72539f82ea361d47d0293
+LIGHTDASH_BUILD_CONTEXT := https://github.com/lightdash/lightdash.git#f57276359a0ffcf38c201f95503e671bf80910cd
 
 .PHONY: images-check airflow-build arxiv-inspector-build dbt-engineering-build \
 	dbt-research-build lightdash-build ocr-worker-build images-build
