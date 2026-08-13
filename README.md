@@ -45,6 +45,10 @@ default OpenDataLoader pipeline runs on CPU.
 
 ![Airflow DAGs orchestrating ingestion, document extraction, maintenance, and analytics](docs/assets/airflow-dags.png)
 
+### Lightdash analytics
+
+![Lightdash Engineering dashboard showing GitHub activity metrics and trends](docs/assets/lightdash-engineering-dashboard.png)
+
 ### ArXiv Inspector
 
 ![ArXiv Inspector showing an annotated PDF page alongside extracted Markdown](docs/assets/arxiv-inspector.png)
