@@ -39,6 +39,16 @@ AWS owns the durable data plane. A private OCI A1 host runs Airflow, PostgreSQL,
 application services behind Tailscale and Cloudflare Access. GPU OCR is optional and remote; the
 default OpenDataLoader pipeline runs on CPU.
 
+## Demo
+
+### Airflow orchestration
+
+![Airflow DAGs orchestrating ingestion, document extraction, maintenance, and analytics](docs/assets/airflow-dags.png)
+
+### ArXiv Inspector
+
+![ArXiv Inspector showing an annotated PDF page alongside extracted Markdown](docs/assets/arxiv-inspector.png)
+
 ## Repository layout
 
 | Path | Purpose |

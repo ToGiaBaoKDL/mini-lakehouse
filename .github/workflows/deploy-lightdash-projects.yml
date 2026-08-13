@@ -62,7 +62,10 @@ jobs:
         with:
           node-version: "24"
           package-manager-cache: false
-      - run: uv sync --frozen --project dbt/runtime
+      - name: Install dbt runtime
+        run: |
+          uv sync --frozen --project dbt/runtime
+          echo "$GITHUB_WORKSPACE/dbt/runtime/.venv/bin" >> "$GITHUB_PATH"
       - run: npm install --global @lightdash/cli@1.146.0
       - uses: aws-actions/configure-aws-credentials@acca2b1b2070338fb9fd1ca27ecee81d687e58e5 # v6.1.2
         with:

@@ -283,6 +283,7 @@ def test_lightdash_projects_use_protected_stateless_delivery() -> None:
     assert "tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888" in workflow
     assert "ping: tgbao-dev-services" in workflow
     assert "npm install --global @lightdash/cli@1.146.0" in workflow
+    assert 'echo "$GITHUB_WORKSPACE/dbt/runtime/.venv/bin" >> "$GITHUB_PATH"' in workflow
     assert "cancel-in-progress: false" in workflow
     assert "strategy:" in workflow
     assert "fail-fast: false" in workflow
