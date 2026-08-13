@@ -101,7 +101,7 @@ def test_airflow_uses_local_executor_and_required_runtime_components() -> None:
     assert environment["AIRFLOW__LOGGING__LOGGING_CONFIG_CLASS"] == (
         "airflow_runtime.logging_config.LOGGING_CONFIG"
     )
-    assert "AIRFLOW__LOGGING__LOGGING_LEVEL" not in environment
+    assert environment["AIRFLOW__LOGGING__LOGGING_LEVEL"] == "WARNING"
     assert environment["AIRFLOW__API__BASE_URL"] == ("${AIRFLOW_BASE_URL:-http://127.0.0.1:8080}")
     assert environment["AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE"].startswith(
         "/opt/airflow/auth/"
@@ -269,8 +269,7 @@ def test_service_console_logs_exclude_info_without_discarding_airflow_task_info(
         encoding="utf-8"
     )
 
-    assert 'handlers["console"]["level"] = "WARNING"' in logging_config
-    assert 'handlers["task"]' not in logging_config
+    assert 'loggers["airflow.task"]["level"] = "INFO"' in logging_config
     assert (
         airflow["x-airflow-common"]["environment"]["AIRFLOW__LOGGING__LOGGING_CONFIG_CLASS"]
         == "airflow_runtime.logging_config.LOGGING_CONFIG"
