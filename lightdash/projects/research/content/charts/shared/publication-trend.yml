@@ -9,8 +9,10 @@ chartConfig:
             yRef:
               field: fct_research_publications_daily_total_papers
           name: Papers
-          smooth: true
           type: line
+      yAxis:
+        - min: "0"
+          minInterval: 1
     layout:
       showGridY: true
       xField: fct_research_publications_daily_publication_date_month

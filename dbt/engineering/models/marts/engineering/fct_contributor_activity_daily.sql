@@ -9,7 +9,6 @@ with events as (
         event_date_utc,
         actor_id,
         repository_id,
-        push_commit_count,
         is_push_event,
         is_pull_request_event,
         is_issue_event,
@@ -31,7 +30,6 @@ aggregated as (
         count(*) as event_count,
         count(distinct repository_id) as active_repository_count,
         count_if(is_push_event) as push_event_count,
-        sum(coalesce(push_commit_count, 0)) as pushed_commit_count,
         count_if(is_pull_request_event) as pull_request_event_count,
         count_if(is_issue_event) as issue_event_count,
         count_if(is_issue_comment_event) as issue_comment_event_count
@@ -45,7 +43,6 @@ select
     aggregated.event_count,
     aggregated.active_repository_count,
     aggregated.push_event_count,
-    aggregated.pushed_commit_count,
     aggregated.pull_request_event_count,
     aggregated.issue_event_count,
     aggregated.issue_comment_event_count,

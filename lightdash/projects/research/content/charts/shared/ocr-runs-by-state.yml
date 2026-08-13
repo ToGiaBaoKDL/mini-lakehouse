@@ -9,6 +9,9 @@ chartConfig:
               field: fct_document_processing_runs_run_count
           name: Runs
           type: bar
+      yAxis:
+        - min: "0"
+          minInterval: 1
     layout:
       categoryColorOverrides:
         failed: "#FA5252"

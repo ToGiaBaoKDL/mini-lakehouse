@@ -10,6 +10,9 @@ chartConfig:
               field: fct_research_publications_daily_total_papers
           name: Papers
           type: bar
+      yAxis:
+        - min: "0"
+          minInterval: 1
     layout:
       flipAxes: true
       xField: fct_research_publications_daily_primary_category

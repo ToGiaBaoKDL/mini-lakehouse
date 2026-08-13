@@ -10,6 +10,9 @@ chartConfig:
               field: fct_repository_activity_daily_total_events
           name: Total events
           type: bar
+      yAxis:
+        - min: "0"
+          minInterval: 1
     layout:
       flipAxes: true
       xField: fct_repository_activity_daily_repository_name

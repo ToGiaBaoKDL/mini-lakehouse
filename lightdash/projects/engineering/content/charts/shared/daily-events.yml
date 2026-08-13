@@ -9,8 +9,10 @@ chartConfig:
             yRef:
               field: fct_repository_activity_daily_total_events
           name: Total events
-          smooth: true
           type: line
+      yAxis:
+        - min: "0"
+          minInterval: 1
     layout:
       showGridY: true
       xField: fct_repository_activity_daily_activity_date_day
