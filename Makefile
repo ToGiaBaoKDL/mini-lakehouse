@@ -50,6 +50,7 @@ lint: ## Run formatting, linting, and static type checks.
 	bash -n jobs/emr/release/publish
 	sh -n infra/runtime/host/install-aws-cli \
 		infra/runtime/host/install-tailscale \
+		infra/runtime/host/reconcile-docker-logging \
 		infra/runtime/identity/install-aws-signing-helper \
 		infra/runtime/identity/workload-identities \
 		infra/runtime/delivery/deploy-component \

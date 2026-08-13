@@ -1,0 +1,43 @@
+#!/bin/sh
+set -eu
+
+test "$(id -u)" -eq 0 || {
+    printf '%s\n' "reconcile-docker-logging must run as root." >&2
+    exit 1
+}
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+source_config="$script_dir/docker-daemon.json"
+target_config=/etc/docker/daemon.json
+
+exec 9>/run/lock/lakehouse-docker-logging.lock
+flock 9
+
+dockerd --validate --config-file "$source_config" >/dev/null
+if cmp -s "$source_config" "$target_config"; then
+    printf '%s\n' "Docker logging configuration is current."
+    exit 0
+fi
+
+install -d -m 0755 /etc/docker
+staged_config=$(mktemp /etc/docker/daemon.json.XXXXXX)
+cleanup() {
+    rm -f "$staged_config"
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+install -m 0644 "$source_config" "$staged_config"
+mv "$staged_config" "$target_config"
+
+systemctl restart docker
+attempt=0
+until docker info >/dev/null 2>&1; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 30 ]; then
+        printf '%s\n' "Docker did not become ready within 30 seconds." >&2
+        exit 1
+    fi
+    sleep 1
+done
+
+printf '%s\n' "Docker logging configuration applied."

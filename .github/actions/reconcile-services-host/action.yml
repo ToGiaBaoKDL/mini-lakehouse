@@ -1,0 +1,24 @@
+name: Reconcile services host
+description: Apply host-owned runtime configuration to the private dev services host
+
+runs:
+  using: composite
+  steps:
+    - name: Connect to the private services host
+      uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
+      with:
+        oauth-client-id: ${{ env.TAILSCALE_CLIENT_ID }}
+        audience: ${{ env.TAILSCALE_AUDIENCE }}
+        tags: tag:tgbao-dev-ci
+        ping: tgbao-dev-services
+
+    - name: Reconcile Docker logging
+      shell: bash
+      run: |
+        set -euo pipefail
+        remote_dir="/tmp/lakehouse-host-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+        remote_command="set -eu; work_dir='$remote_dir'; trap 'rm -rf \"\$work_dir\"' EXIT; install -d -m 0700 \"\$work_dir\"; tar -C \"\$work_dir\" -xf -; sudo \"\$work_dir/infra/runtime/host/reconcile-docker-logging\""
+        tar -cf - \
+          infra/runtime/host/docker-daemon.json \
+          infra/runtime/host/reconcile-docker-logging \
+          | tailscale ssh ubuntu@tgbao-dev-services "$remote_command"

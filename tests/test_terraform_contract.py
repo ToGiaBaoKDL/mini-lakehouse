@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 
@@ -362,6 +363,7 @@ def test_cloud_roots_have_isolated_state_and_private_access_host() -> None:
         encoding="utf-8"
     )
     tailscale_installer = Path("infra/runtime/host/install-tailscale").read_text(encoding="utf-8")
+    docker_daemon = Path("infra/runtime/host/docker-daemon.json").read_text(encoding="utf-8")
     tailscale = _terraform_sources(Path("infra/terraform/tailscale/environments/dev"))
     github = _terraform_sources(Path("infra/terraform/github/environments/dev"))
     cloudflare = _terraform_sources(Path("infra/terraform/cloudflare/environments/dev"))
@@ -412,6 +414,13 @@ def test_cloud_roots_have_isolated_state_and_private_access_host() -> None:
     assert '"$target" version' in signing_helper_installer
     assert "python3 -" in signing_helper_installer
     assert "/usr/local/sbin/install-tailscale" in cloud_init
+    assert "/etc/docker/daemon.json" in cloud_init
+    assert "${docker_daemon_config}" in cloud_init
+    assert "docker_daemon_config" in oci
+    assert json.loads(docker_daemon) == {
+        "log-driver": "json-file",
+        "log-opts": {"compress": "true", "max-file": "3", "max-size": "20m"},
+    }
     assert 'version="1.102.1"' in tailscale_installer
     assert "/opt/lakehouse" not in cloud_init
     assert "--auth-key=file:/run/tailscale-auth-key" in cloud_init

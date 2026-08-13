@@ -1,6 +1,12 @@
 name: Deploy Cloudflare connector
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - .github/actions/deploy-component/action.yml
+      - .github/workflows/deploy-cloudflare.yml
+      - infra/runtime/cloudflare/**
   workflow_dispatch:
 
 jobs:

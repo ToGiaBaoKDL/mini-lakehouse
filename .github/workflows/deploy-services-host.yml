@@ -1,0 +1,33 @@
+name: Deploy services host runtime
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/actions/reconcile-services-host/action.yml
+      - .github/workflows/deploy-services-host.yml
+      - infra/runtime/host/docker-daemon.json
+      - infra/runtime/host/reconcile-docker-logging
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: dev
+    concurrency:
+      group: dev-services-host
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TAILSCALE_CLIENT_ID: ${{ vars.TAILSCALE_CLIENT_ID }}
+      TAILSCALE_AUDIENCE: ${{ vars.TAILSCALE_AUDIENCE }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/reconcile-services-host

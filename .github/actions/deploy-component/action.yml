@@ -16,13 +16,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Connect to the private services host
-      uses: tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888 # v4.1.3
-      with:
-        oauth-client-id: ${{ env.TAILSCALE_CLIENT_ID }}
-        audience: ${{ env.TAILSCALE_AUDIENCE }}
-        tags: tag:tgbao-dev-ci
-        ping: tgbao-dev-services
+    - uses: ./.github/actions/reconcile-services-host
 
     - name: Deploy exact component release
       shell: bash

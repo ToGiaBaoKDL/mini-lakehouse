@@ -104,6 +104,7 @@ resource "oci_core_instance" "services" {
   metadata = {
     user_data = base64encode(templatefile("${path.module}/cloud-init.yaml.tftpl", {
       aws_cli_installer        = indent(6, file("${path.module}/../../../../runtime/host/install-aws-cli"))
+      docker_daemon_config     = indent(6, file("${path.module}/../../../../runtime/host/docker-daemon.json"))
       hostname                 = local.name
       signing_helper_installer = indent(6, file("${path.module}/../../../../runtime/identity/install-aws-signing-helper"))
       tailscale_installer      = indent(6, file("${path.module}/../../../../runtime/host/install-tailscale"))

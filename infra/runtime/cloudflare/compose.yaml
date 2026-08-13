@@ -4,6 +4,8 @@ services:
     user: "${LOCAL_UID}:${LOCAL_GID}"
     command:
       - tunnel
+      - --loglevel
+      - warn
       - --metrics
       - 127.0.0.1:20241
       - run

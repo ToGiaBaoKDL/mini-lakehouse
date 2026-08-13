@@ -98,6 +98,10 @@ def test_airflow_uses_local_executor_and_required_runtime_components() -> None:
     assert environment["AIRFLOW__LOGGING__REMOTE_LOGGING"] == "true"
     assert environment["AIRFLOW__LOGGING__REMOTE_BASE_LOG_FOLDER"] == ("${AIRFLOW_REMOTE_LOG_URI}")
     assert environment["AIRFLOW__LOGGING__DELETE_LOCAL_LOGS"] == "true"
+    assert environment["AIRFLOW__LOGGING__LOGGING_CONFIG_CLASS"] == (
+        "airflow_runtime.logging_config.LOGGING_CONFIG"
+    )
+    assert "AIRFLOW__LOGGING__LOGGING_LEVEL" not in environment
     assert environment["AIRFLOW__API__BASE_URL"] == ("${AIRFLOW_BASE_URL:-http://127.0.0.1:8080}")
     assert environment["AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE"].startswith(
         "/opt/airflow/auth/"
@@ -224,6 +228,7 @@ def test_lightdash_uses_owned_database_storage_and_sdk_credentials() -> None:
     assert "LIGHTDASH_LOG_LEVEL" not in environment
     assert "S3_FORCE_PATH_STYLE" not in environment
     assert "SCHEDULER_ENABLED" not in environment
+    assert environment["LIGHTDASH_LOG_CONSOLE_LEVEL"] == "WARN"
     assert "S3_ACCESS_KEY" not in environment
     assert "S3_SECRET_KEY" not in environment
     assert set(payload["secrets"]) == {"lightdash_database_password", "lightdash_secret"}
@@ -251,8 +256,28 @@ def test_cloudflare_connector_is_pinned_hardened_and_file_secret_driven() -> Non
     assert "--token-file" in command
     assert "--token" not in command
     assert "127.0.0.1:20241" in command
+    assert command[command.index("--loglevel") + 1] == "warn"
     assert set(payload["secrets"]) == {"cloudflare_tunnel_token"}
     assert "CLOUDFLARE_TUNNEL_TOKEN_FILE" in payload["secrets"]["cloudflare_tunnel_token"]["file"]
+
+
+def test_service_console_logs_exclude_info_without_discarding_airflow_task_info() -> None:
+    airflow = _compose(AIRFLOW_COMPOSE)
+    inspector = _compose(INSPECTOR_COMPOSE)["services"]["arxiv-inspector"]
+    postgres = _compose(POSTGRES_COMPOSE)["services"]["metadata-postgres"]
+    logging_config = (AIRFLOW_RUNTIME / "airflow_runtime/logging_config.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'handlers["console"]["level"] = "WARNING"' in logging_config
+    assert 'handlers["task"]' not in logging_config
+    assert (
+        airflow["x-airflow-common"]["environment"]["AIRFLOW__LOGGING__LOGGING_CONFIG_CLASS"]
+        == "airflow_runtime.logging_config.LOGGING_CONFIG"
+    )
+    assert inspector["environment"]["LAKEHOUSE_LOG_LEVEL"] == "WARNING"
+    assert inspector["environment"]["STREAMLIT_LOGGER_LEVEL"] == "warning"
+    assert postgres["command"] == ["postgres", "-c", "log_min_messages=warning"]
 
 
 def test_local_runtime_does_not_use_dotenv_files() -> None:
@@ -279,6 +304,8 @@ def test_arxiv_inspector_receives_only_its_explicit_environment() -> None:
         "LAKEHOUSE_ENVIRONMENT",
         "AWS_CONFIG_FILE",
         "AWS_EC2_METADATA_DISABLED",
+        "LAKEHOUSE_LOG_LEVEL",
+        "STREAMLIT_LOGGER_LEVEL",
     }
     assert service["volumes"] == ["${AWS_IDENTITY_DIR}/arxiv-inspector:/run/aws:ro"]
 

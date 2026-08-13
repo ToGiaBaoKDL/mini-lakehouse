@@ -11,6 +11,11 @@ packages:
   - unzip
 
 write_files:
+  - path: /etc/docker/daemon.json
+    owner: root:root
+    permissions: "0644"
+    content: |
+      ${docker_daemon_config}
   - path: /run/tailscale-auth-key
     owner: root:root
     permissions: "0600"

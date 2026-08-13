@@ -27,6 +27,9 @@ def test_external_github_actions_are_pinned_by_commit() -> None:
 def test_component_release_publishes_before_protected_digest_deployment() -> None:
     release = _workflow("_release-image.yml")
     action = Path(".github/actions/deploy-component/action.yml").read_text(encoding="utf-8")
+    host_action = Path(".github/actions/reconcile-services-host/action.yml").read_text(
+        encoding="utf-8"
+    )
     script = Path("infra/runtime/delivery/deploy-component").read_text(encoding="utf-8")
 
     assert "environment: dev" in release
@@ -54,8 +57,9 @@ def test_component_release_publishes_before_protected_digest_deployment() -> Non
     assert 'dbt-engineering) [[ "$BUILD_ARGS" == "DBT_PROJECT=engineering" ]]' in release
     assert 'dbt-research) [[ "$BUILD_ARGS" == "DBT_PROJECT=research" ]]' in release
     assert "^[0-9]{12}\\.dkr\\.ecr\\." in action
-    assert "tag:tgbao-dev-ci" in action
-    assert "tailscale ssh ubuntu@tgbao-dev-services" in action
+    assert "uses: ./.github/actions/reconcile-services-host" in action
+    assert "tag:tgbao-dev-ci" in host_action
+    assert "tailscale ssh ubuntu@tgbao-dev-services" in host_action
     assert "deployment/release_manifest" not in release + action + script
     assert "latest" not in release + action + script
     assert 'tar -C "$SOURCE_ROOT" -cf -' in action
@@ -170,6 +174,21 @@ def test_cloudflare_connector_has_a_deploy_only_workflow() -> None:
     assert "file:///dev/stdin" in sync
     assert "CLOUDFLARE_API_TOKEN" in sync
     assert 'secret-string "$token"' not in sync
+
+
+def test_services_host_logging_is_reconciled_independently_of_image_builds() -> None:
+    workflow = _workflow("deploy-services-host.yml")
+    action = Path(".github/actions/reconcile-services-host/action.yml").read_text(encoding="utf-8")
+    reconcile = Path("infra/runtime/host/reconcile-docker-logging").read_text(encoding="utf-8")
+
+    assert "environment: dev" in workflow
+    assert "uses: ./.github/actions/reconcile-services-host" in workflow
+    assert "infra/runtime/host/docker-daemon.json" in workflow + action
+    assert "docker/build-push-action" not in workflow + action
+    assert "dockerd --validate" in reconcile
+    assert "flock 9" in reconcile
+    assert 'cmp -s "$source_config" "$target_config"' in reconcile
+    assert "systemctl restart docker" in reconcile
 
 
 def test_each_custom_component_has_a_thin_release_caller() -> None:

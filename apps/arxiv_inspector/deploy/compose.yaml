@@ -8,6 +8,8 @@ services:
       LAKEHOUSE_ENVIRONMENT: ${LAKEHOUSE_ENVIRONMENT}
       AWS_CONFIG_FILE: /run/aws/config
       AWS_EC2_METADATA_DISABLED: "true"
+      LAKEHOUSE_LOG_LEVEL: WARNING
+      STREAMLIT_LOGGER_LEVEL: warning
     volumes:
       - ${AWS_IDENTITY_DIR}/arxiv-inspector:/run/aws:ro
     ports:
