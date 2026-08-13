@@ -267,6 +267,40 @@ def test_run_header_shows_page_count_only_for_imported_output(
     assert captions == ["arXiv:2607.20571 · OAI 2026-07-25 · PDF 100.0 B"]
 
 
+def test_document_markdown_routes_tables_through_streamlit_sanitizer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rendered: list[tuple[str, bool]] = []
+    tables: list[tuple[str, bool]] = []
+
+    def markdown(body: str, *, unsafe_allow_html: bool = False) -> None:
+        rendered.append((body, unsafe_allow_html))
+
+    def html(body: str, *, unsafe_allow_javascript: bool = False) -> None:
+        tables.append((body, unsafe_allow_javascript))
+
+    monkeypatch.setattr(components.st, "markdown", markdown)
+    monkeypatch.setattr(components.st, "html", html)
+    components.render_document_markdown(
+        "## Result\n\n$x < y$\n\n![](<imgs/imageFile1.png>)\n\n"
+        '<table onclick="alert(1)"><tr><th rowspan="2">Header</th>'
+        '<td colspan="3"><script>alert(2)</script>Value</td></tr></table>\n\nDone.'
+    )
+
+    assert rendered[0] == (
+        "## Result\n\n$x < y$\n\n![](<imgs/imageFile1.png>)\n\n",
+        False,
+    )
+    assert tables == [
+        (
+            '<table onclick="alert(1)"><tr><th rowspan="2">Header</th>'
+            '<td colspan="3"><script>alert(2)</script>Value</td></tr></table>',
+            False,
+        )
+    ]
+    assert rendered[1] == ("\n\nDone.", False)
+
+
 def test_document_session_resets_dependent_selection_consistently() -> None:
     session: dict[str, object] = {}
     state.initialize(session)
@@ -333,3 +367,5 @@ def test_arxiv_inspector_owns_config_and_bounded_caches() -> None:
     assert "Processing run" not in source
     assert 'button[data-testid="stBaseButton-primaryFormSubmit"]' in theme
     assert "color: #08110c !important" in theme
+    assert ".st-key-ocr-markdown-panel table" in theme
+    assert "position: sticky" in theme

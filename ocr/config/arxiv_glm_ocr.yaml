@@ -1,7 +1,7 @@
 version: 1
 name: arxiv_glm_ocr
 adapter: glm_ocr
-adapter_version: 1.1.0
+adapter_version: 1.2.0
 
 model:
   repository: zai-org/GLM-OCR
@@ -27,6 +27,10 @@ inference:
   max_workers: 8
   request_timeout_seconds: 600
   layout_device: cpu
+  task_prompts:
+    text: "Text Recognition:/nothink"
+    table: "Table Recognition:/nothink"
+    formula: "Formula Recognition:/nothink"
 
 runner:
   kaggle:

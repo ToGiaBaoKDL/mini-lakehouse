@@ -13,6 +13,7 @@ from loguru import logger
 from apps.arxiv_inspector import state
 from apps.arxiv_inspector.components import (
     document_label,
+    render_document_markdown,
     render_elements,
     render_hero,
     render_run_header,
@@ -213,7 +214,7 @@ def render_artifacts(run: OcrDocumentRun) -> None:
         with markdown_column:
             st.markdown("#### Markdown")
             with st.container(border=True, key="ocr-markdown-panel"):
-                st.markdown(markdown)
+                render_document_markdown(markdown)
 
         st.markdown("#### Elements")
         render_elements(elements)

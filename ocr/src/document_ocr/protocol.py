@@ -65,6 +65,12 @@ class OcrModel(ProtocolModel):
     revision: str = Field(pattern=r"^[0-9a-f]{40}$")
 
 
+class OcrTaskPrompts(ProtocolModel):
+    text: str = Field(default="Text Recognition:", min_length=1, max_length=255)
+    table: str = Field(default="Table Recognition:", min_length=1, max_length=255)
+    formula: str = Field(default="Formula Recognition:", min_length=1, max_length=255)
+
+
 class OcrInference(ProtocolModel):
     api_port: int = Field(ge=1024, le=65535)
     dtype: Literal["float16"]
@@ -76,6 +82,7 @@ class OcrInference(ProtocolModel):
     max_workers: int = Field(ge=1, le=32)
     request_timeout_seconds: int = Field(ge=30, le=3600)
     layout_device: Literal["cpu", "cuda:0"]
+    task_prompts: OcrTaskPrompts = Field(default_factory=OcrTaskPrompts)
 
 
 class OpenDataLoaderOptions(ProtocolModel):

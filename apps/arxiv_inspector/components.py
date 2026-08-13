@@ -1,6 +1,7 @@
 """Reusable presentation components without storage or SQL knowledge."""
 
 from html import escape
+from html.parser import HTMLParser
 
 import streamlit as st
 from document_ocr.protocol import OcrElement
@@ -10,6 +11,41 @@ from apps.arxiv_inspector.data import (
     OcrDocumentSummary,
     OcrRunState,
 )
+
+
+class _TableBlockParser(HTMLParser):
+    def __init__(self, source: str) -> None:
+        super().__init__(convert_charrefs=False)
+        self._source = source
+        self._line_offsets = [0]
+        for index, character in enumerate(source):
+            if character == "\n":
+                self._line_offsets.append(index + 1)
+        self._depth = 0
+        self._start: int | None = None
+        self.ranges: list[tuple[int, int]] = []
+
+    def _offset(self) -> int:
+        line, column = self.getpos()
+        return self._line_offsets[line - 1] + column
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        del attrs
+        if tag != "table":
+            return
+        if self._depth == 0:
+            self._start = self._offset()
+        self._depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag != "table" or self._depth == 0:
+            return
+        self._depth -= 1
+        if self._depth == 0 and self._start is not None:
+            end = self._source.find(">", self._offset())
+            if end >= 0:
+                self.ranges.append((self._start, end + 1))
+            self._start = None
 
 
 def render_hero() -> None:
@@ -52,6 +88,20 @@ def render_run_header(run: OcrDocumentRun) -> None:
     if run.state == OcrRunState.IMPORTED and run.page_count is not None:
         metadata.append(f"Pages {run.page_count}")
     st.caption(" · ".join(metadata))
+
+
+def render_document_markdown(markdown: str) -> None:
+    """Render native Markdown while sanitizing OpenDataLoader HTML tables."""
+    parser = _TableBlockParser(markdown)
+    parser.feed(markdown)
+    position = 0
+    for start, end in parser.ranges:
+        if position < start:
+            st.markdown(markdown[position:start])
+        st.html(markdown[start:end], unsafe_allow_javascript=False)
+        position = end
+    if position < len(markdown) or not parser.ranges:
+        st.markdown(markdown[position:])
 
 
 def render_elements(elements: tuple[OcrElement, ...]) -> None:

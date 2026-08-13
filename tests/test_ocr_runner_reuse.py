@@ -159,6 +159,48 @@ def test_changed_pdf_is_prepared_for_inference(
     assert prepared.page_count == 4
 
 
+def test_sdk_config_uses_the_versioned_no_think_prompts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runner = _runner_modules(monkeypatch)
+
+    class _SdkConfig:
+        def __init__(self, value: dict[str, object]) -> None:
+            self.value = value
+
+        @classmethod
+        def from_yaml(cls) -> "_SdkConfig":
+            return cls(
+                {
+                    "pipeline": {
+                        "maas": {},
+                        "ocr_api": {},
+                        "page_loader": {},
+                        "layout": {},
+                    }
+                }
+            )
+
+        @classmethod
+        def model_validate(cls, value: dict[str, object]) -> "_SdkConfig":
+            return cls(value)
+
+        def to_dict(self) -> dict[str, object]:
+            return self.value
+
+    monkeypatch.setattr(runner.engine, "GlmOcrConfig", _SdkConfig)
+    path = tmp_path / "glmocr.yaml"
+    runner.engine.write_config(path, _job(), tmp_path / "layout-model")
+
+    configured = runner.engine.yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert configured["pipeline"]["page_loader"]["task_prompt_mapping"] == {
+        "formula": "Formula Recognition:/nothink",
+        "table": "Table Recognition:/nothink",
+        "text": "Text Recognition:/nothink",
+    }
+
+
 def test_canonical_elements_accepts_sdk_image_with_null_content(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

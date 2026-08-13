@@ -95,6 +95,7 @@ class GlmOcrConfig(ProcessorConfigBase):
                 "layout_device": self.inference.layout_device,
                 "max_model_len": self.inference.max_model_len,
                 "speculative_tokens": self.inference.speculative_tokens,
+                "task_prompts": self.inference.task_prompts.model_dump(mode="json"),
             },
             "layout_model": self.layout_model.model_dump(mode="json"),
             "model": self.model.model_dump(mode="json"),

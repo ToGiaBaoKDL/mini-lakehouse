@@ -36,6 +36,9 @@ def write_config(path: Path, job: OcrJob, layout_model_path: Path) -> None:
         }
     )
     pipeline["page_loader"]["pdf_max_pages"] = job.limits.max_pages_per_document
+    pipeline["page_loader"]["task_prompt_mapping"] = job.inference.task_prompts.model_dump(
+        mode="json"
+    )
     pipeline["layout"].update(
         {
             "model_dir": str(layout_model_path),
