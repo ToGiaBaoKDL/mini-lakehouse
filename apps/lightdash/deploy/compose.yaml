@@ -18,7 +18,7 @@ services:
       AWS_EC2_METADATA_DISABLED: "true"
       AWS_REGION: ${AWS_REGION}
       AWS_SDK_LOAD_CONFIG: "1"
-      LIGHTDASH_LOG_CONSOLE_LEVEL: WARN
+      LIGHTDASH_LOG_CONSOLE_LEVEL: warn
       PGDATABASE: lightdash
       PGHOST: metadata-postgres
       PGPORT: "5432"

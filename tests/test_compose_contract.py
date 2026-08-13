@@ -228,7 +228,7 @@ def test_lightdash_uses_owned_database_storage_and_sdk_credentials() -> None:
     assert "LIGHTDASH_LOG_LEVEL" not in environment
     assert "S3_FORCE_PATH_STYLE" not in environment
     assert "SCHEDULER_ENABLED" not in environment
-    assert environment["LIGHTDASH_LOG_CONSOLE_LEVEL"] == "WARN"
+    assert environment["LIGHTDASH_LOG_CONSOLE_LEVEL"] == "warn"
     assert "S3_ACCESS_KEY" not in environment
     assert "S3_SECRET_KEY" not in environment
     assert set(payload["secrets"]) == {"lightdash_database_password", "lightdash_secret"}
