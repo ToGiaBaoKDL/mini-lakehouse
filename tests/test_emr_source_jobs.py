@@ -111,6 +111,17 @@ def test_github_landing_parses_once_and_releases_its_cache() -> None:
     assert "landing.unpersist()" in job
 
 
+def test_github_landing_deduplicates_only_identical_event_records() -> None:
+    source = Path("jobs/emr/src/emr_jobs/github_archive/landing.py").read_text()
+
+    assert 'events.join(duplicate_keys, "event_id", "left_semi")' in source
+    assert "duplicate_events.dropDuplicates().cache()" in source
+    assert 'F.col("count") > 1' in source
+    assert "has {conflict[0]['count']} distinct records" in source
+    assert 'events.join(duplicate_keys, "event_id", "left_anti")' in source
+    assert ".unionByName(distinct_duplicate_events)" in source
+
+
 def test_github_current_snapshots_use_a_stable_complete_winner_key() -> None:
     source = Path("jobs/emr/src/emr_jobs/github_archive/curated.py").read_text()
 

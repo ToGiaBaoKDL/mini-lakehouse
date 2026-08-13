@@ -2,6 +2,7 @@
 
 from datetime import datetime
 
+from loguru import logger
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import (
@@ -38,6 +39,50 @@ EVENT_SCHEMA = StructType(
         StructField("created_at", StringType()),
     ]
 )
+
+
+def _deduplicate_exact_events(events: DataFrame) -> DataFrame:
+    duplicate_ids = (
+        events.groupBy("event_id").count().filter(F.col("count") > 1).select("event_id").cache()
+    )
+    duplicate_key_count = duplicate_ids.count()
+    if duplicate_key_count == 0:
+        duplicate_ids.unpersist()
+        return events
+
+    duplicate_keys = F.broadcast(duplicate_ids.select("event_id"))
+    duplicate_events = events.join(duplicate_keys, "event_id", "left_semi")
+    distinct_duplicate_events = duplicate_events.dropDuplicates().cache()
+    conflict = (
+        distinct_duplicate_events.groupBy("event_id")
+        .count()
+        .filter(F.col("count") > 1)
+        .limit(1)
+        .collect()
+    )
+    if conflict:
+        distinct_duplicate_events.unpersist()
+        duplicate_ids.unpersist()
+        events.unpersist()
+        raise RuntimeError(
+            "GitHub Archive violates the event_id merge key: "
+            f"{conflict[0]['event_id']} has {conflict[0]['count']} distinct records"
+        )
+
+    deduplicated = (
+        events.join(duplicate_keys, "event_id", "left_anti")
+        .unionByName(distinct_duplicate_events)
+        .cache()
+    )
+    deduplicated.count()
+    events.unpersist()
+    duplicate_ids.unpersist()
+    distinct_duplicate_events.unpersist()
+    logger.warning(
+        "Removed exact GitHub Archive duplicates for {} event IDs",
+        duplicate_key_count,
+    )
+    return deduplicated
 
 
 def build_frame(
@@ -108,18 +153,4 @@ def build_frame(
     if invalid:
         events.unpersist()
         raise RuntimeError(f"GitHub Archive contains {invalid} invalid required records")
-    duplicate = (
-        events.groupBy("event_id")
-        .count()
-        .filter(F.col("count") > 1)
-        .select("event_id", "count")
-        .limit(1)
-        .collect()
-    )
-    if duplicate:
-        events.unpersist()
-        raise RuntimeError(
-            "GitHub Archive violates the event_id merge key: "
-            f"{duplicate[0]['event_id']} occurs {duplicate[0]['count']} times"
-        )
-    return events
+    return _deduplicate_exact_events(events)
