@@ -22,6 +22,7 @@ locals {
     curated         = "${local.name_prefix}-curated-za7rju"
     analytics       = "${local.name_prefix}-analytics-vt77zs"
     artifacts       = "${local.name_prefix}-artifacts-uhiv2y"
+    backups         = "${local.name_prefix}-backups-hk3u8q"
     lightdash       = "${local.name_prefix}-lightdash-p4m8xs"
     logs            = "${local.name_prefix}-logs-71k0oc"
     "query-results" = "${local.name_prefix}-query-results-q2034x"
@@ -90,6 +91,7 @@ module "storage" {
   expiration_days = {
     "query-results" = 7
     logs            = 30
+    backups         = 35
   }
   force_destroy = true
   tags          = local.tags
@@ -153,6 +155,7 @@ module "identity" {
     curated       = module.storage.bucket_arns.curated
     analytics     = module.storage.bucket_arns.analytics
     artifacts     = module.storage.bucket_arns.artifacts
+    backups       = module.storage.bucket_arns.backups
     lightdash     = module.storage.bucket_arns.lightdash
     logs          = module.storage.bucket_arns.logs
     query_results = module.storage.bucket_arns["query-results"]

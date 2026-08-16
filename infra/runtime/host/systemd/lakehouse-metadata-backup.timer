@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the daily metadata PostgreSQL backup
+
+[Timer]
+OnCalendar=*-*-* 02,14:30:00
+RandomizedDelaySec=30min
+Persistent=true
+Unit=lakehouse-metadata-backup.service
+
+[Install]
+WantedBy=timers.target

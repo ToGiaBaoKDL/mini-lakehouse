@@ -1,0 +1,93 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -gt 1 ]; then
+    printf '%s\n' "Usage: infra/runtime/postgres/backup [airflow|lightdash]" >&2
+    exit 2
+fi
+
+databases="airflow lightdash"
+case "${1:-}" in
+    "") ;;
+    airflow | lightdash) databases="$1" ;;
+    *)
+        printf '%s\n' "Unknown metadata database: $1" >&2
+        exit 2
+        ;;
+esac
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+environment=${LAKEHOUSE_ENVIRONMENT:-dev}
+identity_dir=${AWS_IDENTITY_DIR:-"$HOME/.config/lakehouse/$environment/aws"}
+host_config="$identity_dir/metadata-postgres/host-config"
+container=$(docker ps --format '{{.Names}}' --filter 'name=metadata-postgres-metadata-postgres-' | head -n 1)
+
+test -r "$host_config" || {
+    printf '%s\n' "The metadata-postgres workload identity is missing." >&2
+    exit 1
+}
+[ -n "$container" ] || {
+    printf '%s\n' "The metadata PostgreSQL container is not running." >&2
+    exit 1
+}
+
+aws_runtime() {
+    env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+        AWS_SHARED_CREDENTIALS_FILE=/dev/null \
+        AWS_CONFIG_FILE="$host_config" AWS_PROFILE=default AWS_PAGER= aws "$@"
+}
+
+backup_uri=$(aws_runtime ssm get-parameter \
+    --name "/lakehouse/$environment/backup/metadata_postgres_uri" \
+    --query Parameter.Value --output text)
+case "$backup_uri" in
+    s3://*) ;;
+    *)
+        printf '%s\n' "The metadata backup URI parameter is not an S3 URI: $backup_uri" >&2
+        exit 1
+        ;;
+esac
+
+docker exec "$container" pg_isready --username postgres --dbname postgres >/dev/null 2>&1 || {
+    printf '%s\n' "The metadata PostgreSQL container is not ready: $container" >&2
+    exit 1
+}
+
+bucket_path=${backup_uri#s3://}
+bucket_name=${bucket_path%%/*}
+utc_date=$(date -u +%F)
+utc_hour=$(date -u +%H)
+if [ "$utc_hour" -lt 12 ]; then
+    slot=am
+else
+    slot=pm
+fi
+
+work_dir=$(mktemp -d)
+cleanup() {
+    rm -rf "$work_dir"
+}
+trap cleanup EXIT
+trap 'rm -rf "$work_dir"; exit 1' HUP INT TERM
+
+for database in $databases; do
+    object_key="metadata-postgres/$database/$utc_date/$slot/$database.dump"
+    checksum_key="$object_key.sha256"
+
+    if aws_runtime s3api head-object --bucket "$bucket_name" --key "$checksum_key" >/dev/null 2>&1; then
+        printf '%s\n' "Backup for $database is already complete for $utc_date $slot; skipping."
+        continue
+    fi
+
+    dump_file="$work_dir/$database.dump"
+    checksum_file="$work_dir/$database.dump.sha256"
+    docker exec "$container" \
+        pg_dump --username postgres --format=custom --no-password --dbname="$database" \
+        >"$dump_file"
+    (cd "$work_dir" && sha256sum "$database.dump" >"$database.dump.sha256")
+
+    aws_runtime s3 cp --only-show-errors "$dump_file" "s3://$bucket_name/$object_key"
+    aws_runtime s3 cp --only-show-errors "$checksum_file" "s3://$bucket_name/$checksum_key"
+    printf '%s\n' "Backed up $database to s3://$bucket_name/$object_key ($(wc -c <"$dump_file") bytes)."
+done
+

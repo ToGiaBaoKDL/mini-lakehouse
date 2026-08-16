@@ -121,6 +121,7 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
         "curated",
         "analytics",
         "artifacts",
+        "backups",
         "lightdash",
         "logs",
         "query-results",
@@ -310,6 +311,27 @@ def test_airflow_and_ocr_worker_have_separate_data_permissions() -> None:
     assert "local.curated_object_arns_by_workload.ocr_worker" in ocr
     assert '"${var.bucket_arns.curated}/*"' not in ocr
     assert "secretsmanager:DescribeSecret" not in airflow + ocr + postgres
+
+
+def test_metadata_backup_uses_a_dedicated_bucket_and_postgres_scoped_grants() -> None:
+    environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
+    identity = Path("infra/terraform/aws/modules/identity/postgres.tf").read_text(encoding="utf-8")
+    normalized_environment = " ".join(environment.split())
+
+    assert '"backup/metadata_postgres_uri"' in environment
+    assert '= "s3://${module.storage.bucket_names.backups}/metadata-postgres"' in environment
+    assert "backups = 35" in normalized_environment
+    assert "metadata_postgres = [" in environment
+    assert "module.storage.bucket_arns.backups" in environment
+    assert 'sid       = "ReadRuntimeParameters"' in identity
+    assert "var.parameter_arns.metadata_postgres" in identity
+    assert 'sid       = "GetBackupBucketLocation"' in identity
+    assert "resources = [var.bucket_arns.backups]" in identity
+    assert 'values   = ["metadata-postgres", "metadata-postgres/*"]' in identity
+    assert '"${var.bucket_arns.backups}/metadata-postgres/*"' in identity
+    assert '"s3:DeleteObject"' not in identity
+    assert '"${var.bucket_arns.backups}/*"' not in identity
+    assert '"${var.bucket_arns.artifacts}/*"' not in identity
 
 
 def test_airflow_can_start_only_the_managed_emr_application() -> None:

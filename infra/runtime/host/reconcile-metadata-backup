@@ -1,0 +1,52 @@
+#!/bin/sh
+set -eu
+
+test "$(id -u)" -eq 0 || {
+    printf '%s\n' "reconcile-metadata-backup must run as root." >&2
+    exit 1
+}
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+source_backup="$script_dir/../postgres/backup"
+source_service="$script_dir/systemd/lakehouse-metadata-backup.service"
+source_timer="$script_dir/systemd/lakehouse-metadata-backup.timer"
+target_backup=/usr/local/sbin/lakehouse-metadata-backup
+target_service=/etc/systemd/system/lakehouse-metadata-backup.service
+target_timer=/etc/systemd/system/lakehouse-metadata-backup.timer
+
+exec 9>/run/lock/lakehouse-metadata-backup.lock
+flock 9
+
+units_changed=0
+
+if [ ! -r "$source_backup" ] || [ ! -r "$source_service" ] || [ ! -r "$source_timer" ]; then
+    printf '%s\n' "Backup script or systemd units are missing from the reconciled source tree." >&2
+    exit 1
+fi
+
+if [ -f "$target_backup" ] && cmp -s "$source_backup" "$target_backup"; then
+    printf '%s\n' "Metadata backup script is current."
+else
+    install -m 0755 "$source_backup" "$target_backup"
+    printf '%s\n' "Metadata backup script installed."
+fi
+
+if [ -f "$target_service" ] && cmp -s "$source_service" "$target_service"; then
+    printf '%s\n' "Metadata backup service unit is current."
+else
+    install -m 0644 "$source_service" "$target_service"
+    units_changed=1
+fi
+
+if [ -f "$target_timer" ] && cmp -s "$source_timer" "$target_timer"; then
+    printf '%s\n' "Metadata backup timer unit is current."
+else
+    install -m 0644 "$source_timer" "$target_timer"
+    units_changed=1
+fi
+
+if [ "$units_changed" -eq 1 ]; then
+    systemctl daemon-reload
+fi
+systemctl enable --now lakehouse-metadata-backup.timer
+printf '%s\n' "Metadata backup scheduling is current."

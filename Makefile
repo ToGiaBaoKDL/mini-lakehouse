@@ -51,14 +51,17 @@ lint: ## Run formatting, linting, and static type checks.
 	sh -n infra/runtime/host/install-aws-cli \
 		infra/runtime/host/install-tailscale \
 		infra/runtime/host/reconcile-docker-logging \
+		infra/runtime/host/reconcile-metadata-backup \
 		infra/runtime/identity/install-aws-signing-helper \
 		infra/runtime/identity/workload-identities \
 		infra/runtime/delivery/deploy-component \
 		infra/runtime/delivery/pull-image \
 		infra/runtime/cloudflare/deploy \
 		infra/runtime/cloudflare/sync-secret \
+		infra/runtime/postgres/backup \
 		infra/runtime/postgres/initialize-secrets \
 		infra/runtime/postgres/deploy \
+		infra/runtime/postgres/restore \
 		jobs/emr/release/package \
 		orchestration/deploy/deploy \
 		orchestration/deploy/initialize-secrets \

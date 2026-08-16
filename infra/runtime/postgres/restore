@@ -1,0 +1,99 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 3 ]; then
+    printf '%s\n' \
+        "Usage: infra/runtime/postgres/restore <airflow|lightdash> <utc-date> <am|pm>" \
+        "The metadata cluster must be bootstrapped before restoring." >&2
+    exit 2
+fi
+
+database=$1
+restore_date=$2
+restore_slot=$3
+case "$database" in
+    airflow | lightdash) ;;
+    *)
+        printf '%s\n' "Unknown metadata database: $database" >&2
+        exit 2
+        ;;
+esac
+printf '%s' "$restore_date" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' || {
+    printf '%s\n' "The restore date must be a UTC date such as 2026-08-15: $restore_date" >&2
+    exit 2
+}
+case "$restore_slot" in
+    am | pm) ;;
+    *)
+        printf '%s\n' "The restore slot must be am or pm (before/after 12:00 UTC): $restore_slot" >&2
+        exit 2
+        ;;
+esac
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+environment=${LAKEHOUSE_ENVIRONMENT:-dev}
+identity_dir=${AWS_IDENTITY_DIR:-"$HOME/.config/lakehouse/$environment/aws"}
+host_config="$identity_dir/metadata-postgres/host-config"
+container=$(docker ps --format '{{.Names}}' --filter 'name=metadata-postgres-metadata-postgres-' | head -n 1)
+
+test -r "$host_config" || {
+    printf '%s\n' "The metadata-postgres workload identity is missing." >&2
+    exit 1
+}
+[ -n "$container" ] || {
+    printf '%s\n' "The metadata PostgreSQL container is not running." >&2
+    exit 1
+}
+
+aws_runtime() {
+    env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+        AWS_SHARED_CREDENTIALS_FILE=/dev/null \
+        AWS_CONFIG_FILE="$host_config" AWS_PROFILE=default AWS_PAGER= aws "$@"
+}
+
+backup_uri=$(aws_runtime ssm get-parameter \
+    --name "/lakehouse/$environment/backup/metadata_postgres_uri" \
+    --query Parameter.Value --output text)
+case "$backup_uri" in
+    s3://*) ;;
+    *)
+        printf '%s\n' "The metadata backup URI parameter is not an S3 URI: $backup_uri" >&2
+        exit 1
+        ;;
+esac
+
+docker exec "$container" pg_isready --username postgres --dbname postgres >/dev/null 2>&1 || {
+    printf '%s\n' "The metadata PostgreSQL container is not ready: $container" >&2
+    exit 1
+}
+
+bucket_path=${backup_uri#s3://}
+bucket_name=${bucket_path%%/*}
+object_key="metadata-postgres/$database/$restore_date/$restore_slot/$database.dump"
+checksum_key="$object_key.sha256"
+
+work_dir=$(mktemp -d)
+cleanup() {
+    rm -rf "$work_dir"
+}
+trap cleanup EXIT
+trap 'rm -rf "$work_dir"; exit 1' HUP INT TERM
+
+aws_runtime s3api head-object --bucket "$bucket_name" --key "$checksum_key" >/dev/null 2>&1 || {
+    printf '%s\n' "No complete $database backup exists for $restore_date $restore_slot under $backup_uri." >&2
+    exit 1
+}
+
+aws_runtime s3 cp --only-show-errors "s3://$bucket_name/$object_key" "$work_dir/$database.dump"
+aws_runtime s3 cp --only-show-errors "s3://$bucket_name/$checksum_key" "$work_dir/$database.dump.sha256"
+(cd "$work_dir" && sha256sum -c "$database.dump.sha256")
+
+docker exec --env PGTZ=UTC "$container" \
+    psql --quiet --set ON_ERROR_STOP=1 --username postgres --dbname postgres \
+    --command "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '$database' AND pid <> pg_backend_pid()" \
+    --command "DROP DATABASE IF EXISTS $database" \
+    --command "CREATE DATABASE $database OWNER $database"
+docker exec -i "$container" \
+    pg_restore --no-owner --single-transaction --username "$database" --dbname "$database" \
+    <"$work_dir/$database.dump"
+printf '%s\n' "Restored $database from s3://$bucket_name/$object_key."

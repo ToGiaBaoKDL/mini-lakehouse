@@ -71,6 +71,7 @@ variable "bucket_arns" {
     curated       = string
     analytics     = string
     artifacts     = string
+    backups       = string
     lightdash     = string
     logs          = string
     query_results = string

@@ -11,6 +11,7 @@ locals {
     "athena/arxiv_inspector_output_uri" = "s3://${module.storage.bucket_names["query-results"]}/${local.athena_workload_prefixes.arxiv_inspector}"
     "athena/lightdash_output_uri"       = "s3://${module.storage.bucket_names["query-results"]}/${local.athena_workload_prefixes.lightdash}"
     "airflow/remote_log_uri"            = "s3://${module.storage.bucket_names.logs}/airflow/task-logs"
+    "backup/metadata_postgres_uri"      = "s3://${module.storage.bucket_names.backups}/metadata-postgres"
     "emr/application_id"                = module.emr_serverless.application_id
     "emr/execution_role_arn"            = module.identity.emr_runtime_role_arn
     "ocr/providers/kaggle_secret_id"    = aws_secretsmanager_secret.ocr["kaggle"].name
@@ -42,6 +43,9 @@ locals {
     lightdash = [
       "storage/lightdash_uri",
       "athena/lightdash_output_uri",
+    ]
+    metadata_postgres = [
+      "backup/metadata_postgres_uri",
     ]
     ocr_worker = [
       "storage/curated_uri",

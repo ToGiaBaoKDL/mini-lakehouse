@@ -90,7 +90,9 @@ def test_host_workload_identities_ignore_operator_credentials() -> None:
         for path in (
             "infra/runtime/cloudflare/deploy",
             "infra/runtime/delivery/pull-image",
+            "infra/runtime/postgres/backup",
             "infra/runtime/postgres/deploy",
+            "infra/runtime/postgres/restore",
             "orchestration/deploy/reconcile",
             "apps/lightdash/deploy/reconcile",
         )
@@ -189,6 +191,56 @@ def test_services_host_logging_is_reconciled_independently_of_image_builds() -> 
     assert "flock 9" in reconcile
     assert 'cmp -s "$source_config" "$target_config"' in reconcile
     assert "systemctl restart docker" in reconcile
+
+
+def test_metadata_backup_schedule_is_reconciled_from_reviewed_repo_sources() -> None:
+    workflow = _workflow("deploy-services-host.yml")
+    action = Path(".github/actions/reconcile-services-host/action.yml").read_text(encoding="utf-8")
+    reconcile = Path("infra/runtime/host/reconcile-metadata-backup").read_text(encoding="utf-8")
+    backup = Path("infra/runtime/postgres/backup").read_text(encoding="utf-8")
+    restore = Path("infra/runtime/postgres/restore").read_text(encoding="utf-8")
+    service = Path("infra/runtime/host/systemd/lakehouse-metadata-backup.service").read_text(
+        encoding="utf-8"
+    )
+    timer = Path("infra/runtime/host/systemd/lakehouse-metadata-backup.timer").read_text(
+        encoding="utf-8"
+    )
+
+    assert "infra/runtime/postgres/backup" in workflow + action
+    assert "infra/runtime/host/reconcile-metadata-backup" in workflow
+    assert "infra/runtime/host/systemd/lakehouse-metadata-backup.service" in workflow
+    assert "infra/runtime/host/systemd/lakehouse-metadata-backup.timer" in workflow
+    assert "docker/build-push-action" not in action
+
+    assert "flock 9" in reconcile
+    assert 'install -m 0755 "$source_backup" "$target_backup"' in reconcile
+    assert "systemctl enable --now lakehouse-metadata-backup.timer" in reconcile
+    assert "systemctl daemon-reload" in reconcile
+
+    assert "/usr/local/sbin/lakehouse-metadata-backup" in service + reconcile
+    assert "Type=oneshot" in service
+    assert "User=ubuntu" in service
+    assert "OnCalendar=*-*-* 02,14:30:00" in timer
+    assert "Persistent=true" in timer
+    assert "Unit=lakehouse-metadata-backup.service" in timer
+
+    assert "backup/metadata_postgres_uri" in backup
+    assert "AWS_SHARED_CREDENTIALS_FILE=/dev/null" in backup
+    assert 's3api head-object --bucket "$bucket_name" --key "$checksum_key"' in backup
+    assert "--if-none-match" not in backup
+    assert "pg_dump --username postgres --format=custom --no-password" in backup
+    assert "slot=am" in backup
+    assert "slot=pm" in backup
+    assert "metadata-postgres/daily/" not in backup + restore
+    assert "sha256sum" in backup
+    assert "backup/metadata_postgres_uri" in restore
+    assert "--set ON_ERROR_STOP=1" in restore
+    assert "pg_restore --no-owner --single-transaction" in restore
+    assert "DROP DATABASE IF EXISTS $database" in restore
+    assert "sha256sum -c" in restore
+    assert "am | pm" in restore
+    for source in (backup, restore):
+        assert "git " not in source
 
 
 def test_each_custom_component_has_a_thin_release_caller() -> None:

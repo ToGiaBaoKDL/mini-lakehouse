@@ -61,7 +61,7 @@ the standard AWS `credential_process` chain.
 | `arxiv-inspector` | Roles Anywhere certificate mounted into the application | Read ArXiv curated catalog/objects, run Athena, and manage only its query-result prefix. |
 | `lightdash` | Roles Anywhere certificate mounted into the application | Read Engineering and Research analytics only, run Athena, manage its query-result prefix and its dedicated S3 application bucket, and read its two runtime secrets. |
 | `ocr-worker` | Roles Anywhere certificate mounted into the task container | Read OCR provider secrets and update only ArXiv curated catalog/object prefixes. |
-| `metadata-postgres` | Roles Anywhere certificate on the OCI host | Read only metadata PostgreSQL secrets. |
+| `metadata-postgres` | Roles Anywhere certificate on the OCI host | Read only metadata PostgreSQL secrets and its backup destination parameter, and manage only daily metadata database backup objects under the backup bucket's `metadata-postgres/` prefix. |
 | `catalog-admin` | Explicit operator `AssumeRole` | Apply and validate contract-owned Glue/Iceberg metadata. It does not run scheduled workloads. |
 
 The EMR release workflow does not run Spark. It uploads
@@ -338,6 +338,13 @@ of truth for the managed `Shared` spaces and keep ordinary UI-authored content i
 - Use the protected component rollback for OCI changes, or the EMR pointer rollback, with an exact
   reviewed revision/digest.
 - Re-run contract validation after contract or catalog changes.
+
+Metadata database durability is the services host's own responsibility, not a pipeline task. The
+host reconciles a twice-daily systemd backup timer that dumps `airflow` and `lightdash` into the
+backup bucket (35-day retention, KMS-encrypted, checksum-verified); backup scheduling changes ship
+through the services-host reconcile workflow. Restore one application database from an exact slot
+backup with `make metadata-postgres-restore ARGS='<database> <utc-date> <am|pm>'` against a
+bootstrapped cluster.
 
 The services deployer can pull reviewed ECR digests and read only the Cloudflare connector token;
 it cannot read application secrets or data. Airflow, metadata PostgreSQL, dbt, OCR, and Inspector

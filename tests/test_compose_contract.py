@@ -474,6 +474,8 @@ def test_makefile_exposes_owned_operational_entrypoints() -> None:
         "metadata-postgres-secrets-init:",
         "metadata-postgres-up:",
         "metadata-postgres-down:",
+        "metadata-postgres-backup:",
+        "metadata-postgres-restore:",
         "catalog-apply:",
         "catalog-validate:",
         "airflow-secrets-init:",

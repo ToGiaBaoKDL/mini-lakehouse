@@ -1,0 +1,16 @@
+[Unit]
+Description=Daily metadata PostgreSQL backup to the lakehouse backup bucket
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Environment=LAKEHOUSE_ENVIRONMENT=dev
+ExecStart=/usr/local/sbin/lakehouse-metadata-backup
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=15min
+
+[Install]
+WantedBy=multi-user.target

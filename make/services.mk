@@ -11,6 +11,7 @@ LIGHTDASH_COMPOSE_CONFIG := AWS_REGION=ap-southeast-1 LIGHTDASH_DATABASE_PASSWOR
 CLOUDFLARE_COMPOSE_CONFIG := CLOUDFLARE_IMAGE=$(CLOUDFLARE_CONNECTOR_IMAGE) CLOUDFLARE_TUNNEL_TOKEN_FILE=/dev/null LOCAL_GID=0 $(CLOUDFLARE_COMPOSE)
 
 .PHONY: metadata-postgres-secrets-init metadata-postgres-up metadata-postgres-down metadata-postgres-logs \
+	metadata-postgres-backup metadata-postgres-restore \
 	airflow-secrets-init airflow-up airflow-down airflow-logs airflow-dags \
 	arxiv-inspector-up arxiv-inspector-down arxiv-inspector-logs \
 	lightdash-secrets-init lightdash-ci-secret-sync \
@@ -39,6 +40,12 @@ metadata-postgres-down: ## Stop shared metadata PostgreSQL while preserving data
 
 metadata-postgres-logs: ## Follow metadata PostgreSQL logs.
 	$(METADATA_POSTGRES_COMPOSE_CONFIG) logs --follow --tail=200 $(ARGS)
+
+metadata-postgres-backup: ## Upload encrypted metadata PostgreSQL daily dumps to the backup bucket.
+	infra/runtime/postgres/backup $(ARGS)
+
+metadata-postgres-restore: ## Drop and restore one metadata database from a slot backup (usage: make metadata-postgres-restore ARGS='lightdash 2026-08-15 pm').
+	infra/runtime/postgres/restore $(ARGS)
 
 airflow-up: preflight ## Start self-hosted Airflow against shared metadata PostgreSQL.
 	orchestration/deploy/reconcile airflow:local
