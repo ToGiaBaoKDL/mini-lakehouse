@@ -2,15 +2,15 @@
 set -eu
 
 if [ "$#" -gt 1 ]; then
-    printf '%s\n' "Usage: infra/runtime/postgres/deploy [airflow|lightdash]" >&2
+    printf '%s\n' "Usage: infra/runtime/postgres/deploy [airflow|lightdash|pg_monitor]" >&2
     exit 2
 fi
 
 application=${1:-}
 case "$application" in
-    ""|airflow|lightdash) ;;
+    "" | airflow | lightdash | pg_monitor) ;;
     *)
-        printf '%s\n' "Unknown metadata database: $application" >&2
+        printf '%s\n' "Unknown metadata database credential: $application" >&2
         exit 2
         ;;
 esac

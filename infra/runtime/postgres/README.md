@@ -23,6 +23,12 @@ weeks of hourly-granularity recovery choice. The `metadata-postgres` workload id
 principal with write access, limited to the `metadata-postgres/` prefix, and it cannot delete
 existing backups.
 
+Each run also appends one JSON audit line per database
+(`timestamp`, `status` of `success|failure|skipped`, `database`, `slot`, `duration_seconds`,
+`bytes`, `error`) to `/var/log/lakehouse/metadata-backup-audit.log`. The SigNoz collection agent
+tails that file; alert rules treat a missing `success` line within one slot cadence and any
+`failure` line as paging conditions. The audit write is best-effort and never fails the backup.
+
 Restore replaces one application database from an exact slot backup:
 
 ```bash

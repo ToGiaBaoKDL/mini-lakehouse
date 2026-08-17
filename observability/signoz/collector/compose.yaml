@@ -1,0 +1,41 @@
+services:
+  collection-agent:
+    image: "${COLLECTOR_IMAGE:?COLLECTOR_IMAGE is required}"
+    container_name: signoz-collection-agent
+    # Root is required to read docker JSON log files (0600) and the Docker
+    # socket; every host mount stays read-only.
+    user: "0:0"
+    command:
+      - --config=/etc/otel-collector/config.yaml
+    environment:
+      OTEL_RESOURCE_ATTRIBUTES: "${OTEL_RESOURCE_ATTRIBUTES:-deployment.environment=dev}"
+      POSTGRES_MONITOR_ENDPOINT: "${POSTGRES_MONITOR_ENDPOINT:-metadata-postgres:5432}"
+      PG_MONITOR_USER: "${PG_MONITOR_USER:-pg_monitor_user}"
+      PG_MONITOR_PASSWORD: "${PG_MONITOR_PASSWORD:?PG_MONITOR_PASSWORD is required}"
+    volumes:
+      - ./config.yaml:/etc/otel-collector/config.yaml:ro
+      - /:/hostfs:ro
+      - /var/log/lakehouse:/var/log/lakehouse:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - signoz
+      - metadata
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 512M
+
+networks:
+  signoz:
+    external: true
+    name: signoz-network
+  metadata:
+    external: true
+    name: lakehouse-metadata

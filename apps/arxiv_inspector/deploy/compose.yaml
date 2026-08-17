@@ -10,10 +10,18 @@ services:
       AWS_EC2_METADATA_DISABLED: "true"
       LAKEHOUSE_LOG_LEVEL: WARNING
       STREAMLIT_LOGGER_LEVEL: warning
+      OTEL_SERVICE_NAME: arxiv-inspector
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://signoz-collection-agent:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
+      OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=${LAKEHOUSE_ENVIRONMENT}"
     volumes:
       - ${AWS_IDENTITY_DIR}/arxiv-inspector:/run/aws:ro
     ports:
       - "${HOST_BIND_ADDRESS:-127.0.0.1}:8501:8501"
+    networks:
+      - signoz
     healthcheck:
       test:
         [
@@ -27,3 +35,8 @@ services:
       retries: 12
       start_period: 20s
     restart: unless-stopped
+
+networks:
+  signoz:
+    external: true
+    name: signoz-network

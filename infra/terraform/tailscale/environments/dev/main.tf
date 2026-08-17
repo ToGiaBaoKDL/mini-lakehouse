@@ -12,6 +12,7 @@ locals {
     "tcp:22",
     "tcp:8080",
     "tcp:8081",
+    "tcp:8082",
     "tcp:8501",
   ]
   ci_services_ports = [
@@ -59,6 +60,7 @@ resource "tailscale_acl" "policy" {
           "${local.services_tag}:22",
           "${local.services_tag}:8080",
           "${local.services_tag}:8081",
+          "${local.services_tag}:8082",
           "${local.services_tag}:8501",
         ]
       },

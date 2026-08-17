@@ -13,9 +13,10 @@ locals {
     },
   )
   metadata_postgres_secret_descriptions = {
-    airflow   = "Database credential owned by the Airflow metadata database."
-    bootstrap = "Bootstrap credential for the shared metadata PostgreSQL server."
-    lightdash = "Database credential owned by the Lightdash metadata database."
+    airflow    = "Database credential owned by the Airflow metadata database."
+    bootstrap  = "Bootstrap credential for the shared metadata PostgreSQL server."
+    lightdash  = "Database credential owned by the Lightdash metadata database."
+    pg_monitor = "Read-only pg_monitor credential for host metrics collection."
   }
 }
 

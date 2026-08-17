@@ -16,6 +16,7 @@ CLOUDFLARE_COMPOSE_CONFIG := CLOUDFLARE_IMAGE=$(CLOUDFLARE_CONNECTOR_IMAGE) CLOU
 	arxiv-inspector-up arxiv-inspector-down arxiv-inspector-logs \
 	lightdash-secrets-init lightdash-ci-secret-sync \
 	lightdash-up lightdash-down lightdash-logs \
+	signoz-secrets-init \
 	services-up services-down services-ps
 
 metadata-postgres-secrets-init: ## Initialize the PostgreSQL bootstrap credential exactly once.
@@ -28,6 +29,9 @@ airflow-secrets-init: ## Initialize Airflow database and runtime secrets exactly
 lightdash-secrets-init: ## Initialize Lightdash database and runtime secrets exactly once.
 	infra/runtime/postgres/initialize-secrets lightdash
 	apps/lightdash/deploy/initialize-secrets
+
+signoz-secrets-init: ## Initialize the pg_monitor credential for the SigNoz collection agent.
+	infra/runtime/postgres/initialize-secrets pg_monitor
 
 lightdash-ci-secret-sync: ## Store the local Lightdash CI token payload in Secrets Manager.
 	lightdash/deploy/sync-ci-secret ".secrets/$(LAKEHOUSE_ENVIRONMENT)/lightdash/ci.json"

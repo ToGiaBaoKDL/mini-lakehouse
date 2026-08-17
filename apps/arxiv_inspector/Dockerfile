@@ -53,4 +53,4 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 USER inspector
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD python -c "import urllib.request as u; u.urlopen('http://localhost:8501/_stcore/health', timeout=2)"
-CMD ["streamlit", "run", "apps/arxiv_inspector/app.py"]
+CMD ["opentelemetry-instrument", "streamlit", "run", "apps/arxiv_inspector/app.py"]

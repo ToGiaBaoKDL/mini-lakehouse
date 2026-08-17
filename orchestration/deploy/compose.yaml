@@ -23,6 +23,12 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__FERNET_KEY_CMD: cat /run/secrets/airflow_fernet_key
     AIRFLOW__SECRETS__BACKEND: airflow_runtime.secrets.AwsSecretsBackend
     AIRFLOW__SECRETS__BACKEND_KWARGS: '{"connections_prefix":"lakehouse/${LAKEHOUSE_ENVIRONMENT}/airflow/connections","variables_prefix":"/lakehouse/${LAKEHOUSE_ENVIRONMENT}"}'
+    AIRFLOW__METRICS__OTEL_ON: "true"
+    AIRFLOW__TRACES__OTEL_ON: "true"
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://signoz-collection-agent:4317
+    OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+    OTEL_SERVICE_NAME: airflow
+    OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=${LAKEHOUSE_ENVIRONMENT}"
     AIRFLOW__LOGGING__REMOTE_LOGGING: "true"
     AIRFLOW__LOGGING__REMOTE_BASE_LOG_FOLDER: "${AIRFLOW_REMOTE_LOG_URI}"
     AIRFLOW__LOGGING__DELETE_LOCAL_LOGS: "true"

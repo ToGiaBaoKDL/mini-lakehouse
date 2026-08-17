@@ -9,6 +9,8 @@ dependencies = [
     "document-ocr",
     "lakehouse",
     "loguru==0.7.3",
+    "opentelemetry-distro[otlp]>=0.64b0,<0.65",
+    "opentelemetry-instrumentation-botocore>=0.64b0,<0.65",
     "pandas>=2.2,<4",
     "pydantic>=2.12,<3",
     "streamlit>=1.60,<1.61",

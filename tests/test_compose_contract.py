@@ -178,14 +178,23 @@ def test_airflow_runtime_components_have_role_appropriate_healthchecks() -> None
     assert {path.name for path in Path("infra/runtime/postgres/bootstrap").glob("*.sql")} == {
         "airflow.sql",
         "lightdash.sql",
+        "pg_monitor.sql",
     }
-    for path in Path("infra/runtime/postgres/bootstrap").glob("*.sql"):
-        source = path.read_text(encoding="utf-8")
-        database = path.stem
+    for path in ("airflow.sql", "lightdash.sql"):
+        source = (Path("infra/runtime/postgres/bootstrap") / path).read_text(encoding="utf-8")
+        database = Path(path).stem
         assert "REVOKE CONNECT ON DATABASE postgres FROM PUBLIC" in source
         assert f"REVOKE CONNECT ON DATABASE {database} FROM PUBLIC" in source
         assert f"GRANT CONNECT ON DATABASE {database} TO {database}" in source
         assert "REVOKE CREATE ON SCHEMA public FROM PUBLIC" in source
+
+    pg_monitor_bootstrap = Path("infra/runtime/postgres/bootstrap/pg_monitor.sql").read_text(
+        encoding="utf-8"
+    )
+    assert "CREATE ROLE pg_monitor_user" in pg_monitor_bootstrap
+    assert "GRANT CONNECT ON DATABASE postgres TO pg_monitor_user" in pg_monitor_bootstrap
+    assert "GRANT pg_monitor TO pg_monitor_user" in pg_monitor_bootstrap
+    assert "SUPERUSER" not in pg_monitor_bootstrap
 
     lightdash_bootstrap = Path("infra/runtime/postgres/bootstrap/lightdash.sql").read_text(
         encoding="utf-8"
@@ -305,6 +314,24 @@ def test_arxiv_inspector_receives_only_its_explicit_environment() -> None:
         "AWS_EC2_METADATA_DISABLED",
         "LAKEHOUSE_LOG_LEVEL",
         "STREAMLIT_LOGGER_LEVEL",
+        "OTEL_SERVICE_NAME",
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_PROTOCOL",
+        "OTEL_METRICS_EXPORTER",
+        "OTEL_LOGS_EXPORTER",
+        "OTEL_RESOURCE_ATTRIBUTES",
+    }
+    assert service["environment"]["OTEL_SERVICE_NAME"] == "arxiv-inspector"
+    assert service["environment"]["OTEL_EXPORTER_OTLP_PROTOCOL"] == "grpc"
+    assert service["environment"]["OTEL_METRICS_EXPORTER"] == "none"
+    assert service["environment"]["OTEL_LOGS_EXPORTER"] == "none"
+    assert service["environment"]["OTEL_EXPORTER_OTLP_ENDPOINT"] == (
+        "http://signoz-collection-agent:4317"
+    )
+    assert "extra_hosts" not in service
+    assert _compose(INSPECTOR_COMPOSE)["networks"]["signoz"] == {
+        "external": True,
+        "name": "signoz-network",
     }
     assert service["volumes"] == ["${AWS_IDENTITY_DIR}/arxiv-inspector:/run/aws:ro"]
 
@@ -400,7 +427,7 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
     assert Path("dbt/runtime/uv.lock").is_file()
     assert (AIRFLOW_RUNTIME / "uv.lock").is_file()
     assert "apache-airflow" not in Path("uv.lock").read_text(encoding="utf-8")
-    assert "opentelemetry" not in Path("uv.lock").read_text(encoding="utf-8")
+    assert "opentelemetry-distro" in inspector
     assert "apache-airflow" in (AIRFLOW_RUNTIME / "uv.lock").read_text(encoding="utf-8")
     assert "opentelemetry" in (AIRFLOW_RUNTIME / "uv.lock").read_text(encoding="utf-8")
 

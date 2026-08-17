@@ -24,6 +24,9 @@ if [ ! -r "$source_backup" ] || [ ! -r "$source_service" ] || [ ! -r "$source_ti
     exit 1
 fi
 
+install -d -m 0755 /var/log/lakehouse
+chown ubuntu:ubuntu /var/log/lakehouse
+
 if [ -f "$target_backup" ] && cmp -s "$source_backup" "$target_backup"; then
     printf '%s\n' "Metadata backup script is current."
 else

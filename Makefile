@@ -62,6 +62,8 @@ lint: ## Run formatting, linting, and static type checks.
 		infra/runtime/postgres/initialize-secrets \
 		infra/runtime/postgres/deploy \
 		infra/runtime/postgres/restore \
+		observability/signoz/deploy/deploy \
+		observability/signoz/collector/deploy \
 		jobs/emr/release/package \
 		orchestration/deploy/deploy \
 		orchestration/deploy/initialize-secrets \
@@ -91,6 +93,9 @@ compose-validate: ## Validate self-hosted service Compose files.
 	$(INSPECTOR_COMPOSE) config --quiet
 	$(LIGHTDASH_COMPOSE_CONFIG) config --quiet
 	$(CLOUDFLARE_COMPOSE_CONFIG) config --quiet
+	COLLECTOR_IMAGE=validation:local PG_MONITOR_PASSWORD=validation docker compose \
+		--project-name signoz-collection-agent \
+		-f observability/signoz/collector/compose.yaml config --quiet
 
 check: ## Run the complete local quality gate.
 	uv lock --check

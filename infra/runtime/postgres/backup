@@ -22,6 +22,9 @@ identity_dir=${AWS_IDENTITY_DIR:-"$HOME/.config/lakehouse/$environment/aws"}
 host_config="$identity_dir/metadata-postgres/host-config"
 container=$(docker ps --format '{{.Names}}' --filter 'name=metadata-postgres-metadata-postgres-' | head -n 1)
 
+audit_dir=${BACKUP_AUDIT_DIR:-/var/log/lakehouse}
+audit_file="$audit_dir/metadata-backup-audit.log"
+
 test -r "$host_config" || {
     printf '%s\n' "The metadata-postgres workload identity is missing." >&2
     exit 1
@@ -31,10 +34,27 @@ test -r "$host_config" || {
     exit 1
 }
 
+install -d -m 0700 "$audit_dir"
+
 aws_runtime() {
     env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
         AWS_SHARED_CREDENTIALS_FILE=/dev/null \
         AWS_CONFIG_FILE="$host_config" AWS_PROFILE=default AWS_PAGER= aws "$@"
+}
+
+# Append one machine-readable line so SigNoz can alert on missing or failed
+# slots. Observation must never break the backup itself.
+emit_audit() {
+    status=$1
+    database=$2
+    seconds=$3
+    bytes=$4
+    error=$5
+    timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    safe_error=$(printf '%s' "$error" | tr -d '"' | tr '\n\t' '  ' | cut -c1-300)
+    printf '{"timestamp":"%s","status":"%s","database":"%s","slot":"%s","duration_seconds":%s,"bytes":%s,"error":"%s"}\n' \
+        "$timestamp" "$status" "$database" "$slot" "$seconds" "$bytes" "$safe_error" \
+        >>"$audit_file" 2>/dev/null || true
 }
 
 backup_uri=$(aws_runtime ssm get-parameter \
@@ -70,24 +90,54 @@ cleanup() {
 trap cleanup EXIT
 trap 'rm -rf "$work_dir"; exit 1' HUP INT TERM
 
-for database in $databases; do
+backup_database() {
+    database=$1
     object_key="metadata-postgres/$database/$utc_date/$slot/$database.dump"
     checksum_key="$object_key.sha256"
+    start=$(date +%s)
 
     if aws_runtime s3api head-object --bucket "$bucket_name" --key "$checksum_key" >/dev/null 2>&1; then
         printf '%s\n' "Backup for $database is already complete for $utc_date $slot; skipping."
-        continue
+        emit_audit skipped "$database" 0 0 ""
+        return 0
     fi
 
     dump_file="$work_dir/$database.dump"
     checksum_file="$work_dir/$database.dump.sha256"
-    docker exec "$container" \
+    stderr_file="$work_dir/$database.stderr"
+
+    if ! docker exec "$container" \
         pg_dump --username postgres --format=custom --no-password --dbname="$database" \
-        >"$dump_file"
+        >"$dump_file" 2>"$stderr_file"; then
+        elapsed=$(( $(date +%s) - start ))
+        error=$(head -n 1 "$stderr_file")
+        printf '%s\n' "pg_dump failed for $database: $error" >&2
+        emit_audit failure "$database" "$elapsed" 0 "$error"
+        return 1
+    fi
     (cd "$work_dir" && sha256sum "$database.dump" >"$database.dump.sha256")
 
-    aws_runtime s3 cp --only-show-errors "$dump_file" "s3://$bucket_name/$object_key"
-    aws_runtime s3 cp --only-show-errors "$checksum_file" "s3://$bucket_name/$checksum_key"
-    printf '%s\n' "Backed up $database to s3://$bucket_name/$object_key ($(wc -c <"$dump_file") bytes)."
-done
+    if ! aws_runtime s3 cp --only-show-errors "$dump_file" "s3://$bucket_name/$object_key"; then
+        elapsed=$(( $(date +%s) - start ))
+        printf '%s\n' "Upload failed for $database dump." >&2
+        emit_audit failure "$database" "$elapsed" 0 "dump upload failed"
+        return 1
+    fi
+    if ! aws_runtime s3 cp --only-show-errors "$checksum_file" "s3://$bucket_name/$checksum_key"; then
+        elapsed=$(( $(date +%s) - start ))
+        printf '%s\n' "Upload failed for $database checksum marker." >&2
+        emit_audit failure "$database" "$elapsed" 0 "checksum marker upload failed"
+        return 1
+    fi
 
+    elapsed=$(( $(date +%s) - start ))
+    bytes=$(wc -c <"$dump_file")
+    printf '%s\n' "Backed up $database to s3://$bucket_name/$object_key ($bytes bytes)."
+    emit_audit success "$database" "$elapsed" "$bytes" ""
+}
+
+overall_status=0
+for database in $databases; do
+    if backup_database "$database"; then :; else overall_status=1; fi
+done
+exit "$overall_status"

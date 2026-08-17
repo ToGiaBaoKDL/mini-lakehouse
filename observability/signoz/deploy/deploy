@@ -1,0 +1,85 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 0 ]; then
+    printf '%s\n' "Usage: observability/signoz/deploy/deploy" >&2
+    exit 2
+fi
+
+environment=${LAKEHOUSE_ENVIRONMENT:-dev}
+foundry_version=v0.2.17
+foundry_checksum_arm64=1c2ad64cf8794d355eba947a202e1b2bc6fd660bb943735e26d789e00f52fd3a
+foundry_checksum_amd64=51f41204b8048cd1f7e278fb5d2ba5d82d2ee8fb619bfe9330e2f8ceffc0d886
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+casting_dir="$script_dir/.."
+test -r "$casting_dir/casting.yaml" || {
+    printf '%s\n' "The SigNoz casting file is missing from the bundled source tree." >&2
+    exit 1
+}
+docker compose version >/dev/null 2>&1 || {
+    printf '%s\n' "Docker Compose is required on the services host." >&2
+    exit 1
+}
+
+case "$(uname -m)" in
+    aarch64 | arm64)
+        foundry_arch=arm64
+        foundry_checksum=$foundry_checksum_arm64
+        ;;
+    x86_64)
+        foundry_arch=amd64
+        foundry_checksum=$foundry_checksum_amd64
+        ;;
+    *)
+        printf '%s\n' "Unsupported services-host architecture: $(uname -m)" >&2
+        exit 1
+        ;;
+esac
+
+bin_dir="$HOME/.local/bin"
+install -d -m 0700 "$bin_dir"
+foundryctl="$bin_dir/foundryctl"
+if [ -x "$foundryctl" ] && { "$foundryctl" version 2>/dev/null || "$foundryctl" --version 2>/dev/null; } | grep -q "${foundry_version#v}"; then
+    printf '%s\n' "foundryctl $foundry_version is current."
+else
+    work_dir=$(mktemp -d)
+    cleanup() {
+        rm -rf "$work_dir"
+    }
+    trap cleanup EXIT
+    trap 'rm -rf "$work_dir"; exit 1' HUP INT TERM
+
+    archive="$work_dir/foundry.tar.gz"
+    curl -fsSL -o "$archive" \
+        "https://github.com/SigNoz/foundry/releases/download/$foundry_version/foundry_${foundry_version#v}_linux_$foundry_arch.tar.gz"
+    printf '%s  %s\n' "$foundry_checksum" "$archive" | sha256sum -c -
+    tar -xzf "$archive" -C "$work_dir"
+    install -m 0755 "$work_dir/foundry_linux_$foundry_arch/bin/foundryctl" "$foundryctl"
+    printf '%s\n' "foundryctl $foundry_version installed."
+fi
+
+signoz_dir="$HOME/.config/lakehouse/$environment/signoz"
+install -d -m 0700 "$signoz_dir"
+if [ -f "$signoz_dir/casting.yaml" ] && cmp -s "$casting_dir/casting.yaml" "$signoz_dir/casting.yaml"; then
+    printf '%s\n' "SigNoz casting file is current."
+else
+    install -m 0644 "$casting_dir/casting.yaml" "$signoz_dir/casting.yaml"
+    printf '%s\n' "SigNoz casting file updated."
+fi
+
+cd "$signoz_dir"
+"$foundryctl" cast -f casting.yaml
+
+attempt=0
+until curl -fsS http://127.0.0.1:8082/api/v1/health >/dev/null 2>&1; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 90 ]; then
+        docker compose -f "$signoz_dir/pours/deployment/compose.yaml" logs --tail=100 || true
+        printf '%s\n' "SigNoz did not become ready within 180 seconds." >&2
+        exit 1
+    fi
+    sleep 2
+done
+
+printf '%s\n' "SigNoz is ready on 127.0.0.1:8082."

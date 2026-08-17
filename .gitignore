@@ -34,6 +34,9 @@ lightdash/**/.lightdash-metadata.json
 # License files
 *.license
 
+# Foundry-generated SigNoz deployment output
+observability/signoz/pours/
+
 # Local artifacts and planning notes
 dist/
 plans/
