@@ -6,6 +6,9 @@ on:
     paths:
       - .github/workflows/deploy-signoz.yml
       - observability/signoz/**
+      - infra/runtime/postgres/bootstrap/**
+      - infra/runtime/postgres/compose.yaml
+      - infra/runtime/postgres/deploy
   workflow_dispatch:
 
 jobs:
@@ -92,7 +95,7 @@ jobs:
           set -euo pipefail
           image=$(<observability/signoz/collector/image)
           remote_dir="/tmp/lakehouse-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          remote_command="set -eu; work_dir='$remote_dir'; trap 'rm -rf \"\$work_dir\"' EXIT; install -d -m 0700 \"\$work_dir\"; tar -C \"\$work_dir\" -xf -; sudo \"\$work_dir/observability/signoz/collector/deploy\" '$image'"
+          remote_command="set -eu; work_dir='$remote_dir'; trap 'rm -rf \"\$work_dir\"' EXIT; install -d -m 0700 \"\$work_dir\"; tar -C \"\$work_dir\" -xf -; \"\$work_dir/observability/signoz/collector/deploy\" '$image'"
           tar -cf - \
             observability/signoz/collector/config.yaml \
             observability/signoz/collector/compose.yaml \

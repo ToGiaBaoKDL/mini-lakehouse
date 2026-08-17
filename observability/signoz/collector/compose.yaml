@@ -18,6 +18,15 @@ services:
       - /var/log/lakehouse:/var/log/lakehouse:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    # The contrib image is distroless: the healthcheck runs the binary
+    # itself, which re-validates the live configuration. The health_check
+    # extension answers in-container probes on :13133 for the SigNoz stack.
+    healthcheck:
+      test: ["CMD", "/otelcol-contrib", "validate", "--config=/etc/otel-collector/config.yaml"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     networks:
       - signoz
       - metadata

@@ -1,4 +1,7 @@
 extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
   docker_observer:
     endpoint: unix:///var/run/docker.sock
     timeout: 5s
@@ -113,10 +116,10 @@ processors:
     log_statements:
       - context: log
         statements:
-          - replace_pattern(body, "(?i)((?:authorization|proxy-authorization|x-api-key|cookie|set-cookie)\\s*[:=]\\s*)[^\\s,;\"']{4,}", "$${1}[REDACTED]")
-          - replace_pattern(body, "(?i)((?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)\\s*[:=]\\s*)[^\\s,;\"']{4,}", "$${1}[REDACTED]")
-          - replace_pattern(body, "\\b(?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}\\b", "AKIA[REDACTED]")
           - replace_pattern(body, "(?i)bearer[ \\t]+[A-Za-z0-9\\-._~+/=]{8,}", "Bearer [REDACTED]")
+          - replace_pattern(body, "(?i)((?:authorization|proxy-authorization|x-api-key|cookie|set-cookie)[\"']?\\s*[:=]\\s*[\"']?)[^\\s,;\"']{4,}", "$${1}[REDACTED]")
+          - replace_pattern(body, "(?i)((?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)[\"']?\\s*[:=]\\s*[\"']?)[^\\s,;\"']{4,}", "$${1}[REDACTED]")
+          - replace_pattern(body, "\\b(?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}\\b", "AKIA[REDACTED]")
           - replace_pattern(body, "(\\w+)://[^/\\s:@]+:[^@\\s]+@", "$${1}://[REDACTED]@")
 
   resource_detection:
@@ -137,7 +140,7 @@ exporters:
       insecure: true
 
 service:
-  extensions: [docker_observer]
+  extensions: [health_check, docker_observer]
   telemetry:
     metrics:
       level: normal

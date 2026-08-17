@@ -107,3 +107,7 @@ Log policy: redaction strips bearer tokens, basic-auth connection strings, AWS k
 `json-file` rotation (20m × 3) remains the short-term buffer. Collector container runs as root
 only to read 0600 docker log files and the socket, with `no-new-privileges` and read-only mounts.
 All resource attributes carry `deployment.environment=dev` through `OTEL_RESOURCE_ATTRIBUTES`.
+
+Liveness: the `health_check` extension answers `GET /` on `:13133` in-container, and the
+container healthcheck invokes the distroless binary's `validate` subcommand (the contrib image
+ships no shell or curl), so the SigNoz stack and Docker both detect a wedged collector.
