@@ -103,10 +103,16 @@ Signals collected:
   metadata backup script; see the plan doc).
 
 Log policy: redaction strips bearer tokens, basic-auth connection strings, AWS key IDs, and common
-`password|token|secret|api_key|cookie|authorization` pairings before export; Docker's
+`password|token|secret|api_key|cookie|authorization` pairings before export. The same redaction
+rules apply to span attribute values (e.g. botocore auto-instrumentation signed URLs redact the
+SigV4 `x-amz-credential`/`x-amz-signature`/`x-amz-security-token` query parameters). Docker's
 `json-file` rotation (20m × 3) remains the short-term buffer. Collector container runs as root
 only to read 0600 docker log files and the socket, with `no-new-privileges` and read-only mounts.
 All resource attributes carry `deployment.environment=dev` through `OTEL_RESOURCE_ATTRIBUTES`.
+
+Durability: container-log and backup-audit file positions are checkpointed through the
+`file_storage` extension into the named `collection-agent-file-storage` volume, so restarts and
+redeploys resume where they stopped instead of skipping the backlog with `start_at: end`.
 
 Liveness: the `health_check` extension answers `GET /` on `:13133` in-container, and the
 container healthcheck invokes the distroless binary's `validate` subcommand (the contrib image

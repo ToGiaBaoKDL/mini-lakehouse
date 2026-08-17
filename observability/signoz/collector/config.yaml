@@ -2,6 +2,10 @@ extensions:
   health_check:
     endpoint: 0.0.0.0:13133
 
+  file_storage:
+    directory: /var/lib/otelcol/storage
+    timeout: 10s
+
   docker_observer:
     endpoint: unix:///var/run/docker.sock
     timeout: 5s
@@ -80,6 +84,7 @@ receivers:
         config:
           include:
             - /var/lib/docker/containers/`container_id`/`container_id`-json.log
+          storage: file_storage
           start_at: end
           poll_interval: 200ms
           include_file_name: false
@@ -91,6 +96,7 @@ receivers:
   file_log/lakehouse_audit:
     include:
       - /var/log/lakehouse/metadata-backup-audit.log
+    storage: file_storage
     start_at: end
     poll_interval: 200ms
     include_file_name: false
@@ -121,6 +127,19 @@ processors:
           - replace_pattern(body, "(?i)((?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)[\"']?\\s*[:=]\\s*[\"']?)[^\\s,;\"']{4,}", "$${1}[REDACTED]")
           - replace_pattern(body, "\\b(?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}\\b", "AKIA[REDACTED]")
           - replace_pattern(body, "(\\w+)://[^/\\s:@]+:[^@\\s]+@", "$${1}://[REDACTED]@")
+    # Span attribute values (e.g. botocore auto-instrumentation URLs). AWS
+    # SigV4 query parameters are matched before the generic pairing rules so
+    # each parameter is redacted individually without swallowing its
+    # ampersand-separated neighbours.
+    trace_statements:
+      - context: span
+        statements:
+          - replace_all_patterns(span.attributes, "value", "(?i)(x-amz-(?:credential|signature|security-token))\\s*=\\s*[^\\s&;\"']{4,}", "$${1}=[REDACTED]")
+          - replace_all_patterns(span.attributes, "value", "(?i)bearer[ \\t]+[A-Za-z0-9\\-._~+/=]{8,}", "Bearer [REDACTED]")
+          - replace_all_patterns(span.attributes, "value", "(?i)((?:authorization|proxy-authorization|x-api-key|cookie|set-cookie)[\"']?\\s*[:=]\\s*[\"']?)[^\\s,;\"']{4,}", "$${1}[REDACTED]")
+          - replace_all_patterns(span.attributes, "value", "(?i)((?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key)[\"']?\\s*[:=]\\s*[\"']?)[^\\s,;\"']{4,}", "$${1}[REDACTED]")
+          - replace_all_patterns(span.attributes, "value", "\\b(?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}\\b", "AKIA[REDACTED]")
+          - replace_all_patterns(span.attributes, "value", "(\\w+)://[^/\\s:@]+:[^@\\s]+@", "$${1}://[REDACTED]@")
 
   resource_detection:
     detectors: [env, system]
@@ -140,7 +159,7 @@ exporters:
       insecure: true
 
 service:
-  extensions: [health_check, docker_observer]
+  extensions: [health_check, file_storage, docker_observer]
   telemetry:
     metrics:
       level: normal
@@ -149,7 +168,7 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, resource_detection, batch]
+      processors: [memory_limiter, transform/redact, resource_detection, batch]
       exporters: [otlp/signoz]
     metrics:
       receivers: [otlp, hostmetrics, docker_stats, postgresql]
