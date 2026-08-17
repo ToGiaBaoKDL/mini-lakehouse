@@ -37,7 +37,7 @@ jobs:
           tool_dir=$(mktemp -d)
           trap 'rm -rf "$tool_dir"' EXIT
           curl -fsSL -o "$tool_dir/foundry.tar.gz" \
-            "https://github.com/SigNoz/foundry/releases/download/${FOUNDRY_VERSION}/foundry_${FOUNDRY_VERSION#v}_linux_amd64.tar.gz"
+            "https://github.com/SigNoz/foundry/releases/download/${FOUNDRY_VERSION}/foundry_linux_amd64.tar.gz"
           printf '%s  %s/foundry.tar.gz\n' "$FOUNDRY_SHA256_LINUX_AMD64" "$tool_dir" | sha256sum -c -
           tar -xzf "$tool_dir/foundry.tar.gz" -C "$tool_dir"
           work_dir=$(mktemp -d)

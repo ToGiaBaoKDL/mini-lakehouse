@@ -52,7 +52,7 @@ else
 
     archive="$work_dir/foundry.tar.gz"
     curl -fsSL -o "$archive" \
-        "https://github.com/SigNoz/foundry/releases/download/$foundry_version/foundry_${foundry_version#v}_linux_$foundry_arch.tar.gz"
+        "https://github.com/SigNoz/foundry/releases/download/$foundry_version/foundry_linux_$foundry_arch.tar.gz"
     printf '%s  %s\n' "$foundry_checksum" "$archive" | sha256sum -c -
     tar -xzf "$archive" -C "$work_dir"
     install -m 0755 "$work_dir/foundry_linux_$foundry_arch/bin/foundryctl" "$foundryctl"
