@@ -112,6 +112,11 @@ receivers:
     password: "${env:PG_MONITOR_PASSWORD}"
     transport: tcp
     collection_interval: 30s
+    # The metadata server listens without TLS on the internal
+    # lakehouse-metadata network (same as SigNoz's own metastore DSN uses
+    # sslmode=disable), so the scraper must not enforce a TLS handshake.
+    tls:
+      insecure: true
 
 processors:
   memory_limiter:
