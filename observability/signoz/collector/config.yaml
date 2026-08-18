@@ -4,6 +4,7 @@ extensions:
 
   file_storage:
     directory: /var/lib/otelcol/storage
+    create_directory: true
     timeout: 10s
 
   docker_observer:
