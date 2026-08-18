@@ -62,7 +62,7 @@ printf '%s' "$monitor_secret" | jq -e \
 export COLLECTOR_IMAGE=$image
 export OTEL_RESOURCE_ATTRIBUTES=${OTEL_RESOURCE_ATTRIBUTES:-deployment.environment=dev}
 export POSTGRES_MONITOR_ENDPOINT=${POSTGRES_MONITOR_ENDPOINT:-metadata-postgres:5432}
-PG_MONITOR_USER=$(printf '%s' "$monitor_secret" | jq -r '.username // "pg_monitor_user"')
+PG_MONITOR_USER=$(printf '%s' "$monitor_secret" | jq -r '.username // "lakehouse_monitor"')
 PG_MONITOR_PASSWORD=$(printf '%s' "$monitor_secret" | jq -r '.password')
 export PG_MONITOR_USER PG_MONITOR_PASSWORD
 

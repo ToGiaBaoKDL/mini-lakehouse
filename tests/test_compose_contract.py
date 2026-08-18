@@ -191,10 +191,12 @@ def test_airflow_runtime_components_have_role_appropriate_healthchecks() -> None
     pg_monitor_bootstrap = Path("infra/runtime/postgres/bootstrap/pg_monitor.sql").read_text(
         encoding="utf-8"
     )
-    assert "CREATE ROLE pg_monitor_user" in pg_monitor_bootstrap
-    assert "GRANT CONNECT ON DATABASE postgres TO pg_monitor_user" in pg_monitor_bootstrap
-    assert "GRANT pg_monitor TO pg_monitor_user" in pg_monitor_bootstrap
+    assert "CREATE ROLE lakehouse_monitor" in pg_monitor_bootstrap
+    assert "GRANT CONNECT ON DATABASE postgres TO lakehouse_monitor" in pg_monitor_bootstrap
+    assert "GRANT pg_monitor TO lakehouse_monitor" in pg_monitor_bootstrap
     assert "SUPERUSER" not in pg_monitor_bootstrap
+    # PostgreSQL reserves every role name that starts with pg_.
+    assert "pg_monitor_user" not in pg_monitor_bootstrap
 
     lightdash_bootstrap = Path("infra/runtime/postgres/bootstrap/lightdash.sql").read_text(
         encoding="utf-8"

@@ -71,7 +71,7 @@ jobs:
             -v "$PWD/observability/signoz/collector/config.yaml:/etc/otel-collector/config.yaml:ro" \
             -v "$hostfs:/hostfs:ro" \
             -e POSTGRES_MONITOR_ENDPOINT=metadata-postgres:5432 \
-            -e PG_MONITOR_USER=pg_monitor_user \
+            -e PG_MONITOR_USER=lakehouse_monitor \
             -e PG_MONITOR_PASSWORD=validation \
             "$image" validate --config=/etc/otel-collector/config.yaml
 

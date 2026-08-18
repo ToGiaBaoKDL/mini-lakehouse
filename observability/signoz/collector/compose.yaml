@@ -10,7 +10,7 @@ services:
     environment:
       OTEL_RESOURCE_ATTRIBUTES: "${OTEL_RESOURCE_ATTRIBUTES:-deployment.environment=dev}"
       POSTGRES_MONITOR_ENDPOINT: "${POSTGRES_MONITOR_ENDPOINT:-metadata-postgres:5432}"
-      PG_MONITOR_USER: "${PG_MONITOR_USER:-pg_monitor_user}"
+      PG_MONITOR_USER: "${PG_MONITOR_USER:-lakehouse_monitor}"
       PG_MONITOR_PASSWORD: "${PG_MONITOR_PASSWORD:?PG_MONITOR_PASSWORD is required}"
     volumes:
       - ./config.yaml:/etc/otel-collector/config.yaml:ro
