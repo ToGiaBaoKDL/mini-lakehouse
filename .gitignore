@@ -43,8 +43,5 @@ plans/
 .agents/
 .codex/*
 !.codex/skills/
-!.codex/skills/developing-in-lightdash/
-!.codex/skills/developing-in-lightdash/**
-!.codex/skills/effective-dbt-sql/
-!.codex/skills/effective-dbt-sql/**
+!.codex/skills/**
 .claude/

@@ -117,3 +117,44 @@ redeploys resume where they stopped instead of skipping the backlog with `start_
 Liveness: the `health_check` extension answers `GET /` on `:13133` in-container, and the
 container healthcheck invokes the distroless binary's `validate` subcommand (the contrib image
 ships no shell or curl), so the SigNoz stack and Docker both detect a wedged collector.
+
+## Dashboards and alerts as code
+
+Dashboards and alert rules exist only as Terraform (`observability/signoz/terraform/`), managed by
+the official SigNoz provider (`signoz/signoz`, pinned `~> 0.1.4`, requires SigNoz ≥ v0.133.0). The
+pinned `casting.yaml` must stay at v0.135.0 or later for the typed dashboard schema. Directory
+layout:
+
+| File | Content |
+|---|---|
+| `versions.tf`, `backend.tf` | Provider pin and the shared versioned S3 backend (`lakehouse/signoz/dev/terraform.tfstate`) |
+| `dashboards_host.tf` | Host Overview: CPU, memory, load, filesystem, disk and network IO |
+| `dashboards_containers.tf` | Containers Overview: CPU/memory/network per compose service and per container |
+| `dashboards_airflow.tf` | Airflow: scheduler heartbeat, task outcomes, DAG durations, pool state, recent traces |
+| `dashboards_postgres.tf` | Metadata PostgreSQL: backends, commits/rollbacks, size, row operations |
+| `dashboards_backup.tf` | Metadata backup status parsed from the backup audit JSON lines |
+| `alerts.tf` | Disk 70/80/90%, absent-metric rules for pipeline liveness, DAG stalls, backup failed/missing |
+
+Panel and rule queries use the builder query language over the exact metric names emitted by the
+collection agent (`system.*`, `container.*`, `postgresql.*`, `airflow.*`) and the parsed fields of
+the backup audit log (no `log.file.name` filter — the agent tails the audit file with
+`include_file_name: false`).
+
+Applying requires a SigNoz service-account API key exported as `SIGNOZ_ACCESS_TOKEN` (create one in
+Settings → API Access Keys). The endpoint defaults to `http://127.0.0.1:8082` and can also come
+from `SIGNOZ_ENDPOINT`, so run it from the host or through an SSH port-forward — the UI is bound to
+loopback only:
+
+```sh
+export SIGNOZ_ACCESS_TOKEN=...
+make signoz-init signoz-plan signoz-apply
+```
+
+Notification channels (Slack/SMTP) are not provider resources: create the operator channel once in
+the UI, then set `TF_VAR_signoz_alert_channels='["channel-name"]'` so every rule threshold
+references it. Until it is set, thresholds carry no channel list and the default UI route applies.
+Never edit entities Terraform manages through the UI — drift only reaches the state through
+`terraform import`/refresh.
+
+CI covers the root through the shared `terraform-fmt` and `terraform-validate` make targets
+(`make check`).

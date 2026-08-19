@@ -4,6 +4,7 @@ OCI_TERRAFORM_DIR := infra/terraform/oci/environments/$(LAKEHOUSE_ENVIRONMENT)
 TAILSCALE_TERRAFORM_DIR := infra/terraform/tailscale/environments/$(LAKEHOUSE_ENVIRONMENT)
 GITHUB_TERRAFORM_DIR := infra/terraform/github/environments/$(LAKEHOUSE_ENVIRONMENT)
 CLOUDFLARE_TERRAFORM_DIR := infra/terraform/cloudflare/environments/$(LAKEHOUSE_ENVIRONMENT)
+SIGNOZ_TERRAFORM_DIR := observability/signoz/terraform
 TERRAFORM_CACHE_DIR ?= $(HOME)/.cache/lakehouse/terraform
 TF_PLUGIN_CACHE_DIR ?= $(TERRAFORM_CACHE_DIR)/plugins
 TF_REGISTRY_CLIENT_TIMEOUT ?= 30
@@ -15,6 +16,7 @@ OCI_TERRAFORM_DATA_DIR := $(TERRAFORM_CACHE_DIR)/data/oci-$(LAKEHOUSE_ENVIRONMEN
 TAILSCALE_TERRAFORM_DATA_DIR := $(TERRAFORM_CACHE_DIR)/data/tailscale-$(LAKEHOUSE_ENVIRONMENT)
 GITHUB_TERRAFORM_DATA_DIR := $(TERRAFORM_CACHE_DIR)/data/github-$(LAKEHOUSE_ENVIRONMENT)
 CLOUDFLARE_TERRAFORM_DATA_DIR := $(TERRAFORM_CACHE_DIR)/data/cloudflare-$(LAKEHOUSE_ENVIRONMENT)
+SIGNOZ_TERRAFORM_DATA_DIR := $(TERRAFORM_CACHE_DIR)/data/signoz-$(LAKEHOUSE_ENVIRONMENT)
 TERRAFORM_VALIDATE_DATA_DIR := /tmp/lakehouse-terraform-validate-$(LOCAL_UID)
 AWS_STATE_TERRAFORM := TF_DATA_DIR="$(AWS_STATE_TERRAFORM_DATA_DIR)" terraform -chdir="$(AWS_TERRAFORM_STATE_DIR)"
 AWS_TERRAFORM := TF_DATA_DIR="$(AWS_TERRAFORM_DATA_DIR)" terraform -chdir="$(AWS_TERRAFORM_DIR)"
@@ -22,6 +24,7 @@ OCI_TERRAFORM := TF_DATA_DIR="$(OCI_TERRAFORM_DATA_DIR)" terraform -chdir="$(OCI
 TAILSCALE_TERRAFORM := TF_DATA_DIR="$(TAILSCALE_TERRAFORM_DATA_DIR)" terraform -chdir="$(TAILSCALE_TERRAFORM_DIR)"
 GITHUB_TERRAFORM := TF_DATA_DIR="$(GITHUB_TERRAFORM_DATA_DIR)" terraform -chdir="$(GITHUB_TERRAFORM_DIR)"
 CLOUDFLARE_TERRAFORM := TF_DATA_DIR="$(CLOUDFLARE_TERRAFORM_DATA_DIR)" terraform -chdir="$(CLOUDFLARE_TERRAFORM_DIR)"
+SIGNOZ_TERRAFORM := TF_DATA_DIR="$(SIGNOZ_TERRAFORM_DATA_DIR)" terraform -chdir="$(SIGNOZ_TERRAFORM_DIR)"
 SERVICES_HOST ?= tgbao-dev-services
 SERVICES_HOST_USER ?= ubuntu
 
@@ -31,6 +34,7 @@ SERVICES_HOST_USER ?= ubuntu
 	tailscale-init tailscale-plan tailscale-apply tailscale-policy-import \
 	github-init github-plan github-apply \
 	cloudflare-init cloudflare-plan cloudflare-apply cloudflare-secret-sync \
+	signoz-init signoz-plan signoz-apply \
 	oci-init oci-plan oci-apply \
 	workload-pki-init workload-identities-render \
 	workload-identities-install
@@ -44,6 +48,7 @@ terraform-cache:
 
 terraform-fmt: ## Check Terraform formatting.
 	terraform -chdir=infra/terraform fmt -check -recursive
+	terraform -chdir="$(SIGNOZ_TERRAFORM_DIR)" fmt -check
 
 aws-state-init: terraform-cache
 	$(AWS_STATE_TERRAFORM) init -backend-config="path=$(AWS_STATE_FILE)"
@@ -123,6 +128,23 @@ oci-apply: oci-init ## Apply the reviewed OCI services-host plan.
 	@STATE_BUCKET="$$($(AWS_STATE_TERRAFORM) output -raw bucket_name)"; \
 		TF_VAR_state_bucket="$${STATE_BUCKET}" $(OCI_TERRAFORM) apply
 
+signoz-init: aws-state-init
+	@set -eu; \
+		STATE_BUCKET="$$($(AWS_STATE_TERRAFORM) output -raw bucket_name)"; \
+		$(SIGNOZ_TERRAFORM) init -backend-config="bucket=$${STATE_BUCKET}"
+
+signoz-plan: signoz-init ## Plan SigNoz dashboards and alerts. Requires SIGNOZ_ACCESS_TOKEN.
+	@test -n "$${SIGNOZ_ACCESS_TOKEN:-}" || { \
+		printf '%s\n' "Set SIGNOZ_ACCESS_TOKEN to a SigNoz service-account key first."; exit 1; \
+	}
+	$(SIGNOZ_TERRAFORM) plan
+
+signoz-apply: signoz-init ## Apply the reviewed SigNoz dashboards and alerts. Requires SIGNOZ_ACCESS_TOKEN.
+	@test -n "$${SIGNOZ_ACCESS_TOKEN:-}" || { \
+		printf '%s\n' "Set SIGNOZ_ACCESS_TOKEN to a SigNoz service-account key first."; exit 1; \
+	}
+	$(SIGNOZ_TERRAFORM) apply
+
 terraform-validate: terraform-cache ## Initialize without remote state and validate every Terraform root.
 	@set -eu; \
 		validate_root() { \
@@ -136,6 +158,7 @@ terraform-validate: terraform-cache ## Initialize without remote state and valid
 		validate_root "$(TERRAFORM_VALIDATE_DATA_DIR)/tailscale" "$(TAILSCALE_TERRAFORM_DIR)"; \
 		validate_root "$(TERRAFORM_VALIDATE_DATA_DIR)/github" "$(GITHUB_TERRAFORM_DIR)"; \
 		validate_root "$(TERRAFORM_VALIDATE_DATA_DIR)/cloudflare" "$(CLOUDFLARE_TERRAFORM_DIR)"; \
+		validate_root "$(TERRAFORM_VALIDATE_DATA_DIR)/signoz" "$(SIGNOZ_TERRAFORM_DIR)"; \
 		validate_root "$(TERRAFORM_VALIDATE_DATA_DIR)/oci" "$(OCI_TERRAFORM_DIR)"
 
 workload-pki-init: ## Create the local workload CA outside the repository.
