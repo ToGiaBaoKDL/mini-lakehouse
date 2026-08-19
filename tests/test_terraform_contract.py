@@ -493,6 +493,7 @@ def test_github_delivery_configuration_is_terraform_owned_and_state_derived() ->
         "SIGNOZ_URL",
         "TAILSCALE_AUDIENCE",
         "TAILSCALE_CLIENT_ID",
+        "TF_STATE_BUCKET",
     ):
         assert variable in github
 

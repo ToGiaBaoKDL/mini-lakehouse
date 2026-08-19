@@ -67,6 +67,7 @@ locals {
     SIGNOZ_URL                      = "http://tgbao-dev-services:8082"
     TAILSCALE_AUDIENCE              = data.terraform_remote_state.tailscale.outputs.github_deployer_audience
     TAILSCALE_CLIENT_ID             = data.terraform_remote_state.tailscale.outputs.github_deployer_client_id
+    TF_STATE_BUCKET                 = var.state_bucket
   }
   repository_variables = {
     AWS_EMR_PUBLISHER_ROLE_ARN   = data.terraform_remote_state.aws.outputs.github_ci_role_arns.emr_publisher

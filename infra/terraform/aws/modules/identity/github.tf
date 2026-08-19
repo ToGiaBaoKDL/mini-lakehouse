@@ -111,6 +111,20 @@ data "aws_iam_policy_document" "github_signoz_deployer" {
     actions   = ["secretsmanager:GetSecretValue"]
     resources = [var.signoz_ci_secret_arn]
   }
+
+  statement {
+    sid = "ManageSignozTerraformState"
+    actions = [
+      "s3:ListBucket",
+      "s3:GetObject",
+      "s3:PutObject",
+      "s3:DeleteObject",
+    ]
+    resources = [
+      "arn:${data.aws_partition.current.partition}:s3:::${var.name_prefix}-terraform-state-${var.account_id}",
+      "arn:${data.aws_partition.current.partition}:s3:::${var.name_prefix}-terraform-state-${var.account_id}/lakehouse/signoz/*",
+    ]
+  }
 }
 
 resource "aws_iam_role_policy" "github_signoz_deployer" {

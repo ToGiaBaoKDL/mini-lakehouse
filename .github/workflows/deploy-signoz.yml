@@ -131,6 +131,7 @@ jobs:
         env:
           SIGNOZ_ACCESS_TOKEN: ${{ env.SIGNOZ_TOKEN || env.SIGNOZ || secrets.SIGNOZ_ACCESS_TOKEN }}
           SIGNOZ_ENDPOINT: ${{ vars.SIGNOZ_URL || 'http://tgbao-dev-services:8082' }}
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET || vars.STATE_BUCKET }}
         run: |
           set -euo pipefail
           if [ -z "${SIGNOZ_ACCESS_TOKEN:-}" ]; then
@@ -141,7 +142,12 @@ jobs:
 
           printf '%s\n' "Applying SigNoz dashboards and alert rules via Terraform..."
           cd observability/signoz/terraform
-          terraform init -backend=false
+          if [ -n "${STATE_BUCKET:-}" ]; then
+            terraform init -backend-config="bucket=${STATE_BUCKET}"
+          else
+            printf '%s\n' 'terraform { backend "local" {} }' > backend_override.tf
+            terraform init
+          fi
           terraform apply -auto-approve \
             -var="signoz_endpoint=${SIGNOZ_ENDPOINT}" \
             -var="signoz_access_token=${SIGNOZ_ACCESS_TOKEN}"
