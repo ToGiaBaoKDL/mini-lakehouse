@@ -60,8 +60,11 @@ resource "github_repository_environment_deployment_policy" "main" {
 locals {
   environment_variables = {
     AWS_LIGHTDASH_DEPLOYER_ROLE_ARN = data.terraform_remote_state.aws.outputs.github_ci_role_arns.lightdash_deployer
+    AWS_SIGNOZ_DEPLOYER_ROLE_ARN    = data.terraform_remote_state.aws.outputs.github_ci_role_arns.signoz_deployer
     LIGHTDASH_CI_SECRET_ID          = data.terraform_remote_state.aws.outputs.lightdash_ci_secret_id
     LIGHTDASH_URL                   = "http://tgbao-dev-services:8081"
+    SIGNOZ_CI_SECRET_ID             = data.terraform_remote_state.aws.outputs.signoz_ci_secret_id
+    SIGNOZ_URL                      = "http://tgbao-dev-services:8082"
     TAILSCALE_AUDIENCE              = data.terraform_remote_state.tailscale.outputs.github_deployer_audience
     TAILSCALE_CLIENT_ID             = data.terraform_remote_state.tailscale.outputs.github_deployer_client_id
   }

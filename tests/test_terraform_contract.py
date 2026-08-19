@@ -72,6 +72,7 @@ def test_remote_state_is_versioned_locked_and_bootstrapped_separately() -> None:
     assert "aws-bootstrap.tfstate" in makefile
     assert 'init -backend-config="path=$(AWS_STATE_FILE)"' in makefile
 
+
 def test_secret_containers_never_manage_secret_values() -> None:
     environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
 
@@ -79,6 +80,7 @@ def test_secret_containers_never_manage_secret_values() -> None:
     assert 'resource "aws_secretsmanager_secret" "metadata_postgres"' in environment
     assert 'resource "aws_secretsmanager_secret" "lightdash"' in environment
     assert 'resource "aws_secretsmanager_secret" "lightdash_ci"' in environment
+    assert 'resource "aws_secretsmanager_secret" "signoz_ci"' in environment
     assert 'resource "aws_secretsmanager_secret" "ocr"' in environment
     assert 'resource "aws_secretsmanager_secret" "cloudflare_tunnel"' in environment
     assert '"lakehouse/${local.environment}/airflow/runtime"' in environment
@@ -86,6 +88,7 @@ def test_secret_containers_never_manage_secret_values() -> None:
     assert '"lakehouse/${local.environment}/metadata-postgres/${each.key}"' in environment
     assert '"lakehouse/${local.environment}/lightdash/runtime"' in environment
     assert '"lakehouse/${local.environment}/lightdash/ci"' in environment
+    assert '"lakehouse/${local.environment}/signoz/ci"' in environment
     assert '"lakehouse/${local.environment}/ocr/providers/${each.key}"' in environment
     assert '"lakehouse/${local.environment}/cloudflare/tunnel-token"' in environment
     assert "aws_secretsmanager_secret_version" not in environment
@@ -141,6 +144,7 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
         "github-image-publisher",
         "github-emr-publisher",
         "github-lightdash-deployer",
+        "github-signoz-deployer",
     ):
         assert f'name = "${{var.name_prefix}}-{role}"' in normalized_identity
     assert 'name = "${var.name_prefix}-${replace(each.key, "_", "-")}"' in normalized_identity
@@ -480,10 +484,13 @@ def test_github_delivery_configuration_is_terraform_owned_and_state_derived() ->
         "AWS_EMR_PUBLISHER_ROLE_ARN",
         "AWS_IMAGE_PUBLISHER_ROLE_ARN",
         "AWS_LIGHTDASH_DEPLOYER_ROLE_ARN",
+        "AWS_SIGNOZ_DEPLOYER_ROLE_ARN",
         "EMR_ARTIFACTS_URI",
         "EMR_CODE_PARAMETER_NAME",
         "LIGHTDASH_CI_SECRET_ID",
         "LIGHTDASH_URL",
+        "SIGNOZ_CI_SECRET_ID",
+        "SIGNOZ_URL",
         "TAILSCALE_AUDIENCE",
         "TAILSCALE_CLIENT_ID",
     ):

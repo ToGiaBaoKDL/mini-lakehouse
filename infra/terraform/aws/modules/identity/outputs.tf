@@ -57,3 +57,8 @@ output "github_lightdash_deployer_role_arn" {
   description = "GitHub Actions role allowed to read the Lightdash CI token."
   value       = aws_iam_role.github_lightdash_deployer.arn
 }
+
+output "github_signoz_deployer_role_arn" {
+  description = "GitHub Actions role allowed to read the SigNoz CI token."
+  value       = aws_iam_role.github_signoz_deployer.arn
+}

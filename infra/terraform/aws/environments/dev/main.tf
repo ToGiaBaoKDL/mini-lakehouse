@@ -172,6 +172,7 @@ module "identity" {
     aws_secretsmanager_secret.metadata_postgres["lightdash"].arn,
   ])
   lightdash_ci_secret_arn = aws_secretsmanager_secret.lightdash_ci.arn
+  signoz_ci_secret_arn    = aws_secretsmanager_secret.signoz_ci.arn
   ocr_secret_arns         = toset([for secret in aws_secretsmanager_secret.ocr : secret.arn])
   services_deployer_secret_arns = toset([
     aws_secretsmanager_secret.cloudflare_tunnel.arn,

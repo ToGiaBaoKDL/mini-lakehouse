@@ -168,6 +168,16 @@ variable "lightdash_ci_secret_arn" {
   }
 }
 
+variable "signoz_ci_secret_arn" {
+  type        = string
+  description = "Exact Secrets Manager resource readable by protected SigNoz deployment jobs."
+
+  validation {
+    condition     = startswith(var.signoz_ci_secret_arn, "arn:")
+    error_message = "signoz_ci_secret_arn must be an ARN."
+  }
+}
+
 variable "ocr_secret_arns" {
   type        = set(string)
   description = "Remote-provider credentials readable by the OCR worker."

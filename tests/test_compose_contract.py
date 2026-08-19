@@ -463,4 +463,3 @@ def test_platform_control_plane_is_one_owned_workspace_package() -> None:
         path.read_text(encoding="utf-8") for path in Path("platform/src/lakehouse").rglob("*.py")
     )
     assert "lakehouse.platform" not in sources
-

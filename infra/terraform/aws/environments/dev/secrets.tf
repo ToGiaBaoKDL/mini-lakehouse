@@ -43,6 +43,13 @@ resource "aws_secretsmanager_secret" "lightdash_ci" {
   tags                    = local.tags
 }
 
+resource "aws_secretsmanager_secret" "signoz_ci" {
+  name                    = "lakehouse/${local.environment}/signoz/ci"
+  description             = "Service account API access token for SigNoz dashboard and alert deployments."
+  recovery_window_in_days = 7
+  tags                    = local.tags
+}
+
 resource "aws_secretsmanager_secret" "airflow" {
   for_each = local.airflow_secret_names
 

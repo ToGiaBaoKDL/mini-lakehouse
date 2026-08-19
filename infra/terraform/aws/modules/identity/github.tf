@@ -98,3 +98,22 @@ resource "aws_iam_role_policy" "github_lightdash_deployer" {
   role   = aws_iam_role.github_lightdash_deployer.id
   policy = data.aws_iam_policy_document.github_lightdash_deployer.json
 }
+
+resource "aws_iam_role" "github_signoz_deployer" {
+  name               = "${var.name_prefix}-github-signoz-deployer"
+  assume_role_policy = data.aws_iam_policy_document.github_environment_trust.json
+  tags               = var.tags
+}
+
+data "aws_iam_policy_document" "github_signoz_deployer" {
+  statement {
+    sid       = "ReadSignozCiToken"
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [var.signoz_ci_secret_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "github_signoz_deployer" {
+  role   = aws_iam_role.github_signoz_deployer.id
+  policy = data.aws_iam_policy_document.github_signoz_deployer.json
+}

@@ -19,12 +19,18 @@ output "github_ci_role_arns" {
     emr_publisher      = module.identity.github_emr_publisher_role_arn
     image_publisher    = module.identity.github_image_publisher_role_arn
     lightdash_deployer = module.identity.github_lightdash_deployer_role_arn
+    signoz_deployer    = module.identity.github_signoz_deployer_role_arn
   }
 }
 
 output "lightdash_ci_secret_id" {
   description = "Secrets Manager identifier populated with the Lightdash CI personal access token."
   value       = aws_secretsmanager_secret.lightdash_ci.name
+}
+
+output "signoz_ci_secret_id" {
+  description = "Secrets Manager identifier populated with the SigNoz CI API access token."
+  value       = aws_secretsmanager_secret.signoz_ci.name
 }
 
 output "container_repository_urls" {
