@@ -81,7 +81,7 @@ def test_ci_validation_does_not_require_remote_state() -> None:
 
     assert "terraform-validate: terraform-cache ##" in makefile
     assert makefile.count("init -backend=false -lockfile=readonly") == 1
-    assert makefile.count('validate_root "$(TERRAFORM_VALIDATE_DATA_DIR)/') == 6
+    assert makefile.count('validate_root "$(TERRAFORM_VALIDATE_DATA_DIR)/') == 7
     assert "TF_REGISTRY_CLIENT_TIMEOUT ?= 30" in makefile
     assert "TF_REGISTRY_DISCOVERY_RETRY ?= 3" in makefile
     assert "export TF_REGISTRY_CLIENT_TIMEOUT" in makefile
