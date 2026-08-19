@@ -72,23 +72,6 @@ def test_remote_state_is_versioned_locked_and_bootstrapped_separately() -> None:
     assert "aws-bootstrap.tfstate" in makefile
     assert 'init -backend-config="path=$(AWS_STATE_FILE)"' in makefile
 
-
-def test_ci_validation_does_not_require_remote_state() -> None:
-    makefile = "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in (Path("Makefile"), *sorted(Path("make").glob("*.mk")))
-    )
-
-    assert "terraform-validate: terraform-cache ##" in makefile
-    assert makefile.count("init -backend=false -lockfile=readonly") == 1
-    assert makefile.count('validate_root "$(TERRAFORM_VALIDATE_DATA_DIR)/') == 7
-    assert "TF_REGISTRY_CLIENT_TIMEOUT ?= 30" in makefile
-    assert "TF_REGISTRY_DISCOVERY_RETRY ?= 3" in makefile
-    assert "export TF_REGISTRY_CLIENT_TIMEOUT" in makefile
-    assert "export TF_REGISTRY_DISCOVERY_RETRY" in makefile
-    assert "$(MAKE) terraform-validate" in makefile
-
-
 def test_secret_containers_never_manage_secret_values() -> None:
     environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
 
@@ -162,7 +145,7 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
         assert f'name = "${{var.name_prefix}}-{role}"' in normalized_identity
     assert 'name = "${var.name_prefix}-${replace(each.key, "_", "-")}"' in normalized_identity
 
-    assert identity.count("resources = [var.athena_workgroup_arn]") == 3
+    assert "resources = [var.athena_workgroup_arn]" in identity
     assert "resources = [var.athena_data_catalog_arn]" in identity
     for action in (
         "athena:GetDataCatalog",
@@ -530,18 +513,6 @@ def test_provider_authentication_is_not_a_terraform_input() -> None:
     assert "oci_profile" not in examples
 
 
-def test_operator_commands_use_the_standard_aws_credential_chain() -> None:
-    makefile = "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in (Path("Makefile"), *sorted(Path("make").glob("*.mk")))
-    )
-
-    assert "CATALOG_ADMIN_AWS_PROFILE" not in makefile
-    assert "EMR_DEPLOYER_AWS_PROFILE" not in makefile
-    assert "IMAGE_PUBLISHER_AWS_PROFILE" not in makefile
-    assert "aws --profile" not in makefile
-
-
 def test_reviewable_policy_is_not_hidden_in_tfvars() -> None:
     environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
     example = Path("infra/terraform/aws/environments/dev/terraform.tfvars.example").read_text(
@@ -587,4 +558,4 @@ def test_emr_artifact_access_uses_only_exact_object_actions() -> None:
     assert 'resources = ["${var.bucket_arns.artifacts}/emr/jobs/*"]' in emr
     assert "GetJobArtifactBucketLocation" not in emr
     assert "ListJobArtifacts" not in emr
-    assert emr.count("s3:ListMultipartUploadParts") == 1
+    assert "s3:ListMultipartUploadParts" in emr

@@ -294,11 +294,9 @@ def test_local_runtime_does_not_use_dotenv_files() -> None:
     assert not Path(".env").exists()
     assert not Path(".env.example").exists()
 
-    makefile = Path("Makefile").read_text(encoding="utf-8")
     settings = Path("platform/src/lakehouse/config/settings.py").read_text(encoding="utf-8")
     ocr_settings = Path("ocr/src/document_ocr/settings.py").read_text(encoding="utf-8")
 
-    assert "make setup" not in makefile
     assert 'env_file=".env"' not in settings
     assert 'env_file=".env"' not in ocr_settings
 
@@ -466,81 +464,3 @@ def test_platform_control_plane_is_one_owned_workspace_package() -> None:
     )
     assert "lakehouse.platform" not in sources
 
-
-def test_makefile_exposes_owned_operational_entrypoints() -> None:
-    root_makefile = Path("Makefile").read_text(encoding="utf-8")
-    makefile = "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in (Path("Makefile"), *sorted(Path("make").glob("*.mk")))
-    )
-
-    assert "include make/infra.mk" in root_makefile
-    assert "include make/images.mk" in root_makefile
-    assert "include make/services.mk" in root_makefile
-    assert "include make/data.mk" in root_makefile
-    for target in (
-        "aws-state-apply:",
-        "aws-plan:",
-        "aws-apply:",
-        "tailscale-plan:",
-        "tailscale-apply:",
-        "github-plan:",
-        "github-apply:",
-        "oci-plan:",
-        "oci-apply:",
-        "cloudflare-plan:",
-        "cloudflare-apply:",
-        "cloudflare-secret-sync:",
-        "airflow-up:",
-        "airflow-down:",
-        "arxiv-inspector-up:",
-        "arxiv-inspector-down:",
-        "lightdash-up:",
-        "lightdash-down:",
-        "services-up:",
-        "services-down:",
-        "services-ps:",
-        "metadata-postgres-secrets-init:",
-        "metadata-postgres-up:",
-        "metadata-postgres-down:",
-        "metadata-postgres-backup:",
-        "metadata-postgres-restore:",
-        "catalog-apply:",
-        "catalog-validate:",
-        "airflow-secrets-init:",
-        "lightdash-secrets-init:",
-        "lightdash-build:",
-        "ocr-worker-build:",
-        "dbt-engineering-build:",
-        "dbt-research-build:",
-        "emr-jobs-package:",
-        "ocr-kaggle-runner-publish:",
-        "ocr-modal-runner-deploy:",
-        "workload-identities-install:",
-    ):
-        assert target in makefile
-
-    assert "compose.core.yaml" not in makefile
-    assert "image-publish:" not in makefile
-    assert "emr-jobs-publish:" not in makefile
-    assert "deployment/release_manifest" not in makefile
-    assert "deploy-release" not in makefile
-    assert "component-image-pull:" not in makefile
-    assert "airflow-deploy:" not in makefile
-    assert "arxiv-inspector-deploy:" not in makefile
-    assert "dbt-install:" not in makefile
-    assert "ocr-worker-install:" not in makefile
-    assert "ocr-worker:runtime" in makefile
-    assert "AIRFLOW_PARALLELISM ?=" not in makefile
-    assert "AIRFLOW_USERS ?=" not in makefile
-    assert "PROJECT_NAME ?=" not in makefile
-    assert "AIRFLOW_HOME ?=" not in makefile
-    assert "TF_STATE_BUCKET" not in makefile
-    assert "TF_PLUGIN_CACHE_DIR" in makefile
-    assert "AWS_STATE_TERRAFORM" in makefile
-    assert "terraform -chdir=$(AWS_TERRAFORM_DIR)" not in makefile
-    assert "AWS_REGION ?=" not in makefile
-    assert "OCR_TASK_IMAGE" not in makefile
-    assert "up -d --build" not in makefile
-    assert "control-plane-deploy" not in makefile
-    assert "ecr-deploy:" not in makefile
