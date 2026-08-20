@@ -107,7 +107,6 @@ resource "signoz_dashboard" "metadata_postgres" {
                       metrics = {
                         name          = "A"
                         signal        = "metrics"
-                        step_interval = "60"
                         aggregations = [
                           {
                             metric_name       = "postgresql.backends"
@@ -205,8 +204,7 @@ resource "signoz_dashboard" "metadata_postgres" {
                               metrics = {
                                 name          = "A"
                                 signal        = "metrics"
-                                step_interval = "60"
-                                aggregations = [
+                                        aggregations = [
                                   {
                                     metric_name       = "postgresql.commits"
                                     time_aggregation  = "rate"
@@ -247,8 +245,7 @@ resource "signoz_dashboard" "metadata_postgres" {
                               metrics = {
                                 name          = "B"
                                 signal        = "metrics"
-                                step_interval = "60"
-                                aggregations = [
+                                        aggregations = [
                                   {
                                     metric_name       = "postgresql.rollbacks"
                                     time_aggregation  = "rate"
@@ -344,7 +341,6 @@ resource "signoz_dashboard" "metadata_postgres" {
                       metrics = {
                         name          = "A"
                         signal        = "metrics"
-                        step_interval = "60"
                         aggregations = [
                           {
                             metric_name       = "postgresql.db_size"
@@ -437,7 +433,6 @@ resource "signoz_dashboard" "metadata_postgres" {
                       metrics = {
                         name          = "A"
                         signal        = "metrics"
-                        step_interval = "60"
                         aggregations = [
                           {
                             metric_name       = "postgresql.operations"
@@ -530,7 +525,6 @@ resource "signoz_dashboard" "metadata_postgres" {
                       metrics = {
                         name          = "A"
                         signal        = "metrics"
-                        step_interval = "60"
                         aggregations = [
                           {
                             metric_name       = "postgresql.rows"

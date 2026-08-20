@@ -988,6 +988,202 @@ resource "signoz_rule" "metadata_backup_lightdash_missing" {
   schema_version = "v2alpha1"
 }
 
+resource "signoz_rule" "synthetic_endpoint_probe_failed" {
+  alert      = "synthetic_endpoint_probe_failed"
+  alert_type = "METRIC_BASED_ALERT"
+  rule_type  = "threshold_rule"
+
+  description = "Synthetic HTTP probe failed for a public ingress endpoint (httpcheck.status < 1 for 3 consecutive minutes)."
+
+  annotations = {
+    summary     = "Public ingress endpoint probe failed"
+    description = "Synthetic blackbox probe for public endpoint {{http.url}} returned failing status."
+  }
+
+  labels = {
+    severity = "critical"
+    team     = "platform"
+  }
+
+  condition = {
+    composite_query = {
+      panel_type = "graph"
+      query_type = "builder"
+
+      queries = [
+        {
+          builder_query = {
+            type = "builder_query"
+            spec = {
+              metrics = {
+                name   = "A"
+                signal = "metrics"
+
+                aggregations = [
+                  {
+                    metric_name       = "httpcheck.status"
+                    time_aggregation  = "avg"
+                    space_aggregation = "avg"
+                  },
+                ]
+
+                group_by = [
+                  {
+                    name            = "http.url"
+                    field_context   = "attribute"
+                    field_data_type = "string"
+                  },
+                ]
+                limit = 100
+                order = [
+                  {
+                    key = {
+                      name = "avg(avg(httpcheck.status))"
+                    }
+                    direction = "asc"
+                  },
+                ]
+              }
+            }
+          }
+        },
+      ]
+    }
+
+    selected_query_name = "A"
+
+    thresholds = {
+      basic = {
+        kind = "basic"
+        spec = [
+          {
+            channels   = local.alert_channels
+            match_type = "at_least_once"
+            name       = "probe failed"
+            op         = "below"
+            target     = 1
+          },
+        ]
+      }
+    }
+  }
+
+  evaluation = {
+    rolling = {
+      kind = "rolling"
+      spec = {
+        eval_window = "5m"
+        frequency   = "1m"
+      }
+    }
+  }
+
+  notification_settings = {
+    group_by   = ["http.url"]
+    use_policy = local.use_policy
+  }
+
+  schema_version = "v2alpha1"
+}
+
+resource "signoz_rule" "synthetic_tls_cert_expiring_soon" {
+  alert      = "synthetic_tls_cert_expiring_soon"
+  alert_type = "METRIC_BASED_ALERT"
+  rule_type  = "threshold_rule"
+
+  description = "SSL/TLS certificate for a public ingress endpoint is expiring in less than 7 days (604800 seconds)."
+
+  annotations = {
+    summary     = "Public ingress TLS certificate expiring soon"
+    description = "The TLS certificate for {{http.url}} has less than 7 days remaining before expiration."
+  }
+
+  labels = {
+    severity = "warning"
+    team     = "platform"
+  }
+
+  condition = {
+    composite_query = {
+      panel_type = "graph"
+      query_type = "builder"
+
+      queries = [
+        {
+          builder_query = {
+            type = "builder_query"
+            spec = {
+              metrics = {
+                name   = "A"
+                signal = "metrics"
+
+                aggregations = [
+                  {
+                    metric_name       = "httpcheck.tls.cert_remaining"
+                    time_aggregation  = "avg"
+                    space_aggregation = "min"
+                  },
+                ]
+
+                group_by = [
+                  {
+                    name            = "http.url"
+                    field_context   = "attribute"
+                    field_data_type = "string"
+                  },
+                ]
+                limit = 100
+                order = [
+                  {
+                    key = {
+                      name = "min(avg(httpcheck.tls.cert_remaining))"
+                    }
+                    direction = "asc"
+                  },
+                ]
+              }
+            }
+          }
+        },
+      ]
+    }
+
+    selected_query_name = "A"
+
+    thresholds = {
+      basic = {
+        kind = "basic"
+        spec = [
+          {
+            channels   = local.alert_channels
+            match_type = "at_least_once"
+            name       = "cert expiring in < 7d"
+            op         = "below"
+            target     = 604800
+          },
+        ]
+      }
+    }
+  }
+
+  evaluation = {
+    rolling = {
+      kind = "rolling"
+      spec = {
+        eval_window = "1h"
+        frequency   = "15m"
+      }
+    }
+  }
+
+  notification_settings = {
+    group_by   = ["http.url"]
+    use_policy = local.use_policy
+  }
+
+  schema_version = "v2alpha1"
+}
+
 # No route policy is declared here: every rule threshold carries its own channel
 # list (local.alert_channels), which is how the operator channel reaches alerts.
 # A catch-all route policy would need an expression that is guaranteed to match

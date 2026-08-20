@@ -124,6 +124,21 @@ receivers:
     tls:
       insecure: true
 
+  http_check:
+    collection_interval: 60s
+    metrics:
+      httpcheck.tls.cert_remaining:
+        enabled: true
+    targets:
+      - endpoint: "https://observe.tgblab.io.vn/api/v1/health"
+        method: GET
+      - endpoint: "https://airflow.tgblab.io.vn/health"
+        method: GET
+      - endpoint: "https://lightdash.tgblab.io.vn/api/v1/health"
+        method: GET
+      - endpoint: "https://inspector.tgblab.io.vn/healthz"
+        method: GET
+
 processors:
   memory_limiter:
     check_interval: 2s
@@ -183,7 +198,7 @@ service:
       processors: [memory_limiter, transform/redact, resource_detection, batch]
       exporters: [otlp/signoz]
     metrics:
-      receivers: [otlp, hostmetrics, docker_stats, postgresql]
+      receivers: [otlp, hostmetrics, docker_stats, postgresql, http_check]
       processors: [memory_limiter, resource_detection, batch]
       exporters: [otlp/signoz]
     logs:

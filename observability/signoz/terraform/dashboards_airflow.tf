@@ -90,7 +90,6 @@ resource "signoz_dashboard" "airflow" {
                       metrics = {
                         name          = "A"
                         signal        = "metrics"
-                        step_interval = "60"
                         aggregations = [
                           {
                             metric_name       = "airflow.scheduler_heartbeat"
@@ -188,7 +187,6 @@ resource "signoz_dashboard" "airflow" {
                               metrics = {
                                 name          = "A"
                                 signal        = "metrics"
-                                step_interval = "60"
                                 aggregations = [
                                   {
                                     metric_name       = "airflow.ti_successes"
@@ -223,7 +221,6 @@ resource "signoz_dashboard" "airflow" {
                               metrics = {
                                 name          = "B"
                                 signal        = "metrics"
-                                step_interval = "60"
                                 aggregations = [
                                   {
                                     metric_name       = "airflow.ti_failures"
@@ -318,7 +315,6 @@ resource "signoz_dashboard" "airflow" {
                               metrics = {
                                 name          = "A"
                                 signal        = "metrics"
-                                step_interval = "60"
                                 aggregations = [
                                   {
                                     metric_name       = "airflow.task.duration"
@@ -353,7 +349,6 @@ resource "signoz_dashboard" "airflow" {
                               metrics = {
                                 name          = "B"
                                 signal        = "metrics"
-                                step_interval = "60"
                                 aggregations = [
                                   {
                                     metric_name       = "airflow.task.duration"
@@ -443,7 +438,6 @@ resource "signoz_dashboard" "airflow" {
                       metrics = {
                         name          = "A"
                         signal        = "metrics"
-                        step_interval = "60"
                         aggregations = [
                           {
                             metric_name       = "airflow.dagrun.duration.success"
@@ -536,7 +530,6 @@ resource "signoz_dashboard" "airflow" {
                       metrics = {
                         name          = "A"
                         signal        = "metrics"
-                        step_interval = "60"
                         aggregations = [
                           {
                             metric_name       = "airflow.dagrun.duration.failed"
@@ -629,7 +622,6 @@ resource "signoz_dashboard" "airflow" {
                       metrics = {
                         name          = "A"
                         signal        = "metrics"
-                        step_interval = "60"
                         aggregations = [
                           {
                             metric_name       = "airflow.scheduler.dagruns.running"
@@ -688,7 +680,6 @@ resource "signoz_dashboard" "airflow" {
                       traces = {
                         name          = "A"
                         signal        = "traces"
-                        step_interval = "60"
                         filter = {
                           expression = "service.name = 'airflow'"
                         }

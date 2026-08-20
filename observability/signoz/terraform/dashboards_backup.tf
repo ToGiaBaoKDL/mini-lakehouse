@@ -53,9 +53,8 @@ resource "signoz_dashboard" "metadata_backup_status" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       logs = {
-                        name          = "A"
-                        signal        = "logs"
-                        step_interval = "60"
+                        name   = "A"
+                        signal = "logs"
                         filter = {
                           expression = "status EXISTS"
                         }
@@ -169,9 +168,8 @@ resource "signoz_dashboard" "metadata_backup_status" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       logs = {
-                        name          = "A"
-                        signal        = "logs"
-                        step_interval = "300"
+                        name   = "A"
+                        signal = "logs"
                         aggregations = [
                           {
                             expression = "count()"
@@ -260,9 +258,8 @@ resource "signoz_dashboard" "metadata_backup_status" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       logs = {
-                        name          = "A"
-                        signal        = "logs"
-                        step_interval = "3600"
+                        name   = "A"
+                        signal = "logs"
                         aggregations = [
                           {
                             expression = "count()"
@@ -351,9 +348,8 @@ resource "signoz_dashboard" "metadata_backup_status" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       logs = {
-                        name          = "A"
-                        signal        = "logs"
-                        step_interval = "3600"
+                        name   = "A"
+                        signal = "logs"
                         aggregations = [
                           {
                             expression = "avg(duration_seconds)"

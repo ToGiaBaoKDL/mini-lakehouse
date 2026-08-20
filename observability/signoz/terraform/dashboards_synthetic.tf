@@ -1,14 +1,17 @@
-# Host dashboard: hostmetrics receiver signals (observability/signoz/collector/config.yaml).
-# Metric attribute contexts follow the OTel collector hostmetrics semantics:
-# host.name is a resource attribute, state/mountpoint/device are metric attributes.
+# Synthetic Probing dashboard: http_check receiver signals (observability/signoz/collector/config.yaml).
+# End-to-end blackbox HTTP availability, TLS certificate validity, latency, and error probes across all public Cloudflare ingress endpoints.
 
-resource "signoz_dashboard" "host_overview" {
+resource "signoz_dashboard" "synthetic_probing" {
   schema_version = "v6"
-  name           = "lakehouse-host-overview"
+  name           = "lakehouse-synthetic-probing"
   tags = [
     {
       key   = "tag"
-      value = "host"
+      value = "synthetic"
+    },
+    {
+      key   = "tag"
+      value = "ingress"
     },
     {
       key   = "tag"
@@ -22,8 +25,8 @@ resource "signoz_dashboard" "host_overview" {
 
   spec = {
     display = {
-      name        = "Host Overview"
-      description = "Host CPU, memory, load, filesystem, disk and network from the hostmetrics receiver."
+      name        = "Synthetic Probing"
+      description = "End-to-end HTTP availability, TLS certificate validity, latency, and error probes across all public Cloudflare ingress endpoints."
     }
     links = []
     variables = [
@@ -32,18 +35,18 @@ resource "signoz_dashboard" "host_overview" {
           kind = "ListVariable"
           spec = {
             display = {
-              name        = "host_name"
-              description = "Host reporting hostmetrics"
+              name        = "http_url"
+              description = "Probed endpoint URL (http.url)"
             }
             allow_all_value = true
             allow_multiple  = true
             sort            = "alphabetical-asc"
-            name            = "host_name"
+            name            = "http_url"
             plugin = {
               dynamic_variable = {
                 kind = "signoz/DynamicVariable"
                 spec = {
-                  name   = "host.name"
+                  name   = "http.url"
                   signal = "metrics"
                 }
               }
@@ -53,12 +56,12 @@ resource "signoz_dashboard" "host_overview" {
       },
     ]
     panels = {
-      "f1014990-91b4-543a-ab60-99ddd4772ef8" = {
+      "a1100001-0001-4000-8000-000000000001" = {
         kind = "Panel"
         spec = {
           display = {
-            name        = "CPU utilization"
-            description = "Host CPU utilization by state (hostmetrics)."
+            name        = "Endpoint availability"
+            description = "HTTP availability ratio (1.0 = 100% healthy, 0 = probe failed)."
           }
           links = []
           plugin = {
@@ -77,7 +80,7 @@ resource "signoz_dashboard" "host_overview" {
                   line_interpolation = "spline"
                   show_points        = false
                   line_style         = "solid"
-                  fill_mode          = "solid"
+                  fill_mode          = "none"
                   span_gaps = {
                     fill_only_below = false
                     fill_less_than  = "0s"
@@ -85,6 +88,7 @@ resource "signoz_dashboard" "host_overview" {
                 }
                 axes = {
                   soft_min     = 0
+                  soft_max     = 1
                   is_log_scale = false
                 }
                 legend = {
@@ -104,21 +108,21 @@ resource "signoz_dashboard" "host_overview" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       metrics = {
-                        name          = "A"
-                        signal        = "metrics"
+                        name   = "A"
+                        signal = "metrics"
                         aggregations = [
                           {
-                            metric_name       = "system.cpu.utilization"
+                            metric_name       = "httpcheck.status"
                             time_aggregation  = "avg"
                             space_aggregation = "avg"
                           },
                         ]
                         filter = {
-                          expression = "host.name IN $host_name"
+                          expression = "http.url IN $http_url"
                         }
                         group_by = [
                           {
-                            name            = "state"
+                            name            = "http.url"
                             field_context   = "attribute"
                             field_data_type = "string"
                           },
@@ -126,12 +130,12 @@ resource "signoz_dashboard" "host_overview" {
                         having = {
                           expression = ""
                         }
-                        legend = "{{state}}"
+                        legend = "{{http.url}}"
                         limit  = 100
                         order = [
                           {
                             key = {
-                              name = "avg(avg(system.cpu.utilization))"
+                              name = "avg(avg(httpcheck.status))"
                             }
                             direction = "desc"
                           },
@@ -145,12 +149,12 @@ resource "signoz_dashboard" "host_overview" {
           ]
         }
       }
-      "d454583c-b503-56cc-a890-313bdc4cd55b" = {
+      "a1100001-0001-4000-8000-000000000002" = {
         kind = "Panel"
         spec = {
           display = {
-            name        = "Memory usage"
-            description = "Host memory usage by state (hostmetrics)."
+            name        = "TLS certificate remaining validity"
+            description = "Time remaining until SSL/TLS certificate expiration for HTTPS endpoints."
           }
           links = []
           plugin = {
@@ -162,14 +166,14 @@ resource "signoz_dashboard" "host_overview" {
                   fill_spans      = false
                 }
                 formatting = {
-                  unit              = "bytes"
-                  decimal_precision = "2"
+                  unit              = "s"
+                  decimal_precision = "0"
                 }
                 chart_appearance = {
-                  line_interpolation = "spline"
+                  line_interpolation = "linear"
                   show_points        = false
                   line_style         = "solid"
-                  fill_mode          = "solid"
+                  fill_mode          = "none"
                   span_gaps = {
                     fill_only_below = false
                     fill_less_than  = "0s"
@@ -196,21 +200,21 @@ resource "signoz_dashboard" "host_overview" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       metrics = {
-                        name          = "A"
-                        signal        = "metrics"
+                        name   = "A"
+                        signal = "metrics"
                         aggregations = [
                           {
-                            metric_name       = "system.memory.usage"
+                            metric_name       = "httpcheck.tls.cert_remaining"
                             time_aggregation  = "avg"
-                            space_aggregation = "sum"
+                            space_aggregation = "min"
                           },
                         ]
                         filter = {
-                          expression = "host.name IN $host_name"
+                          expression = "http.url IN $http_url"
                         }
                         group_by = [
                           {
-                            name            = "state"
+                            name            = "http.url"
                             field_context   = "attribute"
                             field_data_type = "string"
                           },
@@ -218,12 +222,104 @@ resource "signoz_dashboard" "host_overview" {
                         having = {
                           expression = ""
                         }
-                        legend = "{{state}}"
+                        legend = "{{http.url}} cert remaining"
                         limit  = 100
                         order = [
                           {
                             key = {
-                              name = "sum(avg(system.memory.usage))"
+                              name = "min(avg(httpcheck.tls.cert_remaining))"
+                            }
+                            direction = "asc"
+                          },
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            },
+          ]
+        }
+      }
+      "a1100001-0001-4000-8000-000000000003" = {
+        kind = "Panel"
+        spec = {
+          display = {
+            name        = "Average response time"
+            description = "Average HTTP probe response duration in milliseconds."
+          }
+          links = []
+          plugin = {
+            time_series_panel = {
+              kind = "signoz/TimeSeriesPanel"
+              spec = {
+                visualization = {
+                  time_preference = "global_time"
+                  fill_spans      = false
+                }
+                formatting = {
+                  unit              = "ms"
+                  decimal_precision = "2"
+                }
+                chart_appearance = {
+                  line_interpolation = "spline"
+                  show_points        = false
+                  line_style         = "solid"
+                  fill_mode          = "none"
+                  span_gaps = {
+                    fill_only_below = false
+                    fill_less_than  = "0s"
+                  }
+                }
+                axes = {
+                  soft_min     = 0
+                  is_log_scale = false
+                }
+                legend = {
+                  position = "bottom"
+                  mode     = "list"
+                }
+              }
+            }
+          }
+          queries = [
+            {
+              kind = "time_series"
+              spec = {
+                name = "A"
+                plugin = {
+                  builder_query = {
+                    kind = "signoz/BuilderQuery"
+                    spec = {
+                      metrics = {
+                        name   = "A"
+                        signal = "metrics"
+                        aggregations = [
+                          {
+                            metric_name       = "httpcheck.duration"
+                            time_aggregation  = "avg"
+                            space_aggregation = "avg"
+                          },
+                        ]
+                        filter = {
+                          expression = "http.url IN $http_url"
+                        }
+                        group_by = [
+                          {
+                            name            = "http.url"
+                            field_context   = "attribute"
+                            field_data_type = "string"
+                          },
+                        ]
+                        having = {
+                          expression = ""
+                        }
+                        legend = "{{http.url}} avg"
+                        limit  = 100
+                        order = [
+                          {
+                            key = {
+                              name = "avg(avg(httpcheck.duration))"
                             }
                             direction = "desc"
                           },
@@ -237,12 +333,196 @@ resource "signoz_dashboard" "host_overview" {
           ]
         }
       }
-      "91b44d33-cb13-5ba3-bd31-60dac91d0971" = {
+      "a1100001-0001-4000-8000-000000000004" = {
         kind = "Panel"
         spec = {
           display = {
-            name        = "Load average"
-            description = "1, 5 and 15 minute load averages (hostmetrics)."
+            name        = "Peak response time"
+            description = "Peak HTTP probe response duration (max duration in ms per interval)."
+          }
+          links = []
+          plugin = {
+            time_series_panel = {
+              kind = "signoz/TimeSeriesPanel"
+              spec = {
+                visualization = {
+                  time_preference = "global_time"
+                  fill_spans      = false
+                }
+                formatting = {
+                  unit              = "ms"
+                  decimal_precision = "2"
+                }
+                chart_appearance = {
+                  line_interpolation = "spline"
+                  show_points        = false
+                  line_style         = "solid"
+                  fill_mode          = "none"
+                  span_gaps = {
+                    fill_only_below = false
+                    fill_less_than  = "0s"
+                  }
+                }
+                axes = {
+                  soft_min     = 0
+                  is_log_scale = false
+                }
+                legend = {
+                  position = "bottom"
+                  mode     = "list"
+                }
+              }
+            }
+          }
+          queries = [
+            {
+              kind = "time_series"
+              spec = {
+                name = "A"
+                plugin = {
+                  builder_query = {
+                    kind = "signoz/BuilderQuery"
+                    spec = {
+                      metrics = {
+                        name   = "A"
+                        signal = "metrics"
+                        aggregations = [
+                          {
+                            metric_name       = "httpcheck.duration"
+                            time_aggregation  = "avg"
+                            space_aggregation = "max"
+                          },
+                        ]
+                        filter = {
+                          expression = "http.url IN $http_url"
+                        }
+                        group_by = [
+                          {
+                            name            = "http.url"
+                            field_context   = "attribute"
+                            field_data_type = "string"
+                          },
+                        ]
+                        having = {
+                          expression = ""
+                        }
+                        legend = "{{http.url}} max"
+                        limit  = 100
+                        order = [
+                          {
+                            key = {
+                              name = "max(avg(httpcheck.duration))"
+                            }
+                            direction = "desc"
+                          },
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            },
+          ]
+        }
+      }
+      "a1100001-0001-4000-8000-000000000005" = {
+        kind = "Panel"
+        spec = {
+          display = {
+            name        = "Probe error rate"
+            description = "Rate of probe failures per second across endpoints."
+          }
+          links = []
+          plugin = {
+            time_series_panel = {
+              kind = "signoz/TimeSeriesPanel"
+              spec = {
+                visualization = {
+                  time_preference = "global_time"
+                  fill_spans      = false
+                }
+                formatting = {
+                  unit              = "ops"
+                  decimal_precision = "2"
+                }
+                chart_appearance = {
+                  line_interpolation = "spline"
+                  show_points        = true
+                  line_style         = "solid"
+                  fill_mode          = "none"
+                  span_gaps = {
+                    fill_only_below = false
+                    fill_less_than  = "0s"
+                  }
+                }
+                axes = {
+                  soft_min     = 0
+                  is_log_scale = false
+                }
+                legend = {
+                  position = "bottom"
+                  mode     = "list"
+                }
+              }
+            }
+          }
+          queries = [
+            {
+              kind = "time_series"
+              spec = {
+                name = "A"
+                plugin = {
+                  builder_query = {
+                    kind = "signoz/BuilderQuery"
+                    spec = {
+                      metrics = {
+                        name   = "A"
+                        signal = "metrics"
+                        aggregations = [
+                          {
+                            metric_name       = "httpcheck.error"
+                            time_aggregation  = "rate"
+                            space_aggregation = "sum"
+                          },
+                        ]
+                        filter = {
+                          expression = "http.url IN $http_url"
+                        }
+                        group_by = [
+                          {
+                            name            = "http.url"
+                            field_context   = "attribute"
+                            field_data_type = "string"
+                          },
+                        ]
+                        having = {
+                          expression = ""
+                        }
+                        legend = "{{http.url}} error rate"
+                        limit  = 100
+                        order = [
+                          {
+                            key = {
+                              name = "sum(rate(httpcheck.error))"
+                            }
+                            direction = "desc"
+                          },
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            },
+          ]
+        }
+      }
+      "a1100001-0001-4000-8000-000000000006" = {
+        kind = "Panel"
+        spec = {
+          display = {
+            name        = "Cumulative probe failures"
+            description = "Total count of failed synthetic probe attempts per endpoint."
           }
           links = []
           plugin = {
@@ -255,173 +535,11 @@ resource "signoz_dashboard" "host_overview" {
                 }
                 formatting = {
                   unit              = "short"
-                  decimal_precision = "2"
+                  decimal_precision = "0"
                 }
                 chart_appearance = {
                   line_interpolation = "spline"
-                  show_points        = false
-                  line_style         = "solid"
-                  fill_mode          = "none"
-                  span_gaps = {
-                    fill_only_below = false
-                    fill_less_than  = "0s"
-                  }
-                }
-                axes = {
-                  soft_min     = 0
-                  is_log_scale = false
-                }
-                legend = {
-                  position = "bottom"
-                  mode     = "list"
-                }
-              }
-            }
-          }
-          queries = [
-            {
-              kind = "time_series"
-              spec = {
-                name = "A"
-                plugin = {
-                  composite_query = {
-                    kind = "signoz/CompositeQuery"
-                    spec = {
-                      queries = [
-                        {
-                          builder_query = {
-                            type = "builder_query"
-                            spec = {
-                              metrics = {
-                                name          = "A"
-                                signal        = "metrics"
-                                        aggregations = [
-                                  {
-                                    metric_name       = "system.cpu.load_average.1m"
-                                    time_aggregation  = "avg"
-                                    space_aggregation = "max"
-                                  },
-                                ]
-                                filter = {
-                                  expression = "host.name IN $host_name"
-                                }
-                                having = {
-                                  expression = ""
-                                }
-                                legend = "load 1"
-                                limit  = 100
-                                order = [
-                                  {
-                                    key = {
-                                      name = "max(avg(system.cpu.load_average.1m))"
-                                    }
-                                    direction = "desc"
-                                  },
-                                ]
-                              }
-                            }
-                          }
-                        },
-                        {
-                          builder_query = {
-                            type = "builder_query"
-                            spec = {
-                              metrics = {
-                                name          = "B"
-                                signal        = "metrics"
-                                        aggregations = [
-                                  {
-                                    metric_name       = "system.cpu.load_average.5m"
-                                    time_aggregation  = "avg"
-                                    space_aggregation = "max"
-                                  },
-                                ]
-                                filter = {
-                                  expression = "host.name IN $host_name"
-                                }
-                                having = {
-                                  expression = ""
-                                }
-                                legend = "load 5"
-                                limit  = 100
-                                order = [
-                                  {
-                                    key = {
-                                      name = "max(avg(system.cpu.load_average.5m))"
-                                    }
-                                    direction = "desc"
-                                  },
-                                ]
-                              }
-                            }
-                          }
-                        },
-                        {
-                          builder_query = {
-                            type = "builder_query"
-                            spec = {
-                              metrics = {
-                                name          = "C"
-                                signal        = "metrics"
-                                        aggregations = [
-                                  {
-                                    metric_name       = "system.cpu.load_average.15m"
-                                    time_aggregation  = "avg"
-                                    space_aggregation = "max"
-                                  },
-                                ]
-                                filter = {
-                                  expression = "host.name IN $host_name"
-                                }
-                                having = {
-                                  expression = ""
-                                }
-                                legend = "load 15"
-                                limit  = 100
-                                order = [
-                                  {
-                                    key = {
-                                      name = "max(avg(system.cpu.load_average.15m))"
-                                    }
-                                    direction = "desc"
-                                  },
-                                ]
-                              }
-                            }
-                          }
-                        },
-                      ]
-                    }
-                  }
-                }
-              }
-            },
-          ]
-        }
-      }
-      "03baacbf-1d8d-57d2-9856-75fd006fafac" = {
-        kind = "Panel"
-        spec = {
-          display = {
-            name        = "Filesystem utilization"
-            description = "Filesystem utilization by mountpoint; alerts fire at 70/80/90%."
-          }
-          links = []
-          plugin = {
-            time_series_panel = {
-              kind = "signoz/TimeSeriesPanel"
-              spec = {
-                visualization = {
-                  time_preference = "global_time"
-                  fill_spans      = false
-                }
-                formatting = {
-                  unit              = "percentunit"
-                  decimal_precision = "2"
-                }
-                chart_appearance = {
-                  line_interpolation = "spline"
-                  show_points        = false
+                  show_points        = true
                   line_style         = "solid"
                   fill_mode          = "none"
                   span_gaps = {
@@ -450,118 +568,21 @@ resource "signoz_dashboard" "host_overview" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       metrics = {
-                        name          = "A"
-                        signal        = "metrics"
+                        name   = "A"
+                        signal = "metrics"
                         aggregations = [
                           {
-                            metric_name       = "system.filesystem.utilization"
-                            time_aggregation  = "avg"
-                            space_aggregation = "max"
-                          },
-                        ]
-                        filter = {
-                          expression = "host.name IN $host_name"
-                        }
-                        group_by = [
-                          {
-                            name            = "mountpoint"
-                            field_context   = "attribute"
-                            field_data_type = "string"
-                          },
-                        ]
-                        having = {
-                          expression = ""
-                        }
-                        legend = "{{mountpoint}}"
-                        limit  = 100
-                        order = [
-                          {
-                            key = {
-                              name = "max(avg(system.filesystem.utilization))"
-                            }
-                            direction = "desc"
-                          },
-                        ]
-                      }
-                    }
-                  }
-                }
-              }
-            },
-          ]
-        }
-      }
-      "ae42dd7f-d9d0-5b9f-afc0-889b5e48a9b0" = {
-        kind = "Panel"
-        spec = {
-          display = {
-            name        = "Disk IO"
-            description = "Disk IO rate (bytes/s) by device and direction."
-          }
-          links = []
-          plugin = {
-            time_series_panel = {
-              kind = "signoz/TimeSeriesPanel"
-              spec = {
-                visualization = {
-                  time_preference = "global_time"
-                  fill_spans      = false
-                }
-                formatting = {
-                  unit              = "bytes"
-                  decimal_precision = "2"
-                }
-                chart_appearance = {
-                  line_interpolation = "spline"
-                  show_points        = false
-                  line_style         = "solid"
-                  fill_mode          = "none"
-                  span_gaps = {
-                    fill_only_below = false
-                    fill_less_than  = "0s"
-                  }
-                }
-                axes = {
-                  soft_min     = 0
-                  is_log_scale = false
-                }
-                legend = {
-                  position = "bottom"
-                  mode     = "list"
-                }
-              }
-            }
-          }
-          queries = [
-            {
-              kind = "time_series"
-              spec = {
-                name = "A"
-                plugin = {
-                  builder_query = {
-                    kind = "signoz/BuilderQuery"
-                    spec = {
-                      metrics = {
-                        name          = "A"
-                        signal        = "metrics"
-                        aggregations = [
-                          {
-                            metric_name       = "system.disk.io"
-                            time_aggregation  = "rate"
+                            metric_name       = "httpcheck.error"
+                            time_aggregation  = "increase"
                             space_aggregation = "sum"
                           },
                         ]
                         filter = {
-                          expression = "host.name IN $host_name"
+                          expression = "http.url IN $http_url"
                         }
                         group_by = [
                           {
-                            name            = "device"
-                            field_context   = "attribute"
-                            field_data_type = "string"
-                          },
-                          {
-                            name            = "direction"
+                            name            = "http.url"
                             field_context   = "attribute"
                             field_data_type = "string"
                           },
@@ -569,109 +590,12 @@ resource "signoz_dashboard" "host_overview" {
                         having = {
                           expression = ""
                         }
-                        legend = "{{device}} {{direction}}"
+                        legend = "{{http.url}} failures"
                         limit  = 100
                         order = [
                           {
                             key = {
-                              name = "sum(rate(system.disk.io))"
-                            }
-                            direction = "desc"
-                          },
-                        ]
-                      }
-                    }
-                  }
-                }
-              }
-            },
-          ]
-        }
-      }
-      "34878f77-4459-5302-b39d-7a2586df87d9" = {
-        kind = "Panel"
-        spec = {
-          display = {
-            name        = "Network IO"
-            description = "Network receive/transmit rate (bytes/s) by device."
-          }
-          links = []
-          plugin = {
-            time_series_panel = {
-              kind = "signoz/TimeSeriesPanel"
-              spec = {
-                visualization = {
-                  time_preference = "global_time"
-                  fill_spans      = false
-                }
-                formatting = {
-                  unit              = "bytes"
-                  decimal_precision = "2"
-                }
-                chart_appearance = {
-                  line_interpolation = "spline"
-                  show_points        = false
-                  line_style         = "solid"
-                  fill_mode          = "none"
-                  span_gaps = {
-                    fill_only_below = false
-                    fill_less_than  = "0s"
-                  }
-                }
-                axes = {
-                  soft_min     = 0
-                  is_log_scale = false
-                }
-                legend = {
-                  position = "bottom"
-                  mode     = "list"
-                }
-              }
-            }
-          }
-          queries = [
-            {
-              kind = "time_series"
-              spec = {
-                name = "A"
-                plugin = {
-                  builder_query = {
-                    kind = "signoz/BuilderQuery"
-                    spec = {
-                      metrics = {
-                        name          = "A"
-                        signal        = "metrics"
-                        aggregations = [
-                          {
-                            metric_name       = "system.network.io"
-                            time_aggregation  = "rate"
-                            space_aggregation = "sum"
-                          },
-                        ]
-                        filter = {
-                          expression = "host.name IN $host_name"
-                        }
-                        group_by = [
-                          {
-                            name            = "device"
-                            field_context   = "attribute"
-                            field_data_type = "string"
-                          },
-                          {
-                            name            = "direction"
-                            field_context   = "attribute"
-                            field_data_type = "string"
-                          },
-                        ]
-                        having = {
-                          expression = ""
-                        }
-                        legend = "{{device}} {{direction}}"
-                        limit  = 100
-                        order = [
-                          {
-                            key = {
-                              name = "sum(rate(system.network.io))"
+                              name = "sum(increase(httpcheck.error))"
                             }
                             direction = "desc"
                           },
@@ -692,7 +616,7 @@ resource "signoz_dashboard" "host_overview" {
           kind = "Grid"
           spec = {
             display = {
-              title = "Overview"
+              title = "Availability & SSL Certificate Health"
               collapse = {
                 open = true
               }
@@ -704,7 +628,7 @@ resource "signoz_dashboard" "host_overview" {
                 width  = 6
                 height = 6
                 content = {
-                  ref = "#/spec/panels/f1014990-91b4-543a-ab60-99ddd4772ef8"
+                  ref = "#/spec/panels/a1100001-0001-4000-8000-000000000001"
                 }
               },
               {
@@ -713,25 +637,7 @@ resource "signoz_dashboard" "host_overview" {
                 width  = 6
                 height = 6
                 content = {
-                  ref = "#/spec/panels/d454583c-b503-56cc-a890-313bdc4cd55b"
-                }
-              },
-              {
-                x      = 0
-                y      = 6
-                width  = 4
-                height = 6
-                content = {
-                  ref = "#/spec/panels/91b44d33-cb13-5ba3-bd31-60dac91d0971"
-                }
-              },
-              {
-                x      = 4
-                y      = 6
-                width  = 8
-                height = 6
-                content = {
-                  ref = "#/spec/panels/03baacbf-1d8d-57d2-9856-75fd006fafac"
+                  ref = "#/spec/panels/a1100001-0001-4000-8000-000000000002"
                 }
               },
             ]
@@ -743,7 +649,7 @@ resource "signoz_dashboard" "host_overview" {
           kind = "Grid"
           spec = {
             display = {
-              title = "Saturation"
+              title = "Latency & Response Performance"
               collapse = {
                 open = true
               }
@@ -751,20 +657,53 @@ resource "signoz_dashboard" "host_overview" {
             items = [
               {
                 x      = 0
-                y      = 0
+                y      = 6
                 width  = 6
                 height = 6
                 content = {
-                  ref = "#/spec/panels/ae42dd7f-d9d0-5b9f-afc0-889b5e48a9b0"
+                  ref = "#/spec/panels/a1100001-0001-4000-8000-000000000003"
                 }
               },
               {
                 x      = 6
-                y      = 0
+                y      = 6
                 width  = 6
                 height = 6
                 content = {
-                  ref = "#/spec/panels/34878f77-4459-5302-b39d-7a2586df87d9"
+                  ref = "#/spec/panels/a1100001-0001-4000-8000-000000000004"
+                }
+              },
+            ]
+          }
+        }
+      },
+      {
+        grid = {
+          kind = "Grid"
+          spec = {
+            display = {
+              title = "Probe Errors & Failure Diagnostics"
+              collapse = {
+                open = true
+              }
+            }
+            items = [
+              {
+                x      = 0
+                y      = 12
+                width  = 6
+                height = 6
+                content = {
+                  ref = "#/spec/panels/a1100001-0001-4000-8000-000000000005"
+                }
+              },
+              {
+                x      = 6
+                y      = 12
+                width  = 6
+                height = 6
+                content = {
+                  ref = "#/spec/panels/a1100001-0001-4000-8000-000000000006"
                 }
               },
             ]
