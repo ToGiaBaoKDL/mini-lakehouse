@@ -28,9 +28,9 @@ Merge to `main` (or manual dispatch of the protected `dev` environment) triggers
    `foundryctl cast`, and waits for `127.0.0.1:8082/api/v1/health`.
 
 Runtime state lives on the host under `~/.config/lakehouse/<env>/signoz/` (casting file, lock,
-generated `pours/`); durable data lives in the named Docker volumes. The UI is reachable at
-`http://127.0.0.1:8082` on the host only; OTLP ingest ports 4317/4318 bind to 127.0.0.1. The UI
-will move behind Cloudflare Tunnel/Access as `observe.tgblab.io.vn` in a later phase.
+generated `pours/`); durable data lives in the named Docker volumes. The UI is reachable over Tailscale
+at `http://tgbao-dev-services:8082`, locally on the host at `http://127.0.0.1:8082`, and behind Cloudflare
+Tunnel/Access as `https://observe.tgblab.io.vn`; OTLP ingest ports 4317/4318 bind to 127.0.0.1.
 
 ### Upgrades
 
@@ -140,10 +140,10 @@ collection agent (`system.*`, `container.*`, `postgresql.*`, `airflow.*`) and th
 the backup audit log (no `log.file.name` filter — the agent tails the audit file with
 `include_file_name: false`).
 
-Applying requires a SigNoz service-account API key exported as `SIGNOZ_ACCESS_TOKEN` (create one in
-Settings → API Access Keys). The endpoint defaults to `http://127.0.0.1:8082` and can also come
-from `SIGNOZ_ENDPOINT`, so run it from the host or through an SSH port-forward — the UI is bound to
-loopback only:
+Applying requires a SigNoz service-account API key stored in AWS Secrets Manager
+(`lakehouse/dev/signoz/ci`) or exported as `SIGNOZ_ACCESS_TOKEN` (create one in
+Settings → Service Accounts → Keys). CD automatically applies dashboards and alert rules
+on merge to `main` via `deploy-signoz.yml`. For manual operator apply:
 
 ```sh
 export SIGNOZ_ACCESS_TOKEN=...
@@ -156,5 +156,5 @@ references it. Until it is set, thresholds carry no channel list and the default
 Never edit entities Terraform manages through the UI — drift only reaches the state through
 `terraform import`/refresh.
 
-CI covers the root through the shared `terraform-fmt` and `terraform-validate` make targets
-(`make check`).
+CD automatically reconciles dashboards and alert rules on deploy. CI covers the root through the
+shared `terraform-fmt` and `terraform-validate` make targets (`make check`).

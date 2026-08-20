@@ -31,7 +31,7 @@ spec:
           value: "8080:8080"
         - op: replace
           path: /services/signoz-signoz-0/ports/0
-          value: "127.0.0.1:8082:8080"
+          value: "8082:8080"
         - op: test
           path: /services/ingester/ports/0
           value: "4317:4317"

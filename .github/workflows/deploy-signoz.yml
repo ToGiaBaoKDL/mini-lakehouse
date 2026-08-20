@@ -50,7 +50,7 @@ jobs:
           cmp "$work_dir/casting.yaml.lock" observability/signoz/casting.yaml.lock
           compose="$work_dir/pours/deployment/compose.yaml"
           docker compose -f "$compose" config --quiet
-          grep -Eq '^[[:space:]]*- 127\.0\.0\.1:8082:8080$' "$compose"
+          grep -Eq '^[[:space:]]*- 8082:8080$' "$compose"
           grep -Eq '^[[:space:]]*- 127\.0\.0\.1:4317:4317$' "$compose"
           grep -Eq '^[[:space:]]*- 127\.0\.0\.1:4318:4318$' "$compose"
           test "$(grep -c '^[[:space:]]*limits:$' "$compose")" -eq 5

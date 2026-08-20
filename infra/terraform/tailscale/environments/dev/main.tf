@@ -18,6 +18,7 @@ locals {
   ci_services_ports = [
     "tcp:22",
     "tcp:8081",
+    "tcp:8082",
   ]
 }
 
@@ -69,6 +70,7 @@ resource "tailscale_acl" "policy" {
         accept = [
           "${local.services_tag}:22",
           "${local.services_tag}:8081",
+          "${local.services_tag}:8082",
         ]
         deny = [
           "${local.services_tag}:8080",

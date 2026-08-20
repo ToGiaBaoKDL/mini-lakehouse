@@ -1,5 +1,5 @@
 variable "signoz_endpoint" {
-  description = "Root URL of the SigNoz UI/API. Port-forwards over Tailscale to the services host loopback binding (127.0.0.1:8082)."
+  description = "Root URL of the SigNoz UI/API. Reached over Tailscale (http://tgbao-dev-services:8082) or locally (http://127.0.0.1:8082)."
   type        = string
   default     = "http://127.0.0.1:8082"
 }
