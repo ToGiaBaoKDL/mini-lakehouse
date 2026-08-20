@@ -147,7 +147,7 @@ jobs:
           if [ -z "${STATE_BUCKET}" ]; then
             account_id=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)
             if [ -n "${account_id}" ]; then
-              STATE_BUCKET="tgbao-dev-terraform-state-${account_id}"
+              STATE_BUCKET="tgbao-terraform-state-${account_id}"
             fi
           fi
 
