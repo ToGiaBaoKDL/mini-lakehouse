@@ -12,7 +12,7 @@ variable "signoz_access_token" {
 }
 
 variable "signoz_alert_channels" {
-  description = "Names of notification channels configured once in the SigNoz UI (Settings → Alert Channels). Leave empty until a channel exists; thresholds then rely on the UI default route."
+  description = "Names of notification channels configured once in the SigNoz UI (Settings → Alert Channels). Defaults to platform-alerts; when empty, thresholds rely on the UI default route."
   type        = list(string)
-  default     = []
+  default     = ["platform-alerts"]
 }

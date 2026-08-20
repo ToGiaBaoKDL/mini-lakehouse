@@ -87,7 +87,8 @@ resource "signoz_rule" "host_disk_70_percent" {
   }
 
   notification_settings = {
-    group_by = ["mountpoint", "host.name"]
+    group_by   = ["mountpoint", "host.name"]
+    use_policy = local.use_policy
   }
 
   schema_version = "v2alpha1"
@@ -177,7 +178,8 @@ resource "signoz_rule" "host_disk_80_percent" {
   }
 
   notification_settings = {
-    group_by = ["mountpoint", "host.name"]
+    group_by   = ["mountpoint", "host.name"]
+    use_policy = local.use_policy
   }
 
   schema_version = "v2alpha1"
@@ -267,7 +269,8 @@ resource "signoz_rule" "host_disk_90_percent" {
   }
 
   notification_settings = {
-    group_by = ["mountpoint", "host.name"]
+    group_by   = ["mountpoint", "host.name"]
+    use_policy = local.use_policy
   }
 
   schema_version = "v2alpha1"
@@ -365,7 +368,8 @@ resource "signoz_rule" "host_metrics_missing" {
   }
 
   notification_settings = {
-    group_by = ["host.name"]
+    group_by   = ["host.name"]
+    use_policy = local.use_policy
   }
 
   schema_version = "v2alpha1"
@@ -456,7 +460,9 @@ resource "signoz_rule" "metadata_postgres_metrics_missing" {
     }
   }
 
-  notification_settings = {}
+  notification_settings = {
+    use_policy = local.use_policy
+  }
 
   schema_version = "v2alpha1"
 }
@@ -546,7 +552,9 @@ resource "signoz_rule" "airflow_scheduler_heartbeat_missing" {
     }
   }
 
-  notification_settings = {}
+  notification_settings = {
+    use_policy = local.use_policy
+  }
 
   schema_version = "v2alpha1"
 }
@@ -681,7 +689,9 @@ resource "signoz_rule" "airflow_task_completions_stalled" {
     }
   }
 
-  notification_settings = {}
+  notification_settings = {
+    use_policy = local.use_policy
+  }
 
   schema_version = "v2alpha1"
 }
@@ -779,7 +789,8 @@ resource "signoz_rule" "metadata_backup_failed" {
   }
 
   notification_settings = {
-    group_by = ["database", "slot"]
+    group_by   = ["database", "slot"]
+    use_policy = local.use_policy
   }
 
   schema_version = "v2alpha1"
@@ -875,6 +886,7 @@ resource "signoz_rule" "metadata_backup_airflow_missing" {
       interval     = "4h"
       alert_states = ["firing"]
     }
+    use_policy = local.use_policy
   }
 
   schema_version = "v2alpha1"
@@ -970,6 +982,7 @@ resource "signoz_rule" "metadata_backup_lightdash_missing" {
       interval     = "4h"
       alert_states = ["firing"]
     }
+    use_policy = local.use_policy
   }
 
   schema_version = "v2alpha1"
