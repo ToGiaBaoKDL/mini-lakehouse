@@ -129,8 +129,8 @@ resource "signoz_dashboard" "containers_overview" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       metrics = {
-                        name          = "A"
-                        signal        = "metrics"
+                        name   = "A"
+                        signal = "metrics"
                         aggregations = [
                           {
                             metric_name       = "container.cpu.utilization"
@@ -221,8 +221,8 @@ resource "signoz_dashboard" "containers_overview" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       metrics = {
-                        name          = "A"
-                        signal        = "metrics"
+                        name   = "A"
+                        signal = "metrics"
                         aggregations = [
                           {
                             metric_name       = "container.memory.usage.total"
@@ -313,8 +313,8 @@ resource "signoz_dashboard" "containers_overview" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       metrics = {
-                        name          = "A"
-                        signal        = "metrics"
+                        name   = "A"
+                        signal = "metrics"
                         aggregations = [
                           {
                             metric_name       = "container.cpu.utilization"
@@ -405,8 +405,8 @@ resource "signoz_dashboard" "containers_overview" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       metrics = {
-                        name          = "A"
-                        signal        = "metrics"
+                        name   = "A"
+                        signal = "metrics"
                         aggregations = [
                           {
                             metric_name       = "container.memory.usage.total"
@@ -502,9 +502,9 @@ resource "signoz_dashboard" "containers_overview" {
                             type = "builder_query"
                             spec = {
                               metrics = {
-                                name          = "A"
-                                signal        = "metrics"
-                                        aggregations = [
+                                name   = "A"
+                                signal = "metrics"
+                                aggregations = [
                                   {
                                     metric_name       = "container.network.io.usage.rx_bytes"
                                     time_aggregation  = "rate"
@@ -543,9 +543,9 @@ resource "signoz_dashboard" "containers_overview" {
                             type = "builder_query"
                             spec = {
                               metrics = {
-                                name          = "B"
-                                signal        = "metrics"
-                                        aggregations = [
+                                name   = "B"
+                                signal = "metrics"
+                                aggregations = [
                                   {
                                     metric_name       = "container.network.io.usage.tx_bytes"
                                     time_aggregation  = "rate"

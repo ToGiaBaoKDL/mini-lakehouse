@@ -105,8 +105,8 @@ resource "signoz_dashboard" "metadata_postgres" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       metrics = {
-                        name          = "A"
-                        signal        = "metrics"
+                        name   = "A"
+                        signal = "metrics"
                         aggregations = [
                           {
                             metric_name       = "postgresql.backends"
@@ -202,9 +202,9 @@ resource "signoz_dashboard" "metadata_postgres" {
                             type = "builder_query"
                             spec = {
                               metrics = {
-                                name          = "A"
-                                signal        = "metrics"
-                                        aggregations = [
+                                name   = "A"
+                                signal = "metrics"
+                                aggregations = [
                                   {
                                     metric_name       = "postgresql.commits"
                                     time_aggregation  = "rate"
@@ -243,9 +243,9 @@ resource "signoz_dashboard" "metadata_postgres" {
                             type = "builder_query"
                             spec = {
                               metrics = {
-                                name          = "B"
-                                signal        = "metrics"
-                                        aggregations = [
+                                name   = "B"
+                                signal = "metrics"
+                                aggregations = [
                                   {
                                     metric_name       = "postgresql.rollbacks"
                                     time_aggregation  = "rate"
@@ -339,8 +339,8 @@ resource "signoz_dashboard" "metadata_postgres" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       metrics = {
-                        name          = "A"
-                        signal        = "metrics"
+                        name   = "A"
+                        signal = "metrics"
                         aggregations = [
                           {
                             metric_name       = "postgresql.db_size"
@@ -431,8 +431,8 @@ resource "signoz_dashboard" "metadata_postgres" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       metrics = {
-                        name          = "A"
-                        signal        = "metrics"
+                        name   = "A"
+                        signal = "metrics"
                         aggregations = [
                           {
                             metric_name       = "postgresql.operations"
@@ -523,8 +523,8 @@ resource "signoz_dashboard" "metadata_postgres" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       metrics = {
-                        name          = "A"
-                        signal        = "metrics"
+                        name   = "A"
+                        signal = "metrics"
                         aggregations = [
                           {
                             metric_name       = "postgresql.rows"

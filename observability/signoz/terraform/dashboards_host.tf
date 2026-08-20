@@ -104,8 +104,8 @@ resource "signoz_dashboard" "host_overview" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       metrics = {
-                        name          = "A"
-                        signal        = "metrics"
+                        name   = "A"
+                        signal = "metrics"
                         aggregations = [
                           {
                             metric_name       = "system.cpu.utilization"
@@ -196,8 +196,8 @@ resource "signoz_dashboard" "host_overview" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       metrics = {
-                        name          = "A"
-                        signal        = "metrics"
+                        name   = "A"
+                        signal = "metrics"
                         aggregations = [
                           {
                             metric_name       = "system.memory.usage"
@@ -293,9 +293,9 @@ resource "signoz_dashboard" "host_overview" {
                             type = "builder_query"
                             spec = {
                               metrics = {
-                                name          = "A"
-                                signal        = "metrics"
-                                        aggregations = [
+                                name   = "A"
+                                signal = "metrics"
+                                aggregations = [
                                   {
                                     metric_name       = "system.cpu.load_average.1m"
                                     time_aggregation  = "avg"
@@ -327,9 +327,9 @@ resource "signoz_dashboard" "host_overview" {
                             type = "builder_query"
                             spec = {
                               metrics = {
-                                name          = "B"
-                                signal        = "metrics"
-                                        aggregations = [
+                                name   = "B"
+                                signal = "metrics"
+                                aggregations = [
                                   {
                                     metric_name       = "system.cpu.load_average.5m"
                                     time_aggregation  = "avg"
@@ -361,9 +361,9 @@ resource "signoz_dashboard" "host_overview" {
                             type = "builder_query"
                             spec = {
                               metrics = {
-                                name          = "C"
-                                signal        = "metrics"
-                                        aggregations = [
+                                name   = "C"
+                                signal = "metrics"
+                                aggregations = [
                                   {
                                     metric_name       = "system.cpu.load_average.15m"
                                     time_aggregation  = "avg"
@@ -450,8 +450,8 @@ resource "signoz_dashboard" "host_overview" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       metrics = {
-                        name          = "A"
-                        signal        = "metrics"
+                        name   = "A"
+                        signal = "metrics"
                         aggregations = [
                           {
                             metric_name       = "system.filesystem.utilization"
@@ -542,8 +542,8 @@ resource "signoz_dashboard" "host_overview" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       metrics = {
-                        name          = "A"
-                        signal        = "metrics"
+                        name   = "A"
+                        signal = "metrics"
                         aggregations = [
                           {
                             metric_name       = "system.disk.io"
@@ -639,8 +639,8 @@ resource "signoz_dashboard" "host_overview" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       metrics = {
-                        name          = "A"
-                        signal        = "metrics"
+                        name   = "A"
+                        signal = "metrics"
                         aggregations = [
                           {
                             metric_name       = "system.network.io"

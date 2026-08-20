@@ -88,8 +88,8 @@ resource "signoz_dashboard" "airflow" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       metrics = {
-                        name          = "A"
-                        signal        = "metrics"
+                        name   = "A"
+                        signal = "metrics"
                         aggregations = [
                           {
                             metric_name       = "airflow.scheduler_heartbeat"
@@ -185,8 +185,8 @@ resource "signoz_dashboard" "airflow" {
                             type = "builder_query"
                             spec = {
                               metrics = {
-                                name          = "A"
-                                signal        = "metrics"
+                                name   = "A"
+                                signal = "metrics"
                                 aggregations = [
                                   {
                                     metric_name       = "airflow.ti_successes"
@@ -219,8 +219,8 @@ resource "signoz_dashboard" "airflow" {
                             type = "builder_query"
                             spec = {
                               metrics = {
-                                name          = "B"
-                                signal        = "metrics"
+                                name   = "B"
+                                signal = "metrics"
                                 aggregations = [
                                   {
                                     metric_name       = "airflow.ti_failures"
@@ -313,8 +313,8 @@ resource "signoz_dashboard" "airflow" {
                             type = "builder_query"
                             spec = {
                               metrics = {
-                                name          = "A"
-                                signal        = "metrics"
+                                name   = "A"
+                                signal = "metrics"
                                 aggregations = [
                                   {
                                     metric_name       = "airflow.task.duration"
@@ -347,8 +347,8 @@ resource "signoz_dashboard" "airflow" {
                             type = "builder_query"
                             spec = {
                               metrics = {
-                                name          = "B"
-                                signal        = "metrics"
+                                name   = "B"
+                                signal = "metrics"
                                 aggregations = [
                                   {
                                     metric_name       = "airflow.task.duration"
@@ -436,8 +436,8 @@ resource "signoz_dashboard" "airflow" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       metrics = {
-                        name          = "A"
-                        signal        = "metrics"
+                        name   = "A"
+                        signal = "metrics"
                         aggregations = [
                           {
                             metric_name       = "airflow.dagrun.duration.success"
@@ -528,8 +528,8 @@ resource "signoz_dashboard" "airflow" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       metrics = {
-                        name          = "A"
-                        signal        = "metrics"
+                        name   = "A"
+                        signal = "metrics"
                         aggregations = [
                           {
                             metric_name       = "airflow.dagrun.duration.failed"
@@ -620,8 +620,8 @@ resource "signoz_dashboard" "airflow" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       metrics = {
-                        name          = "A"
-                        signal        = "metrics"
+                        name   = "A"
+                        signal = "metrics"
                         aggregations = [
                           {
                             metric_name       = "airflow.scheduler.dagruns.running"
@@ -678,8 +678,8 @@ resource "signoz_dashboard" "airflow" {
                     kind = "signoz/BuilderQuery"
                     spec = {
                       traces = {
-                        name          = "A"
-                        signal        = "traces"
+                        name   = "A"
+                        signal = "traces"
                         filter = {
                           expression = "service.name = 'airflow'"
                         }
