@@ -142,12 +142,24 @@ jobs:
 
           printf '%s\n' "Applying SigNoz dashboards and alert rules via Terraform..."
           cd observability/signoz/terraform
-          if [ -n "${STATE_BUCKET:-}" ]; then
+
+          STATE_BUCKET="${STATE_BUCKET:-}"
+          if [ -z "${STATE_BUCKET}" ]; then
+            account_id=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)
+            if [ -n "${account_id}" ]; then
+              STATE_BUCKET="tgbao-dev-terraform-state-${account_id}"
+            fi
+          fi
+
+          if [ -n "${STATE_BUCKET}" ]; then
+            printf '%s\n' "Initializing Terraform with S3 backend bucket: ${STATE_BUCKET}..."
             terraform init -backend-config="bucket=${STATE_BUCKET}"
           else
-            printf '%s\n' 'terraform { backend "local" {} }' > backend_override.tf
+            printf '%s\n' "No S3 state bucket available. Initializing with local backend fallback..."
+            mv backend.tf backend.tf.disabled 2>/dev/null || true
             terraform init
           fi
+
           terraform apply -auto-approve \
             -var="signoz_endpoint=${SIGNOZ_ENDPOINT}" \
             -var="signoz_access_token=${SIGNOZ_ACCESS_TOKEN}"
