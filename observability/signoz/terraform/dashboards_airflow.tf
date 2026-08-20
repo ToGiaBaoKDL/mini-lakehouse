@@ -34,8 +34,33 @@ resource "signoz_dashboard" "airflow" {
       name        = "Airflow"
       description = "Scheduler heartbeat, task success/failure, DAG run durations, and pool slots from Airflow native OpenTelemetry metrics and traces."
     }
-    links     = []
-    variables = []
+    links = []
+    variables = [
+      {
+        list_variable = {
+          kind = "ListVariable"
+          spec = {
+            display = {
+              name        = "dag_id"
+              description = "Airflow DAG ID"
+            }
+            allow_all_value = true
+            allow_multiple  = true
+            sort            = "alphabetical-asc"
+            name            = "dag_id"
+            plugin = {
+              dynamic_variable = {
+                kind = "signoz/DynamicVariable"
+                spec = {
+                  name   = "dag_id"
+                  signal = "metrics"
+                }
+              }
+            }
+          }
+        }
+      },
+    ]
     panels = {
       "d7862908-c2b0-5858-a228-a22c1d7e78c1" = {
         kind = "Panel"
@@ -195,12 +220,24 @@ resource "signoz_dashboard" "airflow" {
                                   },
                                 ]
                                 filter = {
-                                  expression = ""
+                                  expression = "dag_id IN $dag_id"
                                 }
+                                group_by = [
+                                  {
+                                    name            = "dag_id"
+                                    field_context   = "attribute"
+                                    field_data_type = "string"
+                                  },
+                                  {
+                                    name            = "task_id"
+                                    field_context   = "attribute"
+                                    field_data_type = "string"
+                                  },
+                                ]
                                 having = {
                                   expression = ""
                                 }
-                                legend = "success"
+                                legend = "{{dag_id}} - {{task_id}} (success)"
                                 limit  = 100
                                 order = [
                                   {
@@ -229,12 +266,24 @@ resource "signoz_dashboard" "airflow" {
                                   },
                                 ]
                                 filter = {
-                                  expression = ""
+                                  expression = "dag_id IN $dag_id"
                                 }
+                                group_by = [
+                                  {
+                                    name            = "dag_id"
+                                    field_context   = "attribute"
+                                    field_data_type = "string"
+                                  },
+                                  {
+                                    name            = "task_id"
+                                    field_context   = "attribute"
+                                    field_data_type = "string"
+                                  },
+                                ]
                                 having = {
                                   expression = ""
                                 }
-                                legend = "failure"
+                                legend = "{{dag_id}} - {{task_id}} (failure)"
                                 limit  = 100
                                 order = [
                                   {
@@ -323,12 +372,24 @@ resource "signoz_dashboard" "airflow" {
                                   },
                                 ]
                                 filter = {
-                                  expression = ""
+                                  expression = "dag_id IN $dag_id"
                                 }
+                                group_by = [
+                                  {
+                                    name            = "dag_id"
+                                    field_context   = "attribute"
+                                    field_data_type = "string"
+                                  },
+                                  {
+                                    name            = "task_id"
+                                    field_context   = "attribute"
+                                    field_data_type = "string"
+                                  },
+                                ]
                                 having = {
                                   expression = ""
                                 }
-                                legend = "p50"
+                                legend = "{{dag_id}} - {{task_id}} (p50)"
                                 limit  = 100
                                 order = [
                                   {
@@ -357,12 +418,24 @@ resource "signoz_dashboard" "airflow" {
                                   },
                                 ]
                                 filter = {
-                                  expression = ""
+                                  expression = "dag_id IN $dag_id"
                                 }
+                                group_by = [
+                                  {
+                                    name            = "dag_id"
+                                    field_context   = "attribute"
+                                    field_data_type = "string"
+                                  },
+                                  {
+                                    name            = "task_id"
+                                    field_context   = "attribute"
+                                    field_data_type = "string"
+                                  },
+                                ]
                                 having = {
                                   expression = ""
                                 }
-                                legend = "p95"
+                                legend = "{{dag_id}} - {{task_id}} (p95)"
                                 limit  = 100
                                 order = [
                                   {
@@ -446,7 +519,7 @@ resource "signoz_dashboard" "airflow" {
                           },
                         ]
                         filter = {
-                          expression = "dag_id EXISTS"
+                          expression = "dag_id IN $dag_id"
                         }
                         group_by = [
                           {
@@ -538,7 +611,7 @@ resource "signoz_dashboard" "airflow" {
                           },
                         ]
                         filter = {
-                          expression = "dag_id EXISTS"
+                          expression = "dag_id IN $dag_id"
                         }
                         group_by = [
                           {
@@ -695,6 +768,21 @@ resource "signoz_dashboard" "airflow" {
                             field_data_type = "string"
                           },
                           {
+                            name            = "dag_id"
+                            field_context   = "attribute"
+                            field_data_type = "string"
+                          },
+                          {
+                            name            = "task_id"
+                            field_context   = "attribute"
+                            field_data_type = "string"
+                          },
+                          {
+                            name            = "duration_nano"
+                            field_context   = "attribute"
+                            field_data_type = "int64"
+                          },
+                          {
                             name            = "service.name"
                             field_context   = "resource"
                             field_data_type = "string"
@@ -721,6 +809,260 @@ resource "signoz_dashboard" "airflow" {
           ]
         }
       }
+      "e687b321-4f2a-5b8c-9c71-7d1a5e93c102" = {
+        kind = "Panel"
+        spec = {
+          display = {
+            name        = "DAG schedule delay"
+            description = "Delay between scheduled execution time and actual start time in seconds, grouped by dag_id."
+          }
+          links = []
+          plugin = {
+            time_series_panel = {
+              kind = "signoz/TimeSeriesPanel"
+              spec = {
+                visualization = {
+                  time_preference = "global_time"
+                  fill_spans      = false
+                }
+                formatting = {
+                  unit              = "s"
+                  decimal_precision = "2"
+                }
+                chart_appearance = {
+                  line_interpolation = "spline"
+                  show_points        = false
+                  line_style         = "solid"
+                  fill_mode          = "none"
+                  span_gaps = {
+                    fill_only_below = false
+                    fill_less_than  = "0s"
+                  }
+                }
+                axes = {
+                  soft_min     = 0
+                  is_log_scale = false
+                }
+                legend = {
+                  position = "bottom"
+                  mode     = "list"
+                }
+              }
+            }
+          }
+          queries = [
+            {
+              kind = "time_series"
+              spec = {
+                name = "A"
+                plugin = {
+                  builder_query = {
+                    kind = "signoz/BuilderQuery"
+                    spec = {
+                      metrics = {
+                        name   = "A"
+                        signal = "metrics"
+                        aggregations = [
+                          {
+                            metric_name       = "airflow.dagrun.schedule_delay"
+                            time_aggregation  = "avg"
+                            space_aggregation = "avg"
+                          },
+                        ]
+                        filter = {
+                          expression = "dag_id IN $dag_id"
+                        }
+                        group_by = [
+                          {
+                            name            = "dag_id"
+                            field_context   = "attribute"
+                            field_data_type = "string"
+                          },
+                        ]
+                        having = {
+                          expression = ""
+                        }
+                        legend = "{{dag_id}}"
+                        limit  = 100
+                        order = [
+                          {
+                            key = {
+                              name = "avg(avg(airflow.dagrun.schedule_delay))"
+                            }
+                            direction = "desc"
+                          },
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            },
+          ]
+        }
+      }
+      "a218d943-7e1b-5f62-8c90-3b4e7f82d519" = {
+        kind = "Panel"
+        spec = {
+          display = {
+            name        = "Executor capacity and queue"
+            description = "Active worker tasks, queued tasks waiting for execution, and open executor slots."
+          }
+          links = []
+          plugin = {
+            time_series_panel = {
+              kind = "signoz/TimeSeriesPanel"
+              spec = {
+                visualization = {
+                  time_preference = "global_time"
+                  fill_spans      = false
+                }
+                formatting = {
+                  unit              = "short"
+                  decimal_precision = "0"
+                }
+                chart_appearance = {
+                  line_interpolation = "spline"
+                  show_points        = false
+                  line_style         = "solid"
+                  fill_mode          = "none"
+                  span_gaps = {
+                    fill_only_below = false
+                    fill_less_than  = "0s"
+                  }
+                }
+                axes = {
+                  soft_min     = 0
+                  is_log_scale = false
+                }
+                legend = {
+                  position = "bottom"
+                  mode     = "list"
+                }
+              }
+            }
+          }
+          queries = [
+            {
+              kind = "time_series"
+              spec = {
+                name = "A"
+                plugin = {
+                  composite_query = {
+                    kind = "signoz/CompositeQuery"
+                    spec = {
+                      queries = [
+                        {
+                          builder_query = {
+                            type = "builder_query"
+                            spec = {
+                              metrics = {
+                                name   = "A"
+                                signal = "metrics"
+                                aggregations = [
+                                  {
+                                    metric_name       = "airflow.executor.running_tasks"
+                                    time_aggregation  = "avg"
+                                    space_aggregation = "sum"
+                                  },
+                                ]
+                                filter = {
+                                  expression = ""
+                                }
+                                having = {
+                                  expression = ""
+                                }
+                                legend = "running tasks"
+                                limit  = 100
+                                order = [
+                                  {
+                                    key = {
+                                      name = "sum(avg(airflow.executor.running_tasks))"
+                                    }
+                                    direction = "desc"
+                                  },
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        {
+                          builder_query = {
+                            type = "builder_query"
+                            spec = {
+                              metrics = {
+                                name   = "B"
+                                signal = "metrics"
+                                aggregations = [
+                                  {
+                                    metric_name       = "airflow.executor.queued_tasks"
+                                    time_aggregation  = "avg"
+                                    space_aggregation = "sum"
+                                  },
+                                ]
+                                filter = {
+                                  expression = ""
+                                }
+                                having = {
+                                  expression = ""
+                                }
+                                legend = "queued tasks"
+                                limit  = 100
+                                order = [
+                                  {
+                                    key = {
+                                      name = "sum(avg(airflow.executor.queued_tasks))"
+                                    }
+                                    direction = "desc"
+                                  },
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        {
+                          builder_query = {
+                            type = "builder_query"
+                            spec = {
+                              metrics = {
+                                name   = "C"
+                                signal = "metrics"
+                                aggregations = [
+                                  {
+                                    metric_name       = "airflow.executor.open_slots"
+                                    time_aggregation  = "avg"
+                                    space_aggregation = "sum"
+                                  },
+                                ]
+                                filter = {
+                                  expression = ""
+                                }
+                                having = {
+                                  expression = ""
+                                }
+                                legend = "open slots"
+                                limit  = 100
+                                order = [
+                                  {
+                                    key = {
+                                      name = "sum(avg(airflow.executor.open_slots))"
+                                    }
+                                    direction = "desc"
+                                  },
+                                ]
+                              }
+                            }
+                          }
+                        },
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+          ]
+        }
+      }
     }
     layouts = [
       {
@@ -728,7 +1070,7 @@ resource "signoz_dashboard" "airflow" {
           kind = "Grid"
           spec = {
             display = {
-              title = "Overview"
+              title = "Overview and Concurrency"
               collapse = {
                 open = true
               }
@@ -761,6 +1103,15 @@ resource "signoz_dashboard" "airflow" {
                   ref = "#/spec/panels/f8d0fdea-1749-5fb2-ad7e-deb74b2aa099"
                 }
               },
+              {
+                x      = 0
+                y      = 6
+                width  = 12
+                height = 6
+                content = {
+                  ref = "#/spec/panels/a218d943-7e1b-5f62-8c90-3b4e7f82d519"
+                }
+              },
             ]
           }
         }
@@ -770,7 +1121,7 @@ resource "signoz_dashboard" "airflow" {
           kind = "Grid"
           spec = {
             display = {
-              title = "Duration and DAG throughput"
+              title = "Duration and Latency"
               collapse = {
                 open = true
               }
@@ -797,7 +1148,16 @@ resource "signoz_dashboard" "airflow" {
               {
                 x      = 0
                 y      = 6
-                width  = 12
+                width  = 6
+                height = 6
+                content = {
+                  ref = "#/spec/panels/e687b321-4f2a-5b8c-9c71-7d1a5e93c102"
+                }
+              },
+              {
+                x      = 6
+                y      = 6
+                width  = 6
                 height = 6
                 content = {
                   ref = "#/spec/panels/c517d114-b7f4-5e94-9306-68ebd42103cb"
