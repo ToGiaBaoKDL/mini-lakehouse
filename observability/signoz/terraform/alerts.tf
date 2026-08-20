@@ -996,8 +996,8 @@ resource "signoz_rule" "synthetic_endpoint_probe_failed" {
   description = "Synthetic HTTP probe failed for a public ingress endpoint (httpcheck.status < 1 for 3 consecutive minutes)."
 
   annotations = {
-    summary     = "Public ingress endpoint probe failed"
-    description = "Synthetic blackbox probe for public endpoint {{http.url}} returned failing status."
+    summary     = "Public ingress endpoint probe failed for {{$labels.http_url}}"
+    description = "Synthetic blackbox probe for public endpoint {{$labels.http_url}} returned failing status."
   }
 
   labels = {
@@ -1094,8 +1094,8 @@ resource "signoz_rule" "synthetic_tls_cert_expiring_soon" {
   description = "SSL/TLS certificate for a public ingress endpoint is expiring in less than 7 days (604800 seconds)."
 
   annotations = {
-    summary     = "Public ingress TLS certificate expiring soon"
-    description = "The TLS certificate for {{http.url}} has less than 7 days remaining before expiration."
+    summary     = "Public ingress TLS certificate expiring soon for {{$labels.http_url}}"
+    description = "The TLS certificate for {{$labels.http_url}} has less than 7 days remaining before expiration."
   }
 
   labels = {
