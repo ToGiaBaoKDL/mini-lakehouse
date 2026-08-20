@@ -131,7 +131,7 @@ resource "signoz_dashboard" "containers_overview" {
                       metrics = {
                         name          = "A"
                         signal        = "metrics"
-                        step_interval = "30"
+                        step_interval = "60"
                         aggregations = [
                           {
                             metric_name       = "container.cpu.utilization"
@@ -224,7 +224,7 @@ resource "signoz_dashboard" "containers_overview" {
                       metrics = {
                         name          = "A"
                         signal        = "metrics"
-                        step_interval = "30"
+                        step_interval = "60"
                         aggregations = [
                           {
                             metric_name       = "container.memory.usage.total"
@@ -317,7 +317,7 @@ resource "signoz_dashboard" "containers_overview" {
                       metrics = {
                         name          = "A"
                         signal        = "metrics"
-                        step_interval = "30"
+                        step_interval = "60"
                         aggregations = [
                           {
                             metric_name       = "container.cpu.utilization"
@@ -410,7 +410,7 @@ resource "signoz_dashboard" "containers_overview" {
                       metrics = {
                         name          = "A"
                         signal        = "metrics"
-                        step_interval = "30"
+                        step_interval = "60"
                         aggregations = [
                           {
                             metric_name       = "container.memory.usage.total"
@@ -508,7 +508,7 @@ resource "signoz_dashboard" "containers_overview" {
                               metrics = {
                                 name          = "A"
                                 signal        = "metrics"
-                                step_interval = "30"
+                                step_interval = "60"
                                 aggregations = [
                                   {
                                     metric_name       = "container.network.io.usage.rx_bytes"
@@ -550,7 +550,7 @@ resource "signoz_dashboard" "containers_overview" {
                               metrics = {
                                 name          = "B"
                                 signal        = "metrics"
-                                step_interval = "30"
+                                step_interval = "60"
                                 aggregations = [
                                   {
                                     metric_name       = "container.network.io.usage.tx_bytes"

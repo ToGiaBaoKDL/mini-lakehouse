@@ -24,9 +24,15 @@ receivers:
     collection_interval: 30s
     root_path: /hostfs
     scrapers:
-      cpu: {}
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
       disk: {}
       filesystem:
+        metrics:
+          system.filesystem.utilization:
+            enabled: true
         exclude_mount_points:
           match_type: regexp
           mount_points:

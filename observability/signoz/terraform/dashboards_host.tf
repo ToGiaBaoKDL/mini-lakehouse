@@ -106,7 +106,7 @@ resource "signoz_dashboard" "host_overview" {
                       metrics = {
                         name          = "A"
                         signal        = "metrics"
-                        step_interval = "30"
+                        step_interval = "60"
                         aggregations = [
                           {
                             metric_name       = "system.cpu.utilization"
@@ -199,7 +199,7 @@ resource "signoz_dashboard" "host_overview" {
                       metrics = {
                         name          = "A"
                         signal        = "metrics"
-                        step_interval = "30"
+                        step_interval = "60"
                         aggregations = [
                           {
                             metric_name       = "system.memory.usage"
@@ -297,10 +297,10 @@ resource "signoz_dashboard" "host_overview" {
                               metrics = {
                                 name          = "A"
                                 signal        = "metrics"
-                                step_interval = "30"
+                                step_interval = "60"
                                 aggregations = [
                                   {
-                                    metric_name       = "system.load.1"
+                                    metric_name       = "system.cpu.load_average.1m"
                                     time_aggregation  = "avg"
                                     space_aggregation = "max"
                                   },
@@ -316,7 +316,7 @@ resource "signoz_dashboard" "host_overview" {
                                 order = [
                                   {
                                     key = {
-                                      name = "max(avg(system.load.1))"
+                                      name = "max(avg(system.cpu.load_average.1m))"
                                     }
                                     direction = "desc"
                                   },
@@ -332,10 +332,10 @@ resource "signoz_dashboard" "host_overview" {
                               metrics = {
                                 name          = "B"
                                 signal        = "metrics"
-                                step_interval = "30"
+                                step_interval = "60"
                                 aggregations = [
                                   {
-                                    metric_name       = "system.load.5"
+                                    metric_name       = "system.cpu.load_average.5m"
                                     time_aggregation  = "avg"
                                     space_aggregation = "max"
                                   },
@@ -351,7 +351,7 @@ resource "signoz_dashboard" "host_overview" {
                                 order = [
                                   {
                                     key = {
-                                      name = "max(avg(system.load.5))"
+                                      name = "max(avg(system.cpu.load_average.5m))"
                                     }
                                     direction = "desc"
                                   },
@@ -367,10 +367,10 @@ resource "signoz_dashboard" "host_overview" {
                               metrics = {
                                 name          = "C"
                                 signal        = "metrics"
-                                step_interval = "30"
+                                step_interval = "60"
                                 aggregations = [
                                   {
-                                    metric_name       = "system.load.15"
+                                    metric_name       = "system.cpu.load_average.15m"
                                     time_aggregation  = "avg"
                                     space_aggregation = "max"
                                   },
@@ -386,7 +386,7 @@ resource "signoz_dashboard" "host_overview" {
                                 order = [
                                   {
                                     key = {
-                                      name = "max(avg(system.load.15))"
+                                      name = "max(avg(system.cpu.load_average.15m))"
                                     }
                                     direction = "desc"
                                   },
@@ -457,7 +457,7 @@ resource "signoz_dashboard" "host_overview" {
                       metrics = {
                         name          = "A"
                         signal        = "metrics"
-                        step_interval = "30"
+                        step_interval = "60"
                         aggregations = [
                           {
                             metric_name       = "system.filesystem.utilization"
@@ -550,7 +550,7 @@ resource "signoz_dashboard" "host_overview" {
                       metrics = {
                         name          = "A"
                         signal        = "metrics"
-                        step_interval = "30"
+                        step_interval = "60"
                         aggregations = [
                           {
                             metric_name       = "system.disk.io"
@@ -648,7 +648,7 @@ resource "signoz_dashboard" "host_overview" {
                       metrics = {
                         name          = "A"
                         signal        = "metrics"
-                        step_interval = "30"
+                        step_interval = "60"
                         aggregations = [
                           {
                             metric_name       = "system.network.io"
