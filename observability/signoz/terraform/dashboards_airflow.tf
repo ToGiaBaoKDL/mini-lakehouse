@@ -34,33 +34,8 @@ resource "signoz_dashboard" "airflow" {
       name        = "Airflow"
       description = "Scheduler heartbeat, task success/failure, DAG run durations, and pool slots from Airflow native OpenTelemetry metrics and traces."
     }
-    links = []
-    variables = [
-      {
-        list_variable = {
-          kind = "ListVariable"
-          spec = {
-            display = {
-              name        = "dag_id"
-              description = "Airflow DAG ID"
-            }
-            allow_all_value = true
-            allow_multiple  = true
-            sort            = "alphabetical-asc"
-            name            = "dag_id"
-            plugin = {
-              dynamic_variable = {
-                kind = "signoz/DynamicVariable"
-                spec = {
-                  name   = "dag_id"
-                  signal = "metrics"
-                }
-              }
-            }
-          }
-        }
-      },
-    ]
+    links     = []
+    variables = []
     panels = {
       "d7862908-c2b0-5858-a228-a22c1d7e78c1" = {
         kind = "Panel"
@@ -220,7 +195,7 @@ resource "signoz_dashboard" "airflow" {
                                   },
                                 ]
                                 filter = {
-                                  expression = "dag_id IN $dag_id"
+                                  expression = "dag_id EXISTS"
                                 }
                                 group_by = [
                                   {
@@ -266,7 +241,7 @@ resource "signoz_dashboard" "airflow" {
                                   },
                                 ]
                                 filter = {
-                                  expression = "dag_id IN $dag_id"
+                                  expression = "dag_id EXISTS"
                                 }
                                 group_by = [
                                   {
@@ -372,7 +347,7 @@ resource "signoz_dashboard" "airflow" {
                                   },
                                 ]
                                 filter = {
-                                  expression = "dag_id IN $dag_id"
+                                  expression = "dag_id EXISTS"
                                 }
                                 group_by = [
                                   {
@@ -418,7 +393,7 @@ resource "signoz_dashboard" "airflow" {
                                   },
                                 ]
                                 filter = {
-                                  expression = "dag_id IN $dag_id"
+                                  expression = "dag_id EXISTS"
                                 }
                                 group_by = [
                                   {
@@ -519,7 +494,7 @@ resource "signoz_dashboard" "airflow" {
                           },
                         ]
                         filter = {
-                          expression = "dag_id IN $dag_id"
+                          expression = "dag_id EXISTS"
                         }
                         group_by = [
                           {
@@ -611,7 +586,7 @@ resource "signoz_dashboard" "airflow" {
                           },
                         ]
                         filter = {
-                          expression = "dag_id IN $dag_id"
+                          expression = "dag_id EXISTS"
                         }
                         group_by = [
                           {
@@ -754,7 +729,7 @@ resource "signoz_dashboard" "airflow" {
                         name   = "A"
                         signal = "traces"
                         filter = {
-                          expression = "service.name = 'airflow'"
+                          expression = "service.name = 'airflow' AND dag_id EXISTS"
                         }
                         select_fields = [
                           {
@@ -870,7 +845,7 @@ resource "signoz_dashboard" "airflow" {
                           },
                         ]
                         filter = {
-                          expression = "dag_id IN $dag_id"
+                          expression = "dag_id EXISTS"
                         }
                         group_by = [
                           {
