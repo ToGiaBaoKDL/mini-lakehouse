@@ -193,6 +193,18 @@ def test_services_host_logging_is_reconciled_independently_of_image_builds() -> 
     assert "systemctl restart docker" in reconcile
 
 
+def test_services_host_owns_the_shared_observability_network() -> None:
+    workflow = _workflow("deploy-services-host.yml")
+    action = Path(".github/actions/reconcile-services-host/action.yml").read_text(encoding="utf-8")
+    reconcile = Path("infra/runtime/host/reconcile-docker-networks").read_text(encoding="utf-8")
+
+    assert "infra/runtime/host/reconcile-docker-networks" in workflow + action
+    assert "lakehouse-observability" in reconcile
+    assert "docker network inspect" in reconcile
+    assert "docker network create" in reconcile
+    assert "flock 9" in reconcile
+
+
 def test_metadata_backup_schedule_is_reconciled_from_reviewed_repo_sources() -> None:
     workflow = _workflow("deploy-services-host.yml")
     action = Path(".github/actions/reconcile-services-host/action.yml").read_text(encoding="utf-8")

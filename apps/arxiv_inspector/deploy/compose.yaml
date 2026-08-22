@@ -21,7 +21,7 @@ services:
     ports:
       - "${HOST_BIND_ADDRESS:-127.0.0.1}:8501:8501"
     networks:
-      - signoz
+      - telemetry
     healthcheck:
       test:
         [
@@ -37,6 +37,6 @@ services:
     restart: unless-stopped
 
 networks:
-  signoz:
+  telemetry:
     external: true
-    name: signoz-network
+    name: lakehouse-observability

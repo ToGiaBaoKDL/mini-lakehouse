@@ -52,6 +52,7 @@ x-airflow-common: &airflow-common
   networks:
     - metadata
     - runtime
+    - telemetry
   depends_on:
     airflow-init:
       condition: service_completed_successfully
@@ -158,6 +159,9 @@ networks:
     external: true
     name: lakehouse-metadata
   runtime:
+  telemetry:
+    external: true
+    name: lakehouse-observability
 
 secrets:
   airflow_database_password:

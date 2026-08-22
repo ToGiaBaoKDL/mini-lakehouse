@@ -56,7 +56,7 @@ resource "signoz_dashboard" "metadata_backup_status" {
                         name   = "A"
                         signal = "logs"
                         filter = {
-                          expression = "status EXISTS"
+                          expression = "service.name = 'lakehouse-metadata-backup' AND status EXISTS"
                         }
                         select_fields = [
                           {
@@ -176,7 +176,7 @@ resource "signoz_dashboard" "metadata_backup_status" {
                           },
                         ]
                         filter = {
-                          expression = "status EXISTS"
+                          expression = "service.name = 'lakehouse-metadata-backup' AND status EXISTS"
                         }
                         group_by = [
                           {
@@ -266,7 +266,7 @@ resource "signoz_dashboard" "metadata_backup_status" {
                           },
                         ]
                         filter = {
-                          expression = "status = 'success'"
+                          expression = "service.name = 'lakehouse-metadata-backup' AND status = 'success'"
                         }
                         group_by = [
                           {
@@ -356,7 +356,7 @@ resource "signoz_dashboard" "metadata_backup_status" {
                           },
                         ]
                         filter = {
-                          expression = "status = 'success'"
+                          expression = "service.name = 'lakehouse-metadata-backup' AND status = 'success'"
                         }
                         group_by = [
                           {

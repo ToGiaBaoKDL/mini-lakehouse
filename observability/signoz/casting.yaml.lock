@@ -368,15 +368,15 @@ spec:
       value:
         resources:
           limits:
-            cpus: "1.0"
-            memory: 2G
+            cpus: "2.0"
+            memory: 4G
     - op: add
       path: /services/signoz-telemetrykeeper-clickhousekeeper-0/deploy
       value:
         resources:
           limits:
             cpus: "0.25"
-            memory: 256M
+            memory: 512M
     - op: add
       path: /services/signoz-metastore-postgres-0/deploy
       value:

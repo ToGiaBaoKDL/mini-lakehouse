@@ -2,16 +2,20 @@ services:
   collection-agent:
     image: "${COLLECTOR_IMAGE:?COLLECTOR_IMAGE is required}"
     container_name: signoz-collection-agent
+    hostname: "${COLLECTOR_HOSTNAME:?COLLECTOR_HOSTNAME is required}"
     # Root is required to read docker JSON log files (0600) and the Docker
     # socket; every host mount stays read-only.
     user: "0:0"
     command:
       - --config=/etc/otel-collector/config.yaml
+      - --feature-gates=receiver.postgresql.connectionPool
     environment:
       OTEL_RESOURCE_ATTRIBUTES: "${OTEL_RESOURCE_ATTRIBUTES:-deployment.environment=dev}"
       POSTGRES_MONITOR_ENDPOINT: "${POSTGRES_MONITOR_ENDPOINT:-metadata-postgres:5432}"
       PG_MONITOR_USER: "${PG_MONITOR_USER:-lakehouse_monitor}"
       PG_MONITOR_PASSWORD: "${PG_MONITOR_PASSWORD:?PG_MONITOR_PASSWORD is required}"
+    labels:
+      lakehouse.config.sha256: "${COLLECTOR_CONFIG_SHA256:?COLLECTOR_CONFIG_SHA256 is required}"
     volumes:
       - ./config.yaml:/etc/otel-collector/config.yaml:ro
       - /:/hostfs:ro
@@ -19,11 +23,20 @@ services:
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - collection-agent-file-storage:/var/lib/otelcol/storage
+    ports:
+      - "127.0.0.1:13133:13133"
     # The contrib image is distroless: the healthcheck runs the binary
     # itself, which re-validates the live configuration. The health_check
     # extension answers in-container probes on :13133 for the SigNoz stack.
     healthcheck:
-      test: ["CMD", "/otelcol-contrib", "validate", "--config=/etc/otel-collector/config.yaml"]
+      test:
+        [
+          "CMD",
+          "/otelcol-contrib",
+          "validate",
+          "--config=/etc/otel-collector/config.yaml",
+          "--feature-gates=receiver.postgresql.connectionPool",
+        ]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -31,6 +44,7 @@ services:
     networks:
       - signoz
       - metadata
+      - telemetry
     security_opt:
       - no-new-privileges:true
     init: true
@@ -52,3 +66,6 @@ networks:
   metadata:
     external: true
     name: lakehouse-metadata
+  telemetry:
+    external: true
+    name: lakehouse-observability

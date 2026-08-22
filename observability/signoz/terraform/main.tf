@@ -1,6 +1,5 @@
 provider "signoz" {
-  endpoint     = var.signoz_endpoint
-  access_token = var.signoz_access_token
+  endpoint = var.signoz_endpoint
 }
 
 locals {

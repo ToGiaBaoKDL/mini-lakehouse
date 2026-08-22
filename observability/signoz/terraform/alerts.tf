@@ -42,6 +42,18 @@ resource "signoz_rule" "host_disk_70_percent" {
                     space_aggregation = "max"
                   },
                 ]
+                group_by = [
+                  {
+                    name            = "host.name"
+                    field_context   = "resource"
+                    field_data_type = "string"
+                  },
+                  {
+                    name            = "mountpoint"
+                    field_context   = "attribute"
+                    field_data_type = "string"
+                  },
+                ]
                 limit = 100
                 order = [
                   {
@@ -66,7 +78,7 @@ resource "signoz_rule" "host_disk_70_percent" {
         spec = [
           {
             channels   = local.alert_channels
-            match_type = "at_least_once"
+            match_type = "on_average"
             name       = "warning"
             op         = "above"
             target     = 0.7
@@ -133,6 +145,18 @@ resource "signoz_rule" "host_disk_80_percent" {
                     space_aggregation = "max"
                   },
                 ]
+                group_by = [
+                  {
+                    name            = "host.name"
+                    field_context   = "resource"
+                    field_data_type = "string"
+                  },
+                  {
+                    name            = "mountpoint"
+                    field_context   = "attribute"
+                    field_data_type = "string"
+                  },
+                ]
                 limit = 100
                 order = [
                   {
@@ -157,7 +181,7 @@ resource "signoz_rule" "host_disk_80_percent" {
         spec = [
           {
             channels   = local.alert_channels
-            match_type = "at_least_once"
+            match_type = "on_average"
             name       = "critical"
             op         = "above"
             target     = 0.8
@@ -224,6 +248,18 @@ resource "signoz_rule" "host_disk_90_percent" {
                     space_aggregation = "max"
                   },
                 ]
+                group_by = [
+                  {
+                    name            = "host.name"
+                    field_context   = "resource"
+                    field_data_type = "string"
+                  },
+                  {
+                    name            = "mountpoint"
+                    field_context   = "attribute"
+                    field_data_type = "string"
+                  },
+                ]
                 limit = 100
                 order = [
                   {
@@ -248,7 +284,7 @@ resource "signoz_rule" "host_disk_90_percent" {
         spec = [
           {
             channels   = local.alert_channels
-            match_type = "at_least_once"
+            match_type = "on_average"
             name       = "emergency"
             op         = "above"
             target     = 0.9
@@ -321,6 +357,13 @@ resource "signoz_rule" "host_metrics_missing" {
                     metric_name       = "system.cpu.utilization"
                     time_aggregation  = "avg"
                     space_aggregation = "max"
+                  },
+                ]
+                group_by = [
+                  {
+                    name            = "host.name"
+                    field_context   = "resource"
+                    field_data_type = "string"
                   },
                 ]
                 limit = 100
@@ -559,143 +602,6 @@ resource "signoz_rule" "airflow_scheduler_heartbeat_missing" {
   schema_version = "v2alpha1"
 }
 
-resource "signoz_rule" "airflow_task_completions_stalled" {
-  alert      = "airflow_task_completions_stalled"
-  alert_type = "METRIC_BASED_ALERT"
-  rule_type  = "threshold_rule"
-
-  description = "No task instances finished (success or failure) for 2 hours; DAGs may be stuck or the scheduler idle beyond expectations."
-
-  annotations = {
-    summary     = "No Airflow task completions in 2 hours"
-    description = "airflow.ti_successes + airflow.ti_failures has not incremented for 2 hours."
-  }
-
-  labels = {
-    severity = "warning"
-    team     = "platform"
-  }
-
-  condition = {
-    composite_query = {
-      panel_type = "table"
-      query_type = "builder"
-
-      queries = [
-        {
-          builder_query = {
-            type = "builder_query"
-            spec = {
-              metrics = {
-                name     = "A"
-                signal   = "metrics"
-                disabled = true
-
-                aggregations = [
-                  {
-                    metric_name       = "airflow.ti_successes"
-                    time_aggregation  = "increase"
-                    space_aggregation = "sum"
-                  },
-                ]
-                limit = 10000
-                order = [
-                  {
-                    key = {
-                      name = "sum(increase(airflow.ti_successes))"
-                    }
-                    direction = "desc"
-                  },
-                ]
-              }
-            }
-          }
-        },
-        {
-          builder_query = {
-            type = "builder_query"
-            spec = {
-              metrics = {
-                name     = "B"
-                signal   = "metrics"
-                disabled = true
-
-                aggregations = [
-                  {
-                    metric_name       = "airflow.ti_failures"
-                    time_aggregation  = "increase"
-                    space_aggregation = "sum"
-                  },
-                ]
-                limit = 10000
-                order = [
-                  {
-                    key = {
-                      name = "sum(increase(airflow.ti_failures))"
-                    }
-                    direction = "desc"
-                  },
-                ]
-              }
-            }
-          }
-        },
-        {
-          builder_formula = {
-            type = "builder_formula"
-            spec = {
-              name       = "F1"
-              expression = "A + B"
-              limit      = 100
-              order = [
-                {
-                  key = {
-                    name = "__result"
-                  }
-                  direction = "desc"
-                },
-              ]
-            }
-          }
-        },
-      ]
-    }
-
-    selected_query_name = "F1"
-
-    thresholds = {
-      basic = {
-        kind = "basic"
-        spec = [
-          {
-            channels   = local.alert_channels
-            match_type = "in_total"
-            name       = "stalled"
-            op         = "below"
-            target     = 1
-          },
-        ]
-      }
-    }
-  }
-
-  evaluation = {
-    rolling = {
-      kind = "rolling"
-      spec = {
-        eval_window = "2h"
-        frequency   = "15m"
-      }
-    }
-  }
-
-  notification_settings = {
-    use_policy = local.use_policy
-  }
-
-  schema_version = "v2alpha1"
-}
-
 resource "signoz_rule" "metadata_backup_failed" {
   alert      = "metadata_backup_failed"
   alert_type = "LOGS_BASED_ALERT"
@@ -743,12 +649,17 @@ resource "signoz_rule" "metadata_backup_failed" {
                 ]
 
                 filter = {
-                  expression = "status = 'failure'"
+                  expression = "service.name = 'lakehouse-metadata-backup' AND status = 'failure'"
                 }
 
                 group_by = [
                   {
                     name            = "database"
+                    field_context   = "attribute"
+                    field_data_type = "string"
+                  },
+                  {
+                    name            = "slot"
                     field_context   = "attribute"
                     field_data_type = "string"
                   },
@@ -843,7 +754,7 @@ resource "signoz_rule" "metadata_backup_airflow_missing" {
                 ]
 
                 filter = {
-                  expression = "status = 'success' AND database = 'airflow'"
+                  expression = "service.name = 'lakehouse-metadata-backup' AND status = 'success' AND database = 'airflow'"
                 }
               }
             }
@@ -939,7 +850,7 @@ resource "signoz_rule" "metadata_backup_lightdash_missing" {
                 ]
 
                 filter = {
-                  expression = "status = 'success' AND database = 'lightdash'"
+                  expression = "service.name = 'lakehouse-metadata-backup' AND status = 'success' AND database = 'lightdash'"
                 }
               }
             }
@@ -993,11 +904,11 @@ resource "signoz_rule" "synthetic_endpoint_probe_failed" {
   alert_type = "METRIC_BASED_ALERT"
   rule_type  = "threshold_rule"
 
-  description = "Synthetic HTTP probe failed for a public ingress endpoint (httpcheck.status < 1 for 3 consecutive minutes)."
+  description = "A private origin health probe failed or stopped reporting for 3 minutes."
 
   annotations = {
-    summary     = "Public ingress endpoint probe failed for {{$labels.http_url}}"
-    description = "Synthetic blackbox probe for public endpoint {{$labels.http_url}} returned failing status."
+    summary     = "Origin health probe failed for {{$labels.http_url}}"
+    description = "The private health endpoint {{$labels.http_url}} returned a non-2xx response or stopped reporting."
   }
 
   labels = {
@@ -1006,6 +917,9 @@ resource "signoz_rule" "synthetic_endpoint_probe_failed" {
   }
 
   condition = {
+    alert_on_absent = true
+    absent_for      = 3
+
     composite_query = {
       panel_type = "graph"
       query_type = "builder"
@@ -1034,6 +948,9 @@ resource "signoz_rule" "synthetic_endpoint_probe_failed" {
                     field_data_type = "string"
                   },
                 ]
+                filter = {
+                  expression = "http.status_class = '2xx'"
+                }
                 limit = 100
                 order = [
                   {
@@ -1058,7 +975,7 @@ resource "signoz_rule" "synthetic_endpoint_probe_failed" {
         spec = [
           {
             channels   = local.alert_channels
-            match_type = "at_least_once"
+            match_type = "all_the_times"
             name       = "probe failed"
             op         = "below"
             target     = 1
@@ -1072,7 +989,7 @@ resource "signoz_rule" "synthetic_endpoint_probe_failed" {
     rolling = {
       kind = "rolling"
       spec = {
-        eval_window = "5m"
+        eval_window = "3m"
         frequency   = "1m"
       }
     }
@@ -1080,6 +997,107 @@ resource "signoz_rule" "synthetic_endpoint_probe_failed" {
 
   notification_settings = {
     group_by   = ["http.url"]
+    use_policy = local.use_policy
+  }
+
+  schema_version = "v2alpha1"
+}
+
+resource "signoz_rule" "synthetic_origin_validation_failed" {
+  alert      = "synthetic_origin_validation_failed"
+  alert_type = "METRIC_BASED_ALERT"
+  rule_type  = "threshold_rule"
+
+  description = "A private origin returned a 2xx response whose body failed its health validation."
+
+  annotations = {
+    summary     = "Origin health validation failed for {{$labels.http_url}}"
+    description = "The {{$labels.validation_type}} validation failed for {{$labels.http_url}}."
+  }
+
+  labels = {
+    severity = "critical"
+    team     = "platform"
+  }
+
+  condition = {
+    composite_query = {
+      panel_type = "graph"
+      query_type = "builder"
+
+      queries = [
+        {
+          builder_query = {
+            type = "builder_query"
+            spec = {
+              metrics = {
+                name   = "A"
+                signal = "metrics"
+                aggregations = [
+                  {
+                    metric_name       = "httpcheck.validation.failed"
+                    time_aggregation  = "avg"
+                    space_aggregation = "max"
+                  },
+                ]
+                group_by = [
+                  {
+                    name            = "http.url"
+                    field_context   = "attribute"
+                    field_data_type = "string"
+                  },
+                  {
+                    name            = "validation.type"
+                    field_context   = "attribute"
+                    field_data_type = "string"
+                  },
+                ]
+                limit = 100
+                order = [
+                  {
+                    key = {
+                      name = "max(avg(httpcheck.validation.failed))"
+                    }
+                    direction = "desc"
+                  },
+                ]
+              }
+            }
+          }
+        },
+      ]
+    }
+
+    selected_query_name = "A"
+
+    thresholds = {
+      basic = {
+        kind = "basic"
+        spec = [
+          {
+            channels   = local.alert_channels
+            match_type = "at_least_once"
+            name       = "validation failed"
+            op         = "above"
+            target     = 0
+          },
+        ]
+      }
+    }
+  }
+
+  evaluation = {
+    rolling = {
+      kind = "rolling"
+      spec = {
+        eval_window = "3m"
+        frequency   = "1m"
+      }
+    }
+  }
+
+  notification_settings = {
+    group_by   = ["http.url", "validation.type"]
     use_policy = local.use_policy
   }
 
@@ -1104,6 +1122,9 @@ resource "signoz_rule" "synthetic_tls_cert_expiring_soon" {
   }
 
   condition = {
+    alert_on_absent = true
+    absent_for      = 120
+
     composite_query = {
       panel_type = "graph"
       query_type = "builder"
@@ -1156,7 +1177,7 @@ resource "signoz_rule" "synthetic_tls_cert_expiring_soon" {
         spec = [
           {
             channels   = local.alert_channels
-            match_type = "at_least_once"
+            match_type = "all_the_times"
             name       = "cert expiring in < 7d"
             op         = "below"
             target     = 604800
@@ -1170,7 +1191,7 @@ resource "signoz_rule" "synthetic_tls_cert_expiring_soon" {
     rolling = {
       kind = "rolling"
       spec = {
-        eval_window = "1h"
+        eval_window = "2h"
         frequency   = "15m"
       }
     }

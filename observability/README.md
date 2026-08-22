@@ -43,25 +43,16 @@ containers with an altered compose; `foundryctl cast` is the only mutation path.
 Retention is application state in SigNoz's metastore (enforced through ClickHouse table TTLs), not
 casting configuration and not a Terraform resource. After first deployment set it once through the
 same settings API the UI uses (Settings → Workspace → Retention Controls): logs 7 days, traces
-7 days, metrics 30 days. The self-hosted defaults are 15 days logs/traces and 30 days metrics; do
-not rely on them.
+7 days, metrics 30 days. These match the Foundry Docker defaults today, but keeping the values
+explicit makes an upgrade's retention behavior reviewable.
 
 ### Backup and restore
 
 SigNoz telemetry is disposable; S3 remains the durable record of task logs and database backups.
-The ClickHouse volume is the only state worth protecting against a full-host loss. Before any
-SigNoz or host upgrade, snapshot the volumes:
-
-```bash
-for volume in signoz-telemetrystore-0-0-data signoz-metastore-postgres-0-data \
-    signoz-telemetrykeeper-0-data; do
-  docker run --rm -v "$volume":/data -v "$HOME/signoz-backup":/backup alpine \
-    tar -czf "/backup/$volume.tar.gz" -C /data .
-done
-```
-
-Restore stops the stack, replaces the volume contents, and re-casts. A restore drill belongs to the
-upgrade checklist; dev accepts losing telemetry if the drill is not run.
+Before host or SigNoz upgrades, use an OCI boot-volume backup/snapshot for a crash-consistent
+recovery point. Do not archive a live ClickHouse Docker volume with `tar`: that is not an
+application-consistent ClickHouse backup. Dev accepts rebuilding SigNoz and losing retained
+telemetry when no infrastructure snapshot exists.
 
 ## Collection agent
 
@@ -76,11 +67,12 @@ One official OpenTelemetry Collector Contrib agent runs as the compose project
 | `observability/signoz/collector/image` | Reviewed digest-pinned contrib image |
 | `observability/signoz/collector/deploy` | Host-side validate-and-run script |
 
-The agent joins the Foundry-created `signoz-network` and the shared `lakehouse-metadata` network
-(both external network dependencies, deploy order matters) and exports to the already-host-bound
-`signoz-ingester:4317`; it never binds host ports. It is also the single OTLP gateway for
-applications: Airflow exports metrics and traces over `lakehouse-metadata`, and the ArXiv Inspector
-exports traces over `signoz-network`, both to `signoz-collection-agent:4317`. Secrets for the
+The agent joins the Foundry-created `signoz-network`, shared `lakehouse-metadata`, and host-owned
+`lakehouse-observability` application network. The shared host reconcile action creates the latter
+idempotently before any component deploy, removing cross-workflow ordering races. It exports to
+`signoz-ingester:4317` and exposes only its health endpoint on host loopback (`127.0.0.1:13133`).
+It is the single OTLP gateway for applications over `lakehouse-observability`, so workloads do not
+need access to the SigNoz datastore network. Secrets for the
 `postgresql` receiver are supplied at deploy time from Secrets Manager through the
 `metadata-postgres` identity — never stored in config or compose.
 
@@ -91,7 +83,8 @@ Signals collected:
 - `docker_stats` via the read-only Docker socket, with compose project/service labels promoted to
   metric attributes.
 - `postgresql` metrics for the shared metadata server through a login role granted only the
-  built-in `pg_monitor` privilege.
+  built-in `pg_monitor` privilege. The receiver uses its beta per-database connection pool
+  (`max_open=4`); the role-wide connection limit is 12 for the three monitored databases.
 - Container logs through `receiver_creator` + `docker_observer`: resource attributes
   (`container.id`, `container.name`, `container.image.name`) come from Docker metadata with no
   regex, and an allowlist rule keeps only long-lived compose services (Airflow, Lightdash,
@@ -101,8 +94,14 @@ Signals collected:
 - Airflow native OpenTelemetry metrics and traces (scheduler heartbeat, DAG/task durations,
   failures) and the `/var/log/lakehouse/metadata-backup-audit.log` parsed as JSON (written by the
   metadata backup script; see the plan doc).
+- Private application health probes over the telemetry network and public TLS-expiry probes. The
+  latter intentionally ignore HTTP status because Cloudflare Access redirects unauthenticated
+  requests to its login flow.
 
-Log policy: redaction strips bearer tokens, basic-auth connection strings, AWS key IDs, and common
+Log policy: structured OpenTelemetry DEBUG/INFO records are dropped before export; legacy records
+without a severity remain eligible because discarding them would be guesswork. Long-lived Docker
+services also emit warning-or-higher at their source. Redaction strips bearer tokens, basic-auth
+connection strings, AWS key IDs, and common
 `password|token|secret|api_key|cookie|authorization` pairings before export. The same redaction
 rules apply to span attribute values (e.g. botocore auto-instrumentation signed URLs redact the
 SigV4 `x-amz-credential`/`x-amz-signature`/`x-amz-security-token` query parameters). Docker's
@@ -114,7 +113,7 @@ Durability: container-log and backup-audit file positions are checkpointed throu
 `file_storage` extension into the named `collection-agent-file-storage` volume, so restarts and
 redeploys resume where they stopped instead of skipping the backlog with `start_at: end`.
 
-Liveness: the `health_check` extension answers `GET /` on `:13133` in-container, and the
+Liveness: the `health_check` extension answers `GET /` on host loopback port `13133`, and the
 container healthcheck invokes the distroless binary's `validate` subcommand (the contrib image
 ships no shell or curl), so the SigNoz stack and Docker both detect a wedged collector.
 
@@ -133,12 +132,12 @@ layout:
 | `dashboards_airflow.tf` | Airflow: scheduler heartbeat, task outcomes, DAG durations, pool state, recent traces |
 | `dashboards_postgres.tf` | Metadata PostgreSQL: backends, commits/rollbacks, size, row operations |
 | `dashboards_backup.tf` | Metadata backup status parsed from the backup audit JSON lines |
-| `alerts.tf` | Disk 70/80/90%, absent-metric rules for pipeline liveness, DAG stalls, backup failed/missing |
+| `alerts.tf` | Disk 70/80/90%, absent-metric rules for ingest liveness, origin/TLS probes, backup failed/missing |
 
 Panel and rule queries use the builder query language over the exact metric names emitted by the
 collection agent (`system.*`, `container.*`, `postgresql.*`, `airflow.*`) and the parsed fields of
-the backup audit log (no `log.file.name` filter — the agent tails the audit file with
-`include_file_name: false`).
+the backup audit log, identified by the stable resource attribute
+`service.name=lakehouse-metadata-backup` rather than a filename.
 
 Applying requires a SigNoz service-account API key stored in AWS Secrets Manager
 (`lakehouse/dev/signoz/ci`) or exported as `SIGNOZ_ACCESS_TOKEN` (create one in
@@ -146,9 +145,13 @@ Settings → Service Accounts → Keys). CD automatically applies dashboards and
 on merge to `main` via `deploy-signoz.yml`. For manual operator apply:
 
 ```sh
+export AWS_PROFILE=tgbao-dev
 export SIGNOZ_ACCESS_TOKEN=...
 make signoz-init signoz-plan signoz-apply
 ```
+
+`AWS_PROFILE` is needed only for the S3 Terraform backend and AWS APIs. The SigNoz provider itself
+uses `SIGNOZ_ACCESS_TOKEN`; GitHub Actions obtains AWS credentials with OIDC instead of a profile.
 
 Notification channels (Slack/SMTP) are not provider resources: create the operator channel once in
 the UI, then set `TF_VAR_signoz_alert_channels='["channel-name"]'` so every rule threshold

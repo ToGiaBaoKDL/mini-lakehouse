@@ -112,7 +112,11 @@ def test_airflow_uses_local_executor_and_required_runtime_components() -> None:
     assert "airflow-auth:/opt/airflow/auth" in common["volumes"]
     assert "airflow-dag-bundles:/opt/airflow/dag-bundles" in common["volumes"]
     assert payload["networks"]["metadata"]["external"] is True
-    assert set(common["networks"]) == {"metadata", "runtime"}
+    assert set(common["networks"]) == {"metadata", "runtime", "telemetry"}
+    assert payload["networks"]["telemetry"] == {
+        "external": True,
+        "name": "lakehouse-observability",
+    }
     assert _compose(POSTGRES_COMPOSE)["networks"]["metadata"]["internal"] is True
 
 
@@ -194,6 +198,7 @@ def test_airflow_runtime_components_have_role_appropriate_healthchecks() -> None
     assert "CREATE ROLE lakehouse_monitor" in pg_monitor_bootstrap
     assert "GRANT CONNECT ON DATABASE postgres TO lakehouse_monitor" in pg_monitor_bootstrap
     assert "GRANT pg_monitor TO lakehouse_monitor" in pg_monitor_bootstrap
+    assert "CONNECTION LIMIT 12" in pg_monitor_bootstrap
     assert "SUPERUSER" not in pg_monitor_bootstrap
     # PostgreSQL reserves every role name that starts with pg_.
     assert "pg_monitor_user" not in pg_monitor_bootstrap
@@ -226,7 +231,11 @@ def test_lightdash_uses_owned_database_storage_and_sdk_credentials() -> None:
     assert service["entrypoint"][:2] == ["dumb-init", "--"]
     assert service["command"] == ["node", "dist/index.js"]
     assert service["ports"] == ["${HOST_BIND_ADDRESS:-127.0.0.1}:8081:8080"]
-    assert set(service["networks"]) == {"metadata", "runtime"}
+    assert set(service["networks"]) == {"metadata", "runtime", "telemetry"}
+    assert payload["networks"]["telemetry"] == {
+        "external": True,
+        "name": "lakehouse-observability",
+    }
     assert payload["networks"]["metadata"]["external"] is True
     assert payload["networks"]["runtime"] is None
     assert environment["PGDATABASE"] == "lightdash"
@@ -329,9 +338,9 @@ def test_arxiv_inspector_receives_only_its_explicit_environment() -> None:
         "http://signoz-collection-agent:4317"
     )
     assert "extra_hosts" not in service
-    assert _compose(INSPECTOR_COMPOSE)["networks"]["signoz"] == {
+    assert _compose(INSPECTOR_COMPOSE)["networks"]["telemetry"] == {
         "external": True,
-        "name": "signoz-network",
+        "name": "lakehouse-observability",
     }
     assert service["volumes"] == ["${AWS_IDENTITY_DIR}/arxiv-inspector:/run/aws:ro"]
 

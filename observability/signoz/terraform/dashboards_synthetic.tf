@@ -1,5 +1,5 @@
 # Synthetic Probing dashboard: http_check receiver signals (observability/signoz/collector/config.yaml).
-# End-to-end blackbox HTTP availability, TLS certificate validity, latency, and error probes across all public Cloudflare ingress endpoints.
+# Private origin health plus public Cloudflare edge TLS certificate probes.
 
 resource "signoz_dashboard" "synthetic_probing" {
   schema_version = "v6"
@@ -26,7 +26,7 @@ resource "signoz_dashboard" "synthetic_probing" {
   spec = {
     display = {
       name        = "Synthetic Probing"
-      description = "End-to-end HTTP availability, TLS certificate validity, latency, and error probes across all public Cloudflare ingress endpoints."
+      description = "Private application health and latency, plus public Cloudflare edge TLS certificate validity."
     }
     links = []
     variables = [
@@ -61,7 +61,7 @@ resource "signoz_dashboard" "synthetic_probing" {
         spec = {
           display = {
             name        = "Endpoint availability"
-            description = "HTTP availability ratio (1.0 = 100% healthy, 0 = probe failed)."
+            description = "Private origin 2xx availability ratio (1.0 = healthy, 0 = non-2xx)."
           }
           links = []
           plugin = {
@@ -118,7 +118,7 @@ resource "signoz_dashboard" "synthetic_probing" {
                           },
                         ]
                         filter = {
-                          expression = "http.url IN $http_url"
+                          expression = "http.url IN $http_url AND http.status_class = '2xx'"
                         }
                         group_by = [
                           {

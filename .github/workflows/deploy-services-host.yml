@@ -8,6 +8,7 @@ on:
       - .github/workflows/deploy-services-host.yml
       - infra/runtime/host/docker-daemon.json
       - infra/runtime/host/reconcile-docker-logging
+      - infra/runtime/host/reconcile-docker-networks
       - infra/runtime/host/reconcile-metadata-backup
       - infra/runtime/host/systemd/lakehouse-metadata-backup.service
       - infra/runtime/host/systemd/lakehouse-metadata-backup.timer

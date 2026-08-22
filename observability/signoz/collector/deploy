@@ -42,6 +42,10 @@ docker network inspect lakehouse-metadata >/dev/null 2>&1 || {
     printf '%s\n' "lakehouse-metadata is missing; deploy metadata PostgreSQL first." >&2
     exit 1
 }
+docker network inspect lakehouse-observability >/dev/null 2>&1 || {
+    printf '%s\n' "lakehouse-observability is missing; reconcile the services host first." >&2
+    exit 1
+}
 
 aws_runtime() {
     env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
@@ -62,26 +66,21 @@ printf '%s' "$monitor_secret" | jq -e \
 export COLLECTOR_IMAGE=$image
 export OTEL_RESOURCE_ATTRIBUTES=${OTEL_RESOURCE_ATTRIBUTES:-deployment.environment=dev}
 export POSTGRES_MONITOR_ENDPOINT=${POSTGRES_MONITOR_ENDPOINT:-metadata-postgres:5432}
+COLLECTOR_CONFIG_SHA256=$(sha256sum "$script_dir/config.yaml" | awk '{print $1}')
+COLLECTOR_HOSTNAME=$(hostname)
 PG_MONITOR_USER=$(printf '%s' "$monitor_secret" | jq -r '.username // "lakehouse_monitor"')
 PG_MONITOR_PASSWORD=$(printf '%s' "$monitor_secret" | jq -r '.password')
-export PG_MONITOR_USER PG_MONITOR_PASSWORD
+export COLLECTOR_CONFIG_SHA256 COLLECTOR_HOSTNAME PG_MONITOR_USER PG_MONITOR_PASSWORD
 
 docker pull "$image" >/dev/null
 docker compose --project-name signoz-collection-agent -f "$script_dir/compose.yaml" \
-    up -d --force-recreate
+    up -d --wait --wait-timeout 60
 
-attempt=0
-until [ "$(docker inspect -f '{{.State.Running}}' signoz-collection-agent 2>/dev/null)" = "true" ] \
-    && sleep 5 \
-    && [ "$(docker inspect -f '{{.State.Running}}' signoz-collection-agent 2>/dev/null)" = "true" ]; do
-    attempt=$((attempt + 1))
-    if [ "$attempt" -ge 6 ]; then
-        docker compose --project-name signoz-collection-agent -f "$script_dir/compose.yaml" \
-            logs --tail=100
-        printf '%s\n' "SigNoz collection agent did not stay running within 30 seconds." >&2
-        exit 1
-    fi
-    sleep 2
-done
+if ! curl -fsS --connect-timeout 2 --max-time 5 http://127.0.0.1:13133/ >/dev/null; then
+    docker compose --project-name signoz-collection-agent -f "$script_dir/compose.yaml" \
+        logs --tail=100
+    printf '%s\n' "SigNoz collection agent health endpoint is unavailable." >&2
+    exit 1
+fi
 
-printf '%s\n' "SigNoz collection agent is running."
+printf '%s\n' "SigNoz collection agent is healthy."

@@ -42,6 +42,7 @@ services:
     networks:
       - metadata
       - runtime
+      - telemetry
     healthcheck:
       test:
         - CMD
@@ -65,6 +66,9 @@ networks:
     external: true
     name: lakehouse-metadata
   runtime:
+  telemetry:
+    external: true
+    name: lakehouse-observability
 
 secrets:
   lightdash_database_password:

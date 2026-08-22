@@ -438,7 +438,7 @@ resource "signoz_dashboard" "airflow" {
         spec = {
           display = {
             name        = "DAG run duration by DAG"
-            description = "Successful DAG run durations in seconds, grouped by dag_id."
+            description = "Successful DAG run durations in milliseconds, grouped by dag_id."
           }
           links = []
           plugin = {
@@ -450,7 +450,7 @@ resource "signoz_dashboard" "airflow" {
                   fill_spans      = false
                 }
                 formatting = {
-                  unit              = "s"
+                  unit              = "ms"
                   decimal_precision = "2"
                 }
                 chart_appearance = {
@@ -789,7 +789,7 @@ resource "signoz_dashboard" "airflow" {
         spec = {
           display = {
             name        = "DAG schedule delay"
-            description = "Delay between scheduled execution time and actual start time in seconds, grouped by dag_id."
+            description = "Delay between scheduled execution time and actual start time in milliseconds, grouped by dag_id."
           }
           links = []
           plugin = {
@@ -801,7 +801,7 @@ resource "signoz_dashboard" "airflow" {
                   fill_spans      = false
                 }
                 formatting = {
-                  unit              = "s"
+                  unit              = "ms"
                   decimal_precision = "2"
                 }
                 chart_appearance = {

@@ -58,7 +58,7 @@ resource "signoz_dashboard" "host_overview" {
         spec = {
           display = {
             name        = "CPU utilization"
-            description = "Host CPU utilization by state (hostmetrics)."
+            description = "Active CPU utilization by non-idle state, averaged across logical CPUs per host."
           }
           links = []
           plugin = {
@@ -114,9 +114,14 @@ resource "signoz_dashboard" "host_overview" {
                           },
                         ]
                         filter = {
-                          expression = "host.name IN $host_name"
+                          expression = "host.name IN $host_name AND state != 'idle'"
                         }
                         group_by = [
+                          {
+                            name            = "host.name"
+                            field_context   = "resource"
+                            field_data_type = "string"
+                          },
                           {
                             name            = "state"
                             field_context   = "attribute"
@@ -126,7 +131,7 @@ resource "signoz_dashboard" "host_overview" {
                         having = {
                           expression = ""
                         }
-                        legend = "{{state}}"
+                        legend = "{{host.name}} / {{state}}"
                         limit  = 100
                         order = [
                           {
@@ -210,6 +215,11 @@ resource "signoz_dashboard" "host_overview" {
                         }
                         group_by = [
                           {
+                            name            = "host.name"
+                            field_context   = "resource"
+                            field_data_type = "string"
+                          },
+                          {
                             name            = "state"
                             field_context   = "attribute"
                             field_data_type = "string"
@@ -218,7 +228,7 @@ resource "signoz_dashboard" "host_overview" {
                         having = {
                           expression = ""
                         }
-                        legend = "{{state}}"
+                        legend = "{{host.name}} / {{state}}"
                         limit  = 100
                         order = [
                           {
@@ -305,10 +315,17 @@ resource "signoz_dashboard" "host_overview" {
                                 filter = {
                                   expression = "host.name IN $host_name"
                                 }
+                                group_by = [
+                                  {
+                                    name            = "host.name"
+                                    field_context   = "resource"
+                                    field_data_type = "string"
+                                  },
+                                ]
                                 having = {
                                   expression = ""
                                 }
-                                legend = "load 1"
+                                legend = "{{host.name}} / load 1"
                                 limit  = 100
                                 order = [
                                   {
@@ -339,10 +356,17 @@ resource "signoz_dashboard" "host_overview" {
                                 filter = {
                                   expression = "host.name IN $host_name"
                                 }
+                                group_by = [
+                                  {
+                                    name            = "host.name"
+                                    field_context   = "resource"
+                                    field_data_type = "string"
+                                  },
+                                ]
                                 having = {
                                   expression = ""
                                 }
-                                legend = "load 5"
+                                legend = "{{host.name}} / load 5"
                                 limit  = 100
                                 order = [
                                   {
@@ -373,10 +397,17 @@ resource "signoz_dashboard" "host_overview" {
                                 filter = {
                                   expression = "host.name IN $host_name"
                                 }
+                                group_by = [
+                                  {
+                                    name            = "host.name"
+                                    field_context   = "resource"
+                                    field_data_type = "string"
+                                  },
+                                ]
                                 having = {
                                   expression = ""
                                 }
-                                legend = "load 15"
+                                legend = "{{host.name}} / load 15"
                                 limit  = 100
                                 order = [
                                   {
@@ -464,6 +495,11 @@ resource "signoz_dashboard" "host_overview" {
                         }
                         group_by = [
                           {
+                            name            = "host.name"
+                            field_context   = "resource"
+                            field_data_type = "string"
+                          },
+                          {
                             name            = "mountpoint"
                             field_context   = "attribute"
                             field_data_type = "string"
@@ -472,7 +508,7 @@ resource "signoz_dashboard" "host_overview" {
                         having = {
                           expression = ""
                         }
-                        legend = "{{mountpoint}}"
+                        legend = "{{host.name}} / {{mountpoint}}"
                         limit  = 100
                         order = [
                           {
@@ -508,7 +544,7 @@ resource "signoz_dashboard" "host_overview" {
                   fill_spans      = false
                 }
                 formatting = {
-                  unit              = "bytes"
+                  unit              = "Bps"
                   decimal_precision = "2"
                 }
                 chart_appearance = {
@@ -556,6 +592,11 @@ resource "signoz_dashboard" "host_overview" {
                         }
                         group_by = [
                           {
+                            name            = "host.name"
+                            field_context   = "resource"
+                            field_data_type = "string"
+                          },
+                          {
                             name            = "device"
                             field_context   = "attribute"
                             field_data_type = "string"
@@ -569,7 +610,7 @@ resource "signoz_dashboard" "host_overview" {
                         having = {
                           expression = ""
                         }
-                        legend = "{{device}} {{direction}}"
+                        legend = "{{host.name}} / {{device}} {{direction}}"
                         limit  = 100
                         order = [
                           {
@@ -605,7 +646,7 @@ resource "signoz_dashboard" "host_overview" {
                   fill_spans      = false
                 }
                 formatting = {
-                  unit              = "bytes"
+                  unit              = "Bps"
                   decimal_precision = "2"
                 }
                 chart_appearance = {
@@ -653,6 +694,11 @@ resource "signoz_dashboard" "host_overview" {
                         }
                         group_by = [
                           {
+                            name            = "host.name"
+                            field_context   = "resource"
+                            field_data_type = "string"
+                          },
+                          {
                             name            = "device"
                             field_context   = "attribute"
                             field_data_type = "string"
@@ -666,7 +712,7 @@ resource "signoz_dashboard" "host_overview" {
                         having = {
                           expression = ""
                         }
-                        legend = "{{device}} {{direction}}"
+                        legend = "{{host.name}} / {{device}} {{direction}}"
                         limit  = 100
                         order = [
                           {

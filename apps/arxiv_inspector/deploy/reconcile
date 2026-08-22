@@ -14,8 +14,8 @@ test -r "$identity_dir/arxiv-inspector/config" || {
     printf '%s\n' "The arxiv-inspector workload identity is missing." >&2
     exit 1
 }
-docker network inspect signoz-network >/dev/null 2>&1 || {
-    printf '%s\n' "signoz-network is missing; deploy the SigNoz stack first." >&2
+docker network inspect lakehouse-observability >/dev/null 2>&1 || {
+    printf '%s\n' "lakehouse-observability is missing; reconcile the services host first." >&2
     exit 1
 }
 

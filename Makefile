@@ -93,7 +93,8 @@ compose-validate: ## Validate self-hosted service Compose files.
 	$(INSPECTOR_COMPOSE) config --quiet
 	$(LIGHTDASH_COMPOSE_CONFIG) config --quiet
 	$(CLOUDFLARE_COMPOSE_CONFIG) config --quiet
-	COLLECTOR_IMAGE=validation:local PG_MONITOR_PASSWORD=validation docker compose \
+	COLLECTOR_IMAGE=validation:local COLLECTOR_CONFIG_SHA256=validation \
+		COLLECTOR_HOSTNAME=validation-host PG_MONITOR_PASSWORD=validation docker compose \
 		--project-name signoz-collection-agent \
 		-f observability/signoz/collector/compose.yaml config --quiet
 

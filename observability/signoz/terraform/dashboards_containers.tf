@@ -83,7 +83,7 @@ resource "signoz_dashboard" "containers_overview" {
         spec = {
           display = {
             name        = "CPU usage by compose service"
-            description = "Sum of container CPU usage per compose service (percent of one host core)."
+            description = "Sum of container CPU utilization ratios per compose service; values may exceed 100% across cores."
           }
           links = []
           plugin = {
@@ -95,7 +95,7 @@ resource "signoz_dashboard" "containers_overview" {
                   fill_spans      = false
                 }
                 formatting = {
-                  unit              = "percent"
+                  unit              = "percentunit"
                   decimal_precision = "2"
                 }
                 chart_appearance = {
@@ -144,7 +144,7 @@ resource "signoz_dashboard" "containers_overview" {
                         group_by = [
                           {
                             name            = "lakehouse.compose.service"
-                            field_context   = "attribute"
+                            field_context   = "resource"
                             field_data_type = "string"
                           },
                         ]
@@ -175,7 +175,7 @@ resource "signoz_dashboard" "containers_overview" {
         spec = {
           display = {
             name        = "Memory usage by compose service"
-            description = "Sum of container working-set memory per compose service."
+            description = "Sum of total container memory usage per compose service."
           }
           links = []
           plugin = {
@@ -236,7 +236,7 @@ resource "signoz_dashboard" "containers_overview" {
                         group_by = [
                           {
                             name            = "lakehouse.compose.service"
-                            field_context   = "attribute"
+                            field_context   = "resource"
                             field_data_type = "string"
                           },
                         ]
@@ -267,7 +267,7 @@ resource "signoz_dashboard" "containers_overview" {
         spec = {
           display = {
             name        = "CPU usage by container"
-            description = "Per-container CPU time rate (percent of one core)."
+            description = "Per-container CPU utilization ratio; values may exceed 100% across cores."
           }
           links = []
           plugin = {
@@ -279,7 +279,7 @@ resource "signoz_dashboard" "containers_overview" {
                   fill_spans      = false
                 }
                 formatting = {
-                  unit              = "percent"
+                  unit              = "percentunit"
                   decimal_precision = "2"
                 }
                 chart_appearance = {
@@ -328,7 +328,7 @@ resource "signoz_dashboard" "containers_overview" {
                         group_by = [
                           {
                             name            = "container.name"
-                            field_context   = "attribute"
+                            field_context   = "resource"
                             field_data_type = "string"
                           },
                         ]
@@ -359,7 +359,7 @@ resource "signoz_dashboard" "containers_overview" {
         spec = {
           display = {
             name        = "Memory usage by container"
-            description = "Per-container working-set memory."
+            description = "Per-container total memory usage."
           }
           links = []
           plugin = {
@@ -420,7 +420,7 @@ resource "signoz_dashboard" "containers_overview" {
                         group_by = [
                           {
                             name            = "container.name"
-                            field_context   = "attribute"
+                            field_context   = "resource"
                             field_data_type = "string"
                           },
                         ]
@@ -463,7 +463,7 @@ resource "signoz_dashboard" "containers_overview" {
                   fill_spans      = false
                 }
                 formatting = {
-                  unit              = "bytes"
+                  unit              = "Bps"
                   decimal_precision = "2"
                 }
                 chart_appearance = {
@@ -517,7 +517,7 @@ resource "signoz_dashboard" "containers_overview" {
                                 group_by = [
                                   {
                                     name            = "container.name"
-                                    field_context   = "attribute"
+                                    field_context   = "resource"
                                     field_data_type = "string"
                                   },
                                 ]
@@ -558,7 +558,7 @@ resource "signoz_dashboard" "containers_overview" {
                                 group_by = [
                                   {
                                     name            = "container.name"
-                                    field_context   = "attribute"
+                                    field_context   = "resource"
                                     field_data_type = "string"
                                   },
                                 ]
