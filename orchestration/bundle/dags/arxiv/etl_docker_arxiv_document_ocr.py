@@ -4,13 +4,13 @@ from datetime import timedelta
 
 from airflow.sdk import DAG, Param
 from airflow.sdk.definitions.param import ParamsDict
-from airflow_bundle.callbacks.notifications import (
+from callbacks.notifications import (
     dag_failure_callbacks,
     dag_success_callbacks,
 )
-from airflow_bundle.config.assets import CURATED_ARXIV_METADATA, CURATED_ARXIV_OCR
-from airflow_bundle.config.templates import DAG_START_DATE
-from airflow_bundle.operators.docker import docker_task
+from config.assets import CURATED_ARXIV_METADATA, CURATED_ARXIV_OCR
+from config.templates import DAG_START_DATE
+from operators.docker import docker_task
 
 OCR_IMAGE = "ocr-worker:runtime"
 

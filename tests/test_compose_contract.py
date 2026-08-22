@@ -9,7 +9,8 @@ INSPECTOR_COMPOSE = "apps/arxiv_inspector/deploy/compose.yaml"
 LIGHTDASH_COMPOSE = "apps/lightdash/deploy/compose.yaml"
 POSTGRES_COMPOSE = "infra/runtime/postgres/compose.yaml"
 CLOUDFLARE_COMPOSE = "infra/runtime/cloudflare/compose.yaml"
-AIRFLOW_RUNTIME = Path("orchestration/runtime")
+AIRFLOW_PROJECT = Path("orchestration")
+AIRFLOW_RUNTIME = AIRFLOW_PROJECT / "runtime"
 
 
 def _compose(path: str) -> dict[str, Any]:
@@ -98,10 +99,9 @@ def test_airflow_uses_local_executor_and_required_runtime_components() -> None:
     assert environment["AIRFLOW__LOGGING__REMOTE_LOGGING"] == "true"
     assert environment["AIRFLOW__LOGGING__REMOTE_BASE_LOG_FOLDER"] == ("${AIRFLOW_REMOTE_LOG_URI}")
     assert environment["AIRFLOW__LOGGING__DELETE_LOCAL_LOGS"] == "true"
-    assert environment["AIRFLOW__LOGGING__LOGGING_CONFIG_CLASS"] == (
-        "airflow_runtime.logging_config.LOGGING_CONFIG"
-    )
-    assert environment["AIRFLOW__LOGGING__LOGGING_LEVEL"] == "WARNING"
+    assert "AIRFLOW__LOGGING__LOGGING_CONFIG_CLASS" not in environment
+    assert environment["AIRFLOW__LOGGING__LOGGING_LEVEL"] == "INFO"
+    assert environment["AIRFLOW__LOGGING__JSON_LOGS"] == "true"
     assert environment["AIRFLOW__API__BASE_URL"] == ("${AIRFLOW_BASE_URL:-http://127.0.0.1:8080}")
     assert environment["AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE"].startswith(
         "/opt/airflow/auth/"
@@ -281,22 +281,37 @@ def test_cloudflare_connector_is_pinned_hardened_and_file_secret_driven() -> Non
     assert "CLOUDFLARE_TUNNEL_TOKEN_FILE" in payload["secrets"]["cloudflare_tunnel_token"]["file"]
 
 
-def test_service_console_logs_exclude_info_without_discarding_airflow_task_info() -> None:
+def test_airflow_emits_structured_info_while_other_services_start_at_warning() -> None:
     airflow = _compose(AIRFLOW_COMPOSE)
     inspector = _compose(INSPECTOR_COMPOSE)["services"]["arxiv-inspector"]
     postgres = _compose(POSTGRES_COMPOSE)["services"]["metadata-postgres"]
-    logging_config = (AIRFLOW_RUNTIME / "airflow_runtime/logging_config.py").read_text(
-        encoding="utf-8"
-    )
 
-    assert 'loggers["airflow.task"]["level"] = "INFO"' in logging_config
-    assert (
-        airflow["x-airflow-common"]["environment"]["AIRFLOW__LOGGING__LOGGING_CONFIG_CLASS"]
-        == "airflow_runtime.logging_config.LOGGING_CONFIG"
-    )
+    environment = airflow["x-airflow-common"]["environment"]
+    assert environment["AIRFLOW__LOGGING__LOGGING_LEVEL"] == "INFO"
+    assert environment["AIRFLOW__LOGGING__JSON_LOGS"] == "true"
+    assert not (AIRFLOW_RUNTIME / "airflow_runtime/logging_config.py").exists()
     assert inspector["environment"]["LAKEHOUSE_LOG_LEVEL"] == "WARNING"
     assert inspector["environment"]["STREAMLIT_LOGGER_LEVEL"] == "warning"
     assert postgres["command"] == ["postgres", "-c", "log_min_messages=warning"]
+
+
+def test_collector_drops_structured_airflow_info_after_parsing_json_level() -> None:
+    collector = yaml.safe_load(
+        Path("observability/signoz/collector/config.yaml").read_text(encoding="utf-8")
+    )
+    operators = collector["receivers"]["receiver_creator/docker"]["receivers"]["filelog/container"][
+        "config"
+    ]["operators"]
+    airflow_parser = next(
+        operator for operator in operators if operator.get("id") == "parse_airflow_json"
+    )
+
+    assert airflow_parser["if"] == 'resource["container.name"] matches "(?i)^airflow-"'
+    assert airflow_parser["parse_to"] == "attributes.airflow"
+    assert airflow_parser["severity"]["parse_from"] == "attributes.airflow.level"
+    assert collector["processors"]["filter/drop_low_severity"]["logs"]["log_record"] == [
+        "severity_number != SEVERITY_NUMBER_UNSPECIFIED and severity_number < SEVERITY_NUMBER_WARN"
+    ]
 
 
 def test_local_runtime_does_not_use_dotenv_files() -> None:
@@ -358,7 +373,7 @@ def test_all_container_images_are_immutable() -> None:
 
     assert not Path("Dockerfile").exists()
     assert "apache/airflow:3.3.0-python3.12@sha256:" in airflow_dockerfile
-    assert "orchestration/runtime/uv.lock" in airflow_dockerfile
+    assert "orchestration/uv.lock" in airflow_dockerfile
     assert "COPY --chown=airflow:0 orchestration/bundle" not in airflow_dockerfile
     assert '"/uv", "export", "--frozen", "--no-dev"' in airflow_dockerfile
     assert "uv pip sync --python /home/airflow/.local/bin/python" in airflow_dockerfile
@@ -377,7 +392,7 @@ def test_all_container_images_are_immutable() -> None:
     assert "PYTHONPATH=/app" in inspector_dockerfile
     dockerignore = Path(".dockerignore").read_text(encoding="utf-8")
     assert "!infra/runtime/identity/install-aws-signing-helper" in dockerignore
-    assert '"apache-airflow[postgres]==3.3.0"' in (AIRFLOW_RUNTIME / "pyproject.toml").read_text(
+    assert '"apache-airflow[postgres]==3.3.0"' in (AIRFLOW_PROJECT / "pyproject.toml").read_text(
         encoding="utf-8"
     )
     assert "postgres:17.10@sha256:" in compose
@@ -393,7 +408,7 @@ def test_all_container_images_are_immutable() -> None:
 def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
     workspace = Path("pyproject.toml").read_text(encoding="utf-8")
     platform = Path("platform/pyproject.toml").read_text(encoding="utf-8")
-    orchestration = (AIRFLOW_RUNTIME / "pyproject.toml").read_text(encoding="utf-8")
+    orchestration = (AIRFLOW_PROJECT / "pyproject.toml").read_text(encoding="utf-8")
     inspector = Path("apps/arxiv_inspector/pyproject.toml").read_text(encoding="utf-8")
     analytics = Path("dbt/runtime/pyproject.toml").read_text(encoding="utf-8")
     ocr = Path("ocr/pyproject.toml").read_text(encoding="utf-8")
@@ -434,11 +449,11 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
         'exclude = ["dbt/runtime", "jobs/emr", "ocr/runners/glm_ocr", "orchestration"]' in workspace
     )
     assert Path("dbt/runtime/uv.lock").is_file()
-    assert (AIRFLOW_RUNTIME / "uv.lock").is_file()
+    assert (AIRFLOW_PROJECT / "uv.lock").is_file()
     assert "apache-airflow" not in Path("uv.lock").read_text(encoding="utf-8")
     assert "opentelemetry-distro" in inspector
-    assert "apache-airflow" in (AIRFLOW_RUNTIME / "uv.lock").read_text(encoding="utf-8")
-    assert "opentelemetry" in (AIRFLOW_RUNTIME / "uv.lock").read_text(encoding="utf-8")
+    assert "apache-airflow" in (AIRFLOW_PROJECT / "uv.lock").read_text(encoding="utf-8")
+    assert "opentelemetry" in (AIRFLOW_PROJECT / "uv.lock").read_text(encoding="utf-8")
 
 
 def test_airflow_bundle_and_runtime_have_one_way_ownership() -> None:
@@ -447,18 +462,24 @@ def test_airflow_bundle_and_runtime_have_one_way_ownership() -> None:
 
     assert (bundle / "dags").is_dir()
     assert (bundle / ".airflowignore").read_text(encoding="utf-8").strip() == "tests/"
-    assert (bundle / "airflow_bundle/operators").is_dir()
-    assert (bundle / "airflow_bundle/callbacks").is_dir()
+    assert (bundle / "operators").is_dir()
+    assert (bundle / "callbacks").is_dir()
+    assert (bundle / "config").is_dir()
+    assert not (bundle / "airflow_bundle").exists()
     assert (runtime / "airflow_runtime/secrets.py").is_file()
     assert (Path("orchestration/deploy") / "compose.yaml").is_file()
     assert Path(POSTGRES_COMPOSE).is_file()
     assert not (bundle / "config/aws_secrets.py").exists()
 
     bundle_source = "\n".join(path.read_text(encoding="utf-8") for path in bundle.rglob("*.py"))
-    runtime_source = "\n".join(path.read_text(encoding="utf-8") for path in runtime.rglob("*.py"))
+    runtime_source = "\n".join(
+        path.read_text(encoding="utf-8") for path in (runtime / "airflow_runtime").rglob("*.py")
+    )
     assert "from orchestration" not in bundle_source
     assert "airflow_runtime" not in bundle_source
-    assert "airflow_bundle" not in runtime_source
+    assert "from callbacks" not in runtime_source
+    assert "from config" not in runtime_source
+    assert "from operators" not in runtime_source
 
 
 def test_platform_control_plane_is_one_owned_workspace_package() -> None:

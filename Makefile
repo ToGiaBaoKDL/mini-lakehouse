@@ -79,13 +79,13 @@ lint: ## Run formatting, linting, and static type checks.
 	uv run ruff format --check .
 	uv run ruff check .
 	uv run --all-packages --all-extras pyright
-	uv run --project orchestration/runtime pyright --project orchestration/runtime
+	uv run --project orchestration pyright --project orchestration
 	uv run pyright --project jobs/emr
 
 test: ## Run unit tests.
 	uv run --all-packages --all-extras pytest -m "not integration"
-	uv run --project orchestration/runtime pytest \
-		-c orchestration/runtime/pyproject.toml orchestration/bundle/tests
+	uv run --project orchestration pytest \
+		-c orchestration/pyproject.toml orchestration/bundle/tests
 
 compose-validate: ## Validate self-hosted service Compose files.
 	$(METADATA_POSTGRES_COMPOSE_CONFIG) config --quiet
@@ -101,7 +101,7 @@ compose-validate: ## Validate self-hosted service Compose files.
 check: ## Run the complete local quality gate.
 	uv lock --check
 	uv lock --check --project dbt/runtime
-	uv lock --check --project orchestration/runtime
+	uv lock --check --project orchestration
 	uv lock --check --project jobs/emr
 	uv lock --check --directory ocr/runners/glm_ocr
 	$(MAKE) platform-validate

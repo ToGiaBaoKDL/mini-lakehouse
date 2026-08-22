@@ -16,11 +16,11 @@ os.environ["LAKEHOUSE_ENVIRONMENT"] = "ci"
 from airflow.models import DagBag
 from airflow.sdk import DAG
 from airflow.utils.file import list_py_file_paths
-from airflow_bundle.operators import emr as emr_module
-from airflow_bundle.operators.docker import LoggedDockerOperator
-from airflow_bundle.operators.emr import LoggedEmrServerlessStartJobOperator
 from jinja2 import StrictUndefined
 from jinja2.sandbox import SandboxedEnvironment
+from operators import emr as emr_module
+from operators.docker import LoggedDockerOperator
+from operators.emr import LoggedEmrServerlessStartJobOperator
 
 ALLOWED_JOB_TYPES = {"etl", "tl", "rpt", "mon", "man", "bk", "stm", "cat", "gov", "test"}
 ALLOWED_WORKER_TYPES = {"emr", "glue", "k8spod", "afw", "docker", "mix"}

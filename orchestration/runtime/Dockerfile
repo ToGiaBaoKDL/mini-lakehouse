@@ -4,7 +4,7 @@ FROM ghcr.io/astral-sh/uv:0.11.30@sha256:93b61e21202b1dab861092748e46bbd6e0e41dd
 
 FROM uv AS requirements
 WORKDIR /build
-COPY orchestration/runtime/pyproject.toml orchestration/runtime/uv.lock ./
+COPY orchestration/pyproject.toml orchestration/uv.lock ./
 RUN ["/uv", "export", "--frozen", "--no-dev", "--no-emit-project", "--output-file", "requirements.txt"]
 
 FROM apache/airflow:3.3.0-python3.12@sha256:96e99f25815f533b298a4d53f283adf5c84c27334ea16ef232777cb800bddf10

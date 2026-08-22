@@ -7,9 +7,8 @@ from typing import Any
 from airflow.providers.amazon.aws.links.emr import get_serverless_dashboard_url
 from airflow.providers.amazon.aws.operators.emr import EmrServerlessStartJobOperator
 from airflow.sdk import Asset, Context
-
-from airflow_bundle.callbacks.notifications import task_failure_callbacks
-from airflow_bundle.config.templates import runtime_value
+from callbacks.notifications import task_failure_callbacks
+from config.templates import runtime_value
 
 EMR_JOB_TIMEOUT_MINUTES = 120
 AIRFLOW_TASK_TIMEOUT_MINUTES = 130

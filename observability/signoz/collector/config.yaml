@@ -103,6 +103,21 @@ receivers:
             - type: container
               format: docker
               add_metadata_from_filepath: false
+            # Airflow 3.3 emits one JSON object per line. Parse only its level
+            # into OTLP severity, then discard the temporary parsed object so
+            # high-cardinality event fields do not become log attributes.
+            - type: json_parser
+              id: parse_airflow_json
+              if: 'resource["container.name"] matches "(?i)^airflow-"'
+              parse_from: body
+              parse_to: attributes.airflow
+              on_error: send
+              severity:
+                parse_from: attributes.airflow.level
+            - type: remove
+              id: remove_parsed_airflow_json
+              if: 'attributes["airflow"] != nil'
+              field: attributes.airflow
 
   file_log/lakehouse_audit:
     include:
@@ -194,7 +209,8 @@ processors:
     spike_limit_mib: 64
 
   # Preserve legacy/plaintext records with unspecified severity, while
-  # dropping structured OTLP DEBUG/INFO records before export.
+  # dropping structured DEBUG/INFO records before export. Airflow container
+  # JSON levels are promoted to OTLP severity by its filelog receiver above.
   filter/drop_low_severity:
     error_mode: ignore
     logs:

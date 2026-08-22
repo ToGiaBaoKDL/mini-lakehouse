@@ -52,7 +52,11 @@ def test_component_release_publishes_before_protected_digest_deployment() -> Non
     assert "imageTag=$GITHUB_SHA" in release
     assert "aws ecr batch-get-image" in release
     assert "aws ecr put-image" in release
-    assert "source-{0}" in release
+    assert "Resolve immutable image source revision" in release
+    assert "orchestration/pyproject.toml" in release
+    assert "orchestration/uv.lock" in release
+    assert "orchestration/runtime" in release
+    assert "source-$revision" in release
     assert "cancel-in-progress: false" in release
     assert 'dbt-engineering) [[ "$BUILD_ARGS" == "DBT_PROJECT=engineering" ]]' in release
     assert 'dbt-research) [[ "$BUILD_ARGS" == "DBT_PROJECT=research" ]]' in release
@@ -299,6 +303,20 @@ def test_each_custom_component_has_a_thin_release_caller() -> None:
         for assertion in assertions:
             assert assertion in source
     assert "apps/arxiv_inspector/pyproject.toml" in _workflow("release-ocr-worker.yml")
+
+
+def test_airflow_deploy_only_changes_reuse_the_runtime_image() -> None:
+    caller = _workflow("release-airflow.yml")
+    reusable = _workflow("_release-image.yml")
+
+    assert "orchestration/pyproject.toml" in caller
+    assert "orchestration/uv.lock" in caller
+    assert "orchestration/runtime/**" in caller
+    assert "orchestration/deploy/**" in caller
+    assert "infra/runtime/postgres/**" in caller
+    assert '[[ -z "$revision" && "$COMPONENT" == "airflow" ]]' in reusable
+    assert "steps.image_source.outputs.tag" in reusable
+    assert "aws ecr put-image" in reusable
 
 
 def test_lightdash_release_builds_the_pinned_upstream_source_natively() -> None:

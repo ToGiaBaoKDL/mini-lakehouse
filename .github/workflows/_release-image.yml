@@ -70,6 +70,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Validate component boundary
@@ -115,6 +116,28 @@ jobs:
               ;;
           esac
 
+      - name: Resolve immutable image source revision
+        id: image_source
+        shell: bash
+        env:
+          COMPONENT: ${{ inputs.component }}
+          EXTERNAL_SOURCE_REVISION: ${{ inputs.external_source_revision }}
+        run: |
+          set -euo pipefail
+          revision=$EXTERNAL_SOURCE_REVISION
+          if [[ -z "$revision" && "$COMPONENT" == "airflow" ]]; then
+            revision=$(git log -1 --format=%H -- \
+              orchestration/pyproject.toml \
+              orchestration/uv.lock \
+              orchestration/runtime \
+              infra/runtime/identity/install-aws-signing-helper)
+          fi
+          if [[ -n "$revision" ]]; then
+            [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+            echo "tag=source-$revision" >> "$GITHUB_OUTPUT"
+          fi
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+
       - name: Assume the image publisher role
         uses: aws-actions/configure-aws-credentials@acca2b1b2070338fb9fd1ca27ecee81d687e58e5 # v6.1.2
         with:
@@ -131,7 +154,7 @@ jobs:
         shell: bash
         env:
           REPOSITORY: ${{ inputs.repository }}
-          SOURCE_TAG: ${{ inputs.external_source_revision != '' && format('source-{0}', inputs.external_source_revision) || '' }}
+          SOURCE_TAG: ${{ steps.image_source.outputs.tag }}
         run: |
           set -euo pipefail
           response=$(aws ecr batch-get-image \
@@ -187,13 +210,13 @@ jobs:
           push: true
           tags: |
             ${{ steps.ecr.outputs.registry }}/${{ inputs.repository }}:${{ github.sha }}
-            ${{ inputs.external_source_revision != '' && format('{0}/{1}:source-{2}', steps.ecr.outputs.registry, inputs.repository, inputs.external_source_revision) || '' }}
+            ${{ steps.image_source.outputs.tag != '' && format('{0}/{1}:{2}', steps.ecr.outputs.registry, inputs.repository, steps.image_source.outputs.tag) || '' }}
           cache-from: type=gha,scope=${{ inputs.component }}
           cache-to: type=gha,mode=max,scope=${{ inputs.component }}
           provenance: mode=max
           sbom: true
           labels: |
-            org.opencontainers.image.revision=${{ inputs.external_source_revision || github.sha }}
+            org.opencontainers.image.revision=${{ steps.image_source.outputs.revision || github.sha }}
             org.opencontainers.image.source=${{ inputs.external_source_url || format('{0}/{1}', github.server_url, github.repository) }}
 
       - name: Resolve deployment reference

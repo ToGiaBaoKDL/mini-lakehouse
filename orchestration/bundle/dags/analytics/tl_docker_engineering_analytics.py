@@ -3,13 +3,13 @@
 from datetime import timedelta
 
 from airflow.sdk import DAG
-from airflow_bundle.callbacks.notifications import (
+from callbacks.notifications import (
     dag_failure_callbacks,
     dag_success_callbacks,
 )
-from airflow_bundle.config.assets import ANALYTICS_ENGINEERING, CURATED_GITHUB
-from airflow_bundle.config.templates import DAG_START_DATE, runtime_value
-from airflow_bundle.operators.docker import docker_task
+from config.assets import ANALYTICS_ENGINEERING, CURATED_GITHUB
+from config.templates import DAG_START_DATE, runtime_value
+from operators.docker import docker_task
 
 DBT_ENVIRONMENT = {
     "DBT_ANALYTICS_URI": runtime_value("storage/analytics_uri"),

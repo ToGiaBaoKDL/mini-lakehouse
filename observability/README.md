@@ -98,9 +98,10 @@ Signals collected:
   latter intentionally ignore HTTP status because Cloudflare Access redirects unauthenticated
   requests to its login flow.
 
-Log policy: structured OpenTelemetry DEBUG/INFO records are dropped before export; legacy records
-without a severity remain eligible because discarding them would be guesswork. Long-lived Docker
-services also emit warning-or-higher at their source. Redaction strips bearer tokens, basic-auth
+Log policy: structured DEBUG/INFO records are dropped before export; Airflow emits JSON at INFO and
+its container receiver promotes the JSON level to OpenTelemetry severity before that filter. Legacy
+records without a severity remain eligible because discarding them would be guesswork. Other
+long-lived Docker services emit warning-or-higher at their source. Redaction strips bearer tokens, basic-auth
 connection strings, AWS key IDs, and common
 `password|token|secret|api_key|cookie|authorization` pairings before export. The same redaction
 rules apply to span attribute values (e.g. botocore auto-instrumentation signed URLs redact the

@@ -27,8 +27,8 @@ dev = [
 [tool.pyright]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
-include = ["airflow_runtime", "../bundle"]
-extraPaths = [".", "../bundle"]
+include = ["runtime/airflow_runtime", "bundle"]
+extraPaths = ["runtime", "bundle"]
 venvPath = "."
 venv = ".venv"
 reportMissingTypeStubs = false
@@ -38,5 +38,5 @@ reportUnknownParameterType = false
 reportUnknownVariableType = false
 
 [tool.pytest.ini_options]
-testpaths = ["../bundle/tests"]
-pythonpath = [".", "../bundle"]
+testpaths = ["bundle/tests"]
+pythonpath = ["runtime", "bundle"]

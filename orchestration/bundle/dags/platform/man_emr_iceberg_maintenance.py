@@ -1,9 +1,9 @@
 """Maintain contract-owned landing and curated Iceberg tables."""
 
 from airflow.sdk import DAG
-from airflow_bundle.callbacks.notifications import dag_failure_callbacks, dag_success_callbacks
-from airflow_bundle.config.templates import DAG_START_DATE
-from airflow_bundle.operators.emr import emr_spark_job
+from callbacks.notifications import dag_failure_callbacks, dag_success_callbacks
+from config.templates import DAG_START_DATE
+from operators.emr import emr_spark_job
 
 with DAG(
     dag_id="man_emr_iceberg_maintenance",

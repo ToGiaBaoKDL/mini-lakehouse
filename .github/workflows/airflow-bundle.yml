@@ -7,15 +7,15 @@ on:
   pull_request:
     paths:
       - orchestration/bundle/**
-      - orchestration/runtime/pyproject.toml
-      - orchestration/runtime/uv.lock
+      - orchestration/pyproject.toml
+      - orchestration/uv.lock
       - .github/workflows/airflow-bundle.yml
   push:
     branches: [main]
     paths:
       - orchestration/bundle/**
-      - orchestration/runtime/pyproject.toml
-      - orchestration/runtime/uv.lock
+      - orchestration/pyproject.toml
+      - orchestration/uv.lock
       - .github/workflows/airflow-bundle.yml
 
 concurrency:
@@ -37,10 +37,10 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version-file: .python-version
-      - run: uv sync --frozen --project orchestration/runtime --all-groups
-      - run: uv run --project orchestration/runtime ruff format --check orchestration/bundle
-      - run: uv run --project orchestration/runtime ruff check orchestration/bundle
-      - run: uv run --project orchestration/runtime pyright --project orchestration/runtime
+      - run: uv sync --frozen --project orchestration --all-groups
+      - run: uv run --project orchestration ruff format --check orchestration/bundle
+      - run: uv run --project orchestration ruff check orchestration/bundle
+      - run: uv run --project orchestration pyright --project orchestration
       - run: >-
-          uv run --project orchestration/runtime pytest
-          -c orchestration/runtime/pyproject.toml orchestration/bundle/tests
+          uv run --project orchestration pytest
+          -c orchestration/pyproject.toml orchestration/bundle/tests

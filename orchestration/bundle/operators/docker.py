@@ -6,9 +6,8 @@ from datetime import timedelta
 
 from airflow.providers.docker.operators.docker import DockerOperator
 from airflow.sdk import Asset, Context
+from callbacks.notifications import task_failure_callbacks
 from docker.types import Mount
-
-from airflow_bundle.callbacks.notifications import task_failure_callbacks
 
 
 class LoggedDockerOperator(DockerOperator):

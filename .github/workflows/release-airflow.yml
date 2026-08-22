@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - .github/workflows/release-airflow.yml
+      - orchestration/pyproject.toml
+      - orchestration/uv.lock
       - orchestration/runtime/**
       - orchestration/deploy/**
       - infra/runtime/postgres/**

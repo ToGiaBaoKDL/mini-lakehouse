@@ -2,10 +2,10 @@
 
 from airflow.sdk import DAG, Param
 from airflow.sdk.definitions.param import ParamsDict
-from airflow_bundle.callbacks.notifications import dag_failure_callbacks, dag_success_callbacks
-from airflow_bundle.config.assets import CURATED_ARXIV_METADATA
-from airflow_bundle.config.templates import DAG_START_DATE, previous_local_date, runtime_value
-from airflow_bundle.operators.emr import emr_spark_job
+from callbacks.notifications import dag_failure_callbacks, dag_success_callbacks
+from config.assets import CURATED_ARXIV_METADATA
+from config.templates import DAG_START_DATE, previous_local_date, runtime_value
+from operators.emr import emr_spark_job
 
 SOURCE_DATE = previous_local_date()
 

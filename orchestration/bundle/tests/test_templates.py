@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from airflow.sdk.execution_time import macros
-from airflow_bundle.config.templates import (
+from config.templates import (
     DAG_START_DATE,
     LOCAL_TIMEZONE,
     previous_local_date,
