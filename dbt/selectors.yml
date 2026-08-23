@@ -1,0 +1,12 @@
+selectors:
+  - name: engineering
+    description: Engineering models and their GitHub sources.
+    definition:
+      method: tag
+      value: engineering
+
+  - name: research
+    description: Research models and their ArXiv sources.
+    definition:
+      method: tag
+      value: research

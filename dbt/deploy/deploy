@@ -2,14 +2,14 @@
 set -eu
 
 if [ "$#" -ne 2 ]; then
-    printf '%s\n' "Usage: dbt/deploy/deploy <dbt-engineering|dbt-research> <image@sha256:digest>" >&2
+    printf '%s\n' "Usage: dbt/deploy/deploy dbt <image@sha256:digest>" >&2
     exit 2
 fi
 
 component=$1
 image=$2
 case "$component" in
-    dbt-engineering|dbt-research) ;;
+    dbt) ;;
     *) exit 2 ;;
 esac
 

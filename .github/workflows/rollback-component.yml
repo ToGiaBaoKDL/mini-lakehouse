@@ -10,8 +10,7 @@ on:
         options:
           - airflow
           - arxiv-inspector
-          - dbt-engineering
-          - dbt-research
+          - dbt
           - lightdash
           - ocr-worker
       image:

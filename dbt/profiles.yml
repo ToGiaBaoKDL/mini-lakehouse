@@ -1,12 +1,13 @@
-research_analytics:
-  target: dev
+lakehouse_analytics:
+  target: runtime
   outputs:
-    dev:
+    runtime:
       type: athena
       database: awsdatacatalog
-      schema: analytics_research
+      schema: "{{ env_var('DBT_SCHEMA') }}"
       region_name: "{{ env_var('AWS_REGION', 'ap-southeast-1') }}"
       work_group: primary
       s3_staging_dir: "{{ env_var('DBT_QUERY_RESULTS_URI') }}"
-      s3_data_dir: "{{ env_var('DBT_ANALYTICS_URI') }}/research/tables"
+      s3_data_dir: "{{ env_var('DBT_ANALYTICS_URI') }}/{{ env_var('DBT_DOMAIN') }}"
+      s3_data_naming: table_unique
       threads: "{{ env_var('DBT_THREADS', '4') | int }}"

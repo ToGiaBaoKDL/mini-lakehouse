@@ -71,7 +71,8 @@ EMR Serverless subsequently assumes `emr-runtime` for the Spark process.
 
 On the OCI host, workload bundles live outside the repository under
 `~/.config/lakehouse/<env>/aws/<workload>/`. Airflow mounts `airflow/`; Docker tasks mount the exact
-workload directory such as `dbt-engineering/` or `dbt-research/`. The container sees only:
+workload directory such as `dbt-engineering/` or `dbt-research/`. Both identities run the shared
+`dbt:runtime` image, while the container sees only:
 
 ```text
 /run/aws/
@@ -245,8 +246,7 @@ revision has no releases yet, dispatch the missing publishers explicitly:
 
 ```bash
 gh workflow run release-emr-jobs.yml --ref main
-gh workflow run release-dbt-engineering.yml --ref main
-gh workflow run release-dbt-research.yml --ref main
+gh workflow run release-dbt.yml --ref main
 gh workflow run release-ocr-worker.yml --ref main
 gh workflow run release-airflow.yml --ref main
 gh workflow run release-arxiv-inspector.yml --ref main

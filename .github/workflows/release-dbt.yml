@@ -1,14 +1,19 @@
-name: Release dbt Engineering
+name: Release dbt
 
 on:
   push:
     branches: [main]
     paths:
-      - .github/workflows/release-dbt-engineering.yml
+      - .github/workflows/release-dbt.yml
       - dbt/Dockerfile
       - dbt/deploy/**
       - dbt/runtime/**
-      - dbt/engineering/**
+      - dbt/dbt_project.yml
+      - dbt/models/**
+      - dbt/package-lock.yml
+      - dbt/packages.yml
+      - dbt/profiles.yml
+      - dbt/selectors.yml
       - infra/runtime/identity/install-aws-signing-helper
   workflow_dispatch:
 
@@ -19,7 +24,6 @@ jobs:
       contents: read
       id-token: write
     with:
-      component: dbt-engineering
+      component: dbt
       dockerfile: dbt/Dockerfile
-      repository: tgbao-dev-dbt-engineering
-      build_args: DBT_PROJECT=engineering
+      repository: tgbao-dev-dbt

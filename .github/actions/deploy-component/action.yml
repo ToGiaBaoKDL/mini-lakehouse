@@ -40,7 +40,7 @@ runs:
           lightdash)
             bundle+=(infra/runtime/postgres apps/lightdash/deploy)
             ;;
-          dbt-engineering|dbt-research)
+          dbt)
             bundle+=(dbt/deploy)
             ;;
           ocr-worker)

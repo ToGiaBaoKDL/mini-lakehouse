@@ -6,12 +6,13 @@ on:
     paths:
       - .github/workflows/deploy-lightdash-projects.yml
       - dbt/runtime/**
-      - dbt/*/dbt_project.yml
-      - dbt/*/macros/**
-      - dbt/*/models/**
-      - dbt/*/package-lock.yml
-      - dbt/*/packages.yml
-      - dbt/*/profiles.yml
+      - dbt/dbt_project.yml
+      - dbt/macros/**
+      - dbt/models/**
+      - dbt/package-lock.yml
+      - dbt/packages.yml
+      - dbt/profiles.yml
+      - dbt/selectors.yml
       - lightdash/projects/**
   workflow_dispatch:
 
@@ -36,15 +37,17 @@ jobs:
       matrix:
         include:
           - content_dir: lightdash/projects/engineering/content
-            dbt_project_dir: dbt/engineering
             domain: engineering
             project_uuid: bde2b242-ad5d-495b-a581-7a1f74787902
+            schema: analytics_engineering
           - content_dir: lightdash/projects/research/content
-            dbt_project_dir: dbt/research
             domain: research
             project_uuid: 25cf6684-ade3-4c39-b2ac-cb1d8b1ce383
+            schema: analytics_research
     env:
       CI: "true"
+      DBT_DOMAIN: ${{ matrix.domain }}
+      DBT_SCHEMA: ${{ matrix.schema }}
       LIGHTDASH_PROJECT: ${{ matrix.project_uuid }}
       LIGHTDASH_URL: ${{ vars.LIGHTDASH_URL }}
     steps:
@@ -88,10 +91,10 @@ jobs:
           DBT_QUERY_RESULTS_URI: s3://validation/lightdash
         run: |
           env -u VIRTUAL_ENV uv run --project dbt/runtime dbt deps \
-            --project-dir "${{ matrix.dbt_project_dir }}"
+            --project-dir dbt
           env -u VIRTUAL_ENV uv run --project dbt/runtime dbt parse \
-            --project-dir "${{ matrix.dbt_project_dir }}" \
-            --profiles-dir "${{ matrix.dbt_project_dir }}" \
+            --project-dir dbt \
+            --profiles-dir dbt \
             --no-partial-parse \
             --show-all-deprecations
           lightdash lint --path "${{ matrix.content_dir }}"
@@ -99,8 +102,8 @@ jobs:
         run: |
           lightdash config get-project
           lightdash deploy \
-            --project-dir "${{ matrix.dbt_project_dir }}" \
-            --profiles-dir "${{ matrix.dbt_project_dir }}" \
+            --project-dir dbt \
+            --profiles-dir dbt \
             --skip-dbt-compile \
             --skip-warehouse-catalog \
             --no-partial-compilation \
@@ -112,8 +115,8 @@ jobs:
             --concurrency 4 \
             --gzip
           lightdash validate \
-            --project-dir "${{ matrix.dbt_project_dir }}" \
-            --profiles-dir "${{ matrix.dbt_project_dir }}" \
+            --project-dir dbt \
+            --profiles-dir dbt \
             --skip-dbt-compile \
             --skip-warehouse-catalog \
             --only tables charts dashboards \

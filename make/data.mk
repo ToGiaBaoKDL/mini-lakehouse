@@ -1,4 +1,3 @@
-DBT_PROJECT_DIRS := $(patsubst %/,%,$(dir $(wildcard dbt/*/dbt_project.yml)))
 DBT_RUNTIME := env -u VIRTUAL_ENV uv run --project dbt/runtime
 AWS_WORKLOAD_ENV := env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
 	AWS_SHARED_CREDENTIALS_FILE=/dev/null AWS_PROFILE=default
@@ -40,22 +39,23 @@ ocr-modal-runner-deploy: preflight ## Deploy the persistent Modal OCR runner.
 				--env "$${MODAL_ENVIRONMENT}" ocr/runners/modal/glm_ocr/app.py
 
 dbt-deps: ## Install locked dbt packages.
-	@set -eu; for project in $(DBT_PROJECT_DIRS); do \
-		$(DBT_RUNTIME) dbt deps --project-dir "$$project"; \
-	done
+	DBT_DOMAIN=all DBT_SCHEMA=analytics_validation \
+	DBT_QUERY_RESULTS_URI=s3://validation/query-results DBT_ANALYTICS_URI=s3://validation \
+		$(DBT_RUNTIME) dbt deps --project-dir dbt
 
 dbt-validate: dbt-deps ## Parse dbt without accessing AWS data.
-	@set -eu; for project in $(DBT_PROJECT_DIRS); do \
+	@set -eu; for domain in engineering research; do \
+		DBT_DOMAIN="$$domain" DBT_SCHEMA="analytics_$$domain" \
 		DBT_QUERY_RESULTS_URI=s3://validation/query-results DBT_ANALYTICS_URI=s3://validation \
 			$(DBT_RUNTIME) dbt parse \
-				--project-dir "$$project" --profiles-dir "$$project" \
+				--project-dir dbt --profiles-dir dbt \
 				--no-partial-parse --show-all-deprecations; \
 	done
 
 dbt-build: ## Build DBT_DOMAIN analytics with its isolated runtime identity.
 	@test -n "$(DBT_DOMAIN)" || { printf '%s\n' "Usage: make dbt-build DBT_DOMAIN=<domain>"; exit 2; }
-	@test -f "dbt/$(DBT_DOMAIN)/dbt_project.yml" || { printf '%s\n' "Unknown dbt domain: $(DBT_DOMAIN)"; exit 2; }
-	@test -d "dbt/$(DBT_DOMAIN)/dbt_packages/dbt_utils" || { \
+	@case "$(DBT_DOMAIN)" in engineering|research) ;; *) printf '%s\n' "Unknown dbt domain: $(DBT_DOMAIN)"; exit 2;; esac
+	@test -d "dbt/dbt_packages/dbt_utils" || { \
 		printf '%s\n' "Missing locked dbt packages; run 'make dbt-deps' first."; exit 1; \
 	}
 	@test -r "$(AWS_IDENTITY_DIR)/dbt-$(DBT_DOMAIN)/host-config" || { printf '%s\n' "Render the dbt-$(DBT_DOMAIN) identity first."; exit 1; }
@@ -70,8 +70,10 @@ dbt-build: ## Build DBT_DOMAIN analytics with its isolated runtime identity.
 			'.Parameters[] | select(.Name == $$name) | .Value')"; \
 		$(AWS_WORKLOAD_ENV) AWS_CONFIG_FILE="$(AWS_IDENTITY_DIR)/dbt-$(DBT_DOMAIN)/host-config" \
 		DBT_QUERY_RESULTS_URI="$${QUERY_RESULTS_URI}" \
-		DBT_ANALYTICS_URI="$${ANALYTICS_URI}" $(DBT_RUNTIME) dbt build \
-			--project-dir "dbt/$(DBT_DOMAIN)" --profiles-dir "dbt/$(DBT_DOMAIN)"
+		DBT_ANALYTICS_URI="$${ANALYTICS_URI}" \
+		DBT_DOMAIN="$(DBT_DOMAIN)" DBT_SCHEMA="analytics_$(DBT_DOMAIN)" \
+		$(DBT_RUNTIME) dbt build --selector "$(DBT_DOMAIN)" \
+			--project-dir dbt --profiles-dir dbt
 
 emr-jobs-package: ## Build EMR artifacts in the matching EMR runtime.
 	jobs/emr/release/package

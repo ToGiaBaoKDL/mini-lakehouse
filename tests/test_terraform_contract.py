@@ -246,9 +246,16 @@ def test_service_images_are_immutable_bounded_and_published_by_one_role() -> Non
     registry = _terraform_sources(Path("infra/terraform/aws/modules/container_registry"))
     identity = _terraform_sources(Path("infra/terraform/aws/modules/identity"))
 
-    for repository in ("airflow", "arxiv-inspector", "lightdash", "ocr-worker"):
+    for repository in (
+        "airflow",
+        "arxiv-inspector",
+        "dbt",
+        "dbt-engineering",
+        "dbt-research",
+        "lightdash",
+        "ocr-worker",
+    ):
         assert f'"{repository}"' in environment
-    assert '"dbt-${domain}"' in environment
     assert 'image_tag_mutability = "IMMUTABLE"' in registry
     assert "scan_on_push = true" in registry
     assert 'encryption_type = "AES256"' in registry
@@ -551,7 +558,7 @@ def test_catalog_admin_mutates_contract_tiers_but_only_reads_analytics_metadata(
     assert "local.analytics_table_arns" in catalog
     assert 'sid       = "ReadAnalyticsMetadata"' in catalog
     assert 'actions   = ["s3:GetObject"]' in catalog
-    assert '"${var.bucket_arns.analytics}/*/tables/*/metadata/*"' in identity
+    assert '"${var.bucket_arns.analytics}/*/*/*/metadata/*"' in identity
     assert "local.ingestion_metadata_object_arns" in catalog
     assert '"${var.bucket_arns.landing}/*/*/tables/*/metadata/*"' in identity
     assert '"${var.bucket_arns.curated}/*/tables/*/metadata/*"' in identity

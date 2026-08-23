@@ -135,14 +135,16 @@ def test_curated_assets_schedule_isolated_domain_builds_after_freshness() -> Non
 
     expectations = {
         engineering: {
-            "image": "dbt-engineering:runtime",
+            "image": "dbt:runtime",
             "identity": "/tmp/dbt-engineering",
+            "selector": "engineering",
             "inputs": [github_asset],
             "output": "lakehouse://analytics/engineering",
         },
         research: {
-            "image": "dbt-research:runtime",
+            "image": "dbt:runtime",
             "identity": "/tmp/dbt-research",
+            "selector": "research",
             "inputs": [arxiv_asset, ocr_asset],
             "output": "lakehouse://analytics/research",
         },
@@ -153,8 +155,15 @@ def test_curated_assets_schedule_isolated_domain_builds_after_freshness() -> Non
         assert isinstance(freshness, LoggedDockerOperator)
         assert isinstance(build, LoggedDockerOperator)
         assert freshness.image == build.image == expected["image"]
-        assert freshness.command == ["source", "freshness"]
-        assert build.command == ["build"]
+        assert freshness.command == [
+            "source",
+            "freshness",
+            "--selector",
+            expected["selector"],
+        ]
+        assert build.command == ["build", "--selector", expected["selector"]]
+        assert freshness.environment["DBT_DOMAIN"] == expected["selector"]
+        assert freshness.environment["DBT_SCHEMA"] == f"analytics_{expected['selector']}"
         assert freshness.downstream_task_ids == {"build_analytics"}
         assert freshness.retries == build.retries == 0
         assert freshness.environment["AWS_CONFIG_FILE"] == "/run/aws/config"

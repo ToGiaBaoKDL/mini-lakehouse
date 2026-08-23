@@ -147,10 +147,13 @@ locals {
     "${var.bucket_arns.curated}/*/tables/*/metadata/*",
   ]
   analytics_metadata_prefixes = [
+    "*/*/*/metadata",
+    "*/*/*/metadata/*",
     "*/tables",
     "*/tables/*",
   ]
   analytics_metadata_object_arns = [
+    "${var.bucket_arns.analytics}/*/*/*/metadata/*",
     "${var.bucket_arns.analytics}/*/tables/*/metadata/*",
   ]
 }

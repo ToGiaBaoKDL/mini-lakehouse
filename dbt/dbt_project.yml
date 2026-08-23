@@ -1,0 +1,70 @@
+name: "lakehouse_analytics"
+version: "1.0.0"
+config-version: 2
+profile: "lakehouse_analytics"
+require-dbt-version: [">=1.12.0", "<1.13.0"]
+
+model-paths: ["models"]
+clean-targets: ["target", "dbt_packages"]
+
+flags:
+  send_anonymous_usage_stats: false
+  require_certificate_validation: true
+
+models:
+  lakehouse_analytics:
+    +persist_docs:
+      relation: true
+      columns: true
+    staging:
+      +materialized: ephemeral
+      github:
+        +enabled: "{{ env_var('DBT_DOMAIN') in ['all', 'engineering'] }}"
+        +group: data_platform
+        +tags: [staging, github, engineering]
+        +meta:
+          owner: data-platform
+          contact: baokdl2226@gmail.com
+      arxiv:
+        +enabled: "{{ env_var('DBT_DOMAIN') in ['all', 'research'] }}"
+        +group: data_platform
+        +tags: [staging, arxiv, research]
+        +meta:
+          owner: data-platform
+          contact: baokdl2226@gmail.com
+    intermediate:
+      +materialized: ephemeral
+      engineering:
+        +enabled: "{{ env_var('DBT_DOMAIN') in ['all', 'engineering'] }}"
+        +group: engineering
+        +tags: [intermediate, engineering]
+        +meta:
+          owner: engineering-analytics
+          contact: baokdl2226@gmail.com
+      research:
+        +enabled: "{{ env_var('DBT_DOMAIN') in ['all', 'research'] }}"
+        +group: research
+        +tags: [intermediate, research]
+        +meta:
+          owner: research-analytics
+          contact: baokdl2226@gmail.com
+    marts:
+      +materialized: table
+      +table_type: iceberg
+      +access: public
+      engineering:
+        +enabled: "{{ env_var('DBT_DOMAIN') in ['all', 'engineering'] }}"
+        +group: engineering
+        +tags: [mart, engineering]
+        +meta:
+          owner: engineering-analytics
+          contact: baokdl2226@gmail.com
+          business_owner: engineering
+      research:
+        +enabled: "{{ env_var('DBT_DOMAIN') in ['all', 'research'] }}"
+        +group: research
+        +tags: [mart, research]
+        +meta:
+          owner: research-analytics
+          contact: baokdl2226@gmail.com
+          business_owner: research

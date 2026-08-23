@@ -58,8 +58,8 @@ def test_component_release_publishes_before_protected_digest_deployment() -> Non
     assert "orchestration/runtime" in release
     assert "source-$revision" in release
     assert "cancel-in-progress: false" in release
-    assert 'dbt-engineering) [[ "$BUILD_ARGS" == "DBT_PROJECT=engineering" ]]' in release
-    assert 'dbt-research) [[ "$BUILD_ARGS" == "DBT_PROJECT=research" ]]' in release
+    assert "airflow|arxiv-inspector|dbt|lightdash|ocr-worker" in release
+    assert '[[ -z "$BUILD_ARGS" ]]' in release
     assert "^[0-9]{12}\\.dkr\\.ecr\\." in action
     assert "uses: ./.github/actions/reconcile-services-host" in action
     assert "tag:tgbao-dev-ci" in host_action
@@ -269,15 +269,9 @@ def test_each_custom_component_has_a_thin_release_caller() -> None:
             "component: arxiv-inspector",
             "dockerfile: apps/arxiv_inspector/Dockerfile",
         ),
-        "release-dbt-engineering.yml": (
-            "component: dbt-engineering",
+        "release-dbt.yml": (
+            "component: dbt",
             "dockerfile: dbt/Dockerfile",
-            "build_args: DBT_PROJECT=engineering",
-        ),
-        "release-dbt-research.yml": (
-            "component: dbt-research",
-            "dockerfile: dbt/Dockerfile",
-            "build_args: DBT_PROJECT=research",
         ),
         "release-ocr-worker.yml": (
             "component: ocr-worker",
@@ -405,7 +399,7 @@ def test_lightdash_projects_use_protected_stateless_delivery() -> None:
     assert len({project["project_uuid"] for project in projects}) == len(projects)
     for project in projects:
         domain = project["domain"]
-        assert project["dbt_project_dir"] == f"dbt/{domain}"
+        assert project["schema"] == f"analytics_{domain}"
         assert project["content_dir"] == f"lightdash/projects/{domain}/content"
         assert re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", project["project_uuid"])
     assert "lightdash login" not in workflow

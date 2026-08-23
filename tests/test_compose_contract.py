@@ -380,7 +380,7 @@ def test_all_container_images_are_immutable() -> None:
     assert "USER airflow" in airflow_dockerfile
     assert 'ENTRYPOINT ["dbt"]' in dbt_dockerfile
     assert "dbt/runtime/uv.lock" in dbt_dockerfile
-    assert "ARG DBT_PROJECT=engineering" in dbt_dockerfile
+    assert "COPY dbt/models ./models" in dbt_dockerfile
     assert "dbt deps" in dbt_dockerfile
     assert "USER dbt" in dbt_dockerfile
     assert 'ENTRYPOINT ["document-ocr"]' in ocr_dockerfile

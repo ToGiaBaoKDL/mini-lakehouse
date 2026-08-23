@@ -100,10 +100,16 @@ module "storage" {
 module "container_registry" {
   source      = "../../modules/container_registry"
   name_prefix = local.name_prefix
-  repositories = setunion(
-    toset(["airflow", "arxiv-inspector", "lightdash", "ocr-worker"]),
-    toset([for domain in keys(local.analytics_domains) : "dbt-${domain}"]),
-  )
+  repositories = toset([
+    "airflow",
+    "arxiv-inspector",
+    "dbt",
+    # Retain rollback images until the shared dbt release has run both domain DAGs successfully.
+    "dbt-engineering",
+    "dbt-research",
+    "lightdash",
+    "ocr-worker",
+  ])
   retained_image_count = 20
   force_delete         = true
   tags                 = local.tags

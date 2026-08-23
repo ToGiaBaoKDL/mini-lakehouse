@@ -17,7 +17,9 @@ from operators.docker import docker_task
 
 DBT_ENVIRONMENT = {
     "DBT_ANALYTICS_URI": runtime_value("storage/analytics_uri"),
+    "DBT_DOMAIN": "research",
     "DBT_QUERY_RESULTS_URI": runtime_value("athena/dbt_research_output_uri"),
+    "DBT_SCHEMA": "analytics_research",
 }
 
 
@@ -34,8 +36,8 @@ with DAG(
 ) as dag:
     freshness = docker_task(
         task_id="check_source_freshness",
-        image="dbt-research:runtime",
-        command=["source", "freshness"],
+        image="dbt:runtime",
+        command=["source", "freshness", "--selector", "research"],
         workload="dbt-research",
         execution_timeout=timedelta(minutes=30),
         environment=DBT_ENVIRONMENT,
@@ -43,8 +45,8 @@ with DAG(
     )
     build = docker_task(
         task_id="build_analytics",
-        image="dbt-research:runtime",
-        command=["build"],
+        image="dbt:runtime",
+        command=["build", "--selector", "research"],
         workload="dbt-research",
         execution_timeout=timedelta(hours=2),
         environment=DBT_ENVIRONMENT,

@@ -88,15 +88,11 @@ jobs:
         run: |
           set -euo pipefail
           case "$COMPONENT" in
-            airflow|arxiv-inspector|dbt-engineering|dbt-research|lightdash|ocr-worker) ;;
+            airflow|arxiv-inspector|dbt|lightdash|ocr-worker) ;;
             *) exit 2 ;;
           esac
           [[ "$REPOSITORY" == "tgbao-dev-$COMPONENT" ]]
-          case "$COMPONENT" in
-            dbt-engineering) [[ "$BUILD_ARGS" == "DBT_PROJECT=engineering" ]] ;;
-            dbt-research) [[ "$BUILD_ARGS" == "DBT_PROJECT=research" ]] ;;
-            *) [[ -z "$BUILD_ARGS" ]] ;;
-          esac
+          [[ -z "$BUILD_ARGS" ]]
           case "$COMPONENT" in
             lightdash)
               [[ "$EXTERNAL_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]

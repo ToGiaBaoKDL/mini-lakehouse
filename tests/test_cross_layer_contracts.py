@@ -15,11 +15,8 @@ def _yaml(path: str) -> dict[str, object]:
 def test_dbt_sources_match_curated_product_contracts() -> None:
     contracts = load_contracts()
     sources: dict[str, list[dict[str, object]]] = {}
-    product_projects = {"github": "engineering", "arxiv": "research"}
-    for product_name, project_name in product_projects.items():
-        source_file = _yaml(
-            f"dbt/{project_name}/models/staging/{product_name}/_{product_name}__sources.yml"
-        )
+    for product_name in ("github", "arxiv"):
+        source_file = _yaml(f"dbt/models/sources/{product_name}.yml")
         source = cast(list[dict[str, object]], source_file["sources"])[0]
         product = contracts.curated_product(product_name)
         source_tables = cast(list[dict[str, object]], source["tables"])
@@ -61,53 +58,55 @@ def test_dbt_sources_match_curated_product_contracts() -> None:
 
 def test_dbt_athena_configuration_is_explicit() -> None:
     contracts = load_contracts()
-    dbt_domains = {path.parent.name for path in Path("dbt").glob("*/dbt_project.yml")}
     contract_domains = {domain.name for domain in contracts.domains}
-    assert dbt_domains == contract_domains
+    project = _yaml("dbt/dbt_project.yml")
+    profile = Path("dbt/profiles.yml").read_text(encoding="utf-8")
+    profile_config = _yaml("dbt/profiles.yml")
+    project_models = cast(
+        dict[str, object],
+        cast(dict[str, object], project["models"])["lakehouse_analytics"],
+    )
+    marts = cast(dict[str, object], project_models["marts"])
+    outputs = cast(
+        dict[str, object],
+        cast(dict[str, object], profile_config["lakehouse_analytics"])["outputs"],
+    )
+    output = cast(dict[str, object], outputs["runtime"])
+
+    assert project["profile"] == "lakehouse_analytics"
+    assert set(outputs) == {"runtime"}
+    assert "type: athena" in profile
+    assert "aws_access_key_id" not in profile
+    assert marts["+materialized"] == "table"
+    assert marts["+table_type"] == "iceberg"
+    assert marts["+access"] == "public"
+    assert "+on_table_exists" not in marts
+    assert "+format" not in marts
+    assert "+write_compression" not in marts
+    assert "+native_drop" not in marts
+    assert "work_group: primary" in profile
+    assert "DBT_QUERY_RESULTS_URI" in profile
+    assert "aws_profile_name" not in profile
+    assert "num_retries" not in profile
+    assert "poll_interval" not in profile
+    assert output["schema"] == "{{ env_var('DBT_SCHEMA') }}"
+    assert output["s3_data_dir"] == (
+        "{{ env_var('DBT_ANALYTICS_URI') }}/{{ env_var('DBT_DOMAIN') }}"
+    )
+    assert output["s3_data_naming"] == "table_unique"
 
     for domain_name in sorted(contract_domains):
         domain = contracts.domain(domain_name)
-        profile_path = f"dbt/{domain_name}/profiles.yml"
-        profile = Path(profile_path).read_text(encoding="utf-8")
-        profile_config = _yaml(profile_path)
-        project = _yaml(f"dbt/{domain_name}/dbt_project.yml")
-        project_name = f"{domain_name}_analytics"
-        project_models = cast(
-            dict[str, object],
-            cast(dict[str, object], project["models"])[project_name],
-        )
-        marts = cast(dict[str, object], project_models["marts"])
-        outputs = cast(
-            dict[str, object],
-            cast(dict[str, object], profile_config[project_name])["outputs"],
-        )
-        output = cast(dict[str, object], outputs["dev"])
-        assert set(outputs) == {"dev"}
-        mart_meta = cast(dict[str, object], marts["+meta"])
+        domain_marts = cast(dict[str, object], marts[domain_name])
+        mart_meta = cast(dict[str, object], domain_marts["+meta"])
 
-        assert "type: athena" in profile
-        assert "aws_access_key_id" not in profile
-        assert marts["+materialized"] == "table"
-        assert marts["+table_type"] == "iceberg"
-        assert "+s3_data_naming" not in marts
-        assert "+on_table_exists" not in marts
-        assert "+format" not in marts
-        assert "+write_compression" not in marts
-        assert "+native_drop" not in marts
-        assert "work_group: primary" in profile
-        assert "DBT_QUERY_RESULTS_URI" in profile
-        assert "aws_profile_name" not in profile
-        assert "num_retries" not in profile
-        assert "poll_interval" not in profile
+        assert domain_marts["+group"] == domain_name
+        assert domain_name in cast(list[str], domain_marts["+tags"])
         assert mart_meta == {
             "owner": domain.owner,
             "contact": domain.contact.email,
             "business_owner": domain.business_owner,
         }
-        assert output["schema"] == domain.database
-        assert output["s3_data_dir"] == (
-            f"{{{{ env_var('DBT_ANALYTICS_URI') }}}}/{domain_name}/tables"
-        )
 
     data_operations = Path("make/data.mk").read_text(encoding="utf-8")
     assert "/athena/dbt_$(DBT_DOMAIN)_output_uri" in data_operations
@@ -118,37 +117,34 @@ def test_dbt_athena_configuration_is_explicit() -> None:
 def test_dbt_uses_first_party_adapter_and_standard_test_package() -> None:
     root_project = Path("pyproject.toml").read_text(encoding="utf-8")
     analytics_project = Path("dbt/runtime/pyproject.toml").read_text(encoding="utf-8")
-    packages = [_yaml(f"dbt/{domain}/packages.yml") for domain in ("engineering", "research")]
-    mart_models = Path(
-        "dbt/engineering/models/marts/engineering/_engineering__models.yml"
-    ).read_text(encoding="utf-8")
+    packages = _yaml("dbt/packages.yml")
+    mart_models = Path("dbt/models/marts/engineering/_engineering__models.yml").read_text(
+        encoding="utf-8"
+    )
 
     assert '"dbt-athena==1.11.0"' in analytics_project
     assert "dbt-athena" not in root_project
     assert "dbt-athena-community" not in root_project
     assert "dbt-athena-community" not in analytics_project
-    assert all(
-        package == {"packages": [{"package": "dbt-labs/dbt_utils", "version": "1.4.1"}]}
-        for package in packages
-    )
+    assert packages == {"packages": [{"package": "dbt-labs/dbt_utils", "version": "1.4.1"}]}
     assert "dbt_utils.unique_combination_of_columns" in mart_models
     assert not list(Path("dbt").rglob("tests/generic/test_unique_combination_of_columns.sql"))
 
 
 def test_dbt_models_use_explicit_projections() -> None:
-    for path in Path("dbt").glob("*/models/**/*.sql"):
+    for path in Path("dbt/models").rglob("*.sql"):
         sql = path.read_text(encoding="utf-8")
         assert re.search(r"\bselect\s+\*", sql, flags=re.IGNORECASE) is None, path
 
 
 def test_every_dbt_model_and_column_is_documented() -> None:
     documented_models: dict[str, dict[str, object]] = {}
-    for path in Path("dbt").glob("*/models/**/*__models.yml"):
+    for path in Path("dbt/models").rglob("*__models.yml"):
         payload = _yaml(path.as_posix())
         for model in cast(list[dict[str, object]], payload["models"]):
             documented_models[cast(str, model["name"])] = model
 
-    sql_models = {path.stem for path in Path("dbt").glob("*/models/**/*.sql")}
+    sql_models = {path.stem for path in Path("dbt/models").rglob("*.sql")}
     assert set(documented_models) == sql_models
     for model in documented_models.values():
         assert cast(str, model["description"]).strip()

@@ -1,0 +1,17 @@
+version: 2
+
+groups:
+  - name: data_platform
+    owner:
+      name: Data Platform
+      email: baokdl2226@gmail.com
+
+  - name: engineering
+    owner:
+      name: Engineering Analytics
+      email: baokdl2226@gmail.com
+
+  - name: research
+    owner:
+      name: Research Analytics
+      email: baokdl2226@gmail.com
