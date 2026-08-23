@@ -250,8 +250,6 @@ def test_service_images_are_immutable_bounded_and_published_by_one_role() -> Non
         "airflow",
         "arxiv-inspector",
         "dbt",
-        "dbt-engineering",
-        "dbt-research",
         "lightdash",
         "ocr-worker",
     ):

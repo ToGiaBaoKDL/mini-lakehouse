@@ -104,9 +104,6 @@ module "container_registry" {
     "airflow",
     "arxiv-inspector",
     "dbt",
-    # Retain rollback images until the shared dbt release has run both domain DAGs successfully.
-    "dbt-engineering",
-    "dbt-research",
     "lightdash",
     "ocr-worker",
   ])
