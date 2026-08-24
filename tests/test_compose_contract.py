@@ -320,7 +320,9 @@ def test_local_runtime_does_not_use_dotenv_files() -> None:
     assert not Path(".env").exists()
     assert not Path(".env.example").exists()
 
-    settings = Path("platform/src/lakehouse/config/settings.py").read_text(encoding="utf-8")
+    settings = Path("lakehouse/catalog/src/lakehouse/config/settings.py").read_text(
+        encoding="utf-8"
+    )
     modal_execution = Path("ocr/src/document_ocr/execution/modal.py").read_text(encoding="utf-8")
 
     assert 'env_file=".env"' not in settings
@@ -367,7 +369,7 @@ def test_all_container_images_are_immutable() -> None:
     dbt_dockerfile = Path("analytics/dbt-project/Dockerfile").read_text(encoding="utf-8")
     inspector_dockerfile = Path("apps/arxiv_inspector/Dockerfile").read_text(encoding="utf-8")
     ocr_dockerfile = Path("ocr/Dockerfile").read_text(encoding="utf-8")
-    emr_dockerfile = Path("jobs/emr/Dockerfile").read_text(encoding="utf-8")
+    emr_dockerfile = Path("lakehouse/emr/Dockerfile").read_text(encoding="utf-8")
     compose = "\n".join(
         Path(path).read_text(encoding="utf-8")
         for path in (AIRFLOW_COMPOSE, POSTGRES_COMPOSE, CLOUDFLARE_COMPOSE)
@@ -409,7 +411,7 @@ def test_all_container_images_are_immutable() -> None:
 
 def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
     workspace = Path("pyproject.toml").read_text(encoding="utf-8")
-    platform = Path("platform/pyproject.toml").read_text(encoding="utf-8")
+    catalog = Path("lakehouse/catalog/pyproject.toml").read_text(encoding="utf-8")
     orchestration = (AIRFLOW_PROJECT / "pyproject.toml").read_text(encoding="utf-8")
     inspector = Path("apps/arxiv_inspector/pyproject.toml").read_text(encoding="utf-8")
     analytics = Path("analytics/dbt-project/runtime/pyproject.toml").read_text(encoding="utf-8")
@@ -418,7 +420,7 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
     assert "apache-airflow" not in workspace
     assert "dbt-athena" not in workspace
     assert "streamlit" not in workspace
-    assert 'name = "lakehouse"' in platform
+    assert 'name = "lakehouse"' in catalog
     assert '"apache-airflow[postgres]==3.3.0"' in orchestration
     assert '"apache-airflow-providers-amazon==9.32.0"' in orchestration
     assert "aiobotocore" not in orchestration
@@ -445,9 +447,9 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
     assert "providers = [" not in ocr
     assert "s3fs" not in ocr
     assert '"dbt-athena==1.11.0"' in analytics
-    assert 'members = ["apps/arxiv_inspector", "ocr", "platform"]' in workspace
+    assert 'members = ["apps/arxiv_inspector", "lakehouse/catalog", "ocr"]' in workspace
     assert (
-        'exclude = ["analytics/dbt-project/runtime", "automation/airflow", "jobs/emr", '
+        'exclude = ["analytics/dbt-project/runtime", "automation/airflow", "lakehouse/emr", '
         '"ocr/glm_ocr"]' in workspace
     )
     assert Path("analytics/dbt-project/runtime/uv.lock").is_file()
@@ -484,14 +486,18 @@ def test_airflow_bundle_and_runtime_have_one_way_ownership() -> None:
     assert "from operators" not in runtime_source
 
 
-def test_platform_control_plane_is_one_owned_workspace_package() -> None:
-    assert Path("platform/pyproject.toml").is_file()
-    assert Path("platform/contracts").is_dir()
-    assert Path("platform/src/lakehouse/catalog").is_dir()
+def test_lakehouse_data_plane_has_explicit_capability_boundaries() -> None:
+    assert Path("lakehouse/catalog/pyproject.toml").is_file()
+    assert Path("lakehouse/contracts").is_dir()
+    assert Path("lakehouse/catalog/src/lakehouse/catalog").is_dir()
+    assert Path("lakehouse/emr/pyproject.toml").is_file()
     assert not Path("src").exists()
     assert not Path("contracts").exists()
+    assert not Path("platform").exists()
+    assert not Path("jobs").exists()
 
     sources = "\n".join(
-        path.read_text(encoding="utf-8") for path in Path("platform/src/lakehouse").rglob("*.py")
+        path.read_text(encoding="utf-8")
+        for path in Path("lakehouse/catalog/src/lakehouse").rglob("*.py")
     )
     assert "lakehouse.platform" not in sources

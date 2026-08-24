@@ -2,11 +2,12 @@ from pathlib import Path
 
 import pytest
 from lakehouse.catalog.schema import iceberg_schema
+
 from lakehouse.contracts import load_contracts
 
 
 def test_repository_contracts_form_one_glue_registry() -> None:
-    contracts = load_contracts(Path("platform/contracts"))
+    contracts = load_contracts(Path("lakehouse/contracts"))
 
     assert contracts.source("github_archive").table_identifier("events_raw").iceberg == (
         "landing_github_archive",
@@ -45,7 +46,7 @@ def test_arxiv_publication_marker_has_manifest_lineage() -> None:
 
 
 def test_contract_layout_excludes_cloud_identity_and_maintenance_policy() -> None:
-    root = Path("platform/contracts")
+    root = Path("lakehouse/contracts")
     files = {path.relative_to(root).as_posix() for path in root.rglob("*.yaml")}
 
     assert "access.yaml" not in files
@@ -73,7 +74,7 @@ def test_contract_loader_rejects_duplicate_yaml_keys(tmp_path: Path) -> None:
 
 
 def test_contracts_never_contain_secrets() -> None:
-    for path in Path("platform/contracts").rglob("*.yaml"):
+    for path in Path("lakehouse/contracts").rglob("*.yaml"):
         source = path.read_text(encoding="utf-8").lower()
         assert "password:" not in source
         assert "secret:" not in source

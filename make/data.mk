@@ -65,4 +65,4 @@ dbt-build: ## Build DBT_DOMAIN analytics with its isolated runtime identity.
 			--project-dir $(DBT_PROJECT) --profiles-dir $(DBT_PROJECT)
 
 emr-jobs-package: ## Build EMR artifacts in the matching EMR runtime.
-	jobs/emr/release/package
+	lakehouse/emr/release/package

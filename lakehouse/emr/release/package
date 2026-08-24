@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$#" -ne 0 ]; then
-    printf '%s\n' "Usage: jobs/emr/release/package" >&2
+    printf '%s\n' "Usage: lakehouse/emr/release/package" >&2
     exit 2
 fi
 
@@ -13,7 +13,7 @@ output="$repository_root/dist/emr"
 rm -rf "$output"
 docker build \
     --platform linux/amd64 \
-    --file "$repository_root/jobs/emr/Dockerfile" \
+    --file "$repository_root/lakehouse/emr/Dockerfile" \
     --target artifacts \
     --output "type=local,dest=$output" \
     "$repository_root"

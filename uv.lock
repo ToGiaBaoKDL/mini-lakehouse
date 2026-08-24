@@ -148,7 +148,7 @@ requires-dist = [
     { name = "awswrangler", specifier = "==3.17.0" },
     { name = "boto3", specifier = ">=1.42,<2" },
     { name = "document-ocr", editable = "ocr" },
-    { name = "lakehouse", editable = "platform" },
+    { name = "lakehouse", editable = "lakehouse/catalog" },
     { name = "loguru", specifier = "==0.7.3" },
     { name = "opentelemetry-distro", extras = ["otlp"], specifier = ">=0.64b0,<0.65" },
     { name = "opentelemetry-instrumentation-botocore", specifier = ">=0.64b0,<0.65" },
@@ -355,7 +355,7 @@ worker = [
 requires-dist = [
     { name = "boto3", marker = "extra == 'worker'", specifier = ">=1.42,<2" },
     { name = "botocore", marker = "extra == 'worker'", specifier = ">=1.42,<2" },
-    { name = "lakehouse", marker = "extra == 'worker'", editable = "platform" },
+    { name = "lakehouse", marker = "extra == 'worker'", editable = "lakehouse/catalog" },
     { name = "loguru", specifier = "==0.7.3" },
     { name = "modal", marker = "extra == 'worker'", specifier = ">=1.5.3,<1.6" },
     { name = "opendataloader-pdf", marker = "extra == 'worker'", specifier = "==2.5.0" },
@@ -607,7 +607,7 @@ wheels = [
 [[package]]
 name = "lakehouse"
 version = "0.3.0"
-source = { editable = "platform" }
+source = { editable = "lakehouse/catalog" }
 dependencies = [
     { name = "boto3" },
     { name = "loguru" },

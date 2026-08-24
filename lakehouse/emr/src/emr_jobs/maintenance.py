@@ -4,10 +4,11 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
-from lakehouse.catalog import CATALOG_NAME
 from lakehouse.catalog.layout import declared_tables
-from lakehouse.contracts import ManagedIcebergTableContract
 from loguru import logger
+
+from lakehouse.catalog import CATALOG_NAME
+from lakehouse.contracts import ManagedIcebergTableContract
 
 
 @dataclass(frozen=True)

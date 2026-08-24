@@ -5,10 +5,9 @@ on:
     branches: [main]
     paths:
       - .github/workflows/release-emr-jobs.yml
-      - jobs/emr/**
-      - platform/contracts/**
-      - platform/src/**
-      - platform/pyproject.toml
+      - lakehouse/catalog/**
+      - lakehouse/contracts/**
+      - lakehouse/emr/**
   workflow_dispatch:
 
 jobs:
@@ -38,8 +37,8 @@ jobs:
           role-to-assume: ${{ vars.AWS_EMR_PUBLISHER_ROLE_ARN }}
           role-session-name: github-${{ github.run_id }}
       - name: Package EMR jobs
-        run: jobs/emr/release/package
+        run: lakehouse/emr/release/package
       - name: Publish immutable EMR artifacts
         run: >-
-          jobs/emr/release/publish dist/emr "$EMR_ARTIFACTS_URI"
+          lakehouse/emr/release/publish dist/emr "$EMR_ARTIFACTS_URI"
           "$GITHUB_SHA" "$EMR_CODE_PARAMETER_NAME"

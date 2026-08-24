@@ -435,8 +435,8 @@ def test_lightdash_ci_token_has_an_owned_secret_sync_boundary() -> None:
 def test_emr_has_an_independent_release_pointer() -> None:
     source = _workflow("release-emr-jobs.yml")
     makefile = Path("make/data.mk").read_text(encoding="utf-8")
-    package = Path("jobs/emr/release/package").read_text(encoding="utf-8")
-    publish = Path("jobs/emr/release/publish").read_text(encoding="utf-8")
+    package = Path("lakehouse/emr/release/package").read_text(encoding="utf-8")
+    publish = Path("lakehouse/emr/release/publish").read_text(encoding="utf-8")
 
     assert "AWS_EMR_PUBLISHER_ROLE_ARN" in source
     assert "environment: dev" not in source
@@ -444,8 +444,8 @@ def test_emr_has_an_independent_release_pointer() -> None:
     assert "queue: max" in source
     assert "EMR_ARTIFACTS_URI" in source
     assert "EMR_CODE_PARAMETER_NAME" in source
-    assert "jobs/emr/release/package" in source
-    assert "jobs/emr/release/publish" in source
+    assert "lakehouse/emr/release/package" in source
+    assert "lakehouse/emr/release/publish" in source
     assert "--target artifacts" in package
     assert "--if-none-match '*'" in publish
     assert "SHA256SUMS" in publish

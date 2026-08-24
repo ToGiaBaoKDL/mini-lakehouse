@@ -1,9 +1,5 @@
 """Load the validated contract artifact and adapt its schemas to Spark."""
 
-from lakehouse.contracts import (
-    DataContracts,
-    ManagedIcebergTableContract,
-)
 from pyspark.sql.types import (
     BooleanType,
     DateType,
@@ -15,6 +11,10 @@ from pyspark.sql.types import (
 )
 
 from emr_jobs.common.s3 import read_bytes
+from lakehouse.contracts import (
+    DataContracts,
+    ManagedIcebergTableContract,
+)
 
 SPARK_TYPES = {
     "boolean": BooleanType(),

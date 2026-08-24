@@ -24,7 +24,7 @@ include make/images.mk
 include make/services.mk
 include make/data.mk
 
-.PHONY: help preflight platform-validate lightdash-validate lint test compose-validate check
+.PHONY: help preflight lakehouse-validate lightdash-validate lint test compose-validate check
 
 help: ## Show available commands.
 	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-28s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -35,7 +35,7 @@ preflight: ## Verify local tools required by service operations.
 	@command -v jq >/dev/null
 	@docker compose version >/dev/null
 
-platform-validate: ## Validate settings and YAML contracts without AWS I/O.
+lakehouse-validate: ## Validate settings and YAML contracts without AWS I/O.
 	uv run --package lakehouse --extra cli python -m lakehouse.validate
 
 lightdash-validate: ## Validate managed Lightdash content with the pinned CLI.
@@ -47,7 +47,7 @@ lightdash-validate: ## Validate managed Lightdash content with the pinned CLI.
 	done
 
 lint: ## Run formatting, linting, and static type checks.
-	bash -n jobs/emr/release/publish
+	bash -n lakehouse/emr/release/publish
 	sh -n infra/runtime/host/install-aws-cli \
 		infra/runtime/host/install-tailscale \
 		infra/runtime/host/reconcile-docker-logging \
@@ -64,7 +64,7 @@ lint: ## Run formatting, linting, and static type checks.
 		infra/runtime/postgres/restore \
 		observability/signoz/deploy/deploy \
 		observability/signoz/collector/deploy \
-		jobs/emr/release/package \
+		lakehouse/emr/release/package \
 		automation/airflow/deploy/deploy \
 		automation/airflow/deploy/initialize-secrets \
 		automation/airflow/deploy/reconcile \
@@ -80,7 +80,7 @@ lint: ## Run formatting, linting, and static type checks.
 	uv run ruff check .
 	uv run --all-packages --all-extras pyright
 	uv run --project automation/airflow pyright --project automation/airflow
-	uv run pyright --project jobs/emr
+	uv run pyright --project lakehouse/emr
 
 test: ## Run unit tests.
 	uv run --all-packages --all-extras pytest -m "not integration"
@@ -102,9 +102,9 @@ check: ## Run the complete local quality gate.
 	uv lock --check
 	uv lock --check --project analytics/dbt-project/runtime
 	uv lock --check --project automation/airflow
-	uv lock --check --project jobs/emr
+	uv lock --check --project lakehouse/emr
 	uv lock --check --directory ocr/glm_ocr
-	$(MAKE) platform-validate
+	$(MAKE) lakehouse-validate
 	$(MAKE) dbt-validate
 	$(MAKE) lightdash-validate
 	$(MAKE) lint

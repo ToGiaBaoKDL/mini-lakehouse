@@ -15,10 +15,10 @@ COPY --from=uv /uv /uvx /bin/
 COPY pyproject.toml uv.lock .python-version ./
 COPY apps/arxiv_inspector/pyproject.toml ./apps/arxiv_inspector/pyproject.toml
 COPY ocr/pyproject.toml ./ocr/pyproject.toml
-COPY platform/pyproject.toml ./platform/pyproject.toml
+COPY lakehouse/catalog/pyproject.toml ./lakehouse/catalog/pyproject.toml
 
-FROM base AS platform-wheel
-COPY platform/src ./platform/src
+FROM base AS catalog-wheel
+COPY lakehouse/catalog/src ./lakehouse/catalog/src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv build --wheel --package lakehouse --out-dir /dist
 
@@ -44,10 +44,10 @@ RUN apt-get update \
     && java -version \
     && groupadd --gid 10001 worker \
     && useradd --uid 10001 --gid worker --create-home --shell /usr/sbin/nologin worker
-COPY --from=platform-wheel /dist /dist
+COPY --from=catalog-wheel /dist /dist
 COPY --from=ocr-wheel /dist /dist
 COPY infra/runtime/identity/install-aws-signing-helper /tmp/install-aws-signing-helper
-COPY --chown=worker:worker platform/contracts ./platform/contracts
+COPY --chown=worker:worker lakehouse/contracts ./lakehouse/contracts
 COPY --chown=worker:worker ocr/config ./ocr/config
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python /app/.venv/bin/python --no-deps \

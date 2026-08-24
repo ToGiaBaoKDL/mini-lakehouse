@@ -1,9 +1,9 @@
 """Publish canonical GitHub entities from a bounded landing partition."""
 
-from lakehouse.contracts.curated import CuratedProductContract
 from pyspark.sql import SparkSession
 
 from emr_jobs.common.iceberg import qualified_name
+from lakehouse.contracts.curated import CuratedProductContract
 
 
 def publish(

@@ -5,13 +5,13 @@ import hashlib
 import json
 from datetime import date, datetime
 
-from lakehouse.contracts.sources import SourceContract
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
 from emr_jobs.common.contracts import spark_schema
 from emr_jobs.common.iceberg import qualified_name
 from emr_jobs.common.s3 import delete_unlisted, join_key, put_if_changed, split_uri
+from lakehouse.contracts.sources import SourceContract
 
 
 def archive_pages(

@@ -12,19 +12,19 @@ ENV UV_PYTHON=3.11 \
 RUN dnf install -y --setopt=install_weak_deps=0 python3.11 \
     && dnf clean all
 COPY --from=uv /uv /usr/local/bin/uv
-COPY platform/pyproject.toml ./platform/pyproject.toml
-COPY platform/src ./platform/src
-COPY platform/contracts ./platform/contracts
-COPY jobs/emr/pyproject.toml jobs/emr/uv.lock ./jobs/emr/
-COPY jobs/emr/src ./jobs/emr/src
-COPY jobs/emr/entrypoints ./jobs/emr/entrypoints
+COPY lakehouse/catalog/pyproject.toml ./lakehouse/catalog/pyproject.toml
+COPY lakehouse/catalog/src ./lakehouse/catalog/src
+COPY lakehouse/contracts ./lakehouse/contracts
+COPY lakehouse/emr/pyproject.toml lakehouse/emr/uv.lock ./lakehouse/emr/
+COPY lakehouse/emr/src ./lakehouse/emr/src
+COPY lakehouse/emr/entrypoints ./lakehouse/emr/entrypoints
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --project jobs/emr --frozen --no-dev --group build --no-editable
+    uv sync --project lakehouse/emr --frozen --no-dev --group build --no-editable
 RUN mkdir -p /output/entrypoints \
-    && jobs/emr/.venv/bin/venv-pack -p jobs/emr/.venv -o /output/python.tar.gz \
-    && cp jobs/emr/entrypoints/*.py /output/entrypoints/ \
-    && jobs/emr/.venv/bin/python -m lakehouse.contracts.bundle \
+    && lakehouse/emr/.venv/bin/venv-pack -p lakehouse/emr/.venv -o /output/python.tar.gz \
+    && cp lakehouse/emr/entrypoints/*.py /output/entrypoints/ \
+    && lakehouse/emr/.venv/bin/python -m lakehouse.contracts.bundle \
         --output /output/contracts.json
 
 FROM scratch AS artifacts

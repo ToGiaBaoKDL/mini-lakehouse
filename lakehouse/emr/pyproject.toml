@@ -17,7 +17,7 @@ requires = ["uv_build>=0.11.0,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv.sources]
-lakehouse = { path = "../../platform", editable = false }
+lakehouse = { path = "../catalog", editable = false }
 
 [tool.uv.build-backend]
 module-name = "emr_jobs"
@@ -29,7 +29,7 @@ build = ["venv-pack==0.2.0"]
 pythonVersion = "3.11"
 typeCheckingMode = "strict"
 include = ["src", "entrypoints"]
-extraPaths = ["src", "../../platform/src"]
+extraPaths = ["src", "../catalog/src"]
 reportMissingImports = false
 reportMissingModuleSource = false
 reportMissingTypeStubs = false

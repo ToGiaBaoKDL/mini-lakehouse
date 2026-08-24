@@ -3,8 +3,9 @@ from unittest.mock import Mock
 
 import lakehouse.iceberg as iceberg
 from lakehouse.catalog.layout import managed_tables, namespace_properties
-from lakehouse.contracts import load_contracts
 from pytest import MonkeyPatch
+
+from lakehouse.contracts import load_contracts
 
 
 def test_glue_databases_are_derived_from_owned_contracts() -> None:
@@ -76,7 +77,7 @@ def test_data_jobs_do_not_create_or_evolve_catalog_objects() -> None:
         ".create_table(",
         ".create_namespace",
     )
-    for path in Path("jobs/emr/src").rglob("*.py"):
+    for path in Path("lakehouse/emr/src").rglob("*.py"):
         source = path.read_text(encoding="utf-8")
         assert all(token not in source for token in forbidden), path
 

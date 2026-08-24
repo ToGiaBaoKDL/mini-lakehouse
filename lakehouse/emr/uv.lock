@@ -111,7 +111,7 @@ build = [
 requires-dist = [
     { name = "boto3", specifier = ">=1.42,<2" },
     { name = "botocore", specifier = ">=1.42,<2" },
-    { name = "lakehouse", directory = "../../platform" },
+    { name = "lakehouse", directory = "../catalog" },
     { name = "loguru", specifier = "==0.7.3" },
     { name = "requests", specifier = ">=2.32,<3" },
     { name = "typer", specifier = "==0.27.0" },
@@ -142,7 +142,7 @@ wheels = [
 [[package]]
 name = "lakehouse"
 version = "0.3.0"
-source = { directory = "../../platform" }
+source = { directory = "../catalog" }
 dependencies = [
     { name = "boto3" },
     { name = "loguru" },

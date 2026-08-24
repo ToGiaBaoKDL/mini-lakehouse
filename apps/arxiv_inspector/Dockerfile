@@ -16,10 +16,10 @@ COPY --from=uv /uv /uvx /bin/
 COPY pyproject.toml uv.lock .python-version ./
 COPY apps/arxiv_inspector/pyproject.toml ./apps/arxiv_inspector/pyproject.toml
 COPY ocr/pyproject.toml ./ocr/pyproject.toml
-COPY platform/pyproject.toml ./platform/pyproject.toml
+COPY lakehouse/catalog/pyproject.toml ./lakehouse/catalog/pyproject.toml
 
-FROM base AS platform-wheel
-COPY platform/src ./platform/src
+FROM base AS catalog-wheel
+COPY lakehouse/catalog/src ./lakehouse/catalog/src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv build --wheel --package lakehouse --out-dir /dist
 
@@ -37,10 +37,10 @@ ARG TARGETARCH
 ENV HOME=/tmp
 RUN groupadd --gid 10001 inspector \
     && useradd --uid 10001 --gid inspector --create-home --shell /usr/sbin/nologin inspector
-COPY --from=platform-wheel /dist /dist
+COPY --from=catalog-wheel /dist /dist
 COPY --from=ocr-wheel /dist /dist
 COPY infra/runtime/identity/install-aws-signing-helper /tmp/install-aws-signing-helper
-COPY --chown=inspector:inspector platform/contracts ./platform/contracts
+COPY --chown=inspector:inspector lakehouse/contracts ./lakehouse/contracts
 COPY --chown=inspector:inspector apps/arxiv_inspector ./apps/arxiv_inspector
 COPY --chown=inspector:inspector apps/arxiv_inspector/.streamlit ./.streamlit
 RUN --mount=type=cache,target=/root/.cache/uv \

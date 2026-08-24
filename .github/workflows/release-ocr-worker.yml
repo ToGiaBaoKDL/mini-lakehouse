@@ -7,9 +7,8 @@ on:
       - .github/workflows/release-ocr-worker.yml
       - apps/arxiv_inspector/pyproject.toml
       - ocr/**
-      - platform/contracts/**
-      - platform/src/**
-      - platform/pyproject.toml
+      - lakehouse/catalog/**
+      - lakehouse/contracts/**
       - pyproject.toml
       - uv.lock
       - infra/runtime/identity/install-aws-signing-helper

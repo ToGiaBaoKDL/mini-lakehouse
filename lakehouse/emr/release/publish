@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -ne 4 ]]; then
-    echo "Usage: jobs/emr/release/publish <artifacts-dir> <s3-base-uri> <git-sha> <ssm-parameter>" >&2
+    echo "Usage: lakehouse/emr/release/publish <artifacts-dir> <s3-base-uri> <git-sha> <ssm-parameter>" >&2
     exit 2
 fi
 

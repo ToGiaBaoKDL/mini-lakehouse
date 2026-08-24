@@ -14,7 +14,7 @@ with DAG(
     max_active_runs=1,
     on_failure_callback=dag_failure_callbacks(),
     on_success_callback=dag_success_callbacks(),
-    tags=["platform", "maintenance", "man", "emr", "iceberg"],
+    tags=["lakehouse", "maintenance", "man", "emr", "iceberg"],
 ) as dag:
     emr_spark_job(
         task_id="maintain_contract_tables",

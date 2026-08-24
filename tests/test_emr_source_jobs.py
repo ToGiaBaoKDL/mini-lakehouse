@@ -94,7 +94,7 @@ def test_arxiv_parser_rejects_duplicate_oai_identifiers() -> None:
 
 
 def test_github_landing_replay_uses_explicit_day_overwrite() -> None:
-    source = Path("jobs/emr/src/emr_jobs/github_archive/job.py").read_text()
+    source = Path("lakehouse/emr/src/emr_jobs/github_archive/job.py").read_text()
 
     assert ".overwritePartitions()" not in source
     assert ".writeTo(landing_table).overwrite(" in source
@@ -102,8 +102,8 @@ def test_github_landing_replay_uses_explicit_day_overwrite() -> None:
 
 
 def test_github_landing_parses_once_and_releases_its_cache() -> None:
-    landing = Path("jobs/emr/src/emr_jobs/github_archive/landing.py").read_text()
-    job = Path("jobs/emr/src/emr_jobs/github_archive/job.py").read_text()
+    landing = Path("lakehouse/emr/src/emr_jobs/github_archive/landing.py").read_text()
+    job = Path("lakehouse/emr/src/emr_jobs/github_archive/job.py").read_text()
 
     assert landing.count("F.from_json(") == 1
     assert landing.count('F.get_json_object("value"') == 1
@@ -112,7 +112,7 @@ def test_github_landing_parses_once_and_releases_its_cache() -> None:
 
 
 def test_github_landing_deduplicates_only_identical_event_records() -> None:
-    source = Path("jobs/emr/src/emr_jobs/github_archive/landing.py").read_text()
+    source = Path("lakehouse/emr/src/emr_jobs/github_archive/landing.py").read_text()
 
     assert 'events.join(duplicate_keys, "event_id", "left_semi")' in source
     assert "duplicate_events.dropDuplicates().cache()" in source
@@ -123,7 +123,7 @@ def test_github_landing_deduplicates_only_identical_event_records() -> None:
 
 
 def test_github_current_snapshots_use_a_stable_complete_winner_key() -> None:
-    source = Path("jobs/emr/src/emr_jobs/github_archive/curated.py").read_text()
+    source = Path("lakehouse/emr/src/emr_jobs/github_archive/curated.py").read_text()
 
     assert source.count("struct(occurred_at, event_id)") == 2
     assert source.count("source.last_observed_at, source.last_event_id") == 2
@@ -134,7 +134,7 @@ def test_github_current_snapshots_use_a_stable_complete_winner_key() -> None:
 
 
 def test_arxiv_child_replacement_is_unique_and_retry_safe() -> None:
-    source = Path("jobs/emr/src/emr_jobs/arxiv/curated.py").read_text()
+    source = Path("lakehouse/emr/src/emr_jobs/arxiv/curated.py").read_text()
     delete_authors = source.index("MERGE INTO {authors}")
     append_authors = source.index(".writeTo(authors).append()")
     delete_categories = source.index("MERGE INTO {categories}")
@@ -149,7 +149,7 @@ def test_arxiv_child_replacement_is_unique_and_retry_safe() -> None:
 
 
 def test_arxiv_raw_archive_prunes_pages_not_in_the_latest_manifest() -> None:
-    source = Path("jobs/emr/src/emr_jobs/arxiv/landing.py").read_text()
+    source = Path("lakehouse/emr/src/emr_jobs/arxiv/landing.py").read_text()
 
     assert source.index('content_type="application/json"') < source.index("delete_unlisted(")
     assert "retained_keys={manifest_key" in source

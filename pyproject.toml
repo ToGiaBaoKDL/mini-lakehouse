@@ -1,6 +1,6 @@
 [tool.uv.workspace]
-members = ["apps/arxiv_inspector", "ocr", "platform"]
-exclude = ["analytics/dbt-project/runtime", "automation/airflow", "jobs/emr", "ocr/glm_ocr"]
+members = ["apps/arxiv_inspector", "lakehouse/catalog", "ocr"]
+exclude = ["analytics/dbt-project/runtime", "automation/airflow", "lakehouse/emr", "ocr/glm_ocr"]
 
 [dependency-groups]
 dev = [
@@ -12,7 +12,7 @@ dev = [
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"
 testpaths = ["tests"]
-pythonpath = [".", "platform/src", "ocr/src", "jobs/emr/src"]
+pythonpath = [".", "lakehouse/catalog/src", "lakehouse/emr/src", "ocr/src"]
 
 [tool.ruff]
 line-length = 100
@@ -27,9 +27,9 @@ quote-style = "double"
 [tool.pyright]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
-include = ["platform/src", "ocr/src", "apps", "tests"]
+include = ["lakehouse/catalog/src", "ocr/src", "apps", "tests"]
 exclude = ["analytics/dbt-project", ".venv"]
-extraPaths = [".", "platform/src", "ocr/src", "jobs/emr/src"]
+extraPaths = [".", "lakehouse/catalog/src", "lakehouse/emr/src", "ocr/src"]
 venvPath = "."
 venv = ".venv"
 reportMissingTypeStubs = false

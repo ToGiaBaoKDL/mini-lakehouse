@@ -8,7 +8,7 @@ images-check: ## Validate every Dockerfile without building image layers.
 	docker buildx build --check --file apps/arxiv_inspector/Dockerfile .
 	docker buildx build --check --file analytics/dbt-project/Dockerfile .
 	docker buildx build --check --file ocr/Dockerfile .
-	docker buildx build --check --file jobs/emr/Dockerfile .
+	docker buildx build --check --file lakehouse/emr/Dockerfile .
 
 airflow-build: ## Build the local Airflow image.
 	docker build --file automation/airflow/runtime/Dockerfile --tag airflow:local .

@@ -1,8 +1,9 @@
 """Iceberg catalog naming and table guards shared by Spark jobs."""
 
+from pyspark.sql import SparkSession
+
 from lakehouse.catalog import CATALOG_NAME
 from lakehouse.contracts import TableIdentifier
-from pyspark.sql import SparkSession
 
 
 def qualified_name(identifier: TableIdentifier) -> str:

@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-DEFAULT_CONTRACTS_DIR = Path("platform/contracts")
+DEFAULT_CONTRACTS_DIR = Path("lakehouse/contracts")
 
 
 class Settings(BaseSettings):
