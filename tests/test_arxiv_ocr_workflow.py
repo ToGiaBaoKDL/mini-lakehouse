@@ -123,7 +123,7 @@ def _archive(files: dict[str, bytes]) -> bytes:
 
 
 class _Provider:
-    name = "kaggle"
+    name = "modal"
     reference = "test/arxiv-ocr"
 
     def __init__(self, processor: Any) -> None:

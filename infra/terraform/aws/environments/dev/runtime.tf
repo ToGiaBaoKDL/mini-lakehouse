@@ -14,7 +14,6 @@ locals {
     "backup/metadata_postgres_uri"      = "s3://${module.storage.bucket_names.backups}/metadata-postgres"
     "emr/application_id"                = module.emr_serverless.application_id
     "emr/execution_role_arn"            = module.identity.emr_runtime_role_arn
-    "ocr/providers/kaggle_secret_id"    = aws_secretsmanager_secret.ocr["kaggle"].name
     "ocr/providers/modal_secret_id"     = aws_secretsmanager_secret.ocr["modal"].name
     }, {
     for domain, parameter_name in local.dbt_output_parameter_names : parameter_name =>
@@ -49,7 +48,6 @@ locals {
     ]
     ocr_worker = [
       "storage/curated_uri",
-      "ocr/providers/kaggle_secret_id",
       "ocr/providers/modal_secret_id",
     ]
     }, {

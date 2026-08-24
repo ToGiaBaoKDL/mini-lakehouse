@@ -8,6 +8,3 @@ pipelines:
   glm_ocr_modal:
     processor: arxiv_glm_ocr
     execution_backend: modal
-  glm_ocr_kaggle:
-    processor: arxiv_glm_ocr
-    execution_backend: kaggle

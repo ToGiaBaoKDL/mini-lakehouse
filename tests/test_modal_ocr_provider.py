@@ -80,7 +80,7 @@ def _provider() -> ModalProvider:
 
 
 def test_modal_runner_has_an_explicit_deployment_environment() -> None:
-    assert load_ocr_config("arxiv_glm_ocr").runner.modal.environment == "main"
+    assert load_ocr_config("arxiv_glm_ocr").runner.environment == "main"
 
 
 def test_remote_glm_payload_omits_the_orchestration_discriminator() -> None:

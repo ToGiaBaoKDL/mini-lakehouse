@@ -5,7 +5,6 @@ from document_ocr.providers.base import (
     OcrLogSink,
     OcrProvider,
     OcrProviderError,
-    OcrProviderName,
     OcrProviderRunFailedError,
     OcrRunNotFoundError,
 )
@@ -15,7 +14,6 @@ __all__ = [
     "OcrLogSink",
     "OcrProvider",
     "OcrProviderError",
-    "OcrProviderName",
     "OcrProviderRunFailedError",
     "OcrRunNotFoundError",
     "load_ocr_config",

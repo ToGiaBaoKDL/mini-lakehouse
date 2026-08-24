@@ -41,6 +41,7 @@ def test_pipeline_registry_selects_native_cpu_by_default() -> None:
     registry = load_pipeline_registry()
 
     assert registry.default_pipeline == "opendataloader_cpu"
+    assert set(registry.pipelines) == {"opendataloader_cpu", "glm_ocr_modal"}
     assert registry.pipeline("opendataloader_cpu").execution_backend == "oci"
     assert registry.pipeline("glm_ocr_modal").processor == "arxiv_glm_ocr"
 

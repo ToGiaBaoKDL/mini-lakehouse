@@ -217,7 +217,7 @@ under `.secrets/dev` are ignored by Git and must not be uploaded while they stil
 - Slack `password` is the installed app's `xoxb-...` Bot User OAuth Token, not its client secret.
 - SMTP `password` is the Gmail app password; `from_email` must be the authenticated account or an
   approved alias.
-- Kaggle and Modal payloads contain their provider API credentials.
+- The Modal payload contains its provider API credentials.
 
 ```bash
 AWS_PROFILE=tgbao-dev make lightdash-ci-secret-sync
@@ -229,10 +229,6 @@ AWS_PROFILE=tgbao-dev aws secretsmanager put-secret-value \
 AWS_PROFILE=tgbao-dev aws secretsmanager put-secret-value \
   --secret-id lakehouse/dev/airflow/connections/smtp_default \
   --secret-string file://.secrets/dev/airflow/smtp_default.json
-
-AWS_PROFILE=tgbao-dev aws secretsmanager put-secret-value \
-  --secret-id lakehouse/dev/ocr/providers/kaggle \
-  --secret-string file://.secrets/dev/ocr/kaggle.json
 
 AWS_PROFILE=tgbao-dev aws secretsmanager put-secret-value \
   --secret-id lakehouse/dev/ocr/providers/modal \

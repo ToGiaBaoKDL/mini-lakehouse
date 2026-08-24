@@ -439,7 +439,6 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
         "streamlit",
     ):
         assert dependency in inspector
-    assert "kaggle-publish" in ocr
     assert "worker = [" in ocr
     assert "providers = [" not in ocr
     assert "s3fs" not in ocr

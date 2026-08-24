@@ -29,7 +29,7 @@ class ModalProvider:
         *,
         client: modal.Client | None = None,
     ) -> None:
-        runner = processor.runner.modal
+        runner = processor.runner
         self._runner = runner
         self.reference = f"{runner.app_name}/{runner.function_name}"
         if client is None:

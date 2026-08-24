@@ -82,6 +82,7 @@ def test_secret_containers_never_manage_secret_values() -> None:
     assert 'resource "aws_secretsmanager_secret" "lightdash_ci"' in environment
     assert 'resource "aws_secretsmanager_secret" "signoz_ci"' in environment
     assert 'resource "aws_secretsmanager_secret" "ocr"' in environment
+    assert 'for_each = toset(["modal"])' in environment
     assert 'resource "aws_secretsmanager_secret" "cloudflare_tunnel"' in environment
     assert '"lakehouse/${local.environment}/airflow/runtime"' in environment
     assert '"lakehouse/${local.environment}/airflow/connections/${connection}"' in environment

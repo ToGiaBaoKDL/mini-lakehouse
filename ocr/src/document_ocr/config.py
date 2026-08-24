@@ -22,21 +22,11 @@ type ConfigName = Annotated[
     str,
     StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$"),
 ]
-type ExecutionBackendName = Literal["kaggle", "modal", "oci"]
+type ExecutionBackendName = Literal["modal", "oci"]
 
 
 class ConfigModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-class KaggleRunnerConfig(ConfigModel):
-    kernel_name: str = Field(pattern=r"^[A-Za-z0-9_-]+$")
-    runner_dataset_name: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{2,49}$")
-    runner_dataset_version: int = Field(ge=1)
-    model_source: str = Field(min_length=1)
-    layout_model_source: str = Field(min_length=1)
-    accelerator: Literal["NvidiaTeslaP100", "NvidiaTeslaT4"]
-    timeout_seconds: int = Field(ge=300, le=12 * 60 * 60)
 
 
 class ModalRunnerConfig(ConfigModel):
@@ -47,11 +37,6 @@ class ModalRunnerConfig(ConfigModel):
     gpu: Literal["A100", "A100-40GB", "A100-80GB"]
     timeout_seconds: int = Field(ge=300, le=24 * 60 * 60)
     scaledown_window_seconds: int = Field(ge=0, le=20 * 60)
-
-
-class ProcessorRunnerConfig(ConfigModel):
-    kaggle: KaggleRunnerConfig
-    modal: ModalRunnerConfig
 
 
 class ProcessorConfigBase(ConfigModel):
@@ -84,7 +69,7 @@ class GlmOcrConfig(ProcessorConfigBase):
     model: OcrModel
     layout_model: OcrModel
     inference: OcrInference
-    runner: ProcessorRunnerConfig
+    runner: ModalRunnerConfig
 
     @property
     def semantic_configuration(self) -> dict[str, object]:

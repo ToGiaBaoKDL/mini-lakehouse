@@ -18,11 +18,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-kaggle-publish = ["kagglehub>=1,<2"]
 worker = [
     "boto3>=1.42,<2",
     "botocore>=1.42,<2",
-    "kaggle>=2.2.3,<3",
     "lakehouse",
     "modal>=1.5.3,<1.6",
     "opendataloader-pdf==2.5.0",

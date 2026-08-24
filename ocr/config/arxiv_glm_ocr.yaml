@@ -33,19 +33,10 @@ inference:
     formula: "Formula Recognition:/nothink"
 
 runner:
-  kaggle:
-    kernel_name: document-ocr-arxiv-glm-ocr
-    runner_dataset_name: document-ocr-arxiv-glm-ocr-runner
-    runner_dataset_version: 1
-    model_source: botgia/mini-lakehouse-glm-ocr/transformers/safetensors/1
-    layout_model_source: botgia/mini-lakehouse-pp-doclayout-v3/transformers/safetensors/1
-    accelerator: NvidiaTeslaT4
-    timeout_seconds: 14400
-  modal:
-    app_name: document-ocr-arxiv-glm-ocr
-    function_name: run_ocr
-    output_volume: document-ocr-outputs
-    environment: main
-    gpu: A100-40GB
-    timeout_seconds: 14400
-    scaledown_window_seconds: 300
+  app_name: document-ocr-arxiv-glm-ocr
+  function_name: run_ocr
+  output_volume: document-ocr-outputs
+  environment: main
+  gpu: A100-40GB
+  timeout_seconds: 14400
+  scaledown_window_seconds: 300

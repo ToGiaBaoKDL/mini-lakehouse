@@ -12,7 +12,7 @@ from document_ocr.config import load_ocr_config
 from document_ocr.output import OCR_RESULT_FILES
 
 PROCESSOR = load_ocr_config("arxiv_glm_ocr")
-RUNNER = PROCESSOR.runner.modal
+RUNNER = PROCESSOR.runner
 RUNNER_ROOT = Path("/root/ocr/runners/glm_ocr")
 MODEL_ROOT = Path("/models")
 OUTPUT_ROOT = Path("/outputs")

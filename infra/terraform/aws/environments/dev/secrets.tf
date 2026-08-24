@@ -64,7 +64,7 @@ resource "aws_secretsmanager_secret" "airflow" {
 }
 
 resource "aws_secretsmanager_secret" "ocr" {
-  for_each = toset(["kaggle", "modal"])
+  for_each = toset(["modal"])
 
   name                    = "lakehouse/${local.environment}/ocr/providers/${each.key}"
   description             = "${title(each.key)} credentials for remote OCR execution."

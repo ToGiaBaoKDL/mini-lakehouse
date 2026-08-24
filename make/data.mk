@@ -2,8 +2,7 @@ DBT_RUNTIME := env -u VIRTUAL_ENV uv run --project dbt/runtime
 AWS_WORKLOAD_ENV := env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
 	AWS_SHARED_CREDENTIALS_FILE=/dev/null AWS_PROFILE=default
 
-.PHONY: catalog-apply catalog-validate ocr-kaggle-runner-publish \
-	ocr-modal-runner-deploy \
+.PHONY: catalog-apply catalog-validate ocr-modal-runner-deploy \
 	dbt-deps dbt-validate dbt-build \
 	emr-jobs-package
 
@@ -13,17 +12,6 @@ catalog-apply: ## Apply Glue/Iceberg YAML contracts with PyIceberg.
 catalog-validate: ## Validate Glue/Iceberg state against YAML contracts.
 	uv run --package lakehouse --extra catalog --extra cli python -m lakehouse.catalog.admin validate
 
-ocr-kaggle-runner-publish: preflight ## Publish an immutable Kaggle OCR runner Dataset version.
-	@set -eu; \
-		SECRET_ID="$$(aws ssm get-parameter \
-			--name "$(RUNTIME_PARAMETER_PREFIX)/ocr/providers/kaggle_secret_id" \
-			--query Parameter.Value --output text)"; \
-		CREDENTIALS="$$(aws secretsmanager get-secret-value \
-			--secret-id "$${SECRET_ID}" --query SecretString --output text)"; \
-		KAGGLE_USERNAME="$$(printf '%s' "$${CREDENTIALS}" | jq -er '.username | select(type == "string" and length > 0)')" \
-		KAGGLE_API_TOKEN="$$(printf '%s' "$${CREDENTIALS}" | jq -er '.api_token | select(type == "string" and length > 0)')" \
-			uv run --project ocr --extra kaggle-publish python ocr/runners/kaggle/glm_ocr/publish.py
-
 ocr-modal-runner-deploy: preflight ## Deploy the persistent Modal OCR runner.
 	@set -eu; \
 		SECRET_ID="$$(aws ssm get-parameter \
@@ -32,7 +20,7 @@ ocr-modal-runner-deploy: preflight ## Deploy the persistent Modal OCR runner.
 		CREDENTIALS="$$(aws secretsmanager get-secret-value \
 			--secret-id "$${SECRET_ID}" --query SecretString --output text)"; \
 		MODAL_ENVIRONMENT="$$(uv run --project ocr python -c \
-			'from document_ocr.config import load_ocr_config; print(load_ocr_config("arxiv_glm_ocr").runner.modal.environment)')"; \
+			'from document_ocr.config import load_ocr_config; print(load_ocr_config("arxiv_glm_ocr").runner.environment)')"; \
 		MODAL_TOKEN_ID="$$(printf '%s' "$${CREDENTIALS}" | jq -er '.token_id | select(type == "string" and length > 0)')" \
 		MODAL_TOKEN_SECRET="$$(printf '%s' "$${CREDENTIALS}" | jq -er '.token_secret | select(type == "string" and length > 0)')" \
 			uv run --project ocr --extra worker modal deploy \

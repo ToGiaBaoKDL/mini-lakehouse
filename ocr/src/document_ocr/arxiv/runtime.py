@@ -15,23 +15,21 @@ from pyiceberg.table import Table
 from document_ocr import (
     OcrProvider,
     OcrProviderError,
-    OcrProviderName,
     load_ocr_config,
 )
 from document_ocr.arxiv.store import ArxivOcrStore
 from document_ocr.arxiv.workflow import ArxivOcrWorkflow
 from document_ocr.config import GlmOcrConfig, OpenDataLoaderConfig, load_pipeline_registry
 from document_ocr.execution import OciExecutionBackend, RemoteExecutionBackend
-from document_ocr.providers.kaggle import KaggleProvider
 from document_ocr.providers.modal import ModalProvider
-from document_ocr.settings import KaggleSettings, ModalSettings
+from document_ocr.settings import ModalSettings
 
 
-def _provider_credentials(name: OcrProviderName) -> dict[str, object]:
+def _modal_credentials() -> dict[str, object]:
     settings = get_settings()
     secret_id = get_runtime_parameter(
         settings.environment,
-        f"ocr/providers/{name}_secret_id",
+        "ocr/providers/modal_secret_id",
     )
     response = boto3.client("secretsmanager").get_secret_value(SecretId=secret_id)
     secret = response.get("SecretString")
@@ -43,11 +41,8 @@ def _provider_credentials(name: OcrProviderName) -> dict[str, object]:
     return cast(dict[str, object], payload)
 
 
-def _provider(name: OcrProviderName, processor: GlmOcrConfig) -> OcrProvider:
-    credentials = _provider_credentials(name)
-    if name == "kaggle":
-        return KaggleProvider(KaggleSettings.model_validate(credentials), processor)
-    return ModalProvider(ModalSettings.model_validate(credentials), processor)
+def _provider(processor: GlmOcrConfig) -> OcrProvider:
+    return ModalProvider(ModalSettings.model_validate(_modal_credentials()), processor)
 
 
 def run_arxiv_ocr(arxiv_id: str, pipeline_name: str | None = None) -> dict[str, object]:
@@ -68,7 +63,7 @@ def run_arxiv_ocr(arxiv_id: str, pipeline_name: str | None = None) -> dict[str, 
     else:
         if not isinstance(processor, GlmOcrConfig):
             raise RuntimeError("Remote pipeline processor configuration has drifted")
-        provider = _provider(pipeline.execution_backend, processor)
+        provider = _provider(processor)
         execution = RemoteExecutionBackend(provider)
     curated_uri = get_runtime_parameter(settings.environment, "storage/curated_uri")
     catalog = load_iceberg_catalog(region_name=settings.aws_region)

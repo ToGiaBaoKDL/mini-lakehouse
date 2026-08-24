@@ -34,7 +34,7 @@ with DAG(
             "pipeline": Param(
                 default="opendataloader_cpu",
                 type="string",
-                enum=["opendataloader_cpu", "glm_ocr_modal", "glm_ocr_kaggle"],
+                enum=["opendataloader_cpu", "glm_ocr_modal"],
                 description="YAML-configured processor and execution backend.",
             ),
         }

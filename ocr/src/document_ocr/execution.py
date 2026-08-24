@@ -9,7 +9,7 @@ from document_ocr.protocol import DocumentJob, OcrJob, OpenDataLoaderJob
 from document_ocr.providers.base import OcrLogSink, OcrProvider, OcrProviderError
 from document_ocr.runners.opendataloader import run
 
-type ExecutionBackendName = Literal["kaggle", "modal", "oci"]
+type ExecutionBackendName = Literal["modal", "oci"]
 type ExecutionCheckpoint = Callable[[str], None]
 
 

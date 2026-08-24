@@ -123,20 +123,15 @@ OCR provider credentials remain OCR-owned:
 
 ```bash
 aws secretsmanager put-secret-value \
-  --secret-id lakehouse/dev/ocr/providers/kaggle \
-  --secret-string 'file://<0600-temporary-kaggle.json>'
-
-aws secretsmanager put-secret-value \
   --secret-id lakehouse/dev/ocr/providers/modal \
   --secret-string 'file://<0600-temporary-modal.json>'
 ```
 
 The five PostgreSQL, Airflow, and Lightdash credentials are generated locally by the idempotent
-Make targets. Slack, SMTP, Kaggle, and Modal are the only operator-supplied secret values. No secret or
+Make targets. Slack, SMTP, and Modal are the only operator-supplied secret values. No secret or
 provider credential belongs in tfvars, GitHub variables, Compose, a command-line literal, or a
 repository `.env` file. Delete each temporary file immediately after Secrets Manager accepts it.
-The OCR schemas are `{"username":"...","api_token":"..."}` for Kaggle and
-`{"token_id":"...","token_secret":"..."}` for Modal.
+The Modal OCR schema is `{"token_id":"...","token_secret":"..."}`.
 
 ## Component releases
 

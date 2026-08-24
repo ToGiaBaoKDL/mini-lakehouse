@@ -83,7 +83,7 @@ tables:
       - {field_id: 21, name: started_at, data_type: timestamptz, required: true, description: Durable attempt start timestamp.}
       - {field_id: 22, name: completed_at, data_type: timestamptz, required: false, description: Terminal attempt timestamp.}
       - {field_id: 23, name: curated_at, data_type: timestamptz, required: true, description: Latest state publication timestamp.}
-      - {field_id: 24, name: provider, data_type: string, required: true, description: "Execution backend such as OCI, Modal, or Kaggle."}
+      - {field_id: 24, name: provider, data_type: string, required: true, description: "Execution backend such as OCI or Modal."}
       - {field_id: 25, name: provider_reference, data_type: string, required: true, description: "Backend-owned worker, application, or job reference."}
       - {field_id: 26, name: provider_run_id, data_type: string, required: false, description: "Exact backend checkpoint token used for resume, logs, and output retrieval."}
       - {field_id: 27, name: job_json, data_type: string, required: true, description: Immutable validated runner request used to resume this run safely.}

@@ -6,7 +6,6 @@ from typing import Literal, Protocol
 
 from document_ocr.protocol import OcrJob
 
-type OcrProviderName = Literal["kaggle", "modal"]
 type OcrLogSink = Callable[[str], None]
 
 
@@ -29,7 +28,7 @@ class OcrRunNotFoundError(OcrProviderError):
 
 class OcrProvider(Protocol):
     @property
-    def name(self) -> OcrProviderName: ...
+    def name(self) -> Literal["modal"]: ...
 
     reference: str
 
