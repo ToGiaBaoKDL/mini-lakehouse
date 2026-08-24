@@ -1,4 +1,4 @@
-"""OpenDataLoader YAML, protocol, and canonical mapping contracts."""
+"""OpenDataLoader configuration, execution, and canonical mapping contracts."""
 
 import json
 import tomllib
@@ -6,20 +6,20 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from document_ocr.adapters import opendataloader
-from document_ocr.adapters.opendataloader import (
+from document_ocr.config import GlmOcrConfig, OpenDataLoaderConfig, load_arxiv_config
+from document_ocr.identity import request_id
+from document_ocr.processors import opendataloader
+from document_ocr.processors.opendataloader import (
     OpenDataLoaderError,
     canonical_elements,
     load_page_markdown,
     run_upstream,
 )
-from document_ocr.config import OpenDataLoaderConfig, load_ocr_config, load_pipeline_registry
-from document_ocr.identity import request_id
 from document_ocr.protocol import OcrDocumentRequest, OpenDataLoaderJob, parse_document_job
 
 
 def _job() -> OpenDataLoaderJob:
-    processor = load_ocr_config("arxiv_opendataloader_pdf")
+    processor = load_arxiv_config().pipeline("opendataloader")
     assert isinstance(processor, OpenDataLoaderConfig)
     source_hash = "a" * 64
     request_key = request_id(
@@ -37,17 +37,18 @@ def _job() -> OpenDataLoaderJob:
     return processor.build_job(request, attempt=1)
 
 
-def test_pipeline_registry_selects_native_cpu_by_default() -> None:
-    registry = load_pipeline_registry()
+def test_arxiv_configuration_selects_opendataloader_by_default() -> None:
+    config = load_arxiv_config()
 
-    assert registry.default_pipeline == "opendataloader_cpu"
-    assert set(registry.pipelines) == {"opendataloader_cpu", "glm_ocr_modal"}
-    assert registry.pipeline("opendataloader_cpu").execution_backend == "oci"
-    assert registry.pipeline("glm_ocr_modal").processor == "arxiv_glm_ocr"
+    assert config.default_pipeline == "opendataloader"
+    assert set(config.pipelines) == {"opendataloader", "glm_ocr"}
+    assert isinstance(config.pipeline("opendataloader"), OpenDataLoaderConfig)
+    assert isinstance(config.pipeline("glm_ocr"), GlmOcrConfig)
 
 
 def test_yaml_adapter_version_matches_the_locked_worker_package() -> None:
-    processor = load_ocr_config("arxiv_opendataloader_pdf")
+    processor = load_arxiv_config().pipeline("opendataloader")
+    assert isinstance(processor, OpenDataLoaderConfig)
     project = tomllib.loads(Path("ocr/pyproject.toml").read_text(encoding="utf-8"))
     worker_dependencies = project["project"]["optional-dependencies"]["worker"]
 

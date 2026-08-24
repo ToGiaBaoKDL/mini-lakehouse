@@ -105,15 +105,15 @@ def test_host_workload_identities_ignore_operator_credentials() -> None:
     assert all("AWS_SHARED_CREDENTIALS_FILE=/dev/null" in source for source in sources)
 
 
-def test_modal_runner_keeps_models_cached_before_application_source() -> None:
-    source = Path("ocr/runners/modal/glm_ocr/app.py").read_text(encoding="utf-8")
+def test_modal_worker_keeps_models_cached_before_application_source() -> None:
+    source = Path("ocr/glm_ocr/modal.py").read_text(encoding="utf-8")
 
     assert ".run_function(" not in source
     assert source.index(".run_commands(") < source.index(".env(") < source.index(".add_local_dir(")
     assert 'MODEL_DOWNLOAD_COMMAND = shlex.join(("python", "-c", MODEL_DOWNLOAD_SCRIPT))' in source
     assert ".run_commands(MODEL_DOWNLOAD_COMMAND)" in source
     assert 'MODEL_DOWNLOAD_SCRIPT = ";".join(' in source
-    assert '.env({"PYTHONPATH": str(RUNNER_ROOT)})' in source
+    assert '.env({"PYTHONPATH": str(GLM_OCR_ROOT)})' in source
     assert '.add_local_dir("ocr/config", "/root/ocr/config")' in source
 
 

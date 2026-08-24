@@ -1,87 +1,27 @@
 """Download one PDF and adapt the official GLM-OCR result to the output protocol."""
 
 import json
-from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from document_ocr.artifacts import describe_artifacts, write_elements, write_gzip_json
-from document_ocr.errors import DocumentProcessingError
-from document_ocr.identity import (
-    canonical_json_bytes,
-    canonical_json_sha256,
-    processing_id,
+from document_ocr.artifacts import (
+    build_document_result,
+    describe_artifacts,
+    write_elements,
+    write_gzip_json,
 )
+from document_ocr.identity import canonical_json_sha256
 from document_ocr.protocol import (
     PAGE_MARKDOWN_BUNDLE_PATH,
+    DocumentProcessingError,
+    GlmOcrJob,
     OcrDocumentManifest,
-    OcrDocumentRequest,
     OcrDocumentResult,
     OcrElement,
-    OcrJob,
 )
-from document_ocr.source import download_pdf, pdf_page_sizes
+from document_ocr.source import PreparedDocument
 from document_ocr.text import build_page_markdown_bundle
 from glmocr import GlmOcr
-
-DocumentError = DocumentProcessingError
-
-
-@dataclass(frozen=True, slots=True)
-class PreparedDocument:
-    request: OcrDocumentRequest
-    work_root: Path
-    pdf_path: Path
-    pdf_sha256: str
-    pdf_size_bytes: int
-    page_count: int
-
-
-def pdf_page_count(path: Path, maximum: int) -> int:
-    return len(pdf_page_sizes(path, maximum))
-
-
-def prepare_document(
-    job: OcrJob,
-    work_root: Path,
-) -> PreparedDocument | OcrDocumentResult:
-    request = job.document
-    pdf_path = work_root / "source.pdf"
-    pdf_sha256, pdf_size_bytes = download_pdf(
-        request,
-        pdf_path,
-        job.limits.max_pdf_bytes,
-    )
-    page_count = pdf_page_count(pdf_path, job.limits.max_pages_per_document)
-    reuse = request.reuse
-    if reuse is not None and reuse.pdf_sha256 == pdf_sha256:
-        if not reuse.matches(
-            pdf_sha256=pdf_sha256,
-            pdf_size_bytes=pdf_size_bytes,
-            page_count=page_count,
-        ):
-            raise DocumentError(
-                "reuse_lineage_mismatch",
-                "Previously imported OCR lineage disagrees with unchanged PDF content",
-            )
-        return OcrDocumentResult(
-            request_id=request.request_id,
-            document_id=request.document_id,
-            state="reused",
-            pdf_sha256=pdf_sha256,
-            pdf_size_bytes=pdf_size_bytes,
-            page_count=page_count,
-            processing_id=reuse.processing_id,
-            manifest_sha256=reuse.manifest_sha256,
-        )
-    return PreparedDocument(
-        request=request,
-        work_root=work_root,
-        pdf_path=pdf_path,
-        pdf_sha256=pdf_sha256,
-        pdf_size_bytes=pdf_size_bytes,
-        page_count=page_count,
-    )
 
 
 def _normalized_layout(value: Any, expected_pages: int) -> list[list[dict[str, Any]]]:
@@ -89,26 +29,26 @@ def _normalized_layout(value: Any, expected_pages: int) -> list[list[dict[str, A
         try:
             value = json.loads(value)
         except json.JSONDecodeError as error:
-            raise DocumentError("invalid_model_output", str(error)) from error
+            raise DocumentProcessingError("invalid_model_output", str(error)) from error
     if not isinstance(value, list):
-        raise DocumentError(
+        raise DocumentProcessingError(
             "invalid_model_output",
             "GLM-OCR JSON output must be a list of pages",
         )
     if len(value) != expected_pages:
-        raise DocumentError(
+        raise DocumentProcessingError(
             "incomplete_model_output",
             f"GLM-OCR returned {len(value)} pages for a {expected_pages}-page PDF",
         )
     pages: list[list[dict[str, Any]]] = []
     for page_index, raw_page in enumerate(value, start=1):
         if not isinstance(raw_page, list):
-            raise DocumentError(
+            raise DocumentProcessingError(
                 "invalid_model_output",
                 f"GLM-OCR page {page_index} is not a list",
             )
         if not all(isinstance(block, dict) for block in raw_page):
-            raise DocumentError(
+            raise DocumentProcessingError(
                 "invalid_model_output",
                 f"GLM-OCR page {page_index} contains a non-object block",
             )
@@ -142,7 +82,7 @@ def _canonical_elements(
             content = block.get("content", "")
             label = block.get("label")
             if not isinstance(label, str) or not label:
-                raise DocumentError(
+                raise DocumentProcessingError(
                     "invalid_model_output",
                     f"Invalid GLM-OCR block {page_index}:{reading_order}: "
                     "label must be non-empty text",
@@ -153,7 +93,7 @@ def _canonical_elements(
             if content is None and label == "image":
                 content = ""
             if not isinstance(content, str):
-                raise DocumentError(
+                raise DocumentProcessingError(
                     "invalid_model_output",
                     f"Invalid GLM-OCR block {page_index}:{reading_order}: content must be text",
                 )
@@ -164,7 +104,7 @@ def _canonical_elements(
                     try:
                         image_path = _sdk_image_path(block["image_path"])
                     except ValueError as error:
-                        raise DocumentError(
+                        raise DocumentProcessingError(
                             "invalid_model_output",
                             str(error),
                         ) from error
@@ -213,7 +153,7 @@ def _canonical_elements(
                 )
             )
     if not elements:
-        raise DocumentError(
+        raise DocumentProcessingError(
             "empty_model_output",
             "GLM-OCR produced no canonical elements",
         )
@@ -224,7 +164,7 @@ def _save_sdk_images(parsed: Any, destination: Path, expected_pages: int) -> Non
     visualizations = parsed.layout_vis_images or {}
     expected = set(range(expected_pages))
     if set(visualizations) != expected:
-        raise DocumentError(
+        raise DocumentProcessingError(
             "incomplete_model_output",
             f"GLM-OCR produced visualizations for pages {sorted(visualizations)}, "
             f"expected {sorted(expected)}",
@@ -242,7 +182,7 @@ def _save_sdk_images(parsed: Any, destination: Path, expected_pages: int) -> Non
     for name, image in sorted(images.items()):
         path = PurePosixPath(name)
         if path.name != name or name in {"", ".", ".."}:
-            raise DocumentError(
+            raise DocumentProcessingError(
                 "invalid_model_output",
                 f"Unsafe GLM-OCR image filename: {name!r}",
             )
@@ -250,21 +190,16 @@ def _save_sdk_images(parsed: Any, destination: Path, expected_pages: int) -> Non
 
 
 def process_document(
-    job: OcrJob,
+    job: GlmOcrJob,
     prepared: PreparedDocument,
     parser: GlmOcr,
     output_root: Path,
 ) -> tuple[OcrDocumentResult, OcrDocumentManifest]:
-    request = prepared.request
-    current_processing_id = processing_id(
-        document_id=request.document_id,
-        pdf_sha256=prepared.pdf_sha256,
-        configuration_hash=job.config_hash,
-    )
+    current_processing_id = prepared.processing_id(job.config_hash)
     try:
         parsed = parser.parse(prepared.pdf_path, save_layout_visualization=True)
     except Exception as error:
-        raise DocumentError("ocr_inference_failed", str(error)) from error
+        raise DocumentProcessingError("ocr_inference_failed", str(error)) from error
 
     document_root = prepared.work_root / "committed-output"
     document_root.mkdir()
@@ -280,38 +215,12 @@ def process_document(
         write_elements(document_root / "elements.jsonl.gz", elements)
         _save_sdk_images(parsed, document_root, prepared.page_count)
         files = describe_artifacts(document_root, job.limits.max_output_bytes)
-    except DocumentError:
+    except DocumentProcessingError:
         raise
     except (OSError, ValueError) as error:
-        raise DocumentError("artifact_generation_failed", str(error)) from error
+        raise DocumentProcessingError("artifact_generation_failed", str(error)) from error
 
-    manifest = OcrDocumentManifest(
-        document_id=request.document_id,
-        files=files,
-        page_count=prepared.page_count,
-        pdf_sha256=prepared.pdf_sha256,
-        pdf_size_bytes=prepared.pdf_size_bytes,
-        processing_id=current_processing_id,
-    )
-    if (
-        sum(file.size_bytes for file in files)
-        + len(canonical_json_bytes(manifest.model_dump(mode="json")))
-        > job.limits.max_output_bytes
-    ):
-        raise DocumentError(
-            "ocr_output_too_large",
-            f"OCR output exceeds the {job.limits.max_output_bytes}-byte limit",
-        )
-    result = OcrDocumentResult(
-        request_id=request.request_id,
-        document_id=request.document_id,
-        state="succeeded",
-        pdf_sha256=prepared.pdf_sha256,
-        pdf_size_bytes=prepared.pdf_size_bytes,
-        page_count=prepared.page_count,
-        processing_id=current_processing_id,
-        manifest_sha256=canonical_json_sha256(manifest.model_dump(mode="json")),
-    )
+    result, manifest = build_document_result(job, prepared, files)
     destination = output_root
     destination.parent.mkdir(parents=True, exist_ok=True)
     document_root.replace(destination)

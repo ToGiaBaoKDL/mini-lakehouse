@@ -32,9 +32,9 @@ with DAG(
                 description="One exact ArXiv ID. This DAG never selects additional documents.",
             ),
             "pipeline": Param(
-                default="opendataloader_cpu",
+                default="opendataloader",
                 type="string",
-                enum=["opendataloader_cpu", "glm_ocr_modal"],
+                enum=["opendataloader", "glm_ocr"],
                 description="YAML-configured processor and execution backend.",
             ),
         }

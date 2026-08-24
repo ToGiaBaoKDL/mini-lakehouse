@@ -1,17 +1,17 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Literal, cast, overload
+from typing import Annotated, Literal, cast
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from document_ocr.identity import canonical_json_sha256, run_id
 from document_ocr.protocol import (
     OCR_PROTOCOL_VERSION,
     DocumentJob,
+    GlmOcrJob,
     OcrDocumentRequest,
     OcrInference,
-    OcrJob,
     OcrLimits,
     OcrModel,
     OpenDataLoaderJob,
@@ -22,14 +22,13 @@ type ConfigName = Annotated[
     str,
     StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]*$"),
 ]
-type ExecutionBackendName = Literal["modal", "oci"]
 
 
 class ConfigModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-class ModalRunnerConfig(ConfigModel):
+class ModalConfig(ConfigModel):
     app_name: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{2,62}$")
     function_name: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
     output_volume: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{2,62}$")
@@ -39,9 +38,7 @@ class ModalRunnerConfig(ConfigModel):
     scaledown_window_seconds: int = Field(ge=0, le=20 * 60)
 
 
-class ProcessorConfigBase(ConfigModel):
-    version: Literal[1]
-    name: ConfigName
+class PipelineBase(ConfigModel):
     adapter_version: str = Field(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")
     limits: OcrLimits
 
@@ -64,12 +61,12 @@ class ProcessorConfigBase(ConfigModel):
         raise NotImplementedError
 
 
-class GlmOcrConfig(ProcessorConfigBase):
+class GlmOcrConfig(PipelineBase):
     adapter: Literal["glm_ocr"]
     model: OcrModel
     layout_model: OcrModel
     inference: OcrInference
-    runner: ModalRunnerConfig
+    modal: ModalConfig
 
     @property
     def semantic_configuration(self) -> dict[str, object]:
@@ -86,8 +83,8 @@ class GlmOcrConfig(ProcessorConfigBase):
             "model": self.model.model_dump(mode="json"),
         }
 
-    def build_job(self, document: OcrDocumentRequest, *, attempt: int) -> OcrJob:
-        return OcrJob(
+    def build_job(self, document: OcrDocumentRequest, *, attempt: int) -> GlmOcrJob:
+        return GlmOcrJob(
             run_id=run_id(document.request_id, attempt),
             attempt=attempt,
             model=self.model,
@@ -100,7 +97,7 @@ class GlmOcrConfig(ProcessorConfigBase):
         )
 
 
-class OpenDataLoaderConfig(ProcessorConfigBase):
+class OpenDataLoaderConfig(PipelineBase):
     adapter: Literal["opendataloader_pdf"]
     options: OpenDataLoaderOptions
 
@@ -124,22 +121,22 @@ class OpenDataLoaderConfig(ProcessorConfigBase):
         )
 
 
-type OcrConfig = Annotated[
+type PipelineConfig = Annotated[
     GlmOcrConfig | OpenDataLoaderConfig,
     Field(discriminator="adapter"),
 ]
-OCR_CONFIG_ADAPTER = TypeAdapter(OcrConfig)
 
 
-class PipelineConfig(ConfigModel):
-    processor: ConfigName
-    execution_backend: ExecutionBackendName
-
-
-class PipelineRegistry(ConfigModel):
+class ArxivOcrConfig(ConfigModel):
     version: Literal[1]
     default_pipeline: ConfigName
     pipelines: dict[ConfigName, PipelineConfig] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_default_pipeline(self) -> "ArxivOcrConfig":
+        if self.default_pipeline not in self.pipelines:
+            raise ValueError("default_pipeline must reference a configured pipeline")
+        return self
 
     def pipeline(self, name: str) -> PipelineConfig:
         try:
@@ -162,56 +159,10 @@ def _yaml_object(path: Path) -> dict[str, object]:
     return cast(dict[str, object], payload)
 
 
-@overload
-def load_ocr_config(
-    name: Literal["arxiv_glm_ocr"],
-    root: Path = Path("ocr/config"),
-) -> GlmOcrConfig: ...
-
-
-@overload
-def load_ocr_config(
-    name: Literal["arxiv_opendataloader_pdf"],
-    root: Path = Path("ocr/config"),
-) -> OpenDataLoaderConfig: ...
-
-
-@overload
-def load_ocr_config(
-    name: str,
-    root: Path = Path("ocr/config"),
-) -> OcrConfig: ...
-
-
-@lru_cache(maxsize=8)
-def load_ocr_config(
-    name: str,
-    root: Path = Path("ocr/config"),
-) -> OcrConfig:
-    path = (root / f"{name}.yaml").resolve()
-    if not path.is_file():
-        raise ValueError(f"Processor config does not exist: {path}")
-    try:
-        return OCR_CONFIG_ADAPTER.validate_python(_yaml_object(path))
-    except ValueError as error:
-        raise ValueError(f"Invalid OCR config {path}: {error}") from error
-
-
 @lru_cache(maxsize=2)
-def load_pipeline_registry(root: Path = Path("ocr/config")) -> PipelineRegistry:
-    path = (root / "arxiv_pipelines.yaml").resolve()
+def load_arxiv_config(root: Path = Path("ocr/config")) -> ArxivOcrConfig:
+    path = (root / "arxiv.yaml").resolve()
     try:
-        registry = PipelineRegistry.model_validate(_yaml_object(path))
-        if registry.default_pipeline not in registry.pipelines:
-            raise ValueError("default_pipeline must reference a configured pipeline")
-        for name, pipeline in registry.pipelines.items():
-            processor = load_ocr_config(pipeline.processor, root)
-            if pipeline.execution_backend == "oci" and not isinstance(
-                processor, OpenDataLoaderConfig
-            ):
-                raise ValueError(f"Pipeline {name!r} requires an OCI-native processor")
-            if pipeline.execution_backend != "oci" and not isinstance(processor, GlmOcrConfig):
-                raise ValueError(f"Pipeline {name!r} requires the GLM-OCR processor")
-        return registry
+        return ArxivOcrConfig.model_validate(_yaml_object(path))
     except ValueError as error:
-        raise ValueError(f"Invalid OCR pipeline registry {path}: {error}") from error
+        raise ValueError(f"Invalid ArXiv OCR config {path}: {error}") from error

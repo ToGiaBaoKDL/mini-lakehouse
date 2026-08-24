@@ -319,10 +319,10 @@ def test_local_runtime_does_not_use_dotenv_files() -> None:
     assert not Path(".env.example").exists()
 
     settings = Path("platform/src/lakehouse/config/settings.py").read_text(encoding="utf-8")
-    ocr_settings = Path("ocr/src/document_ocr/settings.py").read_text(encoding="utf-8")
+    modal_execution = Path("ocr/src/document_ocr/execution/modal.py").read_text(encoding="utf-8")
 
     assert 'env_file=".env"' not in settings
-    assert 'env_file=".env"' not in ocr_settings
+    assert 'env_file=".env"' not in modal_execution
 
 
 def test_arxiv_inspector_receives_only_its_explicit_environment() -> None:
@@ -444,9 +444,7 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
     assert "s3fs" not in ocr
     assert '"dbt-athena==1.11.0"' in analytics
     assert 'members = ["apps/arxiv_inspector", "ocr", "platform"]' in workspace
-    assert (
-        'exclude = ["dbt/runtime", "jobs/emr", "ocr/runners/glm_ocr", "orchestration"]' in workspace
-    )
+    assert 'exclude = ["dbt/runtime", "jobs/emr", "ocr/glm_ocr", "orchestration"]' in workspace
     assert Path("dbt/runtime/uv.lock").is_file()
     assert (AIRFLOW_PROJECT / "uv.lock").is_file()
     assert "apache-airflow" not in Path("uv.lock").read_text(encoding="utf-8")

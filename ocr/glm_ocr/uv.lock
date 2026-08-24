@@ -528,7 +528,7 @@ wheels = [
 ]
 
 [[package]]
-name = "document-ocr-glm-runner"
+name = "document-ocr-modal-worker"
 version = "3.0.0"
 source = { virtual = "." }
 dependencies = [

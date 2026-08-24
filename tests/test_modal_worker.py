@@ -6,7 +6,7 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 from document_ocr.artifacts import create_archive
-from document_ocr.config import load_ocr_config
+from document_ocr.config import GlmOcrConfig, load_arxiv_config
 from document_ocr.identity import (
     canonical_json_bytes,
     file_sha256,
@@ -15,8 +15,9 @@ from document_ocr.identity import (
 )
 from document_ocr.output import extract_ocr_output
 from document_ocr.protocol import (
+    DocumentProcessingError,
+    GlmOcrJob,
     OcrDocumentRequest,
-    OcrJob,
     OcrReuseReference,
     OcrRunResult,
 )
@@ -32,9 +33,9 @@ def _runner_modules(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     monkeypatch.setitem(sys.modules, "glmocr", glmocr)
     monkeypatch.setitem(sys.modules, "glmocr.config", config)
     module_names = (
-        "ocr.runners.glm_ocr.runner.document",
-        "ocr.runners.glm_ocr.runner.engine",
-        "ocr.runners.glm_ocr.runner.job",
+        "ocr.glm_ocr.worker.document",
+        "ocr.glm_ocr.worker.engine",
+        "ocr.glm_ocr.worker.job",
     )
     for name in module_names:
         sys.modules.pop(name, None)
@@ -42,11 +43,13 @@ def _runner_modules(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         document=importlib.import_module(module_names[0]),
         engine=importlib.import_module(module_names[1]),
         job=importlib.import_module(module_names[2]),
+        source=importlib.import_module("document_ocr.source"),
     )
 
 
-def _job() -> OcrJob:
-    processor = load_ocr_config("arxiv_glm_ocr")
+def _job() -> GlmOcrJob:
+    processor = load_arxiv_config().pipeline("glm_ocr")
+    assert isinstance(processor, GlmOcrConfig)
     configuration_hash = processor.configuration_hash
     document_id = "2607.00001"
     pdf_sha256 = "d" * 64
@@ -89,11 +92,11 @@ def test_unchanged_document_skips_model_validation_and_vllm(
         destination.write_bytes(b"%PDF-placeholder")
         return reuse.pdf_sha256, reuse.pdf_size_bytes
 
-    def pdf_page_count(_path: Path, _maximum: int) -> int:
-        return reuse.page_count
+    def pdf_page_sizes(_path: Path, _maximum: int) -> tuple[tuple[float, float], ...]:
+        return ((612.0, 792.0),) * reuse.page_count
 
-    monkeypatch.setattr(runner.document, "download_pdf", download_pdf)
-    monkeypatch.setattr(runner.document, "pdf_page_count", pdf_page_count)
+    monkeypatch.setattr(runner.source, "download_pdf", download_pdf)
+    monkeypatch.setattr(runner.source, "pdf_page_sizes", pdf_page_sizes)
 
     runner.job.run(
         job,
@@ -115,11 +118,11 @@ def test_document_error_aborts_without_committed_output(
     (tmp_path / "artifacts.tar.zst").write_text("stale", encoding="utf-8")
 
     def fail_preparation(*_args: object, **_kwargs: object) -> None:
-        raise runner.document.DocumentError("invalid_pdf", "test failure")
+        raise DocumentProcessingError("invalid_pdf", "test failure")
 
     monkeypatch.setattr(runner.job, "prepare_document", fail_preparation)
 
-    with pytest.raises(runner.document.DocumentError, match="invalid_pdf: test failure"):
+    with pytest.raises(DocumentProcessingError, match="invalid_pdf: test failure"):
         runner.job.run(
             _job(),
             tmp_path,
@@ -143,18 +146,18 @@ def test_changed_pdf_is_prepared_for_inference(
         destination.write_bytes(b"%PDF-changed")
         return "f" * 64, 120
 
-    def pdf_page_count(_path: Path, _maximum: int) -> int:
-        return 4
+    def pdf_page_sizes(_path: Path, _maximum: int) -> tuple[tuple[float, float], ...]:
+        return ((612.0, 792.0),) * 4
 
-    monkeypatch.setattr(runner.document, "download_pdf", download_pdf)
-    monkeypatch.setattr(runner.document, "pdf_page_count", pdf_page_count)
+    monkeypatch.setattr(runner.source, "download_pdf", download_pdf)
+    monkeypatch.setattr(runner.source, "pdf_page_sizes", pdf_page_sizes)
 
-    prepared = runner.document.prepare_document(
+    prepared = runner.source.prepare_document(
         job,
         work,
     )
 
-    assert isinstance(prepared, runner.document.PreparedDocument)
+    assert isinstance(prepared, runner.source.PreparedDocument)
     assert prepared.pdf_sha256 == "f" * 64
     assert prepared.page_count == 4
 
@@ -233,7 +236,7 @@ def test_canonical_elements_rejects_null_content_for_non_image_block(
     runner = _runner_modules(monkeypatch)
 
     with pytest.raises(
-        runner.document.DocumentError,
+        DocumentProcessingError,
         match=r"invalid_model_output: Invalid GLM-OCR block 1:0: content must be text",
     ):
         runner.document._canonical_elements(
@@ -253,13 +256,13 @@ def test_successful_document_publishes_the_shared_manifest(
     work.mkdir()
     pdf = work / "source.pdf"
     pdf.write_bytes(b"%PDF-test")
-    prepared = runner.document.PreparedDocument(
+    prepared = runner.source.PreparedDocument(
         request=request,
         work_root=work,
         pdf_path=pdf,
         pdf_sha256="f" * 64,
         pdf_size_bytes=9,
-        page_count=1,
+        page_sizes=((612.0, 792.0),),
     )
 
     class _SdkImage:

@@ -12,17 +12,16 @@ from lakehouse.iceberg import load_iceberg_catalog
 from loguru import logger
 from pyiceberg.table import Table
 
-from document_ocr import (
-    OcrProvider,
-    OcrProviderError,
-    load_ocr_config,
-)
 from document_ocr.arxiv.store import ArxivOcrStore
 from document_ocr.arxiv.workflow import ArxivOcrWorkflow
-from document_ocr.config import GlmOcrConfig, OpenDataLoaderConfig, load_pipeline_registry
-from document_ocr.execution import OciExecutionBackend, RemoteExecutionBackend
-from document_ocr.providers.modal import ModalProvider
-from document_ocr.settings import ModalSettings
+from document_ocr.config import OpenDataLoaderConfig, load_arxiv_config
+from document_ocr.execution import (
+    ExecutionBackend,
+    ExecutionError,
+    LocalExecution,
+    ModalCredentials,
+    ModalExecution,
+)
 
 
 def _modal_credentials() -> dict[str, object]:
@@ -41,30 +40,25 @@ def _modal_credentials() -> dict[str, object]:
     return cast(dict[str, object], payload)
 
 
-def _provider(processor: GlmOcrConfig) -> OcrProvider:
-    return ModalProvider(ModalSettings.model_validate(_modal_credentials()), processor)
-
-
 def run_arxiv_ocr(arxiv_id: str, pipeline_name: str | None = None) -> dict[str, object]:
     """Run and publish one configured extraction pipeline for one ArXiv PDF."""
     document_id = arxiv_id.strip()
     if not document_id:
         raise ValueError("arxiv_id must not be empty")
     settings = get_settings()
-    registry = load_pipeline_registry()
-    selected_pipeline = registry.default_pipeline if pipeline_name is None else pipeline_name
-    pipeline = registry.pipeline(selected_pipeline)
-    processor = load_ocr_config(pipeline.processor)
-    provider: OcrProvider | None = None
-    if pipeline.execution_backend == "oci":
-        if not isinstance(processor, OpenDataLoaderConfig):
-            raise RuntimeError("OCI pipeline processor configuration has drifted")
-        execution = OciExecutionBackend()
+    config = load_arxiv_config()
+    selected_pipeline = config.default_pipeline if pipeline_name is None else pipeline_name
+    processor = config.pipeline(selected_pipeline)
+    execution: ExecutionBackend
+    modal: ModalExecution | None = None
+    if isinstance(processor, OpenDataLoaderConfig):
+        execution = LocalExecution()
     else:
-        if not isinstance(processor, GlmOcrConfig):
-            raise RuntimeError("Remote pipeline processor configuration has drifted")
-        provider = _provider(processor)
-        execution = RemoteExecutionBackend(provider)
+        modal = ModalExecution(
+            ModalCredentials.model_validate(_modal_credentials()),
+            processor,
+        )
+        execution = modal
     curated_uri = get_runtime_parameter(settings.environment, "storage/curated_uri")
     catalog = load_iceberg_catalog(region_name=settings.aws_region)
     product = load_contracts(settings.contracts_dir).curated_product("arxiv")
@@ -83,11 +77,11 @@ def run_arxiv_ocr(arxiv_id: str, pipeline_name: str | None = None) -> dict[str, 
     previous_sigterm = signal.getsignal(signal.SIGTERM)
 
     def terminate(signum: int, _frame: object) -> None:
-        if isinstance(provider, ModalProvider):
+        if modal is not None:
             try:
-                provider.cancel()
+                modal.cancel()
                 logger.warning("Cancelled the active Modal function call")
-            except OcrProviderError as error:
+            except ExecutionError as error:
                 logger.error("Unable to cancel the active Modal function call: {}", error)
         raise SystemExit(128 + signum)
 

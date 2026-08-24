@@ -1,13 +1,19 @@
 """Bounded PDF acquisition and structural inspection."""
 
 import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 
 import pymupdf
 import requests
 
-from document_ocr.errors import DocumentProcessingError
-from document_ocr.protocol import OcrDocumentRequest
+from document_ocr.identity import processing_id
+from document_ocr.protocol import (
+    DocumentJob,
+    DocumentProcessingError,
+    OcrDocumentRequest,
+    OcrDocumentResult,
+)
 
 _DOWNLOAD_TIMEOUT = (30, 180)
 _CHUNK_SIZE = 1024 * 1024
@@ -20,6 +26,27 @@ def _pdf_session() -> requests.Session:
 
 
 PDF_SESSION = _pdf_session()
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedDocument:
+    request: OcrDocumentRequest
+    work_root: Path
+    pdf_path: Path
+    pdf_sha256: str
+    pdf_size_bytes: int
+    page_sizes: tuple[tuple[float, float], ...]
+
+    @property
+    def page_count(self) -> int:
+        return len(self.page_sizes)
+
+    def processing_id(self, configuration_hash: str) -> str:
+        return processing_id(
+            document_id=self.request.document_id,
+            pdf_sha256=self.pdf_sha256,
+            configuration_hash=configuration_hash,
+        )
 
 
 def download_pdf(
@@ -92,3 +119,47 @@ def pdf_page_sizes(path: Path, maximum: int) -> tuple[tuple[float, float], ...]:
             f"PDF has {len(sizes)} pages; maximum is {maximum}",
         )
     return sizes
+
+
+def prepare_document(
+    job: DocumentJob,
+    work_root: Path,
+) -> PreparedDocument | OcrDocumentResult:
+    """Download, inspect, and reuse one document through a shared lineage check."""
+    request = job.document
+    pdf_path = work_root / "source.pdf"
+    pdf_sha256, pdf_size_bytes = download_pdf(
+        request,
+        pdf_path,
+        job.limits.max_pdf_bytes,
+    )
+    page_sizes = pdf_page_sizes(pdf_path, job.limits.max_pages_per_document)
+    reuse = request.reuse
+    if reuse is not None and reuse.pdf_sha256 == pdf_sha256:
+        if not reuse.matches(
+            pdf_sha256=pdf_sha256,
+            pdf_size_bytes=pdf_size_bytes,
+            page_count=len(page_sizes),
+        ):
+            raise DocumentProcessingError(
+                "reuse_lineage_mismatch",
+                "Previously imported OCR lineage disagrees with unchanged PDF content",
+            )
+        return OcrDocumentResult(
+            request_id=request.request_id,
+            document_id=request.document_id,
+            state="reused",
+            pdf_sha256=pdf_sha256,
+            pdf_size_bytes=pdf_size_bytes,
+            page_count=len(page_sizes),
+            processing_id=reuse.processing_id,
+            manifest_sha256=reuse.manifest_sha256,
+        )
+    return PreparedDocument(
+        request=request,
+        work_root=work_root,
+        pdf_path=pdf_path,
+        pdf_sha256=pdf_sha256,
+        pdf_size_bytes=pdf_size_bytes,
+        page_sizes=page_sizes,
+    )

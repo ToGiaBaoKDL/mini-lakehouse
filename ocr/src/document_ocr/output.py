@@ -10,6 +10,9 @@ import zstandard
 from document_ocr.identity import canonical_json_bytes, file_sha256, processing_id
 from document_ocr.protocol import (
     DOCUMENT_MANIFEST_PATH,
+    OCR_ARCHIVE_FILE,
+    OCR_RESULT_FILE,
+    OCR_RESULT_FILES,
     PAGE_MARKDOWN_BUNDLE_PATH,
     DocumentJob,
     OcrDocumentManifest,
@@ -20,10 +23,6 @@ from document_ocr.text import (
     InvalidPageMarkdownBundleError,
     read_page_markdown_bundle,
 )
-
-OCR_RESULT_FILE = "result.json"
-OCR_ARCHIVE_FILE = "artifacts.tar.zst"
-OCR_RESULT_FILES = (OCR_RESULT_FILE, OCR_ARCHIVE_FILE)
 
 
 class InvalidOcrArchiveError(ValueError):

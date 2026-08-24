@@ -8,15 +8,15 @@ from lakehouse.config.settings import get_settings
 from lakehouse.logging import configure_logging
 from loguru import logger
 
-from document_ocr.arxiv import OcrError
 from document_ocr.arxiv.runtime import run_arxiv_ocr
+from document_ocr.arxiv.workflow import OcrError
 
 
 def run(
     arxiv_id: Annotated[str, typer.Option(help="One exact curated ArXiv document ID.")],
     pipeline: Annotated[
         str | None,
-        typer.Option(help="YAML-configured pipeline; defaults to the registry default."),
+        typer.Option(help="YAML-configured pipeline; defaults to the configured pipeline."),
     ] = None,
 ) -> None:
     """Extract one ArXiv PDF and publish its validated output."""

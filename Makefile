@@ -103,7 +103,7 @@ check: ## Run the complete local quality gate.
 	uv lock --check --project dbt/runtime
 	uv lock --check --project orchestration
 	uv lock --check --project jobs/emr
-	uv lock --check --directory ocr/runners/glm_ocr
+	uv lock --check --directory ocr/glm_ocr
 	$(MAKE) platform-validate
 	$(MAKE) dbt-validate
 	$(MAKE) lightdash-validate

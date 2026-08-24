@@ -6,19 +6,27 @@ import json
 import os
 import tarfile
 from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pymupdf
 import zstandard
 
-from document_ocr.errors import DocumentProcessingError
-from document_ocr.identity import file_sha256
+from document_ocr.identity import canonical_json_bytes, canonical_json_sha256, file_sha256
 from document_ocr.protocol import (
+    OCR_ARCHIVE_FILE,
+    OCR_RESULT_FILE,
+    OCR_RESULT_FILES,
     ArtifactFile,
+    DocumentJob,
+    DocumentProcessingError,
+    OcrDocumentManifest,
+    OcrDocumentResult,
     OcrElement,
     OcrPageMarkdownBundle,
     OcrRunResult,
 )
+from document_ocr.source import PreparedDocument
 
 _MEDIA_TYPES = {
     ".gz": "application/gzip",
@@ -68,6 +76,43 @@ def describe_artifacts(root: Path, maximum_bytes: int) -> tuple[ArtifactFile, ..
             )
         )
     return tuple(files)
+
+
+def build_document_result(
+    job: DocumentJob,
+    prepared: PreparedDocument,
+    files: tuple[ArtifactFile, ...],
+) -> tuple[OcrDocumentResult, OcrDocumentManifest]:
+    """Build and size-check the shared document lineage contract."""
+    current_processing_id = prepared.processing_id(job.config_hash)
+    manifest = OcrDocumentManifest(
+        document_id=prepared.request.document_id,
+        files=files,
+        page_count=prepared.page_count,
+        pdf_sha256=prepared.pdf_sha256,
+        pdf_size_bytes=prepared.pdf_size_bytes,
+        processing_id=current_processing_id,
+    )
+    if (
+        sum(file.size_bytes for file in files)
+        + len(canonical_json_bytes(manifest.model_dump(mode="json")))
+        > job.limits.max_output_bytes
+    ):
+        raise DocumentProcessingError(
+            "ocr_output_too_large",
+            f"OCR output exceeds the {job.limits.max_output_bytes}-byte limit",
+        )
+    result = OcrDocumentResult(
+        request_id=prepared.request.request_id,
+        document_id=prepared.request.document_id,
+        state="succeeded",
+        pdf_sha256=prepared.pdf_sha256,
+        pdf_size_bytes=prepared.pdf_size_bytes,
+        page_count=prepared.page_count,
+        processing_id=current_processing_id,
+        manifest_sha256=canonical_json_sha256(manifest.model_dump(mode="json")),
+    )
+    return result, manifest
 
 
 def render_canonical_layout_visualizations(
@@ -132,3 +177,34 @@ def write_run_result(destination: Path, result: OcrRunResult) -> None:
         os.replace(temporary, destination)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def reset_run_output(output_directory: Path) -> None:
+    """Clear only the two protocol commit files for a fresh attempt."""
+    output_directory.mkdir(parents=True, exist_ok=True)
+    for filename in OCR_RESULT_FILES:
+        (output_directory / filename).unlink(missing_ok=True)
+
+
+def commit_run_output(
+    job: DocumentJob,
+    result: OcrDocumentResult,
+    manifest: OcrDocumentManifest | None,
+    artifacts: Path,
+    output_directory: Path,
+) -> None:
+    """Atomically publish an archive followed by its result commit marker."""
+    artifacts.mkdir(exist_ok=True)
+    archive = output_directory / OCR_ARCHIVE_FILE
+    create_archive(artifacts, archive)
+    write_run_result(
+        output_directory / OCR_RESULT_FILE,
+        OcrRunResult(
+            run_id=job.run_id,
+            created_at=datetime.now(UTC),
+            archive_sha256=file_sha256(archive),
+            archive_size_bytes=archive.stat().st_size,
+            result=result,
+            document=manifest,
+        ),
+    )

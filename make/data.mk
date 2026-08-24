@@ -2,7 +2,7 @@ DBT_RUNTIME := env -u VIRTUAL_ENV uv run --project dbt/runtime
 AWS_WORKLOAD_ENV := env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
 	AWS_SHARED_CREDENTIALS_FILE=/dev/null AWS_PROFILE=default
 
-.PHONY: catalog-apply catalog-validate ocr-modal-runner-deploy \
+.PHONY: catalog-apply catalog-validate ocr-modal-deploy \
 	dbt-deps dbt-validate dbt-build \
 	emr-jobs-package
 
@@ -12,7 +12,7 @@ catalog-apply: ## Apply Glue/Iceberg YAML contracts with PyIceberg.
 catalog-validate: ## Validate Glue/Iceberg state against YAML contracts.
 	uv run --package lakehouse --extra catalog --extra cli python -m lakehouse.catalog.admin validate
 
-ocr-modal-runner-deploy: preflight ## Deploy the persistent Modal OCR runner.
+ocr-modal-deploy: preflight ## Deploy the persistent Modal OCR worker.
 	@set -eu; \
 		SECRET_ID="$$(aws ssm get-parameter \
 			--name "$(RUNTIME_PARAMETER_PREFIX)/ocr/providers/modal_secret_id" \
@@ -20,11 +20,11 @@ ocr-modal-runner-deploy: preflight ## Deploy the persistent Modal OCR runner.
 		CREDENTIALS="$$(aws secretsmanager get-secret-value \
 			--secret-id "$${SECRET_ID}" --query SecretString --output text)"; \
 		MODAL_ENVIRONMENT="$$(uv run --project ocr python -c \
-			'from document_ocr.config import load_ocr_config; print(load_ocr_config("arxiv_glm_ocr").runner.environment)')"; \
+			'from document_ocr.config import load_arxiv_config; print(load_arxiv_config().pipeline("glm_ocr").modal.environment)')"; \
 		MODAL_TOKEN_ID="$$(printf '%s' "$${CREDENTIALS}" | jq -er '.token_id | select(type == "string" and length > 0)')" \
 		MODAL_TOKEN_SECRET="$$(printf '%s' "$${CREDENTIALS}" | jq -er '.token_secret | select(type == "string" and length > 0)')" \
 			uv run --project ocr --extra worker modal deploy \
-				--env "$${MODAL_ENVIRONMENT}" ocr/runners/modal/glm_ocr/app.py
+				--env "$${MODAL_ENVIRONMENT}" ocr/glm_ocr/modal.py
 
 dbt-deps: ## Install locked dbt packages.
 	DBT_DOMAIN=all DBT_SCHEMA=analytics_validation \

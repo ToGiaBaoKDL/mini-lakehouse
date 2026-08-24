@@ -21,7 +21,7 @@ infra/runtime/*
 !infra/runtime/identity/
 infra/runtime/identity/*
 !infra/runtime/identity/install-aws-signing-helper
-ocr/runners
+ocr/glm_ocr
 plans
 tests
 compose*.yaml

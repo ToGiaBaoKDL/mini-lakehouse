@@ -12,7 +12,7 @@ from typing import BinaryIO
 import requests
 import yaml
 from document_ocr.identity import canonical_json_sha256
-from document_ocr.protocol import OcrJob
+from document_ocr.protocol import GlmOcrJob
 from glmocr import GlmOcr
 from glmocr.config import GlmOcrConfig
 
@@ -21,7 +21,7 @@ DIAGNOSTIC_MAX_CHARACTERS = 8_000
 STARTUP_TIMEOUT_SECONDS = 15 * 60
 
 
-def write_config(path: Path, job: OcrJob, layout_model_path: Path) -> None:
+def write_config(path: Path, job: GlmOcrJob, layout_model_path: Path) -> None:
     """Keep the SDK defaults and override only settings owned by the job."""
     config = GlmOcrConfig.from_yaml().to_dict()
     pipeline = config["pipeline"]
@@ -52,7 +52,7 @@ def write_config(path: Path, job: OcrJob, layout_model_path: Path) -> None:
     )
 
 
-def _vllm_command(job: OcrJob, model_path: Path) -> list[str]:
+def _vllm_command(job: GlmOcrJob, model_path: Path) -> list[str]:
     command = [
         sys.executable,
         "-m",
@@ -91,7 +91,7 @@ def _vllm_command(job: OcrJob, model_path: Path) -> list[str]:
 
 
 def start_vllm(
-    job: OcrJob,
+    job: GlmOcrJob,
     model_path: Path,
     log_path: Path,
 ) -> tuple[subprocess.Popen[bytes], BinaryIO]:
@@ -163,7 +163,7 @@ class InferenceEngine:
 
     def acquire(
         self,
-        job: OcrJob,
+        job: GlmOcrJob,
         *,
         model_path: Path,
         layout_model_path: Path,

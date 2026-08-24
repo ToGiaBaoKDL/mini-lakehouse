@@ -1,4 +1,4 @@
-"""Strict JSON protocol shared by OCR orchestration, runners, and readers."""
+"""Strict JSON protocol shared by OCR orchestration, workers, and readers."""
 
 from datetime import UTC, date, datetime
 from pathlib import PurePosixPath
@@ -17,6 +17,9 @@ from pydantic import (
 from document_ocr.identity import canonical_json_sha256, processing_id, request_id, run_id
 
 OCR_PROTOCOL_VERSION = "3.0.0"
+OCR_RESULT_FILE = "result.json"
+OCR_ARCHIVE_FILE = "artifacts.tar.zst"
+OCR_RESULT_FILES = (OCR_RESULT_FILE, OCR_ARCHIVE_FILE)
 DOCUMENT_MANIFEST_PATH = PurePosixPath("manifest.json")
 PAGE_MARKDOWN_BUNDLE_PATH = PurePosixPath("pages.json.gz")
 type Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
@@ -28,6 +31,14 @@ DocumentState = Literal[
 
 class ProtocolModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class DocumentProcessingError(RuntimeError):
+    """Stable, machine-readable failure raised by document processors."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(f"{code}: {message}")
+        self.code = code
 
 
 class OcrReuseReference(ProtocolModel):
@@ -135,8 +146,8 @@ class DocumentJobBase(ProtocolModel):
         return self
 
 
-class OcrJob(DocumentJobBase):
-    """Backward-compatible GLM-OCR remote runner request."""
+class GlmOcrJob(DocumentJobBase):
+    """GLM-OCR request executed by the Modal GPU worker."""
 
     adapter: Literal["glm_ocr"] = "glm_ocr"
     model: OcrModel
@@ -152,7 +163,7 @@ class OpenDataLoaderJob(DocumentJobBase):
 
 
 type DocumentJob = Annotated[
-    OcrJob | OpenDataLoaderJob,
+    GlmOcrJob | OpenDataLoaderJob,
     Field(discriminator="adapter"),
 ]
 DOCUMENT_JOB_ADAPTER = TypeAdapter(DocumentJob)

@@ -12,22 +12,20 @@ import pyarrow as pa
 import pytest
 import zstandard
 from botocore.exceptions import ClientError
-from document_ocr.arxiv import ArxivOcrStore, ArxivOcrWorkflow, OcrError
-from document_ocr.config import load_ocr_config
-from document_ocr.execution import RemoteExecutionBackend
+from document_ocr.arxiv.store import ArxivOcrStore
+from document_ocr.arxiv.workflow import ArxivOcrWorkflow, OcrError
+from document_ocr.config import GlmOcrConfig, load_arxiv_config
+from document_ocr.execution import ExecutionError
 from document_ocr.identity import canonical_json_bytes, processing_id
 from document_ocr.protocol import (
     ArtifactFile,
+    GlmOcrJob,
     OcrDocumentManifest,
     OcrDocumentResult,
     OcrElement,
-    OcrJob,
     OcrPageMarkdown,
     OcrPageMarkdownBundle,
     OcrRunResult,
-)
-from document_ocr.providers.base import (
-    OcrRunNotFoundError,
 )
 from lakehouse.catalog.schema import iceberg_schema
 from lakehouse.contracts import load_contracts
@@ -122,16 +120,16 @@ def _archive(files: dict[str, bytes]) -> bytes:
     return zstandard.ZstdCompressor(write_checksum=True).compress(bundle.getvalue())
 
 
-class _Provider:
+class _Execution:
     name = "modal"
     reference = "test/arxiv-ocr"
 
     def __init__(self, processor: Any) -> None:
         self._processor = processor
-        self.job: OcrJob | None = None
+        self.job: GlmOcrJob | None = None
         self.submissions = 0
 
-    def submit(self, job: OcrJob) -> str:
+    def submit(self, job: GlmOcrJob) -> str:
         self.job = job
         self.submissions += 1
         return "test/arxiv-ocr"
@@ -213,17 +211,33 @@ class _Provider:
             encoding="utf-8",
         )
 
+    def execute(
+        self,
+        job: GlmOcrJob,
+        destination: Path,
+        log: Any,
+        *,
+        resume_token: str | None,
+        checkpoint: Any,
+    ) -> None:
+        token = resume_token
+        if token is None:
+            token = self.submit(job)
+            checkpoint(token)
+        self.wait(token, log)
+        self.download_output(token, destination)
 
-class _MissingProvider(_Provider):
+
+class _MissingExecution(_Execution):
     def wait(self, provider_run_id: str, log: Any) -> None:
-        raise OcrRunNotFoundError(f"{provider_run_id} is missing")
+        raise ExecutionError(f"{provider_run_id} is missing")
 
 
 def _workflow(
-    provider_type: type[_Provider] = _Provider,
+    execution_type: type[_Execution] = _Execution,
 ) -> tuple[
     ArxivOcrWorkflow,
-    _Provider,
+    _Execution,
     dict[tuple[str, ...], _Table],
     Any,
     _S3,
@@ -257,8 +271,9 @@ def _workflow(
             iceberg_schema(table.columns, table.primary_key).as_arrow(),
             rows,
         )
-    processor = load_ocr_config("arxiv_glm_ocr")
-    provider = provider_type(processor)
+    processor = load_arxiv_config().pipeline("glm_ocr")
+    assert isinstance(processor, GlmOcrConfig)
+    execution = execution_type(processor)
     s3 = _S3()
     catalog = _Catalog(tables)
     store = ArxivOcrStore(
@@ -278,20 +293,20 @@ def _workflow(
     workflow = ArxivOcrWorkflow(
         store=store,
         processor=processor,
-        execution=RemoteExecutionBackend(cast(Any, provider)),
+        execution=cast(Any, execution),
     )
-    return workflow, provider, tables, product, s3
+    return workflow, execution, tables, product, s3
 
 
 def test_arxiv_workflow_runs_and_publishes_exactly_one_document() -> None:
-    workflow, provider, tables, product, s3 = _workflow()
+    workflow, execution, tables, product, s3 = _workflow()
 
     first = workflow.run("2607.00001")
     second = workflow.run("2607.00001")
 
     assert first["state"] == "imported"
     assert second["run_id"] == first["run_id"]
-    assert provider.submissions == 1
+    assert execution.submissions == 1
     runs = tables[product.table_identifier("ocr_document_runs").iceberg]
     assert len(runs.rows) == 1
     assert runs.upserts == 3
@@ -303,7 +318,7 @@ def test_arxiv_workflow_runs_and_publishes_exactly_one_document() -> None:
 
 
 def test_arxiv_workflow_fails_a_missing_remote_run() -> None:
-    workflow, provider, tables, product, _ = _workflow(_MissingProvider)
+    workflow, execution, tables, product, _ = _workflow(_MissingExecution)
 
     with pytest.raises(OcrError, match="is missing"):
         workflow.run("2607.00001")
@@ -312,6 +327,6 @@ def test_arxiv_workflow_fails_a_missing_remote_run() -> None:
 
     runs = tables[product.table_identifier("ocr_document_runs").iceberg]
     assert len(runs.rows) == 2
-    assert provider.submissions == 2
+    assert execution.submissions == 2
     assert {row["attempt"] for row in runs.rows} == {1, 2}
     assert {row["state"] for row in runs.rows} == {"failed"}

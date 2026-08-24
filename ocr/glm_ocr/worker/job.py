@@ -1,33 +1,27 @@
-"""Single-document execution and commit protocol for the GLM-OCR runner."""
+"""Single-document execution and commit protocol for the Modal worker."""
 
 import json
 import tempfile
 import time
 from contextlib import suppress
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
 import typer
-from document_ocr.artifacts import create_archive, write_run_result
-from document_ocr.identity import file_sha256
-from document_ocr.output import OCR_ARCHIVE_FILE, OCR_RESULT_FILE
+from document_ocr.artifacts import commit_run_output, reset_run_output
 from document_ocr.protocol import (
+    GlmOcrJob,
     OcrDocumentManifest,
     OcrDocumentResult,
-    OcrJob,
-    OcrRunResult,
 )
+from document_ocr.source import prepare_document
 
-from .document import (
-    prepare_document,
-    process_document,
-)
+from .document import process_document
 from .engine import InferenceEngine
 
 
 def emit(event: str, started_at: float, **fields: object) -> None:
-    """Emit a compact JSON event that both remote providers can stream."""
+    """Emit a compact JSON event that Modal can stream to the OCR workflow."""
     with suppress(OSError):
         print(
             json.dumps(
@@ -45,7 +39,7 @@ def emit(event: str, started_at: float, **fields: object) -> None:
 
 
 def run(
-    job: OcrJob,
+    job: GlmOcrJob,
     output_directory: Path,
     *,
     model_path: Path,
@@ -65,11 +59,7 @@ def run(
         request_id=request.request_id,
         run_id=job.run_id,
     )
-    output_directory.mkdir(parents=True, exist_ok=True)
-    result_path = output_directory / OCR_RESULT_FILE
-    archive = output_directory / OCR_ARCHIVE_FILE
-    result_path.unlink(missing_ok=True)
-    archive.unlink(missing_ok=True)
+    reset_run_output(output_directory)
 
     with tempfile.TemporaryDirectory(prefix="glm-ocr-") as temporary_directory:
         temporary = Path(temporary_directory)
@@ -132,21 +122,9 @@ def run(
                 if owns_engine:
                     inference_engine.close()
 
-        artifacts.mkdir(exist_ok=True)
         archive_started_at = time.perf_counter()
-        create_archive(artifacts, archive)
+        commit_run_output(job, result, document_manifest, artifacts, output_directory)
         emit("archive_created", archive_started_at, run_id=job.run_id)
-        write_run_result(
-            result_path,
-            OcrRunResult(
-                run_id=job.run_id,
-                created_at=datetime.now(UTC),
-                archive_sha256=file_sha256(archive),
-                archive_size_bytes=archive.stat().st_size,
-                result=result,
-                document=document_manifest,
-            ),
-        )
         emit(
             "run_committed",
             started_at,
@@ -166,7 +144,7 @@ def main(
     ],
 ) -> None:
     run(
-        OcrJob.model_validate_json(job.read_bytes()),
+        GlmOcrJob.model_validate_json(job.read_bytes()),
         output_directory,
         model_path=model_path,
         layout_model_path=layout_model_path,

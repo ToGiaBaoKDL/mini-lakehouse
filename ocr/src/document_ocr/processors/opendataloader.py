@@ -1,8 +1,9 @@
-"""OpenDataLoader SDK boundary and canonical output adapter."""
+"""Run OpenDataLoader and normalize its output into the OCR artifact protocol."""
 
 import json
 import math
 import subprocess
+import tempfile
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -10,14 +11,27 @@ from typing import Any
 
 from opendataloader_pdf import convert as convert_pdf
 
-from document_ocr.errors import DocumentProcessingError
+from document_ocr.artifacts import (
+    build_document_result,
+    commit_run_output,
+    describe_artifacts,
+    render_canonical_layout_visualizations,
+    reset_run_output,
+    write_elements,
+    write_gzip_json,
+)
 from document_ocr.identity import canonical_json_sha256
 from document_ocr.protocol import (
+    PAGE_MARKDOWN_BUNDLE_PATH,
+    DocumentProcessingError,
+    OcrDocumentManifest,
+    OcrDocumentResult,
     OcrElement,
     OcrPageMarkdown,
     OcrPageMarkdownBundle,
     OpenDataLoaderJob,
 )
+from document_ocr.source import PreparedDocument, prepare_document
 
 type LogSink = Callable[[str], None]
 
@@ -352,3 +366,68 @@ def canonical_elements(
             "OpenDataLoader found too little native text; use a GLM-OCR pipeline",
         )
     return tuple(elements)
+
+
+def _extract_document(
+    job: OpenDataLoaderJob,
+    *,
+    prepared: PreparedDocument,
+    temporary: Path,
+    artifacts: Path,
+    log: LogSink,
+) -> tuple[OcrDocumentResult, OcrDocumentManifest]:
+    upstream = run_upstream(job, prepared.pdf_path, temporary / "upstream", log=log)
+    page_count = prepared.page_count
+    nodes = load_document(
+        upstream.json_path,
+        expected_pages=page_count,
+        max_bytes=job.limits.max_output_bytes,
+    )
+    move_images(upstream.json_path.parent, artifacts)
+    current_processing_id = prepared.processing_id(job.config_hash)
+    elements = canonical_elements(
+        nodes,
+        current_processing_id=current_processing_id,
+        page_sizes=prepared.page_sizes,
+    )
+    page_markdown = load_page_markdown(
+        upstream.markdown_path,
+        expected_pages=page_count,
+        run_id=job.run_id,
+        max_bytes=job.limits.max_output_bytes,
+    )
+    write_gzip_json(artifacts.joinpath(*PAGE_MARKDOWN_BUNDLE_PATH.parts), page_markdown)
+    write_elements(artifacts / "elements.jsonl.gz", elements)
+    render_canonical_layout_visualizations(prepared.pdf_path, elements, artifacts)
+    files = describe_artifacts(artifacts, job.limits.max_output_bytes)
+    return build_document_result(job, prepared, files)
+
+
+def run(
+    job: OpenDataLoaderJob,
+    output_directory: Path,
+    *,
+    log: LogSink,
+) -> None:
+    """Execute one native extraction and atomically commit its protocol output."""
+    reset_run_output(output_directory)
+
+    with tempfile.TemporaryDirectory(prefix="opendataloader-") as temporary_directory:
+        temporary = Path(temporary_directory)
+        work = temporary / "work"
+        work.mkdir()
+        prepared = prepare_document(job, work)
+        artifacts = temporary / "artifacts"
+        artifacts.mkdir()
+        manifest: OcrDocumentManifest | None = None
+        if isinstance(prepared, OcrDocumentResult):
+            result = prepared
+        else:
+            result, manifest = _extract_document(
+                job,
+                prepared=prepared,
+                temporary=temporary,
+                artifacts=artifacts,
+                log=log,
+            )
+        commit_run_output(job, result, manifest, artifacts, output_directory)

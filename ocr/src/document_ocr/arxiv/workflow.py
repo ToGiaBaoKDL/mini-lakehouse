@@ -8,14 +8,14 @@ from typing import Any
 from loguru import logger
 
 from document_ocr.arxiv.store import IMPORTED_STATE, ArxivOcrStore
-from document_ocr.config import OcrConfig
+from document_ocr.config import PipelineConfig
 from document_ocr.execution import ExecutionBackend, ExecutionError
 from document_ocr.identity import request_id
 from document_ocr.output import extract_ocr_output
 from document_ocr.protocol import (
     DocumentJob,
+    GlmOcrJob,
     OcrDocumentRequest,
-    OcrJob,
     OcrReuseReference,
     parse_document_job,
 )
@@ -34,7 +34,7 @@ class ArxivOcrWorkflow:
         self,
         *,
         store: ArxivOcrStore,
-        processor: OcrConfig,
+        processor: PipelineConfig,
         execution: ExecutionBackend,
     ) -> None:
         self._store = store
@@ -138,13 +138,13 @@ class ArxivOcrWorkflow:
             "page_count": None,
             "processing_id": None,
             "processor": job.adapter,
-            "model_repository": job.model.repository if isinstance(job, OcrJob) else None,
-            "model_revision": job.model.revision if isinstance(job, OcrJob) else None,
+            "model_repository": job.model.repository if isinstance(job, GlmOcrJob) else None,
+            "model_revision": job.model.revision if isinstance(job, GlmOcrJob) else None,
             "layout_model_repository": (
-                job.layout_model.repository if isinstance(job, OcrJob) else None
+                job.layout_model.repository if isinstance(job, GlmOcrJob) else None
             ),
             "layout_model_revision": (
-                job.layout_model.revision if isinstance(job, OcrJob) else None
+                job.layout_model.revision if isinstance(job, GlmOcrJob) else None
             ),
             "adapter_version": job.adapter_version,
             "config_hash": job.config_hash,

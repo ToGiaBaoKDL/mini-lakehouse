@@ -4,11 +4,7 @@ import gzip
 from collections.abc import Sequence
 from typing import BinaryIO
 
-from document_ocr.protocol import (
-    OcrElement,
-    OcrPageMarkdown,
-    OcrPageMarkdownBundle,
-)
+from document_ocr.protocol import OcrElement, OcrPageMarkdown, OcrPageMarkdownBundle
 
 
 class InvalidPageMarkdownBundleError(ValueError):

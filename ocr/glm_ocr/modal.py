@@ -8,12 +8,14 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 import modal
-from document_ocr.config import load_ocr_config
-from document_ocr.output import OCR_RESULT_FILES
+from document_ocr.config import GlmOcrConfig, load_arxiv_config
+from document_ocr.protocol import OCR_RESULT_FILES
 
-PROCESSOR = load_ocr_config("arxiv_glm_ocr")
-RUNNER = PROCESSOR.runner
-RUNNER_ROOT = Path("/root/ocr/runners/glm_ocr")
+PROCESSOR = load_arxiv_config().pipeline("glm_ocr")
+if not isinstance(PROCESSOR, GlmOcrConfig):
+    raise RuntimeError("The glm_ocr pipeline must use GLM-OCR")
+MODAL = PROCESSOR.modal
+GLM_OCR_ROOT = Path("/root/ocr/glm_ocr")
 MODEL_ROOT = Path("/models")
 OUTPUT_ROOT = Path("/outputs")
 _engine: Any | None = None
@@ -42,19 +44,19 @@ image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("libgl1", "libglib2.0-0")
     .uv_sync(
-        "ocr/runners/glm_ocr",
+        "ocr/glm_ocr",
         extras=["modal"],
         frozen=True,
         uv_version="0.11.30",
     )
     .run_commands(MODEL_DOWNLOAD_COMMAND)
-    .env({"PYTHONPATH": str(RUNNER_ROOT)})
-    .add_local_dir("ocr/runners/glm_ocr/runner", str(RUNNER_ROOT / "runner"))
-    .add_local_dir("ocr/src/document_ocr", str(RUNNER_ROOT / "document_ocr"))
+    .env({"PYTHONPATH": str(GLM_OCR_ROOT)})
+    .add_local_dir("ocr/glm_ocr/worker", str(GLM_OCR_ROOT / "worker"))
+    .add_local_dir("ocr/src/document_ocr", str(GLM_OCR_ROOT / "document_ocr"))
     .add_local_dir("ocr/config", "/root/ocr/config")
 )
-output_volume = modal.Volume.from_name(RUNNER.output_volume, create_if_missing=True)
-app = modal.App(RUNNER.app_name)
+output_volume = modal.Volume.from_name(MODAL.output_volume, create_if_missing=True)
+app = modal.App(MODAL.app_name)
 
 
 def _committed_output(job: Any, target: Path) -> str | None:
@@ -69,20 +71,20 @@ def _committed_output(job: Any, target: Path) -> str | None:
 
 @app.function(
     image=image,
-    gpu=RUNNER.gpu,
+    gpu=MODAL.gpu,
     volumes={str(OUTPUT_ROOT): output_volume},
-    timeout=RUNNER.timeout_seconds,
+    timeout=MODAL.timeout_seconds,
     max_containers=1,
-    scaledown_window=RUNNER.scaledown_window_seconds,
+    scaledown_window=MODAL.scaledown_window_seconds,
 )
 def run_ocr(job_json: str) -> str:
     """Execute one idempotent document run and commit its manifest last."""
     global _engine
-    from document_ocr.protocol import OcrJob
-    from runner.engine import InferenceEngine
-    from runner.job import run
+    from document_ocr.protocol import GlmOcrJob
+    from worker.engine import InferenceEngine
+    from worker.job import run
 
-    job = OcrJob.model_validate_json(job_json)
+    job = GlmOcrJob.model_validate_json(job_json)
     target = OUTPUT_ROOT / "runs" / job.run_id
     committed = _committed_output(job, target)
     if committed is not None:

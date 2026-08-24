@@ -1,9 +1,5 @@
-from typing import Any, cast
-
 import pytest
-from document_ocr.settings import ModalSettings
 from lakehouse.config.settings import Settings
-from pydantic import ValidationError
 
 
 def test_runtime_settings_only_contain_process_configuration() -> None:
@@ -21,8 +17,3 @@ def test_aws_region_environment_alias(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = Settings(environment="dev")
 
     assert settings.aws_region == "us-east-1"
-
-
-def test_modal_credentials_must_be_configured_as_a_pair() -> None:
-    with pytest.raises(ValidationError, match="token_secret"):
-        cast(Any, ModalSettings)(token_id="ak-incomplete")

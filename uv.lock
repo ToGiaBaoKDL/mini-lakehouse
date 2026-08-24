@@ -333,7 +333,6 @@ source = { editable = "ocr" }
 dependencies = [
     { name = "loguru" },
     { name = "pydantic" },
-    { name = "pydantic-settings" },
     { name = "pymupdf" },
     { name = "pyyaml" },
     { name = "requests" },
@@ -362,7 +361,6 @@ requires-dist = [
     { name = "opendataloader-pdf", marker = "extra == 'worker'", specifier = "==2.5.0" },
     { name = "pyarrow", marker = "extra == 'worker'", specifier = ">=23,<26" },
     { name = "pydantic", specifier = ">=2.12,<3" },
-    { name = "pydantic-settings", specifier = ">=2.12,<3" },
     { name = "pyiceberg", extras = ["glue", "pyarrow"], marker = "extra == 'worker'", specifier = ">=0.10,<0.12" },
     { name = "pymupdf", specifier = ">=1.28,<2" },
     { name = "pyyaml", specifier = ">=6.0.3,<7" },
