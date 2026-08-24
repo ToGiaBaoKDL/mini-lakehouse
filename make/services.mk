@@ -1,7 +1,7 @@
 METADATA_POSTGRES_COMPOSE := docker compose --project-name metadata-postgres -f infra/runtime/postgres/compose.yaml
 AIRFLOW_COMPOSE := docker compose --project-name airflow -f orchestration/deploy/compose.yaml
 INSPECTOR_COMPOSE := docker compose --project-name arxiv-inspector -f apps/arxiv_inspector/deploy/compose.yaml
-LIGHTDASH_COMPOSE := docker compose --project-name lightdash -f apps/lightdash/deploy/compose.yaml
+LIGHTDASH_COMPOSE := docker compose --project-name lightdash -f analytics/lightdash/deploy/compose.yaml
 CLOUDFLARE_COMPOSE := docker compose --project-name cloudflare -f infra/runtime/cloudflare/compose.yaml
 CLOUDFLARE_CONNECTOR_IMAGE := $(shell sed -n '1p' infra/runtime/cloudflare/image)
 
@@ -28,13 +28,13 @@ airflow-secrets-init: ## Initialize Airflow database and runtime secrets exactly
 
 lightdash-secrets-init: ## Initialize Lightdash database and runtime secrets exactly once.
 	infra/runtime/postgres/initialize-secrets lightdash
-	apps/lightdash/deploy/initialize-secrets
+	analytics/lightdash/deploy/initialize-secrets
 
 signoz-secrets-init: ## Initialize the pg_monitor credential for the SigNoz collection agent.
 	infra/runtime/postgres/initialize-secrets pg_monitor
 
 lightdash-ci-secret-sync: ## Store the local Lightdash CI token payload in Secrets Manager.
-	lightdash/deploy/sync-ci-secret ".secrets/$(LAKEHOUSE_ENVIRONMENT)/lightdash/ci.json"
+	analytics/lightdash/deploy/sync-ci-secret ".secrets/$(LAKEHOUSE_ENVIRONMENT)/lightdash/ci.json"
 
 metadata-postgres-up: preflight ## Start shared metadata PostgreSQL without changing application databases.
 	infra/runtime/postgres/deploy
@@ -73,7 +73,7 @@ arxiv-inspector-logs: ## Follow ArXiv Inspector logs.
 	$(INSPECTOR_COMPOSE) logs --follow --tail=200
 
 lightdash-up: preflight ## Start the locally built Lightdash image.
-	apps/lightdash/deploy/reconcile lightdash:local
+	analytics/lightdash/deploy/reconcile lightdash:local
 
 lightdash-down: ## Stop Lightdash while preserving its metadata database.
 	$(LIGHTDASH_COMPOSE_CONFIG) down --remove-orphans

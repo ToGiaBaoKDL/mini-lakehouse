@@ -6,7 +6,7 @@ LIGHTDASH_BUILD_CONTEXT := https://github.com/lightdash/lightdash.git#f57276359a
 images-check: ## Validate every Dockerfile without building image layers.
 	docker buildx build --check --file orchestration/runtime/Dockerfile .
 	docker buildx build --check --file apps/arxiv_inspector/Dockerfile .
-	docker buildx build --check --file dbt/Dockerfile .
+	docker buildx build --check --file analytics/dbt-project/Dockerfile .
 	docker buildx build --check --file ocr/Dockerfile .
 	docker buildx build --check --file jobs/emr/Dockerfile .
 
@@ -17,7 +17,7 @@ arxiv-inspector-build: ## Build the local ArXiv Inspector image.
 	docker build --file apps/arxiv_inspector/Dockerfile --tag arxiv-inspector:local .
 
 dbt-image-build: ## Build the shared dbt analytics task image.
-	docker build --file dbt/Dockerfile --tag dbt:local --tag dbt:runtime .
+	docker build --file analytics/dbt-project/Dockerfile --tag dbt:local --tag dbt:runtime .
 
 lightdash-build: ## Build the pinned upstream Lightdash image for local use.
 	docker build --file dockerfile --tag lightdash:local "$(LIGHTDASH_BUILD_CONTEXT)"

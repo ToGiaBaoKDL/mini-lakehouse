@@ -24,12 +24,12 @@ env/
 crash.log
 
 # dbt
-dbt/**/target/
-dbt/**/dbt_packages/
-dbt/**/logs/
+analytics/dbt-project/**/target/
+analytics/dbt-project/**/dbt_packages/
+analytics/dbt-project/**/logs/
 
 # Lightdash
-lightdash/**/.lightdash-metadata.json
+analytics/lightdash/**/.lightdash-metadata.json
 
 # License files
 *.license

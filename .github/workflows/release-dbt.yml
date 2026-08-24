@@ -5,15 +5,7 @@ on:
     branches: [main]
     paths:
       - .github/workflows/release-dbt.yml
-      - dbt/Dockerfile
-      - dbt/deploy/**
-      - dbt/runtime/**
-      - dbt/dbt_project.yml
-      - dbt/models/**
-      - dbt/package-lock.yml
-      - dbt/packages.yml
-      - dbt/profiles.yml
-      - dbt/selectors.yml
+      - analytics/dbt-project/**
       - infra/runtime/identity/install-aws-signing-helper
   workflow_dispatch:
 
@@ -25,5 +17,5 @@ jobs:
       id-token: write
     with:
       component: dbt
-      dockerfile: dbt/Dockerfile
+      dockerfile: analytics/dbt-project/Dockerfile
       repository: tgbao-dev-dbt

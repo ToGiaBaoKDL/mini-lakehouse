@@ -85,8 +85,8 @@ jobs:
             infra/runtime/postgres
             orchestration/deploy
             apps/arxiv_inspector/deploy
-            apps/lightdash/deploy
-            dbt/deploy
+            analytics/lightdash/deploy
+            analytics/dbt-project/deploy
             ocr/deploy
       - name: Verify the deployment bundle was reviewed on main
         shell: bash

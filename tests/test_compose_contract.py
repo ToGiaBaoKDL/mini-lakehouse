@@ -6,7 +6,7 @@ import yaml
 
 AIRFLOW_COMPOSE = "orchestration/deploy/compose.yaml"
 INSPECTOR_COMPOSE = "apps/arxiv_inspector/deploy/compose.yaml"
-LIGHTDASH_COMPOSE = "apps/lightdash/deploy/compose.yaml"
+LIGHTDASH_COMPOSE = "analytics/lightdash/deploy/compose.yaml"
 POSTGRES_COMPOSE = "infra/runtime/postgres/compose.yaml"
 CLOUDFLARE_COMPOSE = "infra/runtime/cloudflare/compose.yaml"
 AIRFLOW_PROJECT = Path("orchestration")
@@ -362,7 +362,7 @@ def test_arxiv_inspector_receives_only_its_explicit_environment() -> None:
 
 def test_all_container_images_are_immutable() -> None:
     airflow_dockerfile = (AIRFLOW_RUNTIME / "Dockerfile").read_text(encoding="utf-8")
-    dbt_dockerfile = Path("dbt/Dockerfile").read_text(encoding="utf-8")
+    dbt_dockerfile = Path("analytics/dbt-project/Dockerfile").read_text(encoding="utf-8")
     inspector_dockerfile = Path("apps/arxiv_inspector/Dockerfile").read_text(encoding="utf-8")
     ocr_dockerfile = Path("ocr/Dockerfile").read_text(encoding="utf-8")
     emr_dockerfile = Path("jobs/emr/Dockerfile").read_text(encoding="utf-8")
@@ -379,8 +379,8 @@ def test_all_container_images_are_immutable() -> None:
     assert "uv pip sync --python /home/airflow/.local/bin/python" in airflow_dockerfile
     assert "USER airflow" in airflow_dockerfile
     assert 'ENTRYPOINT ["dbt"]' in dbt_dockerfile
-    assert "dbt/runtime/uv.lock" in dbt_dockerfile
-    assert "COPY dbt/models ./models" in dbt_dockerfile
+    assert "analytics/dbt-project/runtime/uv.lock" in dbt_dockerfile
+    assert "COPY analytics/dbt-project/models ./models" in dbt_dockerfile
     assert "dbt deps" in dbt_dockerfile
     assert "USER dbt" in dbt_dockerfile
     assert 'ENTRYPOINT ["document-ocr"]' in ocr_dockerfile
@@ -410,7 +410,7 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
     platform = Path("platform/pyproject.toml").read_text(encoding="utf-8")
     orchestration = (AIRFLOW_PROJECT / "pyproject.toml").read_text(encoding="utf-8")
     inspector = Path("apps/arxiv_inspector/pyproject.toml").read_text(encoding="utf-8")
-    analytics = Path("dbt/runtime/pyproject.toml").read_text(encoding="utf-8")
+    analytics = Path("analytics/dbt-project/runtime/pyproject.toml").read_text(encoding="utf-8")
     ocr = Path("ocr/pyproject.toml").read_text(encoding="utf-8")
 
     assert "apache-airflow" not in workspace
@@ -444,8 +444,11 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
     assert "s3fs" not in ocr
     assert '"dbt-athena==1.11.0"' in analytics
     assert 'members = ["apps/arxiv_inspector", "ocr", "platform"]' in workspace
-    assert 'exclude = ["dbt/runtime", "jobs/emr", "ocr/glm_ocr", "orchestration"]' in workspace
-    assert Path("dbt/runtime/uv.lock").is_file()
+    assert (
+        'exclude = ["analytics/dbt-project/runtime", "jobs/emr", "ocr/glm_ocr", '
+        '"orchestration"]' in workspace
+    )
+    assert Path("analytics/dbt-project/runtime/uv.lock").is_file()
     assert (AIRFLOW_PROJECT / "uv.lock").is_file()
     assert "apache-airflow" not in Path("uv.lock").read_text(encoding="utf-8")
     assert "opentelemetry-distro" in inspector

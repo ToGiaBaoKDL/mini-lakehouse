@@ -1,4 +1,5 @@
-DBT_RUNTIME := env -u VIRTUAL_ENV uv run --project dbt/runtime
+DBT_PROJECT := analytics/dbt-project
+DBT_RUNTIME := env -u VIRTUAL_ENV uv run --project $(DBT_PROJECT)/runtime
 AWS_WORKLOAD_ENV := env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
 	AWS_SHARED_CREDENTIALS_FILE=/dev/null AWS_PROFILE=default
 
@@ -29,21 +30,21 @@ ocr-modal-deploy: preflight ## Deploy the persistent Modal OCR worker.
 dbt-deps: ## Install locked dbt packages.
 	DBT_DOMAIN=all DBT_SCHEMA=analytics_validation \
 	DBT_QUERY_RESULTS_URI=s3://validation/query-results DBT_ANALYTICS_URI=s3://validation \
-		$(DBT_RUNTIME) dbt deps --project-dir dbt
+		$(DBT_RUNTIME) dbt deps --project-dir $(DBT_PROJECT)
 
 dbt-validate: dbt-deps ## Parse dbt without accessing AWS data.
 	@set -eu; for domain in engineering research; do \
 		DBT_DOMAIN="$$domain" DBT_SCHEMA="analytics_$$domain" \
 		DBT_QUERY_RESULTS_URI=s3://validation/query-results DBT_ANALYTICS_URI=s3://validation \
 			$(DBT_RUNTIME) dbt parse \
-				--project-dir dbt --profiles-dir dbt \
+				--project-dir $(DBT_PROJECT) --profiles-dir $(DBT_PROJECT) \
 				--no-partial-parse --show-all-deprecations; \
 	done
 
 dbt-build: ## Build DBT_DOMAIN analytics with its isolated runtime identity.
 	@test -n "$(DBT_DOMAIN)" || { printf '%s\n' "Usage: make dbt-build DBT_DOMAIN=<domain>"; exit 2; }
 	@case "$(DBT_DOMAIN)" in engineering|research) ;; *) printf '%s\n' "Unknown dbt domain: $(DBT_DOMAIN)"; exit 2;; esac
-	@test -d "dbt/dbt_packages/dbt_utils" || { \
+	@test -d "$(DBT_PROJECT)/dbt_packages/dbt_utils" || { \
 		printf '%s\n' "Missing locked dbt packages; run 'make dbt-deps' first."; exit 1; \
 	}
 	@test -r "$(AWS_IDENTITY_DIR)/dbt-$(DBT_DOMAIN)/host-config" || { printf '%s\n' "Render the dbt-$(DBT_DOMAIN) identity first."; exit 1; }
@@ -61,7 +62,7 @@ dbt-build: ## Build DBT_DOMAIN analytics with its isolated runtime identity.
 		DBT_ANALYTICS_URI="$${ANALYTICS_URI}" \
 		DBT_DOMAIN="$(DBT_DOMAIN)" DBT_SCHEMA="analytics_$(DBT_DOMAIN)" \
 		$(DBT_RUNTIME) dbt build --selector "$(DBT_DOMAIN)" \
-			--project-dir dbt --profiles-dir dbt
+			--project-dir $(DBT_PROJECT) --profiles-dir $(DBT_PROJECT)
 
 emr-jobs-package: ## Build EMR artifacts in the matching EMR runtime.
 	jobs/emr/release/package

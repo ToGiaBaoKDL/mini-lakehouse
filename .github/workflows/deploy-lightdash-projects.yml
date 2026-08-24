@@ -5,15 +5,8 @@ on:
     branches: [main]
     paths:
       - .github/workflows/deploy-lightdash-projects.yml
-      - dbt/runtime/**
-      - dbt/dbt_project.yml
-      - dbt/macros/**
-      - dbt/models/**
-      - dbt/package-lock.yml
-      - dbt/packages.yml
-      - dbt/profiles.yml
-      - dbt/selectors.yml
-      - lightdash/projects/**
+      - analytics/dbt-project/**
+      - analytics/lightdash/projects/**
   workflow_dispatch:
 
 concurrency:
@@ -36,11 +29,11 @@ jobs:
       max-parallel: 2
       matrix:
         include:
-          - content_dir: lightdash/projects/engineering/content
+          - content_dir: analytics/lightdash/projects/engineering/content
             domain: engineering
             project_uuid: bde2b242-ad5d-495b-a581-7a1f74787902
             schema: analytics_engineering
-          - content_dir: lightdash/projects/research/content
+          - content_dir: analytics/lightdash/projects/research/content
             domain: research
             project_uuid: 25cf6684-ade3-4c39-b2ac-cb1d8b1ce383
             schema: analytics_research
@@ -67,8 +60,8 @@ jobs:
           package-manager-cache: false
       - name: Install dbt runtime
         run: |
-          uv sync --frozen --project dbt/runtime
-          echo "$GITHUB_WORKSPACE/dbt/runtime/.venv/bin" >> "$GITHUB_PATH"
+          uv sync --frozen --project analytics/dbt-project/runtime
+          echo "$GITHUB_WORKSPACE/analytics/dbt-project/runtime/.venv/bin" >> "$GITHUB_PATH"
       - run: npm install --global @lightdash/cli@1.146.0
       - uses: aws-actions/configure-aws-credentials@acca2b1b2070338fb9fd1ca27ecee81d687e58e5 # v6.1.2
         with:
@@ -90,11 +83,11 @@ jobs:
           DBT_ANALYTICS_URI: s3://validation
           DBT_QUERY_RESULTS_URI: s3://validation/lightdash
         run: |
-          env -u VIRTUAL_ENV uv run --project dbt/runtime dbt deps \
-            --project-dir dbt
-          env -u VIRTUAL_ENV uv run --project dbt/runtime dbt parse \
-            --project-dir dbt \
-            --profiles-dir dbt \
+          env -u VIRTUAL_ENV uv run --project analytics/dbt-project/runtime dbt deps \
+            --project-dir analytics/dbt-project
+          env -u VIRTUAL_ENV uv run --project analytics/dbt-project/runtime dbt parse \
+            --project-dir analytics/dbt-project \
+            --profiles-dir analytics/dbt-project \
             --no-partial-parse \
             --show-all-deprecations
           lightdash lint --path "${{ matrix.content_dir }}"
@@ -102,8 +95,8 @@ jobs:
         run: |
           lightdash config get-project
           lightdash deploy \
-            --project-dir dbt \
-            --profiles-dir dbt \
+            --project-dir analytics/dbt-project \
+            --profiles-dir analytics/dbt-project \
             --skip-dbt-compile \
             --skip-warehouse-catalog \
             --no-partial-compilation \
@@ -115,8 +108,8 @@ jobs:
             --concurrency 4 \
             --gzip
           lightdash validate \
-            --project-dir dbt \
-            --profiles-dir dbt \
+            --project-dir analytics/dbt-project \
+            --profiles-dir analytics/dbt-project \
             --skip-dbt-compile \
             --skip-warehouse-catalog \
             --only tables charts dashboards \

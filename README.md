@@ -61,8 +61,8 @@ default OpenDataLoader pipeline runs on CPU.
 | `jobs/emr/` | Spark source ingestion and curated transformations |
 | `orchestration/` | Airflow runtime, DAG bundle, and deployment |
 | `ocr/` | Provider-neutral document extraction and remote runners |
-| `dbt/` | Athena analytics models and their shared runtime |
-| `lightdash/` | Domain-owned BI content and its protected delivery control plane |
+| `analytics/dbt-project/` | Athena analytics models and their isolated runtime |
+| `analytics/lightdash/` | Domain-owned BI content and Lightdash runtime/deployment |
 | `apps/` | Application code and self-hosted service runtime boundaries |
 | `infra/` | Terraform, shared services, delivery, and operations |
 

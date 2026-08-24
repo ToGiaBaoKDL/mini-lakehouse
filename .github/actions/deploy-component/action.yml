@@ -38,10 +38,10 @@ runs:
             bundle+=(infra/runtime/cloudflare)
             ;;
           lightdash)
-            bundle+=(infra/runtime/postgres apps/lightdash/deploy)
+            bundle+=(infra/runtime/postgres analytics/lightdash/deploy)
             ;;
           dbt)
-            bundle+=(dbt/deploy)
+            bundle+=(analytics/dbt-project/deploy)
             ;;
           ocr-worker)
             bundle+=(ocr/deploy)

@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$#" -gt 1 ]; then
-    printf '%s\n' "Usage: apps/lightdash/deploy/reconcile [image]" >&2
+    printf '%s\n' "Usage: analytics/lightdash/deploy/reconcile [image]" >&2
     exit 2
 fi
 

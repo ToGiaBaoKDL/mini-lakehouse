@@ -5,6 +5,8 @@ from typing import cast
 import yaml
 from lakehouse.contracts import load_contracts
 
+DBT_PROJECT = Path("analytics/dbt-project")
+
 
 def _yaml(path: str) -> dict[str, object]:
     payload = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
@@ -16,7 +18,7 @@ def test_dbt_sources_match_curated_product_contracts() -> None:
     contracts = load_contracts()
     sources: dict[str, list[dict[str, object]]] = {}
     for product_name in ("github", "arxiv"):
-        source_file = _yaml(f"dbt/models/sources/{product_name}.yml")
+        source_file = _yaml((DBT_PROJECT / f"models/sources/{product_name}.yml").as_posix())
         source = cast(list[dict[str, object]], source_file["sources"])[0]
         product = contracts.curated_product(product_name)
         source_tables = cast(list[dict[str, object]], source["tables"])
@@ -59,9 +61,9 @@ def test_dbt_sources_match_curated_product_contracts() -> None:
 def test_dbt_athena_configuration_is_explicit() -> None:
     contracts = load_contracts()
     contract_domains = {domain.name for domain in contracts.domains}
-    project = _yaml("dbt/dbt_project.yml")
-    profile = Path("dbt/profiles.yml").read_text(encoding="utf-8")
-    profile_config = _yaml("dbt/profiles.yml")
+    project = _yaml((DBT_PROJECT / "dbt_project.yml").as_posix())
+    profile = (DBT_PROJECT / "profiles.yml").read_text(encoding="utf-8")
+    profile_config = _yaml((DBT_PROJECT / "profiles.yml").as_posix())
     project_models = cast(
         dict[str, object],
         cast(dict[str, object], project["models"])["lakehouse_analytics"],
@@ -116,9 +118,9 @@ def test_dbt_athena_configuration_is_explicit() -> None:
 
 def test_dbt_uses_first_party_adapter_and_standard_test_package() -> None:
     root_project = Path("pyproject.toml").read_text(encoding="utf-8")
-    analytics_project = Path("dbt/runtime/pyproject.toml").read_text(encoding="utf-8")
-    packages = _yaml("dbt/packages.yml")
-    mart_models = Path("dbt/models/marts/engineering/_engineering__models.yml").read_text(
+    analytics_project = (DBT_PROJECT / "runtime/pyproject.toml").read_text(encoding="utf-8")
+    packages = _yaml((DBT_PROJECT / "packages.yml").as_posix())
+    mart_models = (DBT_PROJECT / "models/marts/engineering/_engineering__models.yml").read_text(
         encoding="utf-8"
     )
 
@@ -128,23 +130,23 @@ def test_dbt_uses_first_party_adapter_and_standard_test_package() -> None:
     assert "dbt-athena-community" not in analytics_project
     assert packages == {"packages": [{"package": "dbt-labs/dbt_utils", "version": "1.4.1"}]}
     assert "dbt_utils.unique_combination_of_columns" in mart_models
-    assert not list(Path("dbt").rglob("tests/generic/test_unique_combination_of_columns.sql"))
+    assert not list(DBT_PROJECT.rglob("tests/generic/test_unique_combination_of_columns.sql"))
 
 
 def test_dbt_models_use_explicit_projections() -> None:
-    for path in Path("dbt/models").rglob("*.sql"):
+    for path in (DBT_PROJECT / "models").rglob("*.sql"):
         sql = path.read_text(encoding="utf-8")
         assert re.search(r"\bselect\s+\*", sql, flags=re.IGNORECASE) is None, path
 
 
 def test_every_dbt_model_and_column_is_documented() -> None:
     documented_models: dict[str, dict[str, object]] = {}
-    for path in Path("dbt/models").rglob("*__models.yml"):
+    for path in (DBT_PROJECT / "models").rglob("*__models.yml"):
         payload = _yaml(path.as_posix())
         for model in cast(list[dict[str, object]], payload["models"]):
             documented_models[cast(str, model["name"])] = model
 
-    sql_models = {path.stem for path in Path("dbt/models").rglob("*.sql")}
+    sql_models = {path.stem for path in (DBT_PROJECT / "models").rglob("*.sql")}
     assert set(documented_models) == sql_models
     for model in documented_models.values():
         assert cast(str, model["description"]).strip()

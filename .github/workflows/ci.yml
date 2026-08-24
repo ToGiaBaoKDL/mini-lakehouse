@@ -36,7 +36,7 @@ jobs:
           terraform_version: "1.14.5"
           terraform_wrapper: false
       - run: uv sync --frozen --all-packages --all-extras --all-groups
-      - run: uv sync --frozen --project dbt/runtime
+      - run: uv sync --frozen --project analytics/dbt-project/runtime
       - run: uv sync --frozen --project orchestration --all-groups
       - run: npm install --global @lightdash/cli@1.146.0
       - run: make check

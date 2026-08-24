@@ -28,10 +28,10 @@ case "$component" in
         ;;
     lightdash)
         export LIGHTDASH_SITE_URL=${LIGHTDASH_SITE_URL:-https://analytics.tgblab.io.vn}
-        deploy="$bundle_root/apps/lightdash/deploy/deploy"
+        deploy="$bundle_root/analytics/lightdash/deploy/deploy"
         ;;
     dbt)
-        "$bundle_root/dbt/deploy/deploy" "$component" "$image"
+        "$bundle_root/analytics/dbt-project/deploy/deploy" "$component" "$image"
         printf '%s\n' "Deployed $component as $image"
         exit 0
         ;;

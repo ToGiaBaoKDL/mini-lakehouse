@@ -98,7 +98,7 @@ def test_host_workload_identities_ignore_operator_credentials() -> None:
             "infra/runtime/postgres/deploy",
             "infra/runtime/postgres/restore",
             "orchestration/deploy/reconcile",
-            "apps/lightdash/deploy/reconcile",
+            "analytics/lightdash/deploy/reconcile",
         )
     ]
 
@@ -129,12 +129,15 @@ def test_each_component_owns_its_deployment_operation() -> None:
             "apps/arxiv_inspector/deploy/reconcile",
         )
     )
-    dbt = Path("dbt/deploy/deploy").read_text(encoding="utf-8")
+    dbt = Path("analytics/dbt-project/deploy/deploy").read_text(encoding="utf-8")
     ocr = Path("ocr/deploy/deploy").read_text(encoding="utf-8")
     postgres = Path("infra/runtime/postgres/deploy").read_text(encoding="utf-8")
     lightdash = "\n".join(
         Path(path).read_text(encoding="utf-8")
-        for path in ("apps/lightdash/deploy/deploy", "apps/lightdash/deploy/reconcile")
+        for path in (
+            "analytics/lightdash/deploy/deploy",
+            "analytics/lightdash/deploy/reconcile",
+        )
     )
     cloudflare = Path("infra/runtime/cloudflare/deploy").read_text(encoding="utf-8")
 
@@ -271,7 +274,7 @@ def test_each_custom_component_has_a_thin_release_caller() -> None:
         ),
         "release-dbt.yml": (
             "component: dbt",
-            "dockerfile: dbt/Dockerfile",
+            "dockerfile: analytics/dbt-project/Dockerfile",
         ),
         "release-ocr-worker.yml": (
             "component: ocr-worker",
@@ -349,14 +352,14 @@ def test_lightdash_content_and_runtime_have_separate_owners() -> None:
     release = _workflow("release-lightdash.yml")
     project_delivery = _workflow("deploy-lightdash-projects.yml")
 
-    assert Path("lightdash/projects/engineering/content").is_dir()
-    assert Path("lightdash/projects/research/content").is_dir()
-    assert not Path("lightdash/deploy/projects.py").exists()
-    assert not Path("lightdash/deploy/environments/dev.yml").exists()
-    assert "lightdash/projects/**" not in release
-    assert "apps/lightdash/deploy/**" not in project_delivery
-    assert "lightdash/projects/**" in project_delivery
-    assert "lightdash/deploy/**" not in project_delivery
+    root = Path("analytics/lightdash")
+    assert (root / "projects/engineering/content").is_dir()
+    assert (root / "projects/research/content").is_dir()
+    assert not (root / "deploy/projects.py").exists()
+    assert not (root / "deploy/environments/dev.yml").exists()
+    assert "analytics/lightdash/projects/**" not in release
+    assert "analytics/lightdash/deploy/**" not in project_delivery
+    assert "analytics/lightdash/projects/**" in project_delivery
 
 
 def test_lightdash_projects_use_protected_stateless_delivery() -> None:
@@ -378,7 +381,10 @@ def test_lightdash_projects_use_protected_stateless_delivery() -> None:
     assert "tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888" in workflow
     assert "ping: tgbao-dev-services" in workflow
     assert "npm install --global @lightdash/cli@1.146.0" in workflow
-    assert 'echo "$GITHUB_WORKSPACE/dbt/runtime/.venv/bin" >> "$GITHUB_PATH"' in workflow
+    assert (
+        'echo "$GITHUB_WORKSPACE/analytics/dbt-project/runtime/.venv/bin" >> "$GITHUB_PATH"'
+        in workflow
+    )
     assert "cancel-in-progress: false" in workflow
     assert "strategy:" in workflow
     assert "fail-fast: false" in workflow
@@ -394,13 +400,14 @@ def test_lightdash_projects_use_protected_stateless_delivery() -> None:
     assert workflow.count("--no-partial-compilation") == 2
     assert workflow.count("--show-chart-configuration-warnings") == 1
     projects = workflow_config["jobs"]["deploy"]["strategy"]["matrix"]["include"]
-    managed_domains = {path.name for path in Path("lightdash/projects").iterdir() if path.is_dir()}
+    projects_root = Path("analytics/lightdash/projects")
+    managed_domains = {path.name for path in projects_root.iterdir() if path.is_dir()}
     assert {project["domain"] for project in projects} == managed_domains
     assert len({project["project_uuid"] for project in projects}) == len(projects)
     for project in projects:
         domain = project["domain"]
         assert project["schema"] == f"analytics_{domain}"
-        assert project["content_dir"] == f"lightdash/projects/{domain}/content"
+        assert project["content_dir"] == f"analytics/lightdash/projects/{domain}/content"
         assert re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", project["project_uuid"])
     assert "lightdash login" not in workflow
     for variable in ("LIGHTDASH_CI_SECRET_ID", "LIGHTDASH_URL"):
@@ -411,7 +418,7 @@ def test_lightdash_projects_use_protected_stateless_delivery() -> None:
 
 
 def test_lightdash_ci_token_has_an_owned_secret_sync_boundary() -> None:
-    sync = Path("lightdash/deploy/sync-ci-secret").read_text(encoding="utf-8")
+    sync = Path("analytics/lightdash/deploy/sync-ci-secret").read_text(encoding="utf-8")
     services = Path("make/services.mk").read_text(encoding="utf-8")
 
     assert 'secret_id="lakehouse/$environment/lightdash/ci"' in sync

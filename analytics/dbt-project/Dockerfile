@@ -16,12 +16,12 @@ WORKDIR /app
 
 COPY --from=uv /uv /uvx /bin/
 COPY infra/runtime/identity/install-aws-signing-helper /tmp/install-aws-signing-helper
-COPY dbt/runtime/pyproject.toml dbt/runtime/uv.lock ./
+COPY analytics/dbt-project/runtime/pyproject.toml analytics/dbt-project/runtime/uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
 
-COPY dbt/dbt_project.yml dbt/profiles.yml dbt/selectors.yml ./
-COPY dbt/packages.yml dbt/package-lock.yml ./
-COPY dbt/models ./models
+COPY analytics/dbt-project/dbt_project.yml analytics/dbt-project/profiles.yml analytics/dbt-project/selectors.yml ./
+COPY analytics/dbt-project/packages.yml analytics/dbt-project/package-lock.yml ./
+COPY analytics/dbt-project/models ./models
 RUN --mount=type=cache,target=/tmp/.cache/dbt \
     DBT_DOMAIN=all DBT_SCHEMA=analytics_validation \
     DBT_QUERY_RESULTS_URI=s3://validation/query-results DBT_ANALYTICS_URI=s3://validation \

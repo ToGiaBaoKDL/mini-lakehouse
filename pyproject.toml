@@ -1,6 +1,6 @@
 [tool.uv.workspace]
 members = ["apps/arxiv_inspector", "ocr", "platform"]
-exclude = ["dbt/runtime", "jobs/emr", "ocr/glm_ocr", "orchestration"]
+exclude = ["analytics/dbt-project/runtime", "jobs/emr", "ocr/glm_ocr", "orchestration"]
 
 [dependency-groups]
 dev = [
@@ -28,7 +28,7 @@ quote-style = "double"
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
 include = ["platform/src", "ocr/src", "apps", "tests"]
-exclude = ["dbt", ".venv"]
+exclude = ["analytics/dbt-project", ".venv"]
 extraPaths = [".", "platform/src", "ocr/src", "jobs/emr/src"]
 venvPath = "."
 venv = ".venv"

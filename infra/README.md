@@ -321,7 +321,8 @@ make lightdash-validate
 After the one-time bootstrap, `.github/workflows/deploy-lightdash-projects.yml` is the normal
 delivery path. It uses the protected `dev` environment, short-lived AWS and Tailscale identities,
 and the PAT stored at `lakehouse/dev/lightdash/ci`; no CLI login state or custom deployment wrapper
-is used. Managed content lives under `lightdash/projects/<domain>/content`. Treat Git as the source
+is used. Managed content lives under `analytics/lightdash/projects/<domain>/content`. Treat Git as
+the source
 of truth for the managed `Shared` spaces and keep ordinary UI-authored content in other spaces.
 
 ## Day-two changes

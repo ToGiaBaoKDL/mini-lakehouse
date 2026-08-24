@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$#" -ne 1 ]; then
-    printf '%s\n' "Usage: apps/lightdash/deploy/deploy <image@sha256:digest>" >&2
+    printf '%s\n' "Usage: analytics/lightdash/deploy/deploy <image@sha256:digest>" >&2
     exit 2
 fi
 

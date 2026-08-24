@@ -10,9 +10,9 @@
 **/.terraform
 **/.venv
 **/__pycache__
-dbt/**/dbt_packages
-dbt/**/logs
-dbt/**/target
+analytics/dbt-project/**/dbt_packages
+analytics/dbt-project/**/logs
+analytics/dbt-project/**/target
 dist
 docs
 infra/*

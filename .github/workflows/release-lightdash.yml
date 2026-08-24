@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - .github/workflows/release-lightdash.yml
-      - apps/lightdash/deploy/**
+      - analytics/lightdash/deploy/**
       - infra/runtime/identity/install-aws-signing-helper
       - infra/runtime/postgres/**
   workflow_dispatch:

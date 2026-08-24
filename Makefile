@@ -10,7 +10,7 @@ HOST_BIND_ADDRESS ?= 127.0.0.1
 AIRFLOW_BASE_URL ?= http://$(HOST_BIND_ADDRESS):8080
 RUNTIME_PARAMETER_PREFIX := /lakehouse/$(LAKEHOUSE_ENVIRONMENT)
 LIGHTDASH_CLI_VERSION := 1.146.0
-LIGHTDASH_CONTENT_DIRS := $(wildcard lightdash/projects/*/content)
+LIGHTDASH_CONTENT_DIRS := $(wildcard analytics/lightdash/projects/*/content)
 
 export LAKEHOUSE_ENVIRONMENT
 export LOCAL_UID
@@ -70,11 +70,11 @@ lint: ## Run formatting, linting, and static type checks.
 		orchestration/deploy/reconcile \
 		apps/arxiv_inspector/deploy/deploy \
 		apps/arxiv_inspector/deploy/reconcile \
-		apps/lightdash/deploy/deploy \
-		apps/lightdash/deploy/initialize-secrets \
-		apps/lightdash/deploy/reconcile \
-		lightdash/deploy/sync-ci-secret \
-		dbt/deploy/deploy \
+		analytics/lightdash/deploy/deploy \
+		analytics/lightdash/deploy/initialize-secrets \
+		analytics/lightdash/deploy/reconcile \
+		analytics/lightdash/deploy/sync-ci-secret \
+		analytics/dbt-project/deploy/deploy \
 		ocr/deploy/deploy
 	uv run ruff format --check .
 	uv run ruff check .
@@ -100,7 +100,7 @@ compose-validate: ## Validate self-hosted service Compose files.
 
 check: ## Run the complete local quality gate.
 	uv lock --check
-	uv lock --check --project dbt/runtime
+	uv lock --check --project analytics/dbt-project/runtime
 	uv lock --check --project orchestration
 	uv lock --check --project jobs/emr
 	uv lock --check --directory ocr/glm_ocr
