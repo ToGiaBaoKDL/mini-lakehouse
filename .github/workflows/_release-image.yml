@@ -123,9 +123,9 @@ jobs:
           revision=$EXTERNAL_SOURCE_REVISION
           if [[ -z "$revision" && "$COMPONENT" == "airflow" ]]; then
             revision=$(git log -1 --format=%H -- \
-              orchestration/pyproject.toml \
-              orchestration/uv.lock \
-              orchestration/runtime \
+              automation/airflow/pyproject.toml \
+              automation/airflow/uv.lock \
+              automation/airflow/runtime \
               infra/runtime/identity/install-aws-signing-helper)
           fi
           if [[ -n "$revision" ]]; then

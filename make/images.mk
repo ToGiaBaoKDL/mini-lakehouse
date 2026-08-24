@@ -4,14 +4,14 @@ LIGHTDASH_BUILD_CONTEXT := https://github.com/lightdash/lightdash.git#f57276359a
 	lightdash-build ocr-worker-build images-build
 
 images-check: ## Validate every Dockerfile without building image layers.
-	docker buildx build --check --file orchestration/runtime/Dockerfile .
+	docker buildx build --check --file automation/airflow/runtime/Dockerfile .
 	docker buildx build --check --file apps/arxiv_inspector/Dockerfile .
 	docker buildx build --check --file analytics/dbt-project/Dockerfile .
 	docker buildx build --check --file ocr/Dockerfile .
 	docker buildx build --check --file jobs/emr/Dockerfile .
 
 airflow-build: ## Build the local Airflow image.
-	docker build --file orchestration/runtime/Dockerfile --tag airflow:local .
+	docker build --file automation/airflow/runtime/Dockerfile --tag airflow:local .
 
 arxiv-inspector-build: ## Build the local ArXiv Inspector image.
 	docker build --file apps/arxiv_inspector/Dockerfile --tag arxiv-inspector:local .

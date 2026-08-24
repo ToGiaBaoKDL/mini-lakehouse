@@ -59,7 +59,7 @@ default OpenDataLoader pipeline runs on CPU.
 |---|---|
 | `platform/` | YAML data contracts and the PyIceberg catalog control plane |
 | `jobs/emr/` | Spark source ingestion and curated transformations |
-| `orchestration/` | Airflow runtime, DAG bundle, and deployment |
+| `automation/airflow/` | Airflow runtime, DAG bundle, and deployment |
 | `ocr/` | Provider-neutral document extraction and remote runners |
 | `analytics/dbt-project/` | Athena analytics models and their isolated runtime |
 | `analytics/lightdash/` | Domain-owned BI content and Lightdash runtime/deployment |

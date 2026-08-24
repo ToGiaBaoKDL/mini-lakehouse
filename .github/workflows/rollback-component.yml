@@ -83,7 +83,7 @@ jobs:
           sparse-checkout: |
             infra/runtime/delivery
             infra/runtime/postgres
-            orchestration/deploy
+            automation/airflow/deploy
             apps/arxiv_inspector/deploy
             analytics/lightdash/deploy
             analytics/dbt-project/deploy

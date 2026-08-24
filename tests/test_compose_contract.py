@@ -4,12 +4,12 @@ from typing import Any
 
 import yaml
 
-AIRFLOW_COMPOSE = "orchestration/deploy/compose.yaml"
+AIRFLOW_COMPOSE = "automation/airflow/deploy/compose.yaml"
 INSPECTOR_COMPOSE = "apps/arxiv_inspector/deploy/compose.yaml"
 LIGHTDASH_COMPOSE = "analytics/lightdash/deploy/compose.yaml"
 POSTGRES_COMPOSE = "infra/runtime/postgres/compose.yaml"
 CLOUDFLARE_COMPOSE = "infra/runtime/cloudflare/compose.yaml"
-AIRFLOW_PROJECT = Path("orchestration")
+AIRFLOW_PROJECT = Path("automation/airflow")
 AIRFLOW_RUNTIME = AIRFLOW_PROJECT / "runtime"
 
 
@@ -62,8 +62,8 @@ def test_airflow_uses_local_executor_and_required_runtime_components() -> None:
             "kwargs": {
                 "repo_url": "https://github.com/ToGiaBaoKDL/mini-lakehouse.git",
                 "tracking_ref": "main",
-                "subdir": "orchestration/bundle",
-                "sparse_dirs": ["orchestration/bundle"],
+                "subdir": "automation/airflow/bundle",
+                "sparse_dirs": ["automation/airflow/bundle"],
                 "refresh_interval": 60,
             },
         }
@@ -144,9 +144,11 @@ def test_airflow_runtime_secrets_are_service_scoped_files() -> None:
     assert all("environment" in secret for secret in payload["secrets"].values())
 
     services_makefile = Path("make/services.mk").read_text(encoding="utf-8")
-    airflow_secrets = Path("orchestration/deploy/initialize-secrets").read_text(encoding="utf-8")
+    airflow_secrets = Path("automation/airflow/deploy/initialize-secrets").read_text(
+        encoding="utf-8"
+    )
     postgres_secrets = Path("infra/runtime/postgres/initialize-secrets").read_text(encoding="utf-8")
-    airflow_reconcile = Path("orchestration/deploy/reconcile").read_text(encoding="utf-8")
+    airflow_reconcile = Path("automation/airflow/deploy/reconcile").read_text(encoding="utf-8")
     assert '"version":1' in airflow_secrets + postgres_secrets
     assert ".version == 1" in airflow_secrets + postgres_secrets
     assert "admin_password" in airflow_secrets
@@ -155,7 +157,7 @@ def test_airflow_runtime_secrets_are_service_scoped_files() -> None:
     assert "infra/runtime/postgres/initialize-secrets bootstrap" in services_makefile
     assert "infra/runtime/postgres/initialize-secrets airflow" in services_makefile
     assert "infra/runtime/postgres/initialize-secrets lightdash" in services_makefile
-    assert "orchestration/deploy/initialize-secrets" in services_makefile
+    assert "automation/airflow/deploy/initialize-secrets" in services_makefile
     assert "secretsmanager put-secret-value" not in services_makefile
 
 
@@ -373,8 +375,8 @@ def test_all_container_images_are_immutable() -> None:
 
     assert not Path("Dockerfile").exists()
     assert "apache/airflow:3.3.0-python3.12@sha256:" in airflow_dockerfile
-    assert "orchestration/uv.lock" in airflow_dockerfile
-    assert "COPY --chown=airflow:0 orchestration/bundle" not in airflow_dockerfile
+    assert "automation/airflow/uv.lock" in airflow_dockerfile
+    assert "COPY --chown=airflow:0 automation/airflow/bundle" not in airflow_dockerfile
     assert '"/uv", "export", "--frozen", "--no-dev"' in airflow_dockerfile
     assert "uv pip sync --python /home/airflow/.local/bin/python" in airflow_dockerfile
     assert "USER airflow" in airflow_dockerfile
@@ -445,8 +447,8 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
     assert '"dbt-athena==1.11.0"' in analytics
     assert 'members = ["apps/arxiv_inspector", "ocr", "platform"]' in workspace
     assert (
-        'exclude = ["analytics/dbt-project/runtime", "jobs/emr", "ocr/glm_ocr", '
-        '"orchestration"]' in workspace
+        'exclude = ["analytics/dbt-project/runtime", "automation/airflow", "jobs/emr", '
+        '"ocr/glm_ocr"]' in workspace
     )
     assert Path("analytics/dbt-project/runtime/uv.lock").is_file()
     assert (AIRFLOW_PROJECT / "uv.lock").is_file()
@@ -457,8 +459,8 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
 
 
 def test_airflow_bundle_and_runtime_have_one_way_ownership() -> None:
-    bundle = Path("orchestration/bundle")
-    runtime = Path("orchestration/runtime")
+    bundle = AIRFLOW_PROJECT / "bundle"
+    runtime = AIRFLOW_PROJECT / "runtime"
 
     assert (bundle / "dags").is_dir()
     assert (bundle / ".airflowignore").read_text(encoding="utf-8").strip() == "tests/"
@@ -467,7 +469,7 @@ def test_airflow_bundle_and_runtime_have_one_way_ownership() -> None:
     assert (bundle / "config").is_dir()
     assert not (bundle / "airflow_bundle").exists()
     assert (runtime / "airflow_runtime/secrets.py").is_file()
-    assert (Path("orchestration/deploy") / "compose.yaml").is_file()
+    assert (AIRFLOW_PROJECT / "deploy/compose.yaml").is_file()
     assert Path(POSTGRES_COMPOSE).is_file()
     assert not (bundle / "config/aws_secrets.py").exists()
 
@@ -475,7 +477,7 @@ def test_airflow_bundle_and_runtime_have_one_way_ownership() -> None:
     runtime_source = "\n".join(
         path.read_text(encoding="utf-8") for path in (runtime / "airflow_runtime").rglob("*.py")
     )
-    assert "from orchestration" not in bundle_source
+    assert "from automation" not in bundle_source
     assert "airflow_runtime" not in bundle_source
     assert "from callbacks" not in runtime_source
     assert "from config" not in runtime_source

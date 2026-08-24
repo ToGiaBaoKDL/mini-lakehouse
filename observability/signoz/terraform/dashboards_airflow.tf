@@ -1,5 +1,5 @@
 # Airflow dashboard: Airflow's native OpenTelemetry metrics (prefix "airflow",
-# orchestration/deploy/compose.yaml: AIRFLOW__METRICS__OTEL_ON) plus its traces.
+# automation/airflow/deploy/compose.yaml: AIRFLOW__METRICS__OTEL_ON) plus its traces.
 # Resource-scoped fields (service.name, deployment.environment) use the resource
 # context; Airflow stats tags (dag_id, pool, state) are metric attributes.
 
@@ -13,7 +13,7 @@ resource "signoz_dashboard" "airflow" {
     },
     {
       key   = "tag"
-      value = "orchestration"
+      value = "automation"
     },
     {
       key   = "tag"

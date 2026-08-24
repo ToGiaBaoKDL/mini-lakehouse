@@ -6,11 +6,11 @@ permissions:
 on:
   pull_request:
     paths-ignore:
-      - orchestration/bundle/**
+      - automation/airflow/bundle/**
   push:
     branches: [main]
     paths-ignore:
-      - orchestration/bundle/**
+      - automation/airflow/bundle/**
 
 jobs:
   quality:
@@ -37,6 +37,6 @@ jobs:
           terraform_wrapper: false
       - run: uv sync --frozen --all-packages --all-extras --all-groups
       - run: uv sync --frozen --project analytics/dbt-project/runtime
-      - run: uv sync --frozen --project orchestration --all-groups
+      - run: uv sync --frozen --project automation/airflow --all-groups
       - run: npm install --global @lightdash/cli@1.146.0
       - run: make check

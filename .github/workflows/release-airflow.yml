@@ -5,10 +5,10 @@ on:
     branches: [main]
     paths:
       - .github/workflows/release-airflow.yml
-      - orchestration/pyproject.toml
-      - orchestration/uv.lock
-      - orchestration/runtime/**
-      - orchestration/deploy/**
+      - automation/airflow/pyproject.toml
+      - automation/airflow/uv.lock
+      - automation/airflow/runtime/**
+      - automation/airflow/deploy/**
       - infra/runtime/postgres/**
       - infra/runtime/identity/install-aws-signing-helper
   workflow_dispatch:
@@ -21,5 +21,5 @@ jobs:
       id-token: write
     with:
       component: airflow
-      dockerfile: orchestration/runtime/Dockerfile
+      dockerfile: automation/airflow/runtime/Dockerfile
       repository: tgbao-dev-airflow

@@ -29,7 +29,7 @@ runs:
         bundle=(infra/runtime/delivery)
         case "$COMPONENT" in
           airflow)
-            bundle+=(infra/runtime/postgres orchestration/deploy)
+            bundle+=(infra/runtime/postgres automation/airflow/deploy)
             ;;
           arxiv-inspector)
             bundle+=(apps/arxiv_inspector/deploy)

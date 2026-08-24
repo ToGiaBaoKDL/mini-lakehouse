@@ -177,7 +177,7 @@ Inspector, and Lightdash reconcile their own Compose services; each database-bac
 only its PostgreSQL database. The dbt and OCR deployments advance their stable
 host-local aliases only after pulling an exact digest, so DAG files never contain image SHAs.
 
-Airflow uses the official versioned `GitDagBundle` for `orchestration/bundle`. A DAG-only merge is
+Airflow uses the official versioned `GitDagBundle` for `automation/airflow/bundle`. A DAG-only merge is
 validated by the focused bundle CI, then fetched without rebuilding or restarting Airflow. Active
 and retried runs keep their original Git commit by default. A new Airflow/provider dependency still
 requires publishing the compatible runtime image first.

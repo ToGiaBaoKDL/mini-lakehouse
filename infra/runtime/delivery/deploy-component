@@ -18,7 +18,7 @@ export HOST_BIND_ADDRESS=${HOST_BIND_ADDRESS:-0.0.0.0}
 case "$component" in
     airflow)
         export AIRFLOW_BASE_URL=${AIRFLOW_BASE_URL:-https://airflow.tgblab.io.vn}
-        deploy="$bundle_root/orchestration/deploy/deploy"
+        deploy="$bundle_root/automation/airflow/deploy/deploy"
         ;;
     arxiv-inspector)
         deploy="$bundle_root/apps/arxiv_inspector/deploy/deploy"

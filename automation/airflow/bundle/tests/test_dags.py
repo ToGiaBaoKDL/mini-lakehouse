@@ -4,6 +4,7 @@ import warnings
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import Mock, PropertyMock, patch
 from urllib.parse import ParseResult, urlparse
 
@@ -14,8 +15,10 @@ os.environ.setdefault("HOST_AWS_IDENTITY_DIR", "/tmp")
 os.environ["LAKEHOUSE_ENVIRONMENT"] = "ci"
 
 from airflow.models import DagBag
-from airflow.sdk import DAG
+from airflow.providers.standard.operators.python import ShortCircuitOperator
+from airflow.sdk import DAG, Asset
 from airflow.utils.file import list_py_file_paths
+from airflow.utils.types import DagRunType
 from jinja2 import StrictUndefined
 from jinja2.sandbox import SandboxedEnvironment
 from operators import emr as emr_module
@@ -26,8 +29,7 @@ ALLOWED_JOB_TYPES = {"etl", "tl", "rpt", "mon", "man", "bk", "stm", "cat", "gov"
 ALLOWED_WORKER_TYPES = {"emr", "glue", "k8spod", "afw", "docker", "mix"}
 EXPECTED_DAGS = {
     "etl_docker_arxiv_document_ocr",
-    "tl_docker_engineering_analytics",
-    "tl_docker_research_analytics",
+    "tl_docker_analytics",
     "etl_emr_arxiv_metadata",
     "etl_emr_github_archive",
     "man_emr_iceberg_maintenance",
@@ -35,7 +37,7 @@ EXPECTED_DAGS = {
 
 
 def _bag() -> DagBag:
-    return DagBag(dag_folder=Path("orchestration/bundle/dags"))
+    return DagBag(dag_folder=Path("automation/airflow/bundle/dags"))
 
 
 def _dag(bag: DagBag, dag_id: str) -> DAG:
@@ -52,16 +54,16 @@ def test_dagbag_loads_every_owned_dag_without_import_errors() -> None:
 def test_runtime_bundle_discovery_excludes_test_modules() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        discovered = list_py_file_paths("orchestration/bundle", safe_mode=False)
+        discovered = list_py_file_paths("automation/airflow/bundle", safe_mode=False)
 
     assert discovered
     assert all("/tests/" not in path for path in discovered)
 
 
 def test_dag_files_are_domain_scoped_and_follow_worker_aware_naming() -> None:
-    files = sorted(Path("orchestration/bundle/dags").rglob("*.py"))
+    files = sorted(Path("automation/airflow/bundle/dags").rglob("*.py"))
     assert {path.stem for path in files} == EXPECTED_DAGS
-    assert all(path.parent != Path("orchestration/bundle/dags") for path in files)
+    assert all(path.parent != Path("automation/airflow/bundle/dags") for path in files)
     for path in files:
         job_type, worker_type, description = path.stem.split("_", maxsplit=2)
         assert job_type in ALLOWED_JOB_TYPES
@@ -116,13 +118,12 @@ def test_source_dags_are_bounded_parameterized_emr_jobs() -> None:
     assert arxiv.outlets[0].uri == "lakehouse://curated/arxiv/metadata"
 
 
-def test_curated_assets_schedule_isolated_domain_builds_after_freshness() -> None:
+def test_curated_assets_schedule_one_domain_aware_analytics_dag() -> None:
     bag = _bag()
     github_producer = _dag(bag, "etl_emr_github_archive")
     arxiv_producer = _dag(bag, "etl_emr_arxiv_metadata")
     ocr_producer = _dag(bag, "etl_docker_arxiv_document_ocr")
-    engineering = _dag(bag, "tl_docker_engineering_analytics")
-    research = _dag(bag, "tl_docker_research_analytics")
+    analytics = _dag(bag, "tl_docker_analytics")
 
     github_asset = github_producer.tasks[0].outlets[0]
     arxiv_asset = arxiv_producer.tasks[0].outlets[0]
@@ -130,18 +131,17 @@ def test_curated_assets_schedule_isolated_domain_builds_after_freshness() -> Non
     assert github_asset.uri == "lakehouse://curated/github"
     assert arxiv_asset.uri == "lakehouse://curated/arxiv/metadata"
     assert ocr_asset.uri == "lakehouse://curated/arxiv/ocr"
-    assert engineering.schedule == github_asset
-    assert research.schedule == arxiv_asset | ocr_asset
+    assert analytics.schedule == github_asset | arxiv_asset | ocr_asset
 
     expectations = {
-        engineering: {
+        "engineering": {
             "image": "dbt:runtime",
             "identity": "/tmp/dbt-engineering",
             "selector": "engineering",
             "inputs": [github_asset],
             "output": "lakehouse://analytics/engineering",
         },
-        research: {
+        "research": {
             "image": "dbt:runtime",
             "identity": "/tmp/dbt-research",
             "selector": "research",
@@ -149,9 +149,12 @@ def test_curated_assets_schedule_isolated_domain_builds_after_freshness() -> Non
             "output": "lakehouse://analytics/research",
         },
     }
-    for dag, expected in expectations.items():
-        freshness = dag.get_task("check_source_freshness")
-        build = dag.get_task("build_analytics")
+    for domain, expected in expectations.items():
+        inputs = cast(list[Asset], expected["inputs"])
+        selected = analytics.get_task(f"{domain}.should_run")
+        freshness = analytics.get_task(f"{domain}.check_source_freshness")
+        build = analytics.get_task(f"{domain}.build_analytics")
+        assert isinstance(selected, ShortCircuitOperator)
         assert isinstance(freshness, LoggedDockerOperator)
         assert isinstance(build, LoggedDockerOperator)
         assert freshness.image == build.image == expected["image"]
@@ -164,12 +167,54 @@ def test_curated_assets_schedule_isolated_domain_builds_after_freshness() -> Non
         assert build.command == ["build", "--selector", expected["selector"]]
         assert freshness.environment["DBT_DOMAIN"] == expected["selector"]
         assert freshness.environment["DBT_SCHEMA"] == f"analytics_{expected['selector']}"
-        assert freshness.downstream_task_ids == {"build_analytics"}
+        assert selected.op_kwargs == {"asset_uris": tuple(asset.uri for asset in inputs)}
+        assert selected.downstream_task_ids == {f"{domain}.check_source_freshness"}
+        assert freshness.downstream_task_ids == {f"{domain}.build_analytics"}
         assert freshness.retries == build.retries == 0
         assert freshness.environment["AWS_CONFIG_FILE"] == "/run/aws/config"
         assert freshness.mounts[0]["Source"] == expected["identity"]
-        assert build.inlets == expected["inputs"]
+        assert freshness.inlets == build.inlets == inputs
         assert build.outlets[0].uri == expected["output"]
+
+
+def test_analytics_domain_gates_run_both_manually_and_only_affected_assets() -> None:
+    bag = _bag()
+    analytics = _dag(bag, "tl_docker_analytics")
+    engineering = analytics.get_task("engineering.should_run")
+    research = analytics.get_task("research.should_run")
+    github_asset = _dag(bag, "etl_emr_github_archive").tasks[0].outlets[0]
+
+    assert isinstance(engineering, ShortCircuitOperator)
+    assert isinstance(research, ShortCircuitOperator)
+    manual_run = SimpleNamespace(run_type=DagRunType.MANUAL)
+    for gate in (engineering, research):
+        assert (
+            gate.python_callable(
+                **gate.op_kwargs,
+                dag_run=manual_run,
+                triggering_asset_events={},
+            )
+            is True
+        )
+
+    asset_run = SimpleNamespace(run_type=DagRunType.ASSET_TRIGGERED)
+    triggering_events = {github_asset: [object()]}
+    assert (
+        engineering.python_callable(
+            **engineering.op_kwargs,
+            dag_run=asset_run,
+            triggering_asset_events=triggering_events,
+        )
+        is True
+    )
+    assert (
+        research.python_callable(
+            **research.op_kwargs,
+            dag_run=asset_run,
+            triggering_asset_events=triggering_events,
+        )
+        is False
+    )
 
 
 def test_dags_share_timezone_and_expose_job_and_worker_tags() -> None:

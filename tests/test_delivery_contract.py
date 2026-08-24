@@ -53,9 +53,9 @@ def test_component_release_publishes_before_protected_digest_deployment() -> Non
     assert "aws ecr batch-get-image" in release
     assert "aws ecr put-image" in release
     assert "Resolve immutable image source revision" in release
-    assert "orchestration/pyproject.toml" in release
-    assert "orchestration/uv.lock" in release
-    assert "orchestration/runtime" in release
+    assert "automation/airflow/pyproject.toml" in release
+    assert "automation/airflow/uv.lock" in release
+    assert "automation/airflow/runtime" in release
     assert "source-$revision" in release
     assert "cancel-in-progress: false" in release
     assert "airflow|arxiv-inspector|dbt|lightdash|ocr-worker" in release
@@ -97,7 +97,7 @@ def test_host_workload_identities_ignore_operator_credentials() -> None:
             "infra/runtime/postgres/backup",
             "infra/runtime/postgres/deploy",
             "infra/runtime/postgres/restore",
-            "orchestration/deploy/reconcile",
+            "automation/airflow/deploy/reconcile",
             "analytics/lightdash/deploy/reconcile",
         )
     ]
@@ -120,7 +120,10 @@ def test_modal_worker_keeps_models_cached_before_application_source() -> None:
 def test_each_component_owns_its_deployment_operation() -> None:
     airflow = "\n".join(
         Path(path).read_text(encoding="utf-8")
-        for path in ("orchestration/deploy/deploy", "orchestration/deploy/reconcile")
+        for path in (
+            "automation/airflow/deploy/deploy",
+            "automation/airflow/deploy/reconcile",
+        )
     )
     inspector = "\n".join(
         Path(path).read_text(encoding="utf-8")
@@ -266,7 +269,7 @@ def test_each_custom_component_has_a_thin_release_caller() -> None:
     expected = {
         "release-airflow.yml": (
             "component: airflow",
-            "dockerfile: orchestration/runtime/Dockerfile",
+            "dockerfile: automation/airflow/runtime/Dockerfile",
         ),
         "release-arxiv-inspector.yml": (
             "component: arxiv-inspector",
@@ -306,10 +309,10 @@ def test_airflow_deploy_only_changes_reuse_the_runtime_image() -> None:
     caller = _workflow("release-airflow.yml")
     reusable = _workflow("_release-image.yml")
 
-    assert "orchestration/pyproject.toml" in caller
-    assert "orchestration/uv.lock" in caller
-    assert "orchestration/runtime/**" in caller
-    assert "orchestration/deploy/**" in caller
+    assert "automation/airflow/pyproject.toml" in caller
+    assert "automation/airflow/uv.lock" in caller
+    assert "automation/airflow/runtime/**" in caller
+    assert "automation/airflow/deploy/**" in caller
     assert "infra/runtime/postgres/**" in caller
     assert '[[ -z "$revision" && "$COMPONENT" == "airflow" ]]' in reusable
     assert "steps.image_source.outputs.tag" in reusable

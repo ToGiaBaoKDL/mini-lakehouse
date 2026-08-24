@@ -65,9 +65,9 @@ lint: ## Run formatting, linting, and static type checks.
 		observability/signoz/deploy/deploy \
 		observability/signoz/collector/deploy \
 		jobs/emr/release/package \
-		orchestration/deploy/deploy \
-		orchestration/deploy/initialize-secrets \
-		orchestration/deploy/reconcile \
+		automation/airflow/deploy/deploy \
+		automation/airflow/deploy/initialize-secrets \
+		automation/airflow/deploy/reconcile \
 		apps/arxiv_inspector/deploy/deploy \
 		apps/arxiv_inspector/deploy/reconcile \
 		analytics/lightdash/deploy/deploy \
@@ -79,13 +79,13 @@ lint: ## Run formatting, linting, and static type checks.
 	uv run ruff format --check .
 	uv run ruff check .
 	uv run --all-packages --all-extras pyright
-	uv run --project orchestration pyright --project orchestration
+	uv run --project automation/airflow pyright --project automation/airflow
 	uv run pyright --project jobs/emr
 
 test: ## Run unit tests.
 	uv run --all-packages --all-extras pytest -m "not integration"
-	uv run --project orchestration pytest \
-		-c orchestration/pyproject.toml orchestration/bundle/tests
+	uv run --project automation/airflow pytest \
+		-c automation/airflow/pyproject.toml automation/airflow/bundle/tests
 
 compose-validate: ## Validate self-hosted service Compose files.
 	$(METADATA_POSTGRES_COMPOSE_CONFIG) config --quiet
@@ -101,7 +101,7 @@ compose-validate: ## Validate self-hosted service Compose files.
 check: ## Run the complete local quality gate.
 	uv lock --check
 	uv lock --check --project analytics/dbt-project/runtime
-	uv lock --check --project orchestration
+	uv lock --check --project automation/airflow
 	uv lock --check --project jobs/emr
 	uv lock --check --directory ocr/glm_ocr
 	$(MAKE) platform-validate

@@ -2,13 +2,13 @@
 set -eu
 
 if [ "$#" -gt 1 ]; then
-    printf '%s\n' "Usage: orchestration/deploy/reconcile [airflow-image]" >&2
+    printf '%s\n' "Usage: automation/airflow/deploy/reconcile [airflow-image]" >&2
     exit 2
 fi
 
 image=${1:-airflow:local}
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-bundle_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
+bundle_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
 environment=${LAKEHOUSE_ENVIRONMENT:-dev}
 identity_dir=${AWS_IDENTITY_DIR:-"$HOME/.config/lakehouse/$environment/aws"}
 host_config="$identity_dir/airflow/host-config"

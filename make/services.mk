@@ -1,5 +1,5 @@
 METADATA_POSTGRES_COMPOSE := docker compose --project-name metadata-postgres -f infra/runtime/postgres/compose.yaml
-AIRFLOW_COMPOSE := docker compose --project-name airflow -f orchestration/deploy/compose.yaml
+AIRFLOW_COMPOSE := docker compose --project-name airflow -f automation/airflow/deploy/compose.yaml
 INSPECTOR_COMPOSE := docker compose --project-name arxiv-inspector -f apps/arxiv_inspector/deploy/compose.yaml
 LIGHTDASH_COMPOSE := docker compose --project-name lightdash -f analytics/lightdash/deploy/compose.yaml
 CLOUDFLARE_COMPOSE := docker compose --project-name cloudflare -f infra/runtime/cloudflare/compose.yaml
@@ -24,7 +24,7 @@ metadata-postgres-secrets-init: ## Initialize the PostgreSQL bootstrap credentia
 
 airflow-secrets-init: ## Initialize Airflow database and runtime secrets exactly once.
 	infra/runtime/postgres/initialize-secrets airflow
-	orchestration/deploy/initialize-secrets
+	automation/airflow/deploy/initialize-secrets
 
 lightdash-secrets-init: ## Initialize Lightdash database and runtime secrets exactly once.
 	infra/runtime/postgres/initialize-secrets lightdash
@@ -52,7 +52,7 @@ metadata-postgres-restore: ## Drop and restore one metadata database from a slot
 	infra/runtime/postgres/restore $(ARGS)
 
 airflow-up: preflight ## Start self-hosted Airflow against shared metadata PostgreSQL.
-	orchestration/deploy/reconcile airflow:local
+	automation/airflow/deploy/reconcile airflow:local
 
 airflow-down: ## Stop self-hosted Airflow while preserving metadata and bundle cache.
 	$(AIRFLOW_COMPOSE_CONFIG) down --remove-orphans
