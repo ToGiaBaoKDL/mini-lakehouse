@@ -11,12 +11,13 @@ from lakehouse.catalog.tables import (
     apply_table,
     validate_table_contracts,
 )
-from lakehouse.contracts import ManagedIcebergTableContract, load_contracts
 from pyiceberg.catalog import Catalog
 from pyiceberg.partitioning import PartitionSpec
 from pyiceberg.schema import Schema
 from pyiceberg.table import Table
 from pyiceberg.types import NestedField
+
+from lakehouse.contracts import ManagedIcebergTableContract, load_contracts
 
 
 def _binding(identifier: tuple[str, ...]):

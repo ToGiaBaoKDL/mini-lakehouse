@@ -28,6 +28,7 @@ from document_ocr.protocol import (
     OcrRunResult,
 )
 from lakehouse.catalog.schema import iceberg_schema
+
 from lakehouse.contracts import load_contracts
 
 

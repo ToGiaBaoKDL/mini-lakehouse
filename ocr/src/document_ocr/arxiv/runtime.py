@@ -7,7 +7,6 @@ from typing import cast
 import boto3
 from lakehouse.aws import get_runtime_parameter
 from lakehouse.config.settings import get_settings
-from lakehouse.contracts import load_contracts
 from lakehouse.iceberg import load_iceberg_catalog
 from loguru import logger
 from pyiceberg.table import Table
@@ -22,6 +21,7 @@ from document_ocr.execution import (
     ModalCredentials,
     ModalExecution,
 )
+from lakehouse.contracts import load_contracts
 
 
 def _modal_credentials() -> dict[str, object]:

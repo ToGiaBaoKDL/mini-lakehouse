@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import cast
 
 import yaml
+
 from lakehouse.contracts import load_contracts
 
 DBT_PROJECT = Path("analytics/dbt-project")

@@ -6,7 +6,6 @@ from typing import Any, Protocol
 import pandas as pd
 from lakehouse.aws import get_runtime_parameter
 from lakehouse.config.settings import Settings
-from lakehouse.contracts import DataContracts, load_contracts
 
 from apps.arxiv_inspector.data.athena import AthenaReader
 from apps.arxiv_inspector.data.models import (
@@ -14,6 +13,7 @@ from apps.arxiv_inspector.data.models import (
     OcrDocumentRun,
     OcrDocumentSummary,
 )
+from lakehouse.contracts import DataContracts, load_contracts
 
 
 class QueryReader(Protocol):

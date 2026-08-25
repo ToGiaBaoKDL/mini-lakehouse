@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from emr_jobs.maintenance import POLICIES, maintenance_statements
+
 from lakehouse.contracts import load_contracts
 
 
