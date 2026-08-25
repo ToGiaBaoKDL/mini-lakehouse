@@ -3,119 +3,16 @@
 # SigNoz UI and named through the signoz_alert_channels variable). Routes only
 # need editing when a severity deserves a separate destination.
 
-resource "signoz_rule" "host_disk_70_percent" {
-  alert      = "host_filesystem_70_percent"
+resource "signoz_rule" "host_filesystem_pressure" {
+  alert      = "host_filesystem_pressure"
   alert_type = "METRIC_BASED_ALERT"
   rule_type  = "threshold_rule"
 
-  description = "Host filesystem utilization exceeded 70% of capacity."
+  description = "Host filesystem utilization crossed a warning, error, or critical capacity threshold."
 
   annotations = {
     summary     = "{{$labels.mountpoint}} on {{$labels.host_name}} at {{$value}} of capacity"
-    description = "Filesystem {{$labels.mountpoint}} on host {{$labels.host_name}} is over 70% full."
-  }
-
-  labels = {
-    severity = "warning"
-    team     = "platform"
-  }
-
-  condition = {
-    composite_query = {
-      panel_type = "table"
-      query_type = "builder"
-      unit       = "percentunit"
-
-      queries = [
-        {
-          builder_query = {
-            type = "builder_query"
-            spec = {
-              metrics = {
-                name   = "A"
-                signal = "metrics"
-
-                aggregations = [
-                  {
-                    metric_name       = "system.filesystem.utilization"
-                    time_aggregation  = "avg"
-                    space_aggregation = "max"
-                  },
-                ]
-                group_by = [
-                  {
-                    name            = "host.name"
-                    field_context   = "resource"
-                    field_data_type = "string"
-                  },
-                  {
-                    name            = "mountpoint"
-                    field_context   = "attribute"
-                    field_data_type = "string"
-                  },
-                ]
-                limit = 100
-                order = [
-                  {
-                    key = {
-                      name = "max(avg(system.filesystem.utilization))"
-                    }
-                    direction = "desc"
-                  },
-                ]
-              }
-            }
-          }
-        },
-      ]
-    }
-
-    selected_query_name = "A"
-
-    thresholds = {
-      basic = {
-        kind = "basic"
-        spec = [
-          {
-            channels   = local.alert_channels
-            match_type = "on_average"
-            name       = "warning"
-            op         = "above"
-            target     = 0.7
-          },
-        ]
-      }
-    }
-  }
-
-  evaluation = {
-    rolling = {
-      kind = "rolling"
-      spec = {
-        eval_window = "15m"
-        frequency   = "5m"
-      }
-    }
-  }
-
-  notification_settings = {
-    group_by   = ["mountpoint", "host.name"]
-    use_policy = local.use_policy
-  }
-
-  schema_version = "v2alpha1"
-}
-
-resource "signoz_rule" "host_disk_80_percent" {
-  alert      = "host_filesystem_80_percent"
-  alert_type = "METRIC_BASED_ALERT"
-  rule_type  = "threshold_rule"
-
-  description = "Host filesystem utilization exceeded 80% of capacity."
-
-  annotations = {
-    summary     = "{{$labels.mountpoint}} on {{$labels.host_name}} at {{$value}} of capacity"
-    description = "Filesystem {{$labels.mountpoint}} on host {{$labels.host_name}} is over 80% full."
+    description = "Filesystem {{$labels.mountpoint}} on host {{$labels.host_name}} crossed a configured capacity threshold."
   }
 
   labels = {
@@ -125,7 +22,7 @@ resource "signoz_rule" "host_disk_80_percent" {
 
   condition = {
     composite_query = {
-      panel_type = "table"
+      panel_type = "graph"
       query_type = "builder"
       unit       = "percentunit"
 
@@ -180,11 +77,28 @@ resource "signoz_rule" "host_disk_80_percent" {
         kind = "basic"
         spec = [
           {
-            channels   = local.alert_channels
-            match_type = "on_average"
-            name       = "critical"
-            op         = "above"
-            target     = 0.8
+            channels        = local.alert_channels
+            match_type      = "on_average"
+            name            = "warning"
+            op              = "above"
+            recovery_target = 0.65
+            target          = 0.7
+          },
+          {
+            channels        = local.alert_channels
+            match_type      = "on_average"
+            name            = "error"
+            op              = "above"
+            recovery_target = 0.75
+            target          = 0.8
+          },
+          {
+            channels        = local.alert_channels
+            match_type      = "on_average"
+            name            = "critical"
+            op              = "above"
+            recovery_target = 0.85
+            target          = 0.9
           },
         ]
       }
@@ -209,26 +123,26 @@ resource "signoz_rule" "host_disk_80_percent" {
   schema_version = "v2alpha1"
 }
 
-resource "signoz_rule" "host_disk_90_percent" {
-  alert      = "host_filesystem_90_percent"
+resource "signoz_rule" "host_memory_pressure" {
+  alert      = "host_memory_pressure"
   alert_type = "METRIC_BASED_ALERT"
   rule_type  = "threshold_rule"
 
-  description = "Host filesystem utilization exceeded 90% of capacity; immediate action required."
+  description = "Host used-memory utilization remained above a warning or critical threshold."
 
   annotations = {
-    summary     = "{{$labels.mountpoint}} on {{$labels.host_name}} at {{$value}} of capacity"
-    description = "Filesystem {{$labels.mountpoint}} on host {{$labels.host_name}} is over 90% full."
+    summary     = "Memory pressure on {{$labels.host_name}} is {{$value}}"
+    description = "Used memory on host {{$labels.host_name}} remained above the configured threshold."
   }
 
   labels = {
-    severity = "emergency"
+    severity = "critical"
     team     = "platform"
   }
 
   condition = {
     composite_query = {
-      panel_type = "table"
+      panel_type = "graph"
       query_type = "builder"
       unit       = "percentunit"
 
@@ -243,20 +157,18 @@ resource "signoz_rule" "host_disk_90_percent" {
 
                 aggregations = [
                   {
-                    metric_name       = "system.filesystem.utilization"
+                    metric_name       = "system.memory.utilization"
                     time_aggregation  = "avg"
                     space_aggregation = "max"
                   },
                 ]
+                filter = {
+                  expression = "state = 'used'"
+                }
                 group_by = [
                   {
                     name            = "host.name"
                     field_context   = "resource"
-                    field_data_type = "string"
-                  },
-                  {
-                    name            = "mountpoint"
-                    field_context   = "attribute"
                     field_data_type = "string"
                   },
                 ]
@@ -264,7 +176,7 @@ resource "signoz_rule" "host_disk_90_percent" {
                 order = [
                   {
                     key = {
-                      name = "max(avg(system.filesystem.utilization))"
+                      name = "max(avg(system.memory.utilization))"
                     }
                     direction = "desc"
                   },
@@ -283,11 +195,20 @@ resource "signoz_rule" "host_disk_90_percent" {
         kind = "basic"
         spec = [
           {
-            channels   = local.alert_channels
-            match_type = "on_average"
-            name       = "emergency"
-            op         = "above"
-            target     = 0.9
+            channels        = local.alert_channels
+            match_type      = "on_average"
+            name            = "warning"
+            op              = "above"
+            recovery_target = 0.80
+            target          = 0.85
+          },
+          {
+            channels        = local.alert_channels
+            match_type      = "on_average"
+            name            = "critical"
+            op              = "above"
+            recovery_target = 0.90
+            target          = 0.95
           },
         ]
       }
@@ -305,18 +226,127 @@ resource "signoz_rule" "host_disk_90_percent" {
   }
 
   notification_settings = {
-    group_by   = ["mountpoint", "host.name"]
+    group_by   = ["host.name"]
     use_policy = local.use_policy
   }
 
   schema_version = "v2alpha1"
 }
 
-# Absent-data alerts stand in for collector drops and endpoint liveness: the
-# collection agent does not export its own internal metrics anywhere outside
-# its container, so ingest-path failures surface as missing series. If any of
-# these fire, verify the collection agent container and signoz-ingester ports
-# before suspecting the workload itself.
+resource "signoz_rule" "container_memory_pressure" {
+  alert      = "container_memory_pressure"
+  alert_type = "METRIC_BASED_ALERT"
+  rule_type  = "threshold_rule"
+
+  description = "Container memory utilization remained above a warning or critical percentage of its limit."
+
+  annotations = {
+    summary     = "Memory pressure on {{$labels.container_name}} is {{$value}}"
+    description = "Container {{$labels.container_name}} remained above the configured memory-to-limit threshold."
+  }
+
+  labels = {
+    severity = "critical"
+    team     = "platform"
+  }
+
+  condition = {
+    composite_query = {
+      panel_type = "graph"
+      query_type = "builder"
+      unit       = "percent"
+
+      queries = [
+        {
+          builder_query = {
+            type = "builder_query"
+            spec = {
+              metrics = {
+                name   = "A"
+                signal = "metrics"
+
+                aggregations = [
+                  {
+                    metric_name       = "container.memory.percent"
+                    time_aggregation  = "avg"
+                    space_aggregation = "max"
+                  },
+                ]
+                filter = {
+                  expression = "container.name EXISTS"
+                }
+                group_by = [
+                  {
+                    name            = "container.name"
+                    field_context   = "resource"
+                    field_data_type = "string"
+                  },
+                ]
+                limit = 100
+                order = [
+                  {
+                    key = {
+                      name = "max(avg(container.memory.percent))"
+                    }
+                    direction = "desc"
+                  },
+                ]
+              }
+            }
+          }
+        },
+      ]
+    }
+
+    selected_query_name = "A"
+
+    thresholds = {
+      basic = {
+        kind = "basic"
+        spec = [
+          {
+            channels        = local.alert_channels
+            match_type      = "on_average"
+            name            = "warning"
+            op              = "above"
+            recovery_target = 80
+            target          = 85
+          },
+          {
+            channels        = local.alert_channels
+            match_type      = "on_average"
+            name            = "critical"
+            op              = "above"
+            recovery_target = 90
+            target          = 95
+          },
+        ]
+      }
+    }
+  }
+
+  evaluation = {
+    rolling = {
+      kind = "rolling"
+      spec = {
+        eval_window = "15m"
+        frequency   = "5m"
+      }
+    }
+  }
+
+  notification_settings = {
+    group_by   = ["container.name"]
+    use_policy = local.use_policy
+  }
+
+  schema_version = "v2alpha1"
+}
+
+# No-data alerts complement the collector's internal metrics. They catch a
+# complete collector or OTLP path outage, including the case where the
+# collector can no longer export its own self-observability. If one fires,
+# inspect the collection agent and SigNoz ingest path before the workload.
 
 resource "signoz_rule" "host_metrics_missing" {
   alert      = "host_metrics_missing"
@@ -340,7 +370,7 @@ resource "signoz_rule" "host_metrics_missing" {
     absent_for      = 15
 
     composite_query = {
-      panel_type = "table"
+      panel_type = "graph"
       query_type = "builder"
 
       queries = [
@@ -440,7 +470,7 @@ resource "signoz_rule" "metadata_postgres_metrics_missing" {
     absent_for      = 15
 
     composite_query = {
-      panel_type = "table"
+      panel_type = "graph"
       query_type = "builder"
 
       queries = [
@@ -510,16 +540,16 @@ resource "signoz_rule" "metadata_postgres_metrics_missing" {
   schema_version = "v2alpha1"
 }
 
-resource "signoz_rule" "airflow_scheduler_heartbeat_missing" {
-  alert      = "airflow_scheduler_heartbeat_missing"
+resource "signoz_rule" "airflow_scheduler_metrics_missing" {
+  alert      = "airflow_scheduler_metrics_missing"
   alert_type = "METRIC_BASED_ALERT"
   rule_type  = "threshold_rule"
 
-  description = "No Airflow scheduler heartbeat arrived for 5 minutes; the scheduler or its OTLP export is down."
+  description = "No Airflow scheduler loop metric arrived for 5 minutes; the scheduler or its OTLP export is down."
 
   annotations = {
-    summary     = "Airflow scheduler heartbeat stopped"
-    description = "airflow.scheduler_heartbeat has not reported for 5 minutes."
+    summary     = "Airflow scheduler metrics stopped"
+    description = "airflow.scheduler.scheduler_loop_duration.max has not reported for 5 minutes."
   }
 
   labels = {
@@ -532,7 +562,7 @@ resource "signoz_rule" "airflow_scheduler_heartbeat_missing" {
     absent_for      = 5
 
     composite_query = {
-      panel_type = "table"
+      panel_type = "graph"
       query_type = "builder"
 
       queries = [
@@ -546,16 +576,16 @@ resource "signoz_rule" "airflow_scheduler_heartbeat_missing" {
 
                 aggregations = [
                   {
-                    metric_name       = "airflow.scheduler_heartbeat"
-                    time_aggregation  = "rate"
-                    space_aggregation = "sum"
+                    metric_name       = "airflow.scheduler.scheduler_loop_duration.max"
+                    time_aggregation  = "max"
+                    space_aggregation = "max"
                   },
                 ]
                 limit = 100
                 order = [
                   {
                     key = {
-                      name = "sum(rate(airflow.scheduler_heartbeat))"
+                      name = "max(max(airflow.scheduler.scheduler_loop_duration.max))"
                     }
                     direction = "desc"
                   },
@@ -621,7 +651,7 @@ resource "signoz_rule" "metadata_backup_failed" {
 
   condition = {
     composite_query = {
-      panel_type = "table"
+      panel_type = "graph"
       query_type = "builder"
 
       queries = [
@@ -726,7 +756,7 @@ resource "signoz_rule" "metadata_backup_airflow_missing" {
 
   condition = {
     composite_query = {
-      panel_type = "table"
+      panel_type = "graph"
       query_type = "builder"
 
       queries = [
@@ -822,7 +852,7 @@ resource "signoz_rule" "metadata_backup_lightdash_missing" {
 
   condition = {
     composite_query = {
-      panel_type = "table"
+      panel_type = "graph"
       query_type = "builder"
 
       queries = [

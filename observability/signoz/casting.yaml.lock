@@ -332,6 +332,25 @@ spec:
         POSTGRES_USER: signoz
   patches:
   - operations:
+    - op: add
+      path: /profiles/default/memory_profiler_step
+      value: 0
+    - op: add
+      path: /profiles/default/query_profiler_cpu_time_period_ns
+      value: 0
+    - op: add
+      path: /profiles/default/query_profiler_real_time_period_ns
+      value: 0
+    - op: remove
+      path: /trace_log
+    - op: add
+      path: /merge_tree
+      value:
+        max_bytes_to_merge_at_max_space_in_pool: 268435456
+        max_parts_to_merge_at_once: 20
+        merge_max_block_size: 2048
+    target: deployment/telemetrystore/clickhouse/config-0-0.yaml
+  - operations:
     - op: test
       path: /services/signoz-signoz-0/ports/0
       value: 8080:8080

@@ -1,6 +1,6 @@
 # Metadata PostgreSQL dashboard: postgresql receiver signals from the
 # lakehouse_monitor role (observability/signoz/collector/config.yaml). Only the
-# receiver's default-enabled metrics are queried; db.namespace carries the
+# receiver's default-enabled metrics are queried; postgresql.database.name carries the
 # database name.
 
 resource "signoz_dashboard" "metadata_postgres" {
@@ -23,7 +23,7 @@ resource "signoz_dashboard" "metadata_postgres" {
 
   spec = {
     display = {
-      name        = "Metadata PostgreSQL"
+      name        = "Platform / PostgreSQL"
       description = "Connection, transaction, table size, and row-activity metrics for the shared metadata server."
     }
     links = []
@@ -34,7 +34,7 @@ resource "signoz_dashboard" "metadata_postgres" {
           spec = {
             display = {
               name        = "database"
-              description = "PostgreSQL database (db.namespace)"
+              description = "PostgreSQL database"
             }
             allow_all_value = true
             allow_multiple  = true
@@ -44,7 +44,7 @@ resource "signoz_dashboard" "metadata_postgres" {
               dynamic_variable = {
                 kind = "signoz/DynamicVariable"
                 spec = {
-                  name   = "db.namespace"
+                  name   = "postgresql.database.name"
                   signal = "metrics"
                 }
               }
@@ -53,12 +53,15 @@ resource "signoz_dashboard" "metadata_postgres" {
         }
       },
     ]
-    panels = {
+    panels = merge({
+      for id, panel in local.dashboard_metric_kpi_panels : id => panel
+      if local.dashboard_metric_kpis[id].dashboard == "postgres"
+      }, {
       "be7e7574-01d4-5e62-9670-2ee117ed1131" = {
         kind = "Panel"
         spec = {
           display = {
-            name        = "Backends"
+            name        = "Database backends"
             description = "Backend processes per database."
           }
           links = []
@@ -115,11 +118,11 @@ resource "signoz_dashboard" "metadata_postgres" {
                           },
                         ]
                         filter = {
-                          expression = "db.namespace IN $database"
+                          expression = "postgresql.database.name IN $database"
                         }
                         group_by = [
                           {
-                            name            = "db.namespace"
+                            name            = "postgresql.database.name"
                             field_context   = "resource"
                             field_data_type = "string"
                           },
@@ -127,7 +130,7 @@ resource "signoz_dashboard" "metadata_postgres" {
                         having = {
                           expression = ""
                         }
-                        legend = "{{db.namespace}}"
+                        legend = "{{postgresql.database.name}}"
                         limit  = 100
                         order = [
                           {
@@ -150,7 +153,7 @@ resource "signoz_dashboard" "metadata_postgres" {
         kind = "Panel"
         spec = {
           display = {
-            name        = "Transactions rate"
+            name        = "Transaction rate"
             description = "Commits and rollbacks per second per database."
           }
           links = []
@@ -212,11 +215,11 @@ resource "signoz_dashboard" "metadata_postgres" {
                                   },
                                 ]
                                 filter = {
-                                  expression = "db.namespace IN $database"
+                                  expression = "postgresql.database.name IN $database"
                                 }
                                 group_by = [
                                   {
-                                    name            = "db.namespace"
+                                    name            = "postgresql.database.name"
                                     field_context   = "resource"
                                     field_data_type = "string"
                                   },
@@ -224,7 +227,7 @@ resource "signoz_dashboard" "metadata_postgres" {
                                 having = {
                                   expression = ""
                                 }
-                                legend = "{{db.namespace}} commits"
+                                legend = "{{postgresql.database.name}} commits"
                                 limit  = 100
                                 order = [
                                   {
@@ -253,11 +256,11 @@ resource "signoz_dashboard" "metadata_postgres" {
                                   },
                                 ]
                                 filter = {
-                                  expression = "db.namespace IN $database"
+                                  expression = "postgresql.database.name IN $database"
                                 }
                                 group_by = [
                                   {
-                                    name            = "db.namespace"
+                                    name            = "postgresql.database.name"
                                     field_context   = "resource"
                                     field_data_type = "string"
                                   },
@@ -265,7 +268,7 @@ resource "signoz_dashboard" "metadata_postgres" {
                                 having = {
                                   expression = ""
                                 }
-                                legend = "{{db.namespace}} rollbacks"
+                                legend = "{{postgresql.database.name}} rollbacks"
                                 limit  = 100
                                 order = [
                                   {
@@ -349,11 +352,11 @@ resource "signoz_dashboard" "metadata_postgres" {
                           },
                         ]
                         filter = {
-                          expression = "db.namespace IN $database"
+                          expression = "postgresql.database.name IN $database"
                         }
                         group_by = [
                           {
-                            name            = "db.namespace"
+                            name            = "postgresql.database.name"
                             field_context   = "resource"
                             field_data_type = "string"
                           },
@@ -361,7 +364,7 @@ resource "signoz_dashboard" "metadata_postgres" {
                         having = {
                           expression = ""
                         }
-                        legend = "{{db.namespace}}"
+                        legend = "{{postgresql.database.name}}"
                         limit  = 100
                         order = [
                           {
@@ -441,7 +444,7 @@ resource "signoz_dashboard" "metadata_postgres" {
                           },
                         ]
                         filter = {
-                          expression = "db.namespace IN $database"
+                          expression = "postgresql.database.name IN $database"
                         }
                         group_by = [
                           {
@@ -476,7 +479,7 @@ resource "signoz_dashboard" "metadata_postgres" {
         kind = "Panel"
         spec = {
           display = {
-            name        = "Live vs dead rows"
+            name        = "Live and dead rows"
             description = "Row counts by state; a growing dead-tuple count signals vacuum lag."
           }
           links = []
@@ -533,7 +536,7 @@ resource "signoz_dashboard" "metadata_postgres" {
                           },
                         ]
                         filter = {
-                          expression = "db.namespace IN $database"
+                          expression = "postgresql.database.name IN $database"
                         }
                         group_by = [
                           {
@@ -564,14 +567,65 @@ resource "signoz_dashboard" "metadata_postgres" {
           ]
         }
       }
-    }
+    })
     layouts = [
       {
         grid = {
           kind = "Grid"
           spec = {
             display = {
-              title = "PostgreSQL"
+              title = "Key indicators"
+              collapse = {
+                open = true
+              }
+            }
+            items = [
+              {
+                x      = 0
+                y      = 0
+                width  = 3
+                height = 3
+                content = {
+                  ref = "#/spec/panels/6f5a4a96-9362-43a5-b833-2908dbc8b9a5"
+                }
+              },
+              {
+                x      = 3
+                y      = 0
+                width  = 3
+                height = 3
+                content = {
+                  ref = "#/spec/panels/630b6a99-cd80-428e-b9ea-69fce3db5e7b"
+                }
+              },
+              {
+                x      = 6
+                y      = 0
+                width  = 3
+                height = 3
+                content = {
+                  ref = "#/spec/panels/59de448c-857c-48eb-93ab-688134e834c8"
+                }
+              },
+              {
+                x      = 9
+                y      = 0
+                width  = 3
+                height = 3
+                content = {
+                  ref = "#/spec/panels/e96ec35d-c025-4c5b-9d5a-1b38f55add54"
+                }
+              },
+            ]
+          }
+        }
+      },
+      {
+        grid = {
+          kind = "Grid"
+          spec = {
+            display = {
+              title = "Activity and storage"
               collapse = {
                 open = true
               }

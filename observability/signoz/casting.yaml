@@ -24,6 +24,30 @@ spec:
     spec:
       image: clickhouse/clickhouse-keeper:25.12.5@sha256:525b8b0f93ccb371131c46f22a066ea43d33d74aba314203e8044609945d8524
   patches:
+    - target: "deployment/telemetrystore/clickhouse/config-0-0.yaml"
+      operations:
+        # SigNoz already observes this deployment. ClickHouse's allocation and
+        # query profilers only feed its internal system.trace_log and generated
+        # tens of millions of redundant rows under the previous log flood.
+        - op: add
+          path: /profiles/default/memory_profiler_step
+          value: 0
+        - op: add
+          path: /profiles/default/query_profiler_cpu_time_period_ns
+          value: 0
+        - op: add
+          path: /profiles/default/query_profiler_real_time_period_ns
+          value: 0
+        - op: remove
+          path: /trace_log
+        # Keep background compaction inside the 4 GiB container budget. These
+        # settings trade a little merge throughput for predictable memory use.
+        - op: add
+          path: /merge_tree
+          value:
+            max_parts_to_merge_at_once: 20
+            max_bytes_to_merge_at_max_space_in_pool: 268435456
+            merge_max_block_size: 2048
     - target: "deployment/compose.yaml"
       operations:
         - op: test

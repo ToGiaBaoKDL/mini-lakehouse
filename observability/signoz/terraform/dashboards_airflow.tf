@@ -31,18 +31,21 @@ resource "signoz_dashboard" "airflow" {
 
   spec = {
     display = {
-      name        = "Airflow"
-      description = "Scheduler heartbeat, task success/failure, DAG run durations, and pool slots from Airflow native OpenTelemetry metrics and traces."
+      name        = "Platform / Airflow"
+      description = "Scheduler loop latency, task success/failure, DAG run durations, and pool slots from Airflow native OpenTelemetry metrics and traces."
     }
     links     = []
     variables = []
-    panels = {
+    panels = merge({
+      for id, panel in local.dashboard_metric_kpi_panels : id => panel
+      if local.dashboard_metric_kpis[id].dashboard == "airflow"
+      }, {
       "d7862908-c2b0-5858-a228-a22c1d7e78c1" = {
         kind = "Panel"
         spec = {
           display = {
-            name        = "Scheduler heartbeats"
-            description = "Scheduler heartbeats per interval; a flat zero means the scheduler stopped reporting."
+            name        = "Scheduler loop duration p95"
+            description = "95th-percentile scheduler loop duration in milliseconds; missing data is covered by the scheduler metrics alert."
           }
           links = []
           plugin = {
@@ -54,7 +57,7 @@ resource "signoz_dashboard" "airflow" {
                   fill_spans      = false
                 }
                 formatting = {
-                  unit              = "short"
+                  unit              = "ms"
                   decimal_precision = "2"
                 }
                 chart_appearance = {
@@ -92,9 +95,9 @@ resource "signoz_dashboard" "airflow" {
                         signal = "metrics"
                         aggregations = [
                           {
-                            metric_name       = "airflow.scheduler_heartbeat"
-                            time_aggregation  = "increase"
-                            space_aggregation = "sum"
+                            metric_name       = "airflow.scheduler.scheduler_loop_duration.bucket"
+                            time_aggregation  = ""
+                            space_aggregation = "p95"
                           },
                         ]
                         filter = {
@@ -110,12 +113,12 @@ resource "signoz_dashboard" "airflow" {
                         having = {
                           expression = ""
                         }
-                        legend = "{{service.name}} heartbeats"
+                        legend = "{{service.name}} p95"
                         limit  = 100
                         order = [
                           {
                             key = {
-                              name = "sum(increase(airflow.scheduler_heartbeat))"
+                              name = "p95(airflow.scheduler.scheduler_loop_duration.bucket)"
                             }
                             direction = "desc"
                           },
@@ -133,8 +136,8 @@ resource "signoz_dashboard" "airflow" {
         kind = "Panel"
         spec = {
           display = {
-            name        = "Task outcome counts"
-            description = "Task instance successes and failures per interval (low-volume counter; per-interval counts avoid sub-unit rates)."
+            name        = "Task outcomes per interval"
+            description = "Task instance successes and failures in each chart interval; counts avoid misleading sub-unit rates for low-volume tasks."
           }
           links = []
           plugin = {
@@ -286,7 +289,7 @@ resource "signoz_dashboard" "airflow" {
         spec = {
           display = {
             name        = "Task duration p50/p95"
-            description = "Task duration quantiles in milliseconds, grouped by operation state."
+            description = "Task duration quantiles in milliseconds, grouped by DAG and task."
           }
           links = []
           plugin = {
@@ -341,8 +344,8 @@ resource "signoz_dashboard" "airflow" {
                                 signal = "metrics"
                                 aggregations = [
                                   {
-                                    metric_name       = "airflow.task.duration"
-                                    time_aggregation  = "avg"
+                                    metric_name       = "airflow.task.duration.bucket"
+                                    time_aggregation  = ""
                                     space_aggregation = "p50"
                                   },
                                 ]
@@ -369,7 +372,7 @@ resource "signoz_dashboard" "airflow" {
                                 order = [
                                   {
                                     key = {
-                                      name = "p50(avg(airflow.task.duration))"
+                                      name = "p50(airflow.task.duration.bucket)"
                                     }
                                     direction = "desc"
                                   },
@@ -387,8 +390,8 @@ resource "signoz_dashboard" "airflow" {
                                 signal = "metrics"
                                 aggregations = [
                                   {
-                                    metric_name       = "airflow.task.duration"
-                                    time_aggregation  = "avg"
+                                    metric_name       = "airflow.task.duration.bucket"
+                                    time_aggregation  = ""
                                     space_aggregation = "p95"
                                   },
                                 ]
@@ -415,7 +418,7 @@ resource "signoz_dashboard" "airflow" {
                                 order = [
                                   {
                                     key = {
-                                      name = "p95(avg(airflow.task.duration))"
+                                      name = "p95(airflow.task.duration.bucket)"
                                     }
                                     direction = "desc"
                                   },
@@ -437,8 +440,8 @@ resource "signoz_dashboard" "airflow" {
         kind = "Panel"
         spec = {
           display = {
-            name        = "DAG run duration by DAG"
-            description = "Successful DAG run durations in milliseconds, grouped by dag_id."
+            name        = "Successful DAG run duration p95"
+            description = "95th-percentile successful DAG run duration in milliseconds, grouped by dag_id."
           }
           links = []
           plugin = {
@@ -488,9 +491,9 @@ resource "signoz_dashboard" "airflow" {
                         signal = "metrics"
                         aggregations = [
                           {
-                            metric_name       = "airflow.dagrun.duration.success"
-                            time_aggregation  = "avg"
-                            space_aggregation = "avg"
+                            metric_name       = "airflow.dagrun.duration.success.bucket"
+                            time_aggregation  = ""
+                            space_aggregation = "p95"
                           },
                         ]
                         filter = {
@@ -511,7 +514,7 @@ resource "signoz_dashboard" "airflow" {
                         order = [
                           {
                             key = {
-                              name = "avg(avg(airflow.dagrun.duration.success))"
+                              name = "p95(airflow.dagrun.duration.success.bucket)"
                             }
                             direction = "desc"
                           },
@@ -529,8 +532,8 @@ resource "signoz_dashboard" "airflow" {
         kind = "Panel"
         spec = {
           display = {
-            name        = "DAG run failures"
-            description = "Failed DAG run count rate by dag_id."
+            name        = "Failed DAG run duration p95"
+            description = "95th-percentile failed DAG run duration in milliseconds, grouped by dag_id. Task failures are shown in Task outcomes per interval."
           }
           links = []
           plugin = {
@@ -542,7 +545,7 @@ resource "signoz_dashboard" "airflow" {
                   fill_spans      = false
                 }
                 formatting = {
-                  unit              = "ops"
+                  unit              = "ms"
                   decimal_precision = "2"
                 }
                 chart_appearance = {
@@ -580,9 +583,9 @@ resource "signoz_dashboard" "airflow" {
                         signal = "metrics"
                         aggregations = [
                           {
-                            metric_name       = "airflow.dagrun.duration.failed"
-                            time_aggregation  = "count"
-                            space_aggregation = "count"
+                            metric_name       = "airflow.dagrun.duration.failed.bucket"
+                            time_aggregation  = ""
+                            space_aggregation = "p95"
                           },
                         ]
                         filter = {
@@ -603,7 +606,7 @@ resource "signoz_dashboard" "airflow" {
                         order = [
                           {
                             key = {
-                              name = "count(count(airflow.dagrun.duration.failed))"
+                              name = "p95(airflow.dagrun.duration.failed.bucket)"
                             }
                             direction = "desc"
                           },
@@ -621,7 +624,7 @@ resource "signoz_dashboard" "airflow" {
         kind = "Panel"
         spec = {
           display = {
-            name        = "Running DAG runs"
+            name        = "Active DAG runs"
             description = "Scheduler-reported running DAG run count."
           }
           links = []
@@ -788,8 +791,8 @@ resource "signoz_dashboard" "airflow" {
         kind = "Panel"
         spec = {
           display = {
-            name        = "DAG schedule delay"
-            description = "Delay between scheduled execution time and actual start time in milliseconds, grouped by dag_id."
+            name        = "DAG schedule delay p95"
+            description = "95th-percentile delay between scheduled execution time and actual start time in milliseconds, grouped by dag_id."
           }
           links = []
           plugin = {
@@ -839,9 +842,9 @@ resource "signoz_dashboard" "airflow" {
                         signal = "metrics"
                         aggregations = [
                           {
-                            metric_name       = "airflow.dagrun.schedule_delay"
-                            time_aggregation  = "avg"
-                            space_aggregation = "avg"
+                            metric_name       = "airflow.dagrun.schedule_delay.bucket"
+                            time_aggregation  = ""
+                            space_aggregation = "p95"
                           },
                         ]
                         filter = {
@@ -862,7 +865,7 @@ resource "signoz_dashboard" "airflow" {
                         order = [
                           {
                             key = {
-                              name = "avg(avg(airflow.dagrun.schedule_delay))"
+                              name = "p95(airflow.dagrun.schedule_delay.bucket)"
                             }
                             direction = "desc"
                           },
@@ -1038,14 +1041,65 @@ resource "signoz_dashboard" "airflow" {
           ]
         }
       }
-    }
+    })
     layouts = [
       {
         grid = {
           kind = "Grid"
           spec = {
             display = {
-              title = "Overview and Concurrency"
+              title = "Key indicators"
+              collapse = {
+                open = true
+              }
+            }
+            items = [
+              {
+                x      = 0
+                y      = 0
+                width  = 3
+                height = 3
+                content = {
+                  ref = "#/spec/panels/0fe443a4-a61d-442b-b5cf-b05ee3f094da"
+                }
+              },
+              {
+                x      = 3
+                y      = 0
+                width  = 3
+                height = 3
+                content = {
+                  ref = "#/spec/panels/eb5f72d8-b12c-48e7-b7ce-22f776845ed5"
+                }
+              },
+              {
+                x      = 6
+                y      = 0
+                width  = 3
+                height = 3
+                content = {
+                  ref = "#/spec/panels/8c225e28-555b-45af-b293-c14686f0991f"
+                }
+              },
+              {
+                x      = 9
+                y      = 0
+                width  = 3
+                height = 3
+                content = {
+                  ref = "#/spec/panels/a95a470f-6179-4323-b66e-d302d0274ef7"
+                }
+              },
+            ]
+          }
+        }
+      },
+      {
+        grid = {
+          kind = "Grid"
+          spec = {
+            display = {
+              title = "Concurrency and outcomes"
               collapse = {
                 open = true
               }
@@ -1096,7 +1150,7 @@ resource "signoz_dashboard" "airflow" {
           kind = "Grid"
           spec = {
             display = {
-              title = "Duration and Latency"
+              title = "Duration and latency"
               collapse = {
                 open = true
               }

@@ -11,4 +11,11 @@ SELECT format('ALTER ROLE lakehouse_monitor WITH LOGIN CONNECTION LIMIT 12 PASSW
 REVOKE CONNECT ON DATABASE postgres FROM PUBLIC;
 GRANT CONNECT ON DATABASE postgres TO lakehouse_monitor;
 
+-- The receiver discovers and opens a bounded pool for every application
+-- database. Grant only CONNECT; pg_monitor supplies the read-only statistics
+-- privileges used by the scraper.
+SELECT format('GRANT CONNECT ON DATABASE %I TO lakehouse_monitor', datname)
+FROM pg_database
+WHERE datname IN ('airflow', 'lightdash') \gexec
+
 GRANT pg_monitor TO lakehouse_monitor;

@@ -25,7 +25,7 @@ resource "signoz_dashboard" "synthetic_probing" {
 
   spec = {
     display = {
-      name        = "Synthetic Probing"
+      name        = "Infrastructure / Synthetic checks"
       description = "Private application health and latency, plus public Cloudflare edge TLS certificate validity."
     }
     links = []
@@ -389,7 +389,7 @@ resource "signoz_dashboard" "synthetic_probing" {
                         aggregations = [
                           {
                             metric_name       = "httpcheck.duration"
-                            time_aggregation  = "avg"
+                            time_aggregation  = "max"
                             space_aggregation = "max"
                           },
                         ]
@@ -411,99 +411,7 @@ resource "signoz_dashboard" "synthetic_probing" {
                         order = [
                           {
                             key = {
-                              name = "max(avg(httpcheck.duration))"
-                            }
-                            direction = "desc"
-                          },
-                        ]
-                      }
-                    }
-                  }
-                }
-              }
-            },
-          ]
-        }
-      }
-      "a1100001-0001-4000-8000-000000000005" = {
-        kind = "Panel"
-        spec = {
-          display = {
-            name        = "Probe error rate"
-            description = "Rate of probe failures per second across endpoints."
-          }
-          links = []
-          plugin = {
-            time_series_panel = {
-              kind = "signoz/TimeSeriesPanel"
-              spec = {
-                visualization = {
-                  time_preference = "global_time"
-                  fill_spans      = false
-                }
-                formatting = {
-                  unit              = "ops"
-                  decimal_precision = "2"
-                }
-                chart_appearance = {
-                  line_interpolation = "spline"
-                  show_points        = true
-                  line_style         = "solid"
-                  fill_mode          = "none"
-                  span_gaps = {
-                    fill_only_below = false
-                    fill_less_than  = "0s"
-                  }
-                }
-                axes = {
-                  soft_min     = 0
-                  is_log_scale = false
-                }
-                legend = {
-                  position = "bottom"
-                  mode     = "list"
-                }
-              }
-            }
-          }
-          queries = [
-            {
-              kind = "time_series"
-              spec = {
-                name = "A"
-                plugin = {
-                  builder_query = {
-                    kind = "signoz/BuilderQuery"
-                    spec = {
-                      metrics = {
-                        name   = "A"
-                        signal = "metrics"
-                        aggregations = [
-                          {
-                            metric_name       = "httpcheck.error"
-                            time_aggregation  = "rate"
-                            space_aggregation = "sum"
-                          },
-                        ]
-                        filter = {
-                          expression = "http.url IN $http_url"
-                        }
-                        group_by = [
-                          {
-                            name            = "http.url"
-                            field_context   = "attribute"
-                            field_data_type = "string"
-                          },
-                        ]
-                        having = {
-                          expression = ""
-                        }
-                        legend = "{{http.url}} error rate"
-                        limit  = 100
-                        order = [
-                          {
-                            key = {
-                              name = "sum(rate(httpcheck.error))"
+                              name = "max(max(httpcheck.duration))"
                             }
                             direction = "desc"
                           },
@@ -521,8 +429,8 @@ resource "signoz_dashboard" "synthetic_probing" {
         kind = "Panel"
         spec = {
           display = {
-            name        = "Cumulative probe failures"
-            description = "Total count of failed synthetic probe attempts per endpoint."
+            name        = "Probe failures per interval"
+            description = "Failed synthetic probe attempts in each chart interval, grouped by endpoint."
           }
           links = []
           plugin = {
@@ -616,7 +524,7 @@ resource "signoz_dashboard" "synthetic_probing" {
           kind = "Grid"
           spec = {
             display = {
-              title = "Availability & SSL Certificate Health"
+              title = "Availability and TLS"
               collapse = {
                 open = true
               }
@@ -649,7 +557,7 @@ resource "signoz_dashboard" "synthetic_probing" {
           kind = "Grid"
           spec = {
             display = {
-              title = "Latency & Response Performance"
+              title = "Latency and response performance"
               collapse = {
                 open = true
               }
@@ -657,7 +565,7 @@ resource "signoz_dashboard" "synthetic_probing" {
             items = [
               {
                 x      = 0
-                y      = 6
+                y      = 0
                 width  = 6
                 height = 6
                 content = {
@@ -666,7 +574,7 @@ resource "signoz_dashboard" "synthetic_probing" {
               },
               {
                 x      = 6
-                y      = 6
+                y      = 0
                 width  = 6
                 height = 6
                 content = {
@@ -682,7 +590,7 @@ resource "signoz_dashboard" "synthetic_probing" {
           kind = "Grid"
           spec = {
             display = {
-              title = "Probe Errors & Failure Diagnostics"
+              title = "Probe failures"
               collapse = {
                 open = true
               }
@@ -690,17 +598,8 @@ resource "signoz_dashboard" "synthetic_probing" {
             items = [
               {
                 x      = 0
-                y      = 12
-                width  = 6
-                height = 6
-                content = {
-                  ref = "#/spec/panels/a1100001-0001-4000-8000-000000000005"
-                }
-              },
-              {
-                x      = 6
-                y      = 12
-                width  = 6
+                y      = 0
+                width  = 12
                 height = 6
                 content = {
                   ref = "#/spec/panels/a1100001-0001-4000-8000-000000000006"

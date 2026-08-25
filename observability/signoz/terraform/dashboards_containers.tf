@@ -23,7 +23,7 @@ resource "signoz_dashboard" "containers_overview" {
 
   spec = {
     display = {
-      name        = "Containers Overview"
+      name        = "Infrastructure / Containers"
       description = "Per-container CPU, memory, and network from the docker_stats receiver, grouped by compose service."
     }
     links = []
@@ -77,13 +77,16 @@ resource "signoz_dashboard" "containers_overview" {
         }
       },
     ]
-    panels = {
+    panels = merge({
+      for id, panel in local.dashboard_metric_kpi_panels : id => panel
+      if local.dashboard_metric_kpis[id].dashboard == "containers"
+      }, {
       "9ab29977-a7de-5b60-a645-cb1fc7c41a3d" = {
         kind = "Panel"
         spec = {
           display = {
-            name        = "CPU usage by compose service"
-            description = "Sum of container CPU utilization ratios per compose service; values may exceed 100% across cores."
+            name        = "CPU cores by compose service"
+            description = "CPU cores used across containers in each Compose service; a value of 2 means two logical cores."
           }
           links = []
           plugin = {
@@ -95,7 +98,7 @@ resource "signoz_dashboard" "containers_overview" {
                   fill_spans      = false
                 }
                 formatting = {
-                  unit              = "percentunit"
+                  unit              = "short"
                   decimal_precision = "2"
                 }
                 chart_appearance = {
@@ -266,8 +269,8 @@ resource "signoz_dashboard" "containers_overview" {
         kind = "Panel"
         spec = {
           display = {
-            name        = "CPU usage by container"
-            description = "Per-container CPU utilization ratio; values may exceed 100% across cores."
+            name        = "CPU cores by container"
+            description = "CPU cores used by each container; a value of 1 means one logical core."
           }
           links = []
           plugin = {
@@ -279,7 +282,7 @@ resource "signoz_dashboard" "containers_overview" {
                   fill_spans      = false
                 }
                 formatting = {
-                  unit              = "percentunit"
+                  unit              = "short"
                   decimal_precision = "2"
                 }
                 chart_appearance = {
@@ -450,7 +453,7 @@ resource "signoz_dashboard" "containers_overview" {
         kind = "Panel"
         spec = {
           display = {
-            name        = "Network IO by container"
+            name        = "Network I/O by container"
             description = "Receive/transmit byte rate per container."
           }
           links = []
@@ -588,8 +591,50 @@ resource "signoz_dashboard" "containers_overview" {
           ]
         }
       }
-    }
+    })
     layouts = [
+      {
+        grid = {
+          kind = "Grid"
+          spec = {
+            display = {
+              title = "Key indicators"
+              collapse = {
+                open = true
+              }
+            }
+            items = [
+              {
+                x      = 0
+                y      = 0
+                width  = 4
+                height = 3
+                content = {
+                  ref = "#/spec/panels/a08e8dc8-efde-4dbb-a237-c484adf6cce5"
+                }
+              },
+              {
+                x      = 4
+                y      = 0
+                width  = 4
+                height = 3
+                content = {
+                  ref = "#/spec/panels/2940fec6-f705-41d4-b65b-9631144f6f26"
+                }
+              },
+              {
+                x      = 8
+                y      = 0
+                width  = 4
+                height = 3
+                content = {
+                  ref = "#/spec/panels/61ee482c-72cd-427f-82c8-9a81a3fe4df9"
+                }
+              },
+            ]
+          }
+        }
+      },
       {
         grid = {
           kind = "Grid"

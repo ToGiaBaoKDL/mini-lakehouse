@@ -82,6 +82,8 @@ Signals collected:
   load, filesystem, disk IO, paging, network, process counts.
 - `docker_stats` via the read-only Docker socket, with compose project/service labels promoted to
   metric attributes.
+- The collection agent's own Prometheus telemetry (`otelcol_*`), including receiver failures,
+  exporter queue pressure, sent points, process memory, and uptime.
 - `postgresql` metrics for the shared metadata server through a login role granted only the
   built-in `pg_monitor` privilege. The receiver uses its beta per-database connection pool
   (`max_open=4`); the role-wide connection limit is 12 for the three monitored databases.
@@ -98,11 +100,10 @@ Signals collected:
   latter intentionally ignore HTTP status because Cloudflare Access redirects unauthenticated
   requests to its login flow.
 
-Log policy: structured DEBUG/INFO records are dropped before export; Airflow emits JSON at INFO and
-its container receiver promotes the JSON level to OpenTelemetry severity before that filter. Legacy
-records without a severity remain eligible because discarding them would be guesswork. Other
-long-lived Docker services emit warning-or-higher at their source. Redaction strips bearer tokens, basic-auth
-connection strings, AWS key IDs, and common
+Log policy: workloads keep their normal local log level, including INFO. The collector normalizes
+Airflow JSON and PostgreSQL plaintext levels to OpenTelemetry severity, then exports only WARN and
+higher. Legacy records without a parseable severity remain eligible because discarding them would
+be guesswork. Redaction strips bearer tokens, basic-auth connection strings, AWS key IDs, and common
 `password|token|secret|api_key|cookie|authorization` pairings before export. The same redaction
 rules apply to span attribute values (e.g. botocore auto-instrumentation signed URLs redact the
 SigV4 `x-amz-credential`/`x-amz-signature`/`x-amz-security-token` query parameters). Docker's
@@ -114,9 +115,10 @@ Durability: container-log and backup-audit file positions are checkpointed throu
 `file_storage` extension into the named `collection-agent-file-storage` volume, so restarts and
 redeploys resume where they stopped instead of skipping the backlog with `start_at: end`.
 
-Liveness: the `health_check` extension answers `GET /` on host loopback port `13133`, and the
-container healthcheck invokes the distroless binary's `validate` subcommand (the contrib image
-ships no shell or curl), so the SigNoz stack and Docker both detect a wedged collector.
+Liveness: the `health_check` extension answers `GET /` on host loopback port `13133`, the container
+healthcheck invokes the distroless binary's `validate` subcommand, and the collector scrapes its own
+port `8888`. This exposes queue/export failures while absent-data rules still catch a total collector
+or OTLP-path outage.
 
 ## Dashboards and alerts as code
 
@@ -128,17 +130,19 @@ layout:
 | File | Content |
 |---|---|
 | `versions.tf`, `backend.tf` | Provider pin and the shared versioned S3 backend (`lakehouse/signoz/dev/terraform.tfstate`) |
-| `dashboards_host.tf` | Host Overview: CPU, memory, load, filesystem, disk and network IO |
-| `dashboards_containers.tf` | Containers Overview: CPU/memory/network per compose service and per container |
-| `dashboards_airflow.tf` | Airflow: scheduler heartbeat, task outcomes, DAG durations, pool state, recent traces |
-| `dashboards_postgres.tf` | Metadata PostgreSQL: backends, commits/rollbacks, size, row operations |
-| `dashboards_backup.tf` | Metadata backup status parsed from the backup audit JSON lines |
-| `alerts.tf` | Disk 70/80/90%, absent-metric rules for ingest liveness, origin/TLS probes, backup failed/missing |
+| `dashboard_components.tf` | Shared, reviewable KPI definitions and Number-panel construction |
+| `dashboards_host.tf` | `Infrastructure / Host`: CPU, memory, load, filesystem, disk and network IO |
+| `dashboards_containers.tf` | `Infrastructure / Containers`: CPU, memory and network by Compose service/container |
+| `dashboards_synthetic.tf` | `Infrastructure / Synthetic checks`: origin health/latency and public TLS validity |
+| `dashboards_airflow.tf` | `Platform / Airflow`: scheduler, executor, DAG/task duration and recent traces |
+| `dashboards_postgres.tf` | `Platform / PostgreSQL`: capacity, backends, transactions, size and row activity |
+| `alerts.tf` | Tiered resource pressure, ingest liveness, synthetic probes, and backup failed/missing rules |
 
-Panel and rule queries use the builder query language over the exact metric names emitted by the
-collection agent (`system.*`, `container.*`, `postgresql.*`, `airflow.*`) and the parsed fields of
-the backup audit log, identified by the stable resource attribute
-`service.name=lakehouse-metadata-backup` rather than a filename.
+Dashboard names follow `<domain> / <system>`. Each dashboard begins with a compact `Key indicators`
+row. Panel and rule queries use the builder query language over the exact metric names emitted by
+the collection agent (`system.*`, `container.*`, `postgresql.*`, `airflow.*`, `otelcol_*`). Backup
+status stays alert-only: audit JSON is identified by the stable resource attribute
+`service.name=lakehouse-metadata-backup`, without maintaining a low-value status dashboard.
 
 Applying requires a SigNoz service-account API key stored in AWS Secrets Manager
 (`lakehouse/dev/signoz/ci`) or exported as `SIGNOZ_ACCESS_TOKEN` (create one in

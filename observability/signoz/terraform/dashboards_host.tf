@@ -22,7 +22,7 @@ resource "signoz_dashboard" "host_overview" {
 
   spec = {
     display = {
-      name        = "Host Overview"
+      name        = "Infrastructure / Host"
       description = "Host CPU, memory, load, filesystem, disk and network from the hostmetrics receiver."
     }
     links = []
@@ -52,12 +52,15 @@ resource "signoz_dashboard" "host_overview" {
         }
       },
     ]
-    panels = {
+    panels = merge({
+      for id, panel in local.dashboard_metric_kpi_panels : id => panel
+      if local.dashboard_metric_kpis[id].dashboard == "host"
+      }, {
       "f1014990-91b4-543a-ab60-99ddd4772ef8" = {
         kind = "Panel"
         spec = {
           display = {
-            name        = "CPU utilization"
+            name        = "CPU utilization by state"
             description = "Active CPU utilization by non-idle state, averaged across logical CPUs per host."
           }
           links = []
@@ -435,7 +438,7 @@ resource "signoz_dashboard" "host_overview" {
         spec = {
           display = {
             name        = "Filesystem utilization"
-            description = "Filesystem utilization by mountpoint; alerts fire at 70/80/90%."
+            description = "Filesystem utilization by mountpoint; warning, error, and critical thresholds are 70%, 80%, and 90%."
           }
           links = []
           plugin = {
@@ -531,7 +534,7 @@ resource "signoz_dashboard" "host_overview" {
         kind = "Panel"
         spec = {
           display = {
-            name        = "Disk IO"
+            name        = "Disk I/O"
             description = "Disk IO rate (bytes/s) by device and direction."
           }
           links = []
@@ -633,7 +636,7 @@ resource "signoz_dashboard" "host_overview" {
         kind = "Panel"
         spec = {
           display = {
-            name        = "Network IO"
+            name        = "Network I/O"
             description = "Network receive/transmit rate (bytes/s) by device."
           }
           links = []
@@ -731,14 +734,65 @@ resource "signoz_dashboard" "host_overview" {
           ]
         }
       }
-    }
+    })
     layouts = [
       {
         grid = {
           kind = "Grid"
           spec = {
             display = {
-              title = "Overview"
+              title = "Key indicators"
+              collapse = {
+                open = true
+              }
+            }
+            items = [
+              {
+                x      = 0
+                y      = 0
+                width  = 3
+                height = 3
+                content = {
+                  ref = "#/spec/panels/c0ac575a-c5be-4392-9d53-2c78f7315159"
+                }
+              },
+              {
+                x      = 3
+                y      = 0
+                width  = 3
+                height = 3
+                content = {
+                  ref = "#/spec/panels/e51bca2f-9a00-4807-97c4-f2bec18670a6"
+                }
+              },
+              {
+                x      = 6
+                y      = 0
+                width  = 3
+                height = 3
+                content = {
+                  ref = "#/spec/panels/d81ef4a1-1694-48c5-b111-fa706334d883"
+                }
+              },
+              {
+                x      = 9
+                y      = 0
+                width  = 3
+                height = 3
+                content = {
+                  ref = "#/spec/panels/f1017d6a-35a4-4220-9bf2-0e65a907114d"
+                }
+              },
+            ]
+          }
+        }
+      },
+      {
+        grid = {
+          kind = "Grid"
+          spec = {
+            display = {
+              title = "Resource utilization"
               collapse = {
                 open = true
               }
@@ -789,7 +843,7 @@ resource "signoz_dashboard" "host_overview" {
           kind = "Grid"
           spec = {
             display = {
-              title = "Saturation"
+              title = "Saturation and I/O"
               collapse = {
                 open = true
               }

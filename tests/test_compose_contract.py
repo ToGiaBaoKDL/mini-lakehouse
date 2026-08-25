@@ -308,12 +308,53 @@ def test_collector_drops_structured_airflow_info_after_parsing_json_level() -> N
         operator for operator in operators if operator.get("id") == "parse_airflow_json"
     )
 
-    assert airflow_parser["if"] == 'resource["container.name"] matches "(?i)^airflow-"'
+    # Receiver-created resource attributes are attached after Stanza operators
+    # execute, so the parser uses Airflow's stable JSON envelope as its guard.
+    assert airflow_parser["if"].startswith('body matches "^\\\\{')
+    assert "timestamp" in airflow_parser["if"]
+    assert "level" in airflow_parser["if"]
     assert airflow_parser["parse_to"] == "attributes.airflow"
     assert airflow_parser["severity"]["parse_from"] == "attributes.airflow.level"
     assert collector["processors"]["filter/drop_low_severity"]["logs"]["log_record"] == [
         "severity_number != SEVERITY_NUMBER_UNSPECIFIED and severity_number < SEVERITY_NUMBER_WARN"
     ]
+
+
+def test_collector_observes_itself_and_scopes_postgres_severity_parsing() -> None:
+    collector = yaml.safe_load(
+        Path("observability/signoz/collector/config.yaml").read_text(encoding="utf-8")
+    )
+
+    scrape = collector["receivers"]["prometheus/collector"]["config"]["scrape_configs"][0]
+    assert scrape["job_name"] == "signoz-collection-agent"
+    assert scrape["static_configs"] == [{"targets": ["127.0.0.1:8888"]}]
+    assert (
+        "prometheus/collector"
+        in collector["service"]["pipelines"]["metrics/infrastructure"]["receivers"]
+    )
+
+    statements = collector["processors"]["transform/log_normalize"]["log_statements"][0][
+        "statements"
+    ]
+    severity_statements = [
+        statement for statement in statements if statement.startswith("set(severity_number,")
+    ]
+    assert severity_statements
+    assert all("^metadata-postgres-" in statement for statement in severity_statements)
+
+
+def test_airflow_metric_allowlist_keeps_operational_health_signals() -> None:
+    airflow = _compose(AIRFLOW_COMPOSE)
+    allowlist = airflow["x-airflow-common"]["environment"]["AIRFLOW__METRICS__METRICS_ALLOW_LIST"]
+
+    for family in (
+        "critical_section_duration",
+        "dag_processor_heartbeat",
+        "tasks\\.(executable|starving)",
+        "queued_duration",
+        "pool\\.",
+    ):
+        assert family in allowlist
 
 
 def test_local_runtime_does_not_use_dotenv_files() -> None:

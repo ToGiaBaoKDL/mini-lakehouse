@@ -11,6 +11,9 @@ extensions:
     endpoint: unix:///var/run/docker.sock
     timeout: 5s
     cache_sync_interval: 60m
+    # Multi-network containers can otherwise alternate between network IPs,
+    # recreating file receivers and ingesting the same Docker log repeatedly.
+    use_hostname_if_present: true
     # Emit one stable, port-less endpoint per container. Without this the
     # observer creates an endpoint per exposed port/network and repeatedly
     # tears down file receivers for multi-network Compose containers.
@@ -24,7 +27,7 @@ receivers:
       http:
         endpoint: 0.0.0.0:4318
 
-  hostmetrics:
+  host_metrics:
     collection_interval: 30s
     root_path: /hostfs
     scrapers:
@@ -71,7 +74,10 @@ receivers:
             - sysfs
             - tracefs
       load: {}
-      memory: {}
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
       network: {}
       paging: {}
       processes: {}
@@ -82,6 +88,16 @@ receivers:
     container_labels_to_metric_labels:
       com.docker.compose.project: lakehouse.compose.project
       com.docker.compose.service: lakehouse.compose.service
+
+  # Scrape the agent's own internal telemetry so exporter failures, queue
+  # pressure, and dropped data are observable instead of inferred indirectly.
+  prometheus/collector:
+    config:
+      scrape_configs:
+        - job_name: signoz-collection-agent
+          scrape_interval: 30s
+          static_configs:
+            - targets: ["127.0.0.1:8888"]
 
   receiver_creator/docker:
     watch_observers: [docker_observer]
@@ -103,12 +119,13 @@ receivers:
             - type: container
               format: docker
               add_metadata_from_filepath: false
-            # Airflow 3.3 emits one JSON object per line. Parse only its level
-            # into OTLP severity, then discard the temporary parsed object so
-            # high-cardinality event fields do not become log attributes.
+            # Airflow 3.3 emits one JSON object per line. Receiver-created
+            # resource attributes are added after these operators run, so this
+            # parser must not be conditional on resource.container.name.
+            # The body-based guard leaves non-Airflow/plaintext records alone.
             - type: json_parser
               id: parse_airflow_json
-              if: 'resource["container.name"] matches "(?i)^airflow-"'
+              if: 'body matches "^\\{\\\"timestamp\\\":\\\".*\\\",\\\"level\\\":\\\""'
               parse_from: body
               parse_to: attributes.airflow
               on_error: send
@@ -140,6 +157,33 @@ receivers:
     password: "${env:PG_MONITOR_PASSWORD}"
     transport: tcp
     collection_interval: 30s
+    # Keep a lean production baseline. Connection capacity and checkpoint
+    # pressure remain enabled; table/index inventory and replica-only metrics
+    # are disabled because they are high-volume or inapplicable on this
+    # single-primary metadata server.
+    metrics:
+      postgresql.bgwriter.buffers.allocated:
+        enabled: false
+      postgresql.blocks_read:
+        enabled: false
+      postgresql.database.count:
+        enabled: false
+      postgresql.index.scans:
+        enabled: false
+      postgresql.index.size:
+        enabled: false
+      postgresql.replication.data_delay:
+        enabled: false
+      postgresql.table.count:
+        enabled: false
+      postgresql.table.size:
+        enabled: false
+      postgresql.table.vacuum.count:
+        enabled: false
+      postgresql.wal.age:
+        enabled: false
+      postgresql.wal.lag:
+        enabled: false
     # The beta connection-pool feature bounds each database pool and reuses
     # sessions instead of opening a burst of connections on every scrape.
     connection_pool:
@@ -208,9 +252,42 @@ processors:
     limit_mib: 400
     spike_limit_mib: 64
 
-  # Preserve legacy/plaintext records with unspecified severity, while
-  # dropping structured DEBUG/INFO records before export. Airflow container
-  # JSON levels are promoted to OTLP severity by its filelog receiver above.
+  # Normalize container identity and PostgreSQL's plaintext severities before
+  # filtering. Docker keeps INFO locally; only WARN+ leaves the collector.
+  transform/log_normalize:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          - set(resource.attributes["service.name"], "airflow")
+            where IsMatch(resource.attributes["container.name"], "^airflow-")
+          - set(resource.attributes["service.name"], "lightdash")
+            where IsMatch(resource.attributes["container.name"], "^lightdash-")
+          - set(resource.attributes["service.name"], "arxiv-inspector")
+            where IsMatch(resource.attributes["container.name"], "^arxiv-inspector-")
+          - set(resource.attributes["service.name"], "metadata-postgres")
+            where IsMatch(resource.attributes["container.name"], "^metadata-postgres-")
+          - set(resource.attributes["service.name"], "cloudflare-connector")
+            where IsMatch(resource.attributes["container.name"], "^cloudflare-")
+          - set(severity_number, SEVERITY_NUMBER_INFO)
+            where IsMatch(resource.attributes["container.name"], "^metadata-postgres-") and IsMatch(body, "^[0-9-]+ [0-9:.]+ [A-Z]+ \\[[0-9]+\\] (DEBUG|INFO|NOTICE|LOG):")
+          - set(severity_text, "INFO")
+            where severity_number == SEVERITY_NUMBER_INFO and IsMatch(resource.attributes["container.name"], "^metadata-postgres-")
+          - set(severity_number, SEVERITY_NUMBER_WARN)
+            where IsMatch(resource.attributes["container.name"], "^metadata-postgres-") and IsMatch(body, "^[0-9-]+ [0-9:.]+ [A-Z]+ \\[[0-9]+\\] WARNING:")
+          - set(severity_text, "WARN")
+            where severity_number == SEVERITY_NUMBER_WARN and IsMatch(resource.attributes["container.name"], "^metadata-postgres-")
+          - set(severity_number, SEVERITY_NUMBER_ERROR)
+            where IsMatch(resource.attributes["container.name"], "^metadata-postgres-") and IsMatch(body, "^[0-9-]+ [0-9:.]+ [A-Z]+ \\[[0-9]+\\] ERROR:")
+          - set(severity_text, "ERROR")
+            where severity_number == SEVERITY_NUMBER_ERROR and IsMatch(resource.attributes["container.name"], "^metadata-postgres-")
+          - set(severity_number, SEVERITY_NUMBER_FATAL)
+            where IsMatch(resource.attributes["container.name"], "^metadata-postgres-") and IsMatch(body, "^[0-9-]+ [0-9:.]+ [A-Z]+ \\[[0-9]+\\] (FATAL|PANIC):")
+          - set(severity_text, "FATAL")
+            where severity_number == SEVERITY_NUMBER_FATAL and IsMatch(resource.attributes["container.name"], "^metadata-postgres-")
+
+  # Preserve other legacy/plaintext records with unspecified severity while
+  # dropping parsed DEBUG/INFO records before export.
   filter/drop_low_severity:
     error_mode: ignore
     logs:
@@ -243,6 +320,14 @@ processors:
   transform/airflow_metrics:
     error_mode: ignore
     metric_statements:
+      # Airflow 3.3 emits timing metrics as exponential histograms, while the
+      # SigNoz metrics path currently indexes explicit histograms reliably.
+      # Convert at the collection boundary with millisecond buckets spanning
+      # short scheduler work through day-long DAG/task runs.
+      - context: metric
+        statements:
+          - convert_exponential_histogram_to_histogram("midpoint", [0.0, 10.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0, 10000.0, 30000.0, 60000.0, 300000.0, 900000.0, 1800000.0, 3600000.0, 10800000.0, 21600000.0, 43200000.0, 86400000.0])
+            where IsMatch(metric.name, "^airflow\\..*$$")
       - context: datapoint
         statements:
           - merge_maps(attributes, ExtractPatterns(metric.name, "^airflow\\.dagrun\\.duration\\.success\\.(?P<dag_id>.*)$$"), "insert")
@@ -276,8 +361,16 @@ processors:
     send_batch_max_size: 2048
     timeout: 10s
 
+  # Keep application histogram conversion and batching isolated from the
+  # infrastructure scrapers. A malformed application metric can therefore
+  # never block host, container, PostgreSQL, or synthetic telemetry.
+  batch/airflow_metrics:
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+    timeout: 10s
+
 exporters:
-  otlp/signoz:
+  otlp_grpc/signoz:
     endpoint: signoz-ingester:4317
     compression: gzip
     timeout: 15s
@@ -305,12 +398,16 @@ service:
     traces:
       receivers: [otlp]
       processors: [memory_limiter, transform/redact, resource_detection, batch]
-      exporters: [otlp/signoz]
-    metrics:
-      receivers: [otlp, hostmetrics, docker_stats, postgresql, http_check/services, http_check/public_tls]
-      processors: [memory_limiter, transform/airflow_metrics, resource_detection, batch]
-      exporters: [otlp/signoz]
+      exporters: [otlp_grpc/signoz]
+    metrics/airflow:
+      receivers: [otlp]
+      processors: [memory_limiter, transform/airflow_metrics, resource_detection, batch/airflow_metrics]
+      exporters: [otlp_grpc/signoz]
+    metrics/infrastructure:
+      receivers: [host_metrics, docker_stats, prometheus/collector, postgresql, http_check/services, http_check/public_tls]
+      processors: [memory_limiter, resource_detection, batch]
+      exporters: [otlp_grpc/signoz]
     logs:
       receivers: [otlp, receiver_creator/docker, file_log/lakehouse_audit]
-      processors: [memory_limiter, filter/drop_low_severity, transform/redact, resource_detection, batch]
-      exporters: [otlp/signoz]
+      processors: [memory_limiter, transform/log_normalize, transform/redact, filter/drop_low_severity, resource_detection, batch]
+      exporters: [otlp_grpc/signoz]
