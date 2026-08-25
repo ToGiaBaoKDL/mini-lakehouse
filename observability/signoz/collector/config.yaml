@@ -328,27 +328,6 @@ processors:
         statements:
           - convert_exponential_histogram_to_histogram("midpoint", [0.0, 10.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0, 10000.0, 30000.0, 60000.0, 300000.0, 900000.0, 1800000.0, 3600000.0, 10800000.0, 21600000.0, 43200000.0, 86400000.0])
             where IsMatch(metric.name, "^airflow\\..*$$")
-      - context: datapoint
-        statements:
-          - merge_maps(attributes, ExtractPatterns(metric.name, "^airflow\\.dagrun\\.duration\\.success\\.(?P<dag_id>.*)$$"), "insert")
-            where IsMatch(metric.name, "^airflow\\.dagrun\\.duration\\.success\\..*$$")
-          - replace_pattern(metric.name, "^airflow\\.dagrun\\.duration\\.success\\..*$$", "airflow.dagrun.duration.success")
-            where IsMatch(metric.name, "^airflow\\.dagrun\\.duration\\.success\\..*$$")
-
-          - merge_maps(attributes, ExtractPatterns(metric.name, "^airflow\\.dagrun\\.duration\\.failed\\.(?P<dag_id>.*)$$"), "insert")
-            where IsMatch(metric.name, "^airflow\\.dagrun\\.duration\\.failed\\..*$$")
-          - replace_pattern(metric.name, "^airflow\\.dagrun\\.duration\\.failed\\..*$$", "airflow.dagrun.duration.failed")
-            where IsMatch(metric.name, "^airflow\\.dagrun\\.duration\\.failed\\..*$$")
-
-          - merge_maps(attributes, ExtractPatterns(metric.name, "^airflow\\.dagrun\\.schedule_delay\\.(?P<dag_id>.*)$$"), "insert")
-            where IsMatch(metric.name, "^airflow\\.dagrun\\.schedule_delay\\..*$$")
-          - replace_pattern(metric.name, "^airflow\\.dagrun\\.schedule_delay\\..*$$", "airflow.dagrun.schedule_delay")
-            where IsMatch(metric.name, "^airflow\\.dagrun\\.schedule_delay\\..*$$")
-
-          - merge_maps(attributes, ExtractPatterns(metric.name, "^airflow\\.dag\\.(?P<dag_id>[^.]+)\\.(?P<task_id>[^.]+)\\.duration$$"), "insert")
-            where IsMatch(metric.name, "^airflow\\.dag\\.[^.]+\\.[^.]+\\.duration$$")
-          - replace_pattern(metric.name, "^airflow\\.dag\\.[^.]+\\.[^.]+\\.duration$$", "airflow.task.duration")
-            where IsMatch(metric.name, "^airflow\\.dag\\.[^.]+\\.[^.]+\\.duration$$")
 
   resource_detection:
     detectors: [env, system]

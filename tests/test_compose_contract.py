@@ -92,7 +92,7 @@ def test_airflow_uses_local_executor_and_required_runtime_components() -> None:
     assert "DBT_AWS_PROFILE" not in environment
     assert "OCR_TASK_IMAGE" not in environment
     assert "DOCKER_TASK_USER" not in environment
-    assert "AIRFLOW_CONN_AWS_DEFAULT" not in environment
+    assert environment["AIRFLOW_CONN_AWS_DEFAULT"] == "aws://"
     assert "AIRFLOW_BOOTSTRAP_VERSION" not in environment
     assert "AWS_REGION" not in environment
     assert environment["PYTHONWARNINGS"] == "ignore:ProvidersManager.hooks is deprecated"
@@ -345,7 +345,17 @@ def test_collector_observes_itself_and_scopes_postgres_severity_parsing() -> Non
 
 def test_airflow_metric_allowlist_keeps_operational_health_signals() -> None:
     airflow = _compose(AIRFLOW_COMPOSE)
-    allowlist = airflow["x-airflow-common"]["environment"]["AIRFLOW__METRICS__METRICS_ALLOW_LIST"]
+    environment = airflow["x-airflow-common"]["environment"]
+    allowlist = environment["AIRFLOW__METRICS__METRICS_ALLOW_LIST"]
+    collector = yaml.safe_load(
+        Path("observability/signoz/collector/config.yaml").read_text(encoding="utf-8")
+    )
+    airflow_metric_statements = collector["processors"]["transform/airflow_metrics"][
+        "metric_statements"
+    ]
+    dashboard = Path("observability/signoz/terraform/dashboards_airflow.tf").read_text(
+        encoding="utf-8"
+    )
 
     for family in (
         "critical_section_duration",
@@ -355,6 +365,23 @@ def test_airflow_metric_allowlist_keeps_operational_health_signals() -> None:
         "pool\\.",
     ):
         assert family in allowlist
+    assert environment["AIRFLOW__METRICS__LEGACY_NAMES_ON"] == "false"
+    assert "^task\\." in allowlist
+    assert "^dag\\..+" not in allowlist
+    assert "ti_(successes|failures)" not in allowlist
+    assert [statement["context"] for statement in airflow_metric_statements] == ["metric"]
+    assert "ExtractPatterns" not in str(airflow_metric_statements)
+    assert "airflow.ti_successes" not in dashboard
+    assert "airflow.ti_failures" not in dashboard
+
+
+def test_airflow_remote_logging_uses_workload_identity_without_secret_lookup() -> None:
+    airflow = _compose(AIRFLOW_COMPOSE)
+    environment = airflow["x-airflow-common"]["environment"]
+    backend_kwargs = json.loads(environment["AIRFLOW__SECRETS__BACKEND_KWARGS"])
+
+    assert environment["AIRFLOW_CONN_AWS_DEFAULT"] == "aws://"
+    assert backend_kwargs["connections_lookup_pattern"] == ("^(slack_api_default|smtp_default)$")
 
 
 def test_local_runtime_does_not_use_dotenv_files() -> None:

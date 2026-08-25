@@ -32,7 +32,7 @@ resource "signoz_dashboard" "airflow" {
   spec = {
     display = {
       name        = "Platform / Airflow"
-      description = "Scheduler loop latency, task success/failure, DAG run durations, and pool slots from Airflow native OpenTelemetry metrics and traces."
+      description = "Scheduler loop latency, DAG and task durations, executor capacity, schedule delay, and recent Airflow traces."
     }
     links     = []
     variables = []
@@ -124,158 +124,6 @@ resource "signoz_dashboard" "airflow" {
                           },
                         ]
                       }
-                    }
-                  }
-                }
-              }
-            },
-          ]
-        }
-      }
-      "b385fc0f-4042-568b-af49-17051fe26d2b" = {
-        kind = "Panel"
-        spec = {
-          display = {
-            name        = "Task outcomes per interval"
-            description = "Task instance successes and failures in each chart interval; counts avoid misleading sub-unit rates for low-volume tasks."
-          }
-          links = []
-          plugin = {
-            time_series_panel = {
-              kind = "signoz/TimeSeriesPanel"
-              spec = {
-                visualization = {
-                  time_preference = "global_time"
-                  fill_spans      = false
-                }
-                formatting = {
-                  unit              = "short"
-                  decimal_precision = "2"
-                }
-                chart_appearance = {
-                  line_interpolation = "spline"
-                  show_points        = false
-                  line_style         = "solid"
-                  fill_mode          = "none"
-                  span_gaps = {
-                    fill_only_below = false
-                    fill_less_than  = "0s"
-                  }
-                }
-                axes = {
-                  soft_min     = 0
-                  is_log_scale = false
-                }
-                legend = {
-                  position = "bottom"
-                  mode     = "list"
-                }
-              }
-            }
-          }
-          queries = [
-            {
-              kind = "time_series"
-              spec = {
-                name = "A"
-                plugin = {
-                  composite_query = {
-                    kind = "signoz/CompositeQuery"
-                    spec = {
-                      queries = [
-                        {
-                          builder_query = {
-                            type = "builder_query"
-                            spec = {
-                              metrics = {
-                                name   = "A"
-                                signal = "metrics"
-                                aggregations = [
-                                  {
-                                    metric_name       = "airflow.ti_successes"
-                                    time_aggregation  = "increase"
-                                    space_aggregation = "sum"
-                                  },
-                                ]
-                                filter = {
-                                  expression = "dag_id EXISTS"
-                                }
-                                group_by = [
-                                  {
-                                    name            = "dag_id"
-                                    field_context   = "attribute"
-                                    field_data_type = "string"
-                                  },
-                                  {
-                                    name            = "task_id"
-                                    field_context   = "attribute"
-                                    field_data_type = "string"
-                                  },
-                                ]
-                                having = {
-                                  expression = ""
-                                }
-                                legend = "{{dag_id}} - {{task_id}} (success)"
-                                limit  = 100
-                                order = [
-                                  {
-                                    key = {
-                                      name = "sum(increase(airflow.ti_successes))"
-                                    }
-                                    direction = "desc"
-                                  },
-                                ]
-                              }
-                            }
-                          }
-                        },
-                        {
-                          builder_query = {
-                            type = "builder_query"
-                            spec = {
-                              metrics = {
-                                name   = "B"
-                                signal = "metrics"
-                                aggregations = [
-                                  {
-                                    metric_name       = "airflow.ti_failures"
-                                    time_aggregation  = "increase"
-                                    space_aggregation = "sum"
-                                  },
-                                ]
-                                filter = {
-                                  expression = "dag_id EXISTS"
-                                }
-                                group_by = [
-                                  {
-                                    name            = "dag_id"
-                                    field_context   = "attribute"
-                                    field_data_type = "string"
-                                  },
-                                  {
-                                    name            = "task_id"
-                                    field_context   = "attribute"
-                                    field_data_type = "string"
-                                  },
-                                ]
-                                having = {
-                                  expression = ""
-                                }
-                                legend = "{{dag_id}} - {{task_id}} (failure)"
-                                limit  = 100
-                                order = [
-                                  {
-                                    key = {
-                                      name = "sum(increase(airflow.ti_failures))"
-                                    }
-                                    direction = "desc"
-                                  },
-                                ]
-                              }
-                            }
-                          }
-                        },
-                      ]
                     }
                   }
                 }
@@ -533,7 +381,7 @@ resource "signoz_dashboard" "airflow" {
         spec = {
           display = {
             name        = "Failed DAG run duration p95"
-            description = "95th-percentile failed DAG run duration in milliseconds, grouped by dag_id. Task failures are shown in Task outcomes per interval."
+            description = "95th-percentile failed DAG run duration in milliseconds, grouped by dag_id."
           }
           links = []
           plugin = {
@@ -1099,7 +947,7 @@ resource "signoz_dashboard" "airflow" {
           kind = "Grid"
           spec = {
             display = {
-              title = "Concurrency and outcomes"
+              title = "Concurrency and capacity"
               collapse = {
                 open = true
               }
@@ -1108,25 +956,16 @@ resource "signoz_dashboard" "airflow" {
               {
                 x      = 0
                 y      = 0
-                width  = 4
+                width  = 6
                 height = 6
                 content = {
                   ref = "#/spec/panels/d7862908-c2b0-5858-a228-a22c1d7e78c1"
                 }
               },
               {
-                x      = 4
+                x      = 6
                 y      = 0
-                width  = 4
-                height = 6
-                content = {
-                  ref = "#/spec/panels/b385fc0f-4042-568b-af49-17051fe26d2b"
-                }
-              },
-              {
-                x      = 8
-                y      = 0
-                width  = 4
+                width  = 6
                 height = 6
                 content = {
                   ref = "#/spec/panels/f8d0fdea-1749-5fb2-ad7e-deb74b2aa099"

@@ -22,12 +22,13 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-api-server:8080/execution/
     AIRFLOW__CORE__FERNET_KEY_CMD: cat /run/secrets/airflow_fernet_key
     AIRFLOW__SECRETS__BACKEND: airflow_runtime.secrets.AwsSecretsBackend
-    AIRFLOW__SECRETS__BACKEND_KWARGS: '{"connections_prefix":"lakehouse/${LAKEHOUSE_ENVIRONMENT}/airflow/connections","variables_prefix":"/lakehouse/${LAKEHOUSE_ENVIRONMENT}"}'
+    AIRFLOW__SECRETS__BACKEND_KWARGS: '{"connections_prefix":"lakehouse/${LAKEHOUSE_ENVIRONMENT}/airflow/connections","connections_lookup_pattern":"^(slack_api_default|smtp_default)$","variables_prefix":"/lakehouse/${LAKEHOUSE_ENVIRONMENT}"}'
     AIRFLOW__METRICS__OTEL_ON: "true"
+    AIRFLOW__METRICS__LEGACY_NAMES_ON: "false"
     # Keep a bounded production baseline: scheduler/processor health,
-    # concurrency pressure, DAG/task latency, and outcomes. Traces are
+    # concurrency pressure and DAG/task latency. Traces are
     # unaffected; high-cardinality serialization/debug families stay out.
-    AIRFLOW__METRICS__METRICS_ALLOW_LIST: "^scheduler\\.(scheduler_loop_duration|critical_section_duration|critical_section_query_duration|executor_heartbeat_duration|dagruns\\.running|tasks\\.(executable|starving))$,^scheduler_heartbeat$,^dag_processor_heartbeat$,^dag_processing\\.(file_path_queue_size|last_duration|last_run\\.seconds_ago).*,^dagrun\\.(duration\\.(success|failed)|schedule_delay|first_task_(scheduling|start)_delay)\\.,^dag\\..+\\.(duration|scheduled_duration|queued_duration)$,^ti_(successes|failures)$,^executor\\.(running_tasks|queued_tasks|open_slots).*,^pool\\.(open_slots|queued_slots|running_slots|deferred_slots|scheduled_slots).*"
+    AIRFLOW__METRICS__METRICS_ALLOW_LIST: "^scheduler\\.(scheduler_loop_duration|critical_section_duration|critical_section_query_duration|executor_heartbeat_duration|dagruns\\.running|tasks\\.(executable|starving))$,^scheduler_heartbeat$,^dag_processor_heartbeat$,^dag_processing\\.(file_path_queue_size|last_duration|last_run\\.seconds_ago)$,^dagrun\\.(duration\\.(success|failed)|schedule_delay|first_task_(scheduling|start)_delay)$,^task\\.(duration|scheduled_duration|queued_duration)$,^executor\\.(running_tasks|queued_tasks|open_slots)$,^pool\\.(open_slots|queued_slots|running_slots|deferred_slots|scheduled_slots)$"
     AIRFLOW__TRACES__OTEL_ON: "true"
     OTEL_EXPORTER_OTLP_ENDPOINT: http://signoz-collection-agent:4317
     OTEL_EXPORTER_OTLP_PROTOCOL: grpc
@@ -39,6 +40,9 @@ x-airflow-common: &airflow-common
     AIRFLOW__LOGGING__DELETE_LOCAL_LOGS: "true"
     AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
     AIRFLOW__LOGGING__JSON_LOGS: "true"
+    # Credential-free connection metadata keeps Task SDK remote logging on the
+    # standard boto credential chain backed by the mounted workload identity.
+    AIRFLOW_CONN_AWS_DEFAULT: "aws://"
     AWS_CONFIG_FILE: /run/aws/config
     AWS_EC2_METADATA_DISABLED: "true"
     LAKEHOUSE_ENVIRONMENT: "${LAKEHOUSE_ENVIRONMENT}"
