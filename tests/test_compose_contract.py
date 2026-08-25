@@ -369,10 +369,29 @@ def test_airflow_metric_allowlist_keeps_operational_health_signals() -> None:
     assert "^task\\." in allowlist
     assert "^dag\\..+" not in allowlist
     assert "ti_(successes|failures)" not in allowlist
+    assert "last_duration" not in allowlist
+    assert "last_run\\.seconds_ago" not in allowlist
     assert [statement["context"] for statement in airflow_metric_statements] == ["metric"]
     assert "ExtractPatterns" not in str(airflow_metric_statements)
     assert "airflow.ti_successes" not in dashboard
     assert "airflow.ti_failures" not in dashboard
+    assert "service.name = 'airflow' AND airflow.dag_id EXISTS" in dashboard
+    assert 'name            = "airflow.dag_id"' in dashboard
+    assert 'name            = "airflow.task_id"' in dashboard
+
+
+def test_container_cpu_panels_normalize_docker_percent_to_logical_cores() -> None:
+    components = Path("observability/signoz/terraform/dashboard_components.tf").read_text(
+        encoding="utf-8"
+    )
+    dashboard = Path("observability/signoz/terraform/dashboards_containers.tf").read_text(
+        encoding="utf-8"
+    )
+
+    assert components.count('formula           = "A / 100"') == 1
+    assert dashboard.count('expression = "A / 100"') == 2
+    assert dashboard.count('metric_name       = "container.cpu.utilization"') == 2
+    assert dashboard.count("limit = 10000") >= 2
 
 
 def test_airflow_remote_logging_uses_workload_identity_without_secret_lookup() -> None:

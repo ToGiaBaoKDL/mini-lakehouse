@@ -86,7 +86,7 @@ resource "signoz_dashboard" "containers_overview" {
         spec = {
           display = {
             name        = "CPU cores by compose service"
-            description = "CPU cores used across containers in each Compose service; a value of 2 means two logical cores."
+            description = "CPU cores used across containers in each Compose service; Docker CPU percentage is normalized so 1 means one logical core."
           }
           links = []
           plugin = {
@@ -128,43 +128,76 @@ resource "signoz_dashboard" "containers_overview" {
               spec = {
                 name = "A"
                 plugin = {
-                  builder_query = {
-                    kind = "signoz/BuilderQuery"
+                  composite_query = {
+                    kind = "signoz/CompositeQuery"
                     spec = {
-                      metrics = {
-                        name   = "A"
-                        signal = "metrics"
-                        aggregations = [
-                          {
-                            metric_name       = "container.cpu.utilization"
-                            time_aggregation  = "avg"
-                            space_aggregation = "sum"
-                          },
-                        ]
-                        filter = {
-                          expression = "lakehouse.compose.service IN $compose_service"
-                        }
-                        group_by = [
-                          {
-                            name            = "lakehouse.compose.service"
-                            field_context   = "resource"
-                            field_data_type = "string"
-                          },
-                        ]
-                        having = {
-                          expression = ""
-                        }
-                        legend = "{{lakehouse.compose.service}}"
-                        limit  = 100
-                        order = [
-                          {
-                            key = {
-                              name = "sum(avg(container.cpu.utilization))"
+                      queries = [
+                        {
+                          builder_query = {
+                            type = "builder_query"
+                            spec = {
+                              metrics = {
+                                name     = "A"
+                                signal   = "metrics"
+                                disabled = true
+                                aggregations = [
+                                  {
+                                    metric_name       = "container.cpu.utilization"
+                                    time_aggregation  = "avg"
+                                    space_aggregation = "sum"
+                                  },
+                                ]
+                                filter = {
+                                  expression = "lakehouse.compose.service IN $compose_service"
+                                }
+                                group_by = [
+                                  {
+                                    name            = "lakehouse.compose.service"
+                                    signal          = "metrics"
+                                    field_context   = "resource"
+                                    field_data_type = "string"
+                                  },
+                                ]
+                                having = {
+                                  expression = ""
+                                }
+                                limit = 10000
+                                order = [
+                                  {
+                                    key = {
+                                      name = "sum(avg(container.cpu.utilization))"
+                                    }
+                                    direction = "desc"
+                                  },
+                                ]
+                              }
                             }
-                            direction = "desc"
-                          },
-                        ]
-                      }
+                          }
+                        },
+                        {
+                          builder_formula = {
+                            type = "builder_formula"
+                            spec = {
+                              name       = "F1"
+                              expression = "A / 100"
+                              disabled   = false
+                              having = {
+                                expression = ""
+                              }
+                              legend = "{{lakehouse.compose.service}}"
+                              limit  = 100
+                              order = [
+                                {
+                                  key = {
+                                    name = "__result"
+                                  }
+                                  direction = "desc"
+                                },
+                              ]
+                            }
+                          }
+                        },
+                      ]
                     }
                   }
                 }
@@ -270,7 +303,7 @@ resource "signoz_dashboard" "containers_overview" {
         spec = {
           display = {
             name        = "CPU cores by container"
-            description = "CPU cores used by each container; a value of 1 means one logical core."
+            description = "CPU cores used by each container; Docker CPU percentage is normalized so 1 means one logical core."
           }
           links = []
           plugin = {
@@ -312,43 +345,76 @@ resource "signoz_dashboard" "containers_overview" {
               spec = {
                 name = "A"
                 plugin = {
-                  builder_query = {
-                    kind = "signoz/BuilderQuery"
+                  composite_query = {
+                    kind = "signoz/CompositeQuery"
                     spec = {
-                      metrics = {
-                        name   = "A"
-                        signal = "metrics"
-                        aggregations = [
-                          {
-                            metric_name       = "container.cpu.utilization"
-                            time_aggregation  = "avg"
-                            space_aggregation = "avg"
-                          },
-                        ]
-                        filter = {
-                          expression = "container.name IN $container_name"
-                        }
-                        group_by = [
-                          {
-                            name            = "container.name"
-                            field_context   = "resource"
-                            field_data_type = "string"
-                          },
-                        ]
-                        having = {
-                          expression = ""
-                        }
-                        legend = "{{container.name}}"
-                        limit  = 100
-                        order = [
-                          {
-                            key = {
-                              name = "avg(avg(container.cpu.utilization))"
+                      queries = [
+                        {
+                          builder_query = {
+                            type = "builder_query"
+                            spec = {
+                              metrics = {
+                                name     = "A"
+                                signal   = "metrics"
+                                disabled = true
+                                aggregations = [
+                                  {
+                                    metric_name       = "container.cpu.utilization"
+                                    time_aggregation  = "avg"
+                                    space_aggregation = "avg"
+                                  },
+                                ]
+                                filter = {
+                                  expression = "container.name IN $container_name"
+                                }
+                                group_by = [
+                                  {
+                                    name            = "container.name"
+                                    signal          = "metrics"
+                                    field_context   = "resource"
+                                    field_data_type = "string"
+                                  },
+                                ]
+                                having = {
+                                  expression = ""
+                                }
+                                limit = 10000
+                                order = [
+                                  {
+                                    key = {
+                                      name = "avg(avg(container.cpu.utilization))"
+                                    }
+                                    direction = "desc"
+                                  },
+                                ]
+                              }
                             }
-                            direction = "desc"
-                          },
-                        ]
-                      }
+                          }
+                        },
+                        {
+                          builder_formula = {
+                            type = "builder_formula"
+                            spec = {
+                              name       = "F1"
+                              expression = "A / 100"
+                              disabled   = false
+                              having = {
+                                expression = ""
+                              }
+                              legend = "{{container.name}}"
+                              limit  = 100
+                              order = [
+                                {
+                                  key = {
+                                    name = "__result"
+                                  }
+                                  direction = "desc"
+                                },
+                              ]
+                            }
+                          }
+                        },
+                      ]
                     }
                   }
                 }

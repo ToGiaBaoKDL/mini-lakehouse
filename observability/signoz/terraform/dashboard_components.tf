@@ -55,7 +55,7 @@ locals {
     "a08e8dc8-efde-4dbb-a237-c484adf6cce5" = {
       dashboard         = "containers"
       name              = "Total CPU cores"
-      description       = "Logical CPU cores currently used by selected Compose services."
+      description       = "Logical CPU cores used by selected Compose services, averaged over the latest interval."
       unit              = "short"
       decimal_precision = "2"
       metric_name       = "container.cpu.utilization"
@@ -63,6 +63,7 @@ locals {
       space_aggregation = "sum"
       reduce_to         = "last"
       filter            = "lakehouse.compose.service IN $compose_service"
+      formula           = "A / 100"
     }
     "2940fec6-f705-41d4-b65b-9631144f6f26" = {
       dashboard         = "containers"
@@ -188,6 +189,39 @@ locals {
     }
   }
 
+  dashboard_metric_kpi_builder_specs = {
+    for id, kpi in local.dashboard_metric_kpis : id => {
+      metrics = {
+        name     = "A"
+        signal   = "metrics"
+        disabled = lookup(kpi, "formula", "") != ""
+        aggregations = [
+          {
+            metric_name       = kpi.metric_name
+            time_aggregation  = kpi.time_aggregation
+            space_aggregation = kpi.space_aggregation
+            reduce_to         = kpi.reduce_to
+          },
+        ]
+        filter = {
+          expression = kpi.filter
+        }
+        having = {
+          expression = ""
+        }
+        limit = lookup(kpi, "formula", "") == "" ? 100 : 10000
+        order = [
+          {
+            key = {
+              name = "__result"
+            }
+            direction = "desc"
+          },
+        ]
+      }
+    }
+  }
+
   dashboard_metric_kpi_panels = {
     for id, kpi in local.dashboard_metric_kpis : id => {
       kind = "Panel"
@@ -213,40 +247,52 @@ locals {
             kind = "scalar"
             spec = {
               name = "A"
-              plugin = {
-                builder_query = {
-                  kind = "signoz/BuilderQuery"
-                  spec = {
-                    metrics = {
-                      name   = "A"
-                      signal = "metrics"
-                      aggregations = [
+              plugin = merge(
+                lookup(kpi, "formula", "") == "" ? {
+                  builder_query = {
+                    kind = "signoz/BuilderQuery"
+                    spec = local.dashboard_metric_kpi_builder_specs[id]
+                  }
+                } : {},
+                lookup(kpi, "formula", "") != "" ? {
+                  composite_query = {
+                    kind = "signoz/CompositeQuery"
+                    spec = {
+                      queries = [
                         {
-                          metric_name       = kpi.metric_name
-                          time_aggregation  = kpi.time_aggregation
-                          space_aggregation = kpi.space_aggregation
-                          reduce_to         = kpi.reduce_to
-                        },
-                      ]
-                      filter = {
-                        expression = kpi.filter
-                      }
-                      having = {
-                        expression = ""
-                      }
-                      limit = 100
-                      order = [
-                        {
-                          key = {
-                            name = "__result"
+                          builder_query = {
+                            type = "builder_query"
+                            spec = local.dashboard_metric_kpi_builder_specs[id]
                           }
-                          direction = "desc"
+                        },
+                        {
+                          builder_formula = {
+                            type = "builder_formula"
+                            spec = {
+                              name       = "F1"
+                              expression = lookup(kpi, "formula", "")
+                              disabled   = false
+                              having = {
+                                expression = ""
+                              }
+                              legend = ""
+                              limit  = 100
+                              order = [
+                                {
+                                  key = {
+                                    name = "__result"
+                                  }
+                                  direction = "desc"
+                                },
+                              ]
+                            }
+                          }
                         },
                       ]
                     }
                   }
-                }
-              }
+                } : {},
+              )
             }
           },
         ]

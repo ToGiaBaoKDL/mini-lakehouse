@@ -580,36 +580,42 @@ resource "signoz_dashboard" "airflow" {
                         name   = "A"
                         signal = "traces"
                         filter = {
-                          expression = "service.name = 'airflow' AND dag_id EXISTS"
+                          expression = "service.name = 'airflow' AND airflow.dag_id EXISTS"
                         }
                         select_fields = [
                           {
                             name            = "timestamp"
-                            field_context   = "attribute"
-                            field_data_type = "string"
+                            signal          = "traces"
+                            field_context   = "span"
+                            field_data_type = "number"
                           },
                           {
                             name            = "name"
+                            signal          = "traces"
+                            field_context   = "span"
+                            field_data_type = "string"
+                          },
+                          {
+                            name            = "airflow.dag_id"
+                            signal          = "traces"
                             field_context   = "attribute"
                             field_data_type = "string"
                           },
                           {
-                            name            = "dag_id"
-                            field_context   = "attribute"
-                            field_data_type = "string"
-                          },
-                          {
-                            name            = "task_id"
+                            name            = "airflow.task_id"
+                            signal          = "traces"
                             field_context   = "attribute"
                             field_data_type = "string"
                           },
                           {
                             name            = "duration_nano"
-                            field_context   = "attribute"
-                            field_data_type = "int64"
+                            signal          = "traces"
+                            field_context   = "span"
+                            field_data_type = "number"
                           },
                           {
                             name            = "service.name"
+                            signal          = "traces"
                             field_context   = "resource"
                             field_data_type = "string"
                           },

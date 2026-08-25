@@ -28,7 +28,7 @@ x-airflow-common: &airflow-common
     # Keep a bounded production baseline: scheduler/processor health,
     # concurrency pressure and DAG/task latency. Traces are
     # unaffected; high-cardinality serialization/debug families stay out.
-    AIRFLOW__METRICS__METRICS_ALLOW_LIST: "^scheduler\\.(scheduler_loop_duration|critical_section_duration|critical_section_query_duration|executor_heartbeat_duration|dagruns\\.running|tasks\\.(executable|starving))$,^scheduler_heartbeat$,^dag_processor_heartbeat$,^dag_processing\\.(file_path_queue_size|last_duration|last_run\\.seconds_ago)$,^dagrun\\.(duration\\.(success|failed)|schedule_delay|first_task_(scheduling|start)_delay)$,^task\\.(duration|scheduled_duration|queued_duration)$,^executor\\.(running_tasks|queued_tasks|open_slots)$,^pool\\.(open_slots|queued_slots|running_slots|deferred_slots|scheduled_slots)$"
+    AIRFLOW__METRICS__METRICS_ALLOW_LIST: "^scheduler\\.(scheduler_loop_duration|critical_section_duration|critical_section_query_duration|executor_heartbeat_duration|dagruns\\.running|tasks\\.(executable|starving))$,^scheduler_heartbeat$,^dag_processor_heartbeat$,^dag_processing\\.file_path_queue_size$,^dagrun\\.(duration\\.(success|failed)|schedule_delay|first_task_(scheduling|start)_delay)$,^task\\.(duration|scheduled_duration|queued_duration)$,^executor\\.(running_tasks|queued_tasks|open_slots)$,^pool\\.(open_slots|queued_slots|running_slots|deferred_slots|scheduled_slots)$"
     AIRFLOW__TRACES__OTEL_ON: "true"
     OTEL_EXPORTER_OTLP_ENDPOINT: http://signoz-collection-agent:4317
     OTEL_EXPORTER_OTLP_PROTOCOL: grpc
