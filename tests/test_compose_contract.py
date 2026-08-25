@@ -57,7 +57,7 @@ def test_airflow_uses_local_executor_and_required_runtime_components() -> None:
     bundle_config = json.loads(environment["AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_CONFIG_LIST"])
     assert bundle_config == [
         {
-            "name": "lakehouse",
+            "name": "automation",
             "classpath": "airflow.providers.git.bundles.git.GitDagBundle",
             "kwargs": {
                 "repo_url": "https://github.com/ToGiaBaoKDL/mini-lakehouse.git",
