@@ -10,7 +10,7 @@ from operators.emr import emr_spark_job
 SOURCE_DATE = previous_local_date()
 
 with DAG(
-    dag_id="etl_emr_github_archive",
+    dag_id="etl_emr_ingest_github_archive",
     description="Load one UTC GitHub Archive day into landing and curated Iceberg tables.",
     schedule="30 7 * * *",
     start_date=DAG_START_DATE,

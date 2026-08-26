@@ -45,6 +45,14 @@ GLM-OCR runs on a scale-to-zero Modal GPU runtime.
 
 ![Airflow DAGs orchestrating ingestion, document extraction, maintenance, and analytics](docs/assets/airflow-dags.png)
 
+DAG IDs follow `<job_type>_<worker_type>_<verb>_<scope>`. For example,
+`etl_emr_ingest_github_archive` runs an ETL ingestion on EMR, while
+`tl_docker_build_analytics` builds the analytics layer in Docker. Supported job
+types are `etl`, `el`, `tl`, `rpt`, `mon`, `bk`, `gov`, and `test`; supported
+worker types are `afw`, `docker`, `emr`, `k8spod`, `sparkonk8s`, `glue`, and
+`mix`. The complete convention is documented in
+[Pipeline execution](docs/04_pipeline_execution.md).
+
 ### Lightdash analytics
 
 ![Lightdash Engineering dashboard showing GitHub activity metrics and trends](docs/assets/lightdash-engineering-dashboard.png)

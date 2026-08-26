@@ -80,7 +80,7 @@ def _analytics_group(
 
 
 with DAG(
-    dag_id="tl_docker_analytics",
+    dag_id="tl_docker_build_analytics",
     description="Build only analytics domains affected by curated asset events.",
     schedule=CURATED_GITHUB | CURATED_ARXIV_METADATA,
     start_date=DAG_START_DATE,

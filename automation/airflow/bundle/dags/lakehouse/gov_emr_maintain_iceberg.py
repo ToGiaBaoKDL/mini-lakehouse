@@ -6,7 +6,7 @@ from config.templates import DAG_START_DATE
 from operators.emr import emr_spark_job
 
 with DAG(
-    dag_id="man_emr_iceberg_maintenance",
+    dag_id="gov_emr_maintain_iceberg",
     description="Compact recent partitions and prune expired Iceberg metadata and files.",
     schedule="0 3 * * 0",
     start_date=DAG_START_DATE,
@@ -14,7 +14,7 @@ with DAG(
     max_active_runs=1,
     on_failure_callback=dag_failure_callbacks(),
     on_success_callback=dag_success_callbacks(),
-    tags=["lakehouse", "maintenance", "man", "emr", "iceberg"],
+    tags=["gov", "emr", "lakehouse", "iceberg", "maintenance"],
 ) as dag:
     emr_spark_job(
         task_id="maintain_contract_tables",

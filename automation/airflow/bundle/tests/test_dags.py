@@ -25,13 +25,22 @@ from operators import emr as emr_module
 from operators.docker import LoggedDockerOperator
 from operators.emr import LoggedEmrServerlessStartJobOperator
 
-ALLOWED_JOB_TYPES = {"etl", "tl", "rpt", "mon", "man", "bk", "stm", "cat", "gov", "test"}
-ALLOWED_WORKER_TYPES = {"emr", "glue", "k8spod", "afw", "docker", "mix"}
+ALLOWED_JOB_TYPES = {"etl", "el", "tl", "rpt", "mon", "bk", "gov", "test"}
+ALLOWED_WORKER_TYPES = {
+    "afw",
+    "docker",
+    "emr",
+    "glue",
+    "k8spod",
+    "mix",
+    "sparkonk8s",
+}
+ALLOWED_ACTIONS = {"build", "ingest", "maintain"}
 EXPECTED_DAGS = {
-    "tl_docker_analytics",
-    "etl_emr_arxiv_metadata",
-    "etl_emr_github_archive",
-    "man_emr_iceberg_maintenance",
+    "etl_emr_ingest_arxiv_metadata",
+    "etl_emr_ingest_github_archive",
+    "gov_emr_maintain_iceberg",
+    "tl_docker_build_analytics",
 }
 
 
@@ -64,10 +73,11 @@ def test_dag_files_are_domain_scoped_and_follow_worker_aware_naming() -> None:
     assert {path.stem for path in files} == EXPECTED_DAGS
     assert all(path.parent != Path("automation/airflow/bundle/dags") for path in files)
     for path in files:
-        job_type, worker_type, description = path.stem.split("_", maxsplit=2)
+        job_type, worker_type, action, scope = path.stem.split("_", maxsplit=3)
         assert job_type in ALLOWED_JOB_TYPES
         assert worker_type in ALLOWED_WORKER_TYPES
-        assert description
+        assert action in ALLOWED_ACTIONS
+        assert scope
 
     sources = "\n".join(path.read_text(encoding="utf-8") for path in files)
     assert "DockerOperator(" not in sources
@@ -78,8 +88,8 @@ def test_dag_files_are_domain_scoped_and_follow_worker_aware_naming() -> None:
 def test_source_dags_are_bounded_parameterized_emr_jobs() -> None:
     bag = _bag()
     schedules = {
-        "etl_emr_github_archive": "30 7 * * *",
-        "etl_emr_arxiv_metadata": "0 11 * * *",
+        "etl_emr_ingest_github_archive": "30 7 * * *",
+        "etl_emr_ingest_arxiv_metadata": "0 11 * * *",
     }
     for dag_id, schedule in schedules.items():
         dag = _dag(bag, dag_id)
@@ -113,15 +123,15 @@ def test_source_dags_are_bounded_parameterized_emr_jobs() -> None:
         assert "spark.dynamicAllocation.minExecutors=0" in submit_parameters
         assert "spark.dynamicAllocation.initialExecutors=1" in submit_parameters
 
-    arxiv = _dag(bag, "etl_emr_arxiv_metadata").tasks[0]
+    arxiv = _dag(bag, "etl_emr_ingest_arxiv_metadata").tasks[0]
     assert arxiv.outlets[0].uri == "lakehouse://curated/arxiv/metadata"
 
 
 def test_curated_assets_schedule_one_domain_aware_analytics_dag() -> None:
     bag = _bag()
-    github_producer = _dag(bag, "etl_emr_github_archive")
-    arxiv_producer = _dag(bag, "etl_emr_arxiv_metadata")
-    analytics = _dag(bag, "tl_docker_analytics")
+    github_producer = _dag(bag, "etl_emr_ingest_github_archive")
+    arxiv_producer = _dag(bag, "etl_emr_ingest_arxiv_metadata")
+    analytics = _dag(bag, "tl_docker_build_analytics")
 
     github_asset = github_producer.tasks[0].outlets[0]
     arxiv_asset = arxiv_producer.tasks[0].outlets[0]
@@ -175,10 +185,10 @@ def test_curated_assets_schedule_one_domain_aware_analytics_dag() -> None:
 
 def test_analytics_domain_gates_run_both_manually_and_only_affected_assets() -> None:
     bag = _bag()
-    analytics = _dag(bag, "tl_docker_analytics")
+    analytics = _dag(bag, "tl_docker_build_analytics")
     engineering = analytics.get_task("engineering.should_run")
     research = analytics.get_task("research.should_run")
-    github_asset = _dag(bag, "etl_emr_github_archive").tasks[0].outlets[0]
+    github_asset = _dag(bag, "etl_emr_ingest_github_archive").tasks[0].outlets[0]
 
     assert isinstance(engineering, ShortCircuitOperator)
     assert isinstance(research, ShortCircuitOperator)
@@ -218,14 +228,14 @@ def test_dags_share_timezone_and_expose_job_and_worker_tags() -> None:
 
     for dag_id in EXPECTED_DAGS:
         dag = _dag(bag, dag_id)
-        job_type, worker_type, _ = dag_id.split("_", maxsplit=2)
+        job_type, worker_type, _, _ = dag_id.split("_", maxsplit=3)
         assert dag.timezone.name == "Asia/Ho_Chi_Minh"
         assert job_type in dag.tags
         assert worker_type in dag.tags
 
 
 def test_maintenance_dag_uses_the_shared_emr_lifecycle() -> None:
-    dag = _dag(_bag(), "man_emr_iceberg_maintenance")
+    dag = _dag(_bag(), "gov_emr_maintain_iceberg")
     assert dag.schedule == "0 3 * * 0"
     assert dag.max_active_runs == 1
 
@@ -242,7 +252,7 @@ def test_maintenance_dag_uses_the_shared_emr_lifecycle() -> None:
 def test_emr_operator_logs_an_ephemeral_driver_url(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    task = _dag(_bag(), "man_emr_iceberg_maintenance").tasks[0]
+    task = _dag(_bag(), "gov_emr_maintain_iceberg").tasks[0]
     assert isinstance(task, LoggedEmrServerlessStartJobOperator)
     task.job_id = "job-123"
     logger = Mock()
