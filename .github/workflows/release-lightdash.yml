@@ -23,6 +23,6 @@ jobs:
       external_source_revision: f57276359a0ffcf38c201f95503e671bf80910cd
       external_source_url: https://github.com/lightdash/lightdash
       platforms: linux/arm64
-      repository: tgbao-dev-lightdash
+      repository: tgbao-dev-analytics-lightdash
       runner: ubuntu-24.04-arm
       build_timeout_minutes: 120

@@ -62,7 +62,7 @@ jobs:
           REVISION: ${{ inputs.revision }}
         run: |
           set -euo pipefail
-          repository="tgbao-dev-$COMPONENT"
+          repository=$(infra/runtime/delivery/image-repository "$COMPONENT")
           response=$(aws ecr batch-get-image \
             --repository-name "$repository" \
             --image-ids "imageTag=$REVISION" \

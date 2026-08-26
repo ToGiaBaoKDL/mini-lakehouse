@@ -9,23 +9,13 @@ fi
 component=$1
 image=$2
 environment=${LAKEHOUSE_ENVIRONMENT:-dev}
-
-case "$component" in
-    airflow|arxiv-lens|dbt|lightdash) ;;
-    *)
-        printf '%s\n' "Unknown component: $component" >&2
-        exit 2
-        ;;
-esac
-printf '%s' "$environment" | grep -Eq '^[a-z0-9][a-z0-9-]*$' || {
-    printf '%s\n' "Invalid lakehouse environment: $environment" >&2
-    exit 2
-}
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repository=$("$script_dir/image-repository" "$component")
 
 printf '%s' "$image" \
-    | grep -Eq "^[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com/tgbao-$environment-$component@sha256:[0-9a-f]{64}$" \
+    | grep -Eq "^[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com/$repository@sha256:[0-9a-f]{64}$" \
     || {
-    printf '%s\n' "Image must be an immutable digest from the $environment $component repository." >&2
+    printf '%s\n' "Image must be an immutable digest from the $repository repository." >&2
     exit 2
 }
 

@@ -18,4 +18,4 @@ jobs:
     with:
       component: dbt
       dockerfile: analytics/dbt-project/Dockerfile
-      repository: tgbao-dev-dbt
+      repository: tgbao-dev-analytics-dbt

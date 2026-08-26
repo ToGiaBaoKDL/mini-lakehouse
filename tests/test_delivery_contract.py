@@ -84,10 +84,30 @@ def test_service_pull_uses_short_lived_registry_login() -> None:
     assert 'DOCKER_CONFIG="$docker_config"' in pull
     assert "mktemp -d" in pull
     assert "environment=${LAKEHOUSE_ENVIRONMENT:-dev}" in pull
-    assert "tgbao-$environment-$component@sha256" in pull
-    assert "Image must be an immutable digest from the $environment" in pull
+    assert 'repository=$("$script_dir/image-repository" "$component")' in pull
+    assert "/$repository@sha256" in pull
+    assert "Image must be an immutable digest from the $repository" in pull
     assert "services-deployer/host-config" in pull
     assert "AWS CLI v2 is missing from the services host." in pull
+
+
+def test_image_repositories_follow_capability_ownership() -> None:
+    repository = Path("infra/runtime/delivery/image-repository").read_text(encoding="utf-8")
+    release = _workflow("_release-image.yml")
+    deploy = Path(".github/actions/deploy-component/action.yml").read_text(encoding="utf-8")
+    rollback = _workflow("rollback-component.yml")
+
+    for mapping in (
+        "airflow) capability=automation-airflow",
+        "arxiv-lens) capability=arxiv-lens",
+        "dbt) capability=analytics-dbt",
+        "lightdash) capability=analytics-lightdash",
+    ):
+        assert mapping in repository
+    assert "printf '%s\\n' \"tgbao-$environment-$capability\"" in repository
+    assert 'expected_repository=$(infra/runtime/delivery/image-repository "$COMPONENT")' in release
+    assert '"$SOURCE_ROOT/infra/runtime/delivery/image-repository"' in deploy
+    assert 'repository=$(infra/runtime/delivery/image-repository "$COMPONENT")' in rollback
 
 
 def test_host_workload_identities_ignore_operator_credentials() -> None:
@@ -313,14 +333,17 @@ def test_each_custom_component_has_a_thin_release_caller() -> None:
         "release-airflow.yml": (
             "component: airflow",
             "dockerfile: automation/airflow/runtime/Dockerfile",
+            "repository: tgbao-dev-automation-airflow",
         ),
         "release-arxiv-lens.yml": (
             "component: arxiv-lens",
             "dockerfile: arxiv-lens/Dockerfile",
+            "repository: tgbao-dev-arxiv-lens",
         ),
         "release-dbt.yml": (
             "component: dbt",
             "dockerfile: analytics/dbt-project/Dockerfile",
+            "repository: tgbao-dev-analytics-dbt",
         ),
         "release-lightdash.yml": (
             "component: lightdash",
@@ -328,6 +351,7 @@ def test_each_custom_component_has_a_thin_release_caller() -> None:
             "external_source_revision: f57276359a0ffcf38c201f95503e671bf80910cd",
             "external_source_url: https://github.com/lightdash/lightdash",
             "platforms: linux/arm64",
+            "repository: tgbao-dev-analytics-lightdash",
             "runner: ubuntu-24.04-arm",
         ),
     }

@@ -22,4 +22,4 @@ jobs:
     with:
       component: airflow
       dockerfile: automation/airflow/runtime/Dockerfile
-      repository: tgbao-dev-airflow
+      repository: tgbao-dev-automation-airflow

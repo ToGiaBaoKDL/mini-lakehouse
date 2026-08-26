@@ -50,7 +50,8 @@ runs:
             [[ "$IMAGE" =~ ^cloudflare/cloudflared:[0-9]{4}\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]
             ;;
           *)
-            [[ "$IMAGE" =~ ^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/tgbao-dev-${COMPONENT}@sha256:[0-9a-f]{64}$ ]]
+            repository=$("$SOURCE_ROOT/infra/runtime/delivery/image-repository" "$COMPONENT")
+            [[ "$IMAGE" =~ ^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/${repository}@sha256:[0-9a-f]{64}$ ]]
             ;;
         esac
         [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]]

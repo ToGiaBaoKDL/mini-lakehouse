@@ -245,14 +245,24 @@ def test_service_images_are_immutable_bounded_and_published_by_one_role() -> Non
     environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
     registry = _terraform_sources(Path("infra/terraform/aws/modules/container_registry"))
     identity = _terraform_sources(Path("infra/terraform/aws/modules/identity"))
+    repositories = environment[
+        environment.index('module "container_registry"') : environment.index('module "emr_network"')
+    ]
 
     for repository in (
-        "airflow",
+        "analytics-dbt",
+        "analytics-lightdash",
+        "automation-airflow",
+        # ArXiv Lens is already capability-scoped and does not need a rename.
         "arxiv-lens",
+    ):
+        assert f'"{repository}"' in repositories
+    for legacy_repository in (
+        "airflow",
         "dbt",
         "lightdash",
     ):
-        assert f'"{repository}"' in environment
+        assert f'"{legacy_repository}"' not in repositories
     assert 'image_tag_mutability = "IMMUTABLE"' in registry
     assert "scan_on_push = true" in registry
     assert 'encryption_type = "AES256"' in registry

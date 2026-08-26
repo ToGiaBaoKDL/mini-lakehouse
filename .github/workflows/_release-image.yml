@@ -91,7 +91,8 @@ jobs:
             airflow|arxiv-lens|dbt|lightdash) ;;
             *) exit 2 ;;
           esac
-          [[ "$REPOSITORY" == "tgbao-dev-$COMPONENT" ]]
+          expected_repository=$(infra/runtime/delivery/image-repository "$COMPONENT")
+          [[ "$REPOSITORY" == "$expected_repository" ]]
           [[ -z "$BUILD_ARGS" ]]
           case "$COMPONENT" in
             lightdash)

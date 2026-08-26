@@ -55,6 +55,7 @@ lint: ## Run formatting, linting, and static type checks.
 		infra/runtime/identity/install-aws-signing-helper \
 		infra/runtime/identity/workload-identities \
 		infra/runtime/delivery/deploy-component \
+		infra/runtime/delivery/image-repository \
 		infra/runtime/delivery/pull-image \
 		infra/runtime/cloudflare/deploy \
 		infra/runtime/cloudflare/sync-secret \

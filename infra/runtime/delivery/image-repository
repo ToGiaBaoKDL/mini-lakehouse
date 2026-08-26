@@ -1,0 +1,26 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 1 ]; then
+    printf '%s\n' "Usage: image-repository <component>" >&2
+    exit 2
+fi
+
+environment=${LAKEHOUSE_ENVIRONMENT:-dev}
+printf '%s' "$environment" | grep -Eq '^[a-z0-9][a-z0-9-]*$' || {
+    printf '%s\n' "Invalid lakehouse environment: $environment" >&2
+    exit 2
+}
+
+case "$1" in
+    airflow) capability=automation-airflow ;;
+    arxiv-lens) capability=arxiv-lens ;;
+    dbt) capability=analytics-dbt ;;
+    lightdash) capability=analytics-lightdash ;;
+    *)
+        printf '%s\n' "Unknown image component: $1" >&2
+        exit 2
+        ;;
+esac
+
+printf '%s\n' "tgbao-$environment-$capability"

@@ -97,10 +97,10 @@ module "container_registry" {
   source      = "../../modules/container_registry"
   name_prefix = local.name_prefix
   repositories = toset([
-    "airflow",
+    "analytics-dbt",
+    "analytics-lightdash",
     "arxiv-lens",
-    "dbt",
-    "lightdash",
+    "automation-airflow",
   ])
   retained_image_count = 20
   force_delete         = true
