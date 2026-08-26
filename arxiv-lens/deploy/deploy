@@ -7,6 +7,6 @@ if [ "$#" -ne 1 ]; then
 fi
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-bundle_root=$(CDPATH= cd -- "$script_dir/../../.." && pwd)
+bundle_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
 "$bundle_root/infra/runtime/delivery/pull-image" arxiv-lens "$1"
 "$script_dir/reconcile" "$1"

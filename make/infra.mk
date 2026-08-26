@@ -184,11 +184,26 @@ workload-identities-install: aws-init ## Install leaf workload identities on the
 		done; \
 		tar -C "$(AWS_IDENTITY_DIR)" --exclude='*/host-config' -cf - $${WORKLOADS} \
 		| tailscale ssh "$(SERVICES_HOST_USER)@$(SERVICES_HOST)" \
-			'set -eu; target="$$HOME/.config/lakehouse/$(LAKEHOUSE_ENVIRONMENT)/aws"; \
-			install -d -m 0700 "$$target"; tar -C "$$target" -xf -; \
-			chmod 0700 "$$target"/*; chmod 0600 "$$target"/*/private-key.pem "$$target"/*/config; \
-			for config in "$$target"/*/config; do \
-				workload="$$(basename "$$(dirname "$$config")")"; \
-				sed "s#/run/aws/#$$target/$$workload/#g" "$$config" >"$${config%/config}/host-config"; \
+			'set -eu; parent="$$HOME/.config/lakehouse/$(LAKEHOUSE_ENVIRONMENT)"; \
+			target="$$parent/aws"; install -d -m 0700 "$$parent"; \
+			staged="$$(mktemp -d "$$parent/.aws.XXXXXX")"; \
+			cleanup() { rm -rf "$$staged"; }; \
+			trap cleanup EXIT; trap 'exit 1' HUP INT TERM; tar -C "$$staged" -xf -; \
+			install -d -m 0700 "$$target"; \
+			for source in "$$staged"/*; do \
+				workload="$$(basename "$$source")"; destination="$$target/$$workload"; \
+				install -d -m 0700 "$$destination"; \
+				for file in certificate.pem private-key.pem config; do \
+					mode=0600; if test "$$file" = certificate.pem; then mode=0644; fi; \
+					temporary="$$(mktemp "$$destination/.$$file.XXXXXX")"; \
+					install -m "$$mode" "$$source/$$file" "$$temporary"; mv "$$temporary" "$$destination/$$file"; \
+				done; \
+				temporary="$$(mktemp "$$destination/.host-config.XXXXXX")"; \
+				sed "s#/run/aws/#$$destination/#g" "$$destination/config" >"$$temporary"; \
+				chmod 0600 "$$temporary"; mv "$$temporary" "$$destination/host-config"; \
 			done; \
-			chmod 0600 "$$target"/*/host-config'
+			for destination in "$$target"/*; do \
+				workload="$$(basename "$$destination")"; test -d "$$staged/$$workload" && continue; \
+				for file in certificate.pem private-key.pem config; do test -f "$$destination/$$file" || { printf "%s\n" "Refusing to remove unmanaged host identity: $$destination" >&2; exit 1; }; done; \
+				rm -rf "$$destination"; printf "%s\n" "Removed stale host workload identity: $$workload"; \
+			done'

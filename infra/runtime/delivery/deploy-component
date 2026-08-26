@@ -31,9 +31,7 @@ case "$component" in
         deploy="$bundle_root/analytics/lightdash/deploy/deploy"
         ;;
     dbt)
-        "$bundle_root/analytics/dbt-project/deploy/deploy" "$component" "$image"
-        printf '%s\n' "Deployed $component as $image"
-        exit 0
+        deploy="$bundle_root/analytics/dbt-project/deploy/deploy"
         ;;
     *)
         printf '%s\n' "Unknown component: $component" >&2

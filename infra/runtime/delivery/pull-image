@@ -8,6 +8,7 @@ fi
 
 component=$1
 image=$2
+environment=${LAKEHOUSE_ENVIRONMENT:-dev}
 
 case "$component" in
     airflow|arxiv-lens|dbt|lightdash) ;;
@@ -16,15 +17,18 @@ case "$component" in
         exit 2
         ;;
 esac
-
-printf '%s' "$image" \
-    | grep -Eq "^[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com/tgbao-dev-$component@sha256:[0-9a-f]{64}$" \
-    || {
-    printf '%s\n' "Image must be an immutable digest from the dev $component repository." >&2
+printf '%s' "$environment" | grep -Eq '^[a-z0-9][a-z0-9-]*$' || {
+    printf '%s\n' "Invalid lakehouse environment: $environment" >&2
     exit 2
 }
 
-environment=${LAKEHOUSE_ENVIRONMENT:-dev}
+printf '%s' "$image" \
+    | grep -Eq "^[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com/tgbao-$environment-$component@sha256:[0-9a-f]{64}$" \
+    || {
+    printf '%s\n' "Image must be an immutable digest from the $environment $component repository." >&2
+    exit 2
+}
+
 identity_dir=${AWS_IDENTITY_DIR:-"$HOME/.config/lakehouse/$environment/aws"}
 aws_config="$identity_dir/services-deployer/host-config"
 test -r "$aws_config" || {

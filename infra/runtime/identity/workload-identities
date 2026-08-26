@@ -100,6 +100,8 @@ render_configs() {
     trust_anchor_arn="$(terraform -chdir="$terraform_dir" output -raw roles_anywhere_trust_anchor_arn)"
     region="$(printf '%s' "$trust_anchor_arn" | cut -d: -f4)"
     workload_config="$(terraform -chdir="$terraform_dir" output -json roles_anywhere_workloads)"
+    desired_workloads="$(printf '%s' "$workload_config" \
+        | jq -er 'keys | map(gsub("_"; "-")) | join(" ")')"
 
     printf '%s' "$workload_config" | jq -er 'keys[]' | while read -r workload_key; do
         workload="$(printf '%s' "$workload_key" | tr _ -)"
@@ -123,6 +125,23 @@ render_configs() {
         chmod 0600 "$bundle/host-config"
         chmod 0600 "$bundle/config" "$bundle/private-key.pem"
         chmod 0644 "$bundle/certificate.pem"
+    done
+
+    for bundle in "$identity_dir"/*; do
+        [ -d "$bundle" ] || continue
+        workload=$(basename "$bundle")
+        [ "$workload" = ca ] && continue
+        case " $desired_workloads " in
+            *" $workload "*) continue ;;
+        esac
+        for file in certificate.pem private-key.pem config; do
+            [ -f "$bundle/$file" ] || {
+                printf '%s\n' "Refusing to remove unmanaged identity directory: $bundle" >&2
+                exit 1
+            }
+        done
+        rm -rf "$bundle"
+        printf '%s\n' "Removed stale workload identity: $workload"
     done
     printf '%s\n' "Rendered workload identities under $identity_dir."
 }

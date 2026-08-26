@@ -83,7 +83,9 @@ def test_service_pull_uses_short_lived_registry_login() -> None:
     assert "docker logout" in pull
     assert 'DOCKER_CONFIG="$docker_config"' in pull
     assert "mktemp -d" in pull
-    assert "Image must be an immutable digest from the dev" in pull
+    assert "environment=${LAKEHOUSE_ENVIRONMENT:-dev}" in pull
+    assert "tgbao-$environment-$component@sha256" in pull
+    assert "Image must be an immutable digest from the $environment" in pull
     assert "services-deployer/host-config" in pull
     assert "AWS CLI v2 is missing from the services host." in pull
 
@@ -172,12 +174,20 @@ def test_each_component_owns_its_deployment_operation() -> None:
     assert '"$bundle_root/infra/runtime/postgres/deploy" lightdash' in lightdash
     assert "--force-recreate" not in lightdash
     assert "docker compose --project-name arxiv-lens" in lens
-    assert '"$component:runtime"' in dbt
+    assert '"$1" dbt:runtime' in dbt
+    assert "deploy/deploy <image@sha256:digest>" in dbt
     assert "docker compose --project-name cloudflare" in cloudflare
     assert "--token-file" in Path("infra/runtime/cloudflare/compose.yaml").read_text(
         encoding="utf-8"
     )
     assert "git " not in airflow + lens + lightdash + dbt + postgres + cloudflare
+
+
+def test_top_level_arxiv_lens_resolves_the_release_bundle_root() -> None:
+    deploy = Path("arxiv-lens/deploy/deploy").read_text(encoding="utf-8")
+
+    assert '"$script_dir/../.."' in deploy
+    assert '"$script_dir/../../.."' not in deploy
 
 
 def test_cloudflare_connector_has_a_deploy_only_workflow() -> None:
@@ -228,6 +238,24 @@ def test_services_host_owns_the_shared_observability_network() -> None:
     assert "docker network inspect" in reconcile
     assert "docker network create" in reconcile
     assert "flock 9" in reconcile
+
+
+def test_workload_identity_install_reconciles_the_host_desired_state() -> None:
+    makefile = Path("make/infra.mk").read_text(encoding="utf-8")
+    renderer = Path("infra/runtime/identity/workload-identities").read_text(encoding="utf-8")
+    target = makefile[makefile.index("workload-identities-install:") :]
+
+    assert 'desired_workloads="$(printf' in renderer
+    assert "Refusing to remove unmanaged identity directory: $bundle" in renderer
+    assert 'rm -rf "$bundle"' in renderer
+    assert "Removed stale workload identity: $workload" in renderer
+    assert 'staged="$$(mktemp -d "$$parent/.aws.XXXXXX")"' in target
+    assert 'temporary="$$(mktemp "$$destination/.$$file.XXXXXX")"' in target
+    assert 'mv "$$temporary" "$$destination/$$file"' in target
+    assert "Refusing to remove unmanaged host identity: $$destination" in target
+    assert "Removed stale host workload identity: $$workload" in target
+    assert "trap cleanup EXIT; trap 'exit 1' HUP INT TERM" in target
+    assert 'mv "$$target" "$$previous"' not in target
 
 
 def test_metadata_backup_schedule_is_reconciled_from_reviewed_repo_sources() -> None:
