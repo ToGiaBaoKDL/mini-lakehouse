@@ -55,54 +55,25 @@ tables:
       - {field_id: 4, name: oai_datestamp, data_type: date, required: true, description: Parent metadata mutation date.}
       - {field_id: 5, name: curated_at, data_type: timestamptz, required: true, description: Latest curation timestamp.}
 
-  - key: ocr_document_runs
-    name: ocr_document_runs
-    description: Durable state for one document-processing attempt over one ArXiv PDF.
-    primary_key: [run_id]
+  - key: ocr_documents
+    name: ocr_documents
+    description: Latest successfully published OCR document for each ArXiv paper.
+    primary_key: [arxiv_id]
     columns:
-      - {field_id: 1, name: run_id, data_type: string, required: true, description: Deterministic request and attempt identifier.}
-      - {field_id: 2, name: request_id, data_type: string, required: true, description: "Deterministic paper, source mutation, and processor identifier preserved across attempts."}
-      - {field_id: 3, name: arxiv_id, data_type: string, required: true, description: Source paper identifier.}
-      - {field_id: 4, name: oai_datestamp, data_type: date, required: true, description: Selecting paper mutation date.}
-      - {field_id: 5, name: source_record_sha256, data_type: string, required: true, description: Selecting canonical metadata mutation hash.}
-      - {field_id: 6, name: pdf_url, data_type: string, required: true, description: Source PDF URL processed by the selected pipeline.}
-      - {field_id: 7, name: pdf_sha256, data_type: string, required: false, description: Observed source PDF hash.}
-      - {field_id: 8, name: pdf_size_bytes, data_type: long, required: false, description: Observed source PDF size.}
-      - {field_id: 9, name: page_count, data_type: long, required: false, description: Observed PDF page count.}
-      - {field_id: 10, name: processing_id, data_type: string, required: false, description: Paper/content/model/config identity.}
-      - {field_id: 11, name: model_repository, data_type: string, required: false, description: OCR model repository when the processor uses a model.}
-      - {field_id: 12, name: model_revision, data_type: string, required: false, description: Pinned OCR model revision when applicable.}
-      - {field_id: 13, name: layout_model_repository, data_type: string, required: false, description: Layout model repository when the processor uses a model.}
-      - {field_id: 14, name: layout_model_revision, data_type: string, required: false, description: Pinned layout model revision when applicable.}
-      - {field_id: 15, name: adapter_version, data_type: string, required: true, description: Canonical adapter version.}
-      - {field_id: 16, name: config_hash, data_type: string, required: true, description: Canonical processor configuration hash.}
-      - {field_id: 17, name: artifact_uri, data_type: string, required: false, description: Published per-paper artifact root.}
-      - {field_id: 18, name: manifest_sha256, data_type: string, required: false, description: Per-document content manifest hash.}
-      - {field_id: 19, name: state, data_type: string, required: true, description: Canonical document state.}
-      - {field_id: 20, name: attempt, data_type: long, required: true, description: Attempt ordinal for this source mutation and processor configuration.}
-      - {field_id: 21, name: started_at, data_type: timestamptz, required: true, description: Durable attempt start timestamp.}
-      - {field_id: 22, name: completed_at, data_type: timestamptz, required: false, description: Terminal attempt timestamp.}
-      - {field_id: 23, name: curated_at, data_type: timestamptz, required: true, description: Latest state publication timestamp.}
-      - {field_id: 24, name: provider, data_type: string, required: true, description: "Execution backend such as OCI or Modal."}
-      - {field_id: 25, name: provider_reference, data_type: string, required: true, description: "Backend-owned worker, application, or job reference."}
-      - {field_id: 26, name: provider_run_id, data_type: string, required: false, description: "Exact backend checkpoint token used for resume, logs, and output retrieval."}
-      - {field_id: 27, name: job_json, data_type: string, required: true, description: Immutable validated runner request used to resume this run safely.}
-      - {field_id: 28, name: processor, data_type: string, required: false, description: Canonical processor adapter; historical null values represent GLM-OCR.}
-
-  - key: ocr_document_elements
-    name: ocr_document_elements
-    description: Canonical layout/content elements for successful document processing.
-    primary_key: [processing_id, element_id]
-    columns:
-      - {field_id: 1, name: processing_id, data_type: string, required: true, description: Paper/content/model/config identity.}
-      - {field_id: 2, name: element_id, data_type: string, required: true, description: Deterministic element identifier.}
-      - {field_id: 3, name: arxiv_id, data_type: string, required: true, description: Source paper identifier.}
-      - {field_id: 4, name: page_number, data_type: long, required: true, description: One-based source page number.}
-      - {field_id: 5, name: reading_order, data_type: long, required: true, description: Zero-based page reading order.}
-      - {field_id: 6, name: element_type, data_type: string, required: true, description: Canonical block type.}
-      - {field_id: 7, name: bbox_json, data_type: string, required: false, description: Normalized bounding box JSON.}
-      - {field_id: 8, name: text_content, data_type: string, required: true, description: Normalized plain text.}
-      - {field_id: 9, name: markdown_content, data_type: string, required: false, description: Element Markdown when available.}
-      - {field_id: 10, name: parent_element_id, data_type: string, required: false, description: Canonical parent element.}
-      - {field_id: 11, name: raw_attributes_json, data_type: string, required: false, description: Forward-compatible model attributes.}
-      - {field_id: 12, name: curated_at, data_type: timestamptz, required: true, description: Publication timestamp.}
+      - {field_id: 1, name: arxiv_id, data_type: string, required: true, description: Source paper identifier.}
+      - {field_id: 2, name: oai_datestamp, data_type: date, required: true, description: Source metadata mutation date.}
+      - {field_id: 3, name: source_record_sha256, data_type: string, required: true, description: Canonical source metadata hash.}
+      - {field_id: 4, name: pdf_url, data_type: string, required: true, description: Source PDF URL.}
+      - {field_id: 5, name: pdf_sha256, data_type: string, required: true, description: Observed source PDF hash.}
+      - {field_id: 6, name: pdf_size_bytes, data_type: long, required: true, description: Observed source PDF size.}
+      - {field_id: 7, name: page_count, data_type: long, required: true, description: Source PDF page count.}
+      - {field_id: 8, name: processing_id, data_type: string, required: true, description: Paper/content/model/config identity.}
+      - {field_id: 9, name: model_repository, data_type: string, required: true, description: Pinned OCR model repository.}
+      - {field_id: 10, name: model_revision, data_type: string, required: true, description: Pinned OCR model revision.}
+      - {field_id: 11, name: layout_model_repository, data_type: string, required: true, description: Pinned layout model repository.}
+      - {field_id: 12, name: layout_model_revision, data_type: string, required: true, description: Pinned layout model revision.}
+      - {field_id: 13, name: sdk_version, data_type: string, required: true, description: Pinned GLM-OCR SDK version.}
+      - {field_id: 14, name: config_hash, data_type: string, required: true, description: Canonical OCR configuration hash.}
+      - {field_id: 15, name: artifact_uri, data_type: string, required: true, description: Immutable artifact root.}
+      - {field_id: 16, name: manifest_sha256, data_type: string, required: true, description: Document manifest hash.}
+      - {field_id: 17, name: processed_at, data_type: timestamptz, required: true, description: Successful publication timestamp.}

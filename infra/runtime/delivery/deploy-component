@@ -20,8 +20,8 @@ case "$component" in
         export AIRFLOW_BASE_URL=${AIRFLOW_BASE_URL:-https://airflow.tgblab.io.vn}
         deploy="$bundle_root/automation/airflow/deploy/deploy"
         ;;
-    arxiv-inspector)
-        deploy="$bundle_root/apps/arxiv_inspector/deploy/deploy"
+    arxiv-lens)
+        deploy="$bundle_root/arxiv-lens/deploy/deploy"
         ;;
     cloudflare)
         deploy="$bundle_root/infra/runtime/cloudflare/deploy"
@@ -34,9 +34,6 @@ case "$component" in
         "$bundle_root/analytics/dbt-project/deploy/deploy" "$component" "$image"
         printf '%s\n' "Deployed $component as $image"
         exit 0
-        ;;
-    ocr-worker)
-        deploy="$bundle_root/ocr/deploy/deploy"
         ;;
     *)
         printf '%s\n' "Unknown component: $component" >&2

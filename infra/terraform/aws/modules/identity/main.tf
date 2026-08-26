@@ -17,11 +17,10 @@ locals {
   ])
   external_runtime_workloads = setunion(toset([
     "airflow",
-    "arxiv_inspector",
+    "arxiv_lens",
     "lightdash",
     "metadata_postgres",
     "services_deployer",
-    "ocr_worker",
   ]), local.dbt_workloads)
 }
 

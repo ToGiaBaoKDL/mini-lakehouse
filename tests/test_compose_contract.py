@@ -5,7 +5,7 @@ from typing import Any
 import yaml
 
 AIRFLOW_COMPOSE = "automation/airflow/deploy/compose.yaml"
-INSPECTOR_COMPOSE = "apps/arxiv_inspector/deploy/compose.yaml"
+ARXIV_LENS_COMPOSE = "arxiv-lens/deploy/compose.yaml"
 LIGHTDASH_COMPOSE = "analytics/lightdash/deploy/compose.yaml"
 POSTGRES_COMPOSE = "infra/runtime/postgres/compose.yaml"
 CLOUDFLARE_COMPOSE = "infra/runtime/cloudflare/compose.yaml"
@@ -30,7 +30,7 @@ def test_compose_owns_only_self_hosted_application_services() -> None:
         "airflow-scheduler",
         "airflow-dag-processor",
     }
-    assert set(_compose(INSPECTOR_COMPOSE)["services"]) == {"arxiv-inspector"}
+    assert set(_compose(ARXIV_LENS_COMPOSE)["services"]) == {"arxiv-lens"}
     assert set(_compose(LIGHTDASH_COMPOSE)["services"]) == {"lightdash"}
     assert set(_compose(POSTGRES_COMPOSE)["services"]) == {
         "metadata-postgres",
@@ -214,7 +214,7 @@ def test_airflow_runtime_components_have_role_appropriate_healthchecks() -> None
 def test_compose_uses_aws_credential_chain_without_static_keys() -> None:
     rendered = "\n".join(
         Path(path).read_text(encoding="utf-8")
-        for path in (AIRFLOW_COMPOSE, INSPECTOR_COMPOSE, LIGHTDASH_COMPOSE, POSTGRES_COMPOSE)
+        for path in (AIRFLOW_COMPOSE, ARXIV_LENS_COMPOSE, LIGHTDASH_COMPOSE, POSTGRES_COMPOSE)
     )
 
     assert "AWS_ACCESS_KEY_ID" not in rendered
@@ -285,21 +285,21 @@ def test_cloudflare_connector_is_pinned_hardened_and_file_secret_driven() -> Non
 
 def test_airflow_emits_structured_info_while_other_services_start_at_warning() -> None:
     airflow = _compose(AIRFLOW_COMPOSE)
-    inspector = _compose(INSPECTOR_COMPOSE)["services"]["arxiv-inspector"]
+    lens = _compose(ARXIV_LENS_COMPOSE)["services"]["arxiv-lens"]
     postgres = _compose(POSTGRES_COMPOSE)["services"]["metadata-postgres"]
 
     environment = airflow["x-airflow-common"]["environment"]
     assert environment["AIRFLOW__LOGGING__LOGGING_LEVEL"] == "INFO"
     assert environment["AIRFLOW__LOGGING__JSON_LOGS"] == "true"
     assert not (AIRFLOW_RUNTIME / "airflow_runtime/logging_config.py").exists()
-    assert inspector["environment"]["LAKEHOUSE_LOG_LEVEL"] == "WARNING"
-    assert inspector["environment"]["STREAMLIT_LOGGER_LEVEL"] == "warning"
+    assert lens["environment"]["LAKEHOUSE_LOG_LEVEL"] == "WARNING"
+    assert lens["environment"]["STREAMLIT_LOGGER_LEVEL"] == "warning"
     assert postgres["command"] == ["postgres", "-c", "log_min_messages=warning"]
 
 
 def test_collector_drops_structured_airflow_info_after_parsing_json_level() -> None:
     collector = yaml.safe_load(
-        Path("observability/signoz/collector/config.yaml").read_text(encoding="utf-8")
+        Path("sysops/signoz/collector/config.yaml").read_text(encoding="utf-8")
     )
     operators = collector["receivers"]["receiver_creator/docker"]["receivers"]["filelog/container"][
         "config"
@@ -322,7 +322,7 @@ def test_collector_drops_structured_airflow_info_after_parsing_json_level() -> N
 
 def test_collector_observes_itself_and_scopes_postgres_severity_parsing() -> None:
     collector = yaml.safe_load(
-        Path("observability/signoz/collector/config.yaml").read_text(encoding="utf-8")
+        Path("sysops/signoz/collector/config.yaml").read_text(encoding="utf-8")
     )
 
     scrape = collector["receivers"]["prometheus/collector"]["config"]["scrape_configs"][0]
@@ -348,14 +348,12 @@ def test_airflow_metric_allowlist_keeps_operational_health_signals() -> None:
     environment = airflow["x-airflow-common"]["environment"]
     allowlist = environment["AIRFLOW__METRICS__METRICS_ALLOW_LIST"]
     collector = yaml.safe_load(
-        Path("observability/signoz/collector/config.yaml").read_text(encoding="utf-8")
+        Path("sysops/signoz/collector/config.yaml").read_text(encoding="utf-8")
     )
     airflow_metric_statements = collector["processors"]["transform/airflow_metrics"][
         "metric_statements"
     ]
-    dashboard = Path("observability/signoz/terraform/dashboards_airflow.tf").read_text(
-        encoding="utf-8"
-    )
+    dashboard = Path("sysops/signoz/terraform/dashboards_airflow.tf").read_text(encoding="utf-8")
 
     for family in (
         "critical_section_duration",
@@ -381,12 +379,8 @@ def test_airflow_metric_allowlist_keeps_operational_health_signals() -> None:
 
 
 def test_container_cpu_panels_normalize_docker_percent_to_logical_cores() -> None:
-    components = Path("observability/signoz/terraform/dashboard_components.tf").read_text(
-        encoding="utf-8"
-    )
-    dashboard = Path("observability/signoz/terraform/dashboards_containers.tf").read_text(
-        encoding="utf-8"
-    )
+    components = Path("sysops/signoz/terraform/dashboard_components.tf").read_text(encoding="utf-8")
+    dashboard = Path("sysops/signoz/terraform/dashboards_containers.tf").read_text(encoding="utf-8")
 
     assert components.count('formula           = "A / 100"') == 1
     assert dashboard.count('expression = "A / 100"') == 2
@@ -410,18 +404,18 @@ def test_local_runtime_does_not_use_dotenv_files() -> None:
     settings = Path("lakehouse/catalog/src/lakehouse/config/settings.py").read_text(
         encoding="utf-8"
     )
-    modal_execution = Path("ocr/src/document_ocr/execution/modal.py").read_text(encoding="utf-8")
+    modal_client = Path("ocr-engine/src/document_ocr/modal.py").read_text(encoding="utf-8")
 
     assert 'env_file=".env"' not in settings
-    assert 'env_file=".env"' not in modal_execution
+    assert 'env_file=".env"' not in modal_client
 
 
-def test_arxiv_inspector_receives_only_its_explicit_environment() -> None:
-    service = _compose(INSPECTOR_COMPOSE)["services"]["arxiv-inspector"]
+def test_arxiv_lens_receives_only_its_explicit_environment() -> None:
+    service = _compose(ARXIV_LENS_COMPOSE)["services"]["arxiv-lens"]
 
     assert "env_file" not in service
     assert "build" not in service
-    assert service["image"] == ("${ARXIV_INSPECTOR_IMAGE:-arxiv-inspector:local}")
+    assert service["image"] == ("${ARXIV_LENS_IMAGE:-arxiv-lens:local}")
     assert service["user"] == "${LOCAL_UID}:0"
     assert set(service["environment"]) == {
         "LAKEHOUSE_ENVIRONMENT",
@@ -436,7 +430,7 @@ def test_arxiv_inspector_receives_only_its_explicit_environment() -> None:
         "OTEL_LOGS_EXPORTER",
         "OTEL_RESOURCE_ATTRIBUTES",
     }
-    assert service["environment"]["OTEL_SERVICE_NAME"] == "arxiv-inspector"
+    assert service["environment"]["OTEL_SERVICE_NAME"] == "arxiv-lens"
     assert service["environment"]["OTEL_EXPORTER_OTLP_PROTOCOL"] == "grpc"
     assert service["environment"]["OTEL_METRICS_EXPORTER"] == "none"
     assert service["environment"]["OTEL_LOGS_EXPORTER"] == "none"
@@ -444,18 +438,17 @@ def test_arxiv_inspector_receives_only_its_explicit_environment() -> None:
         "http://signoz-collection-agent:4317"
     )
     assert "extra_hosts" not in service
-    assert _compose(INSPECTOR_COMPOSE)["networks"]["telemetry"] == {
+    assert _compose(ARXIV_LENS_COMPOSE)["networks"]["telemetry"] == {
         "external": True,
         "name": "lakehouse-observability",
     }
-    assert service["volumes"] == ["${AWS_IDENTITY_DIR}/arxiv-inspector:/run/aws:ro"]
+    assert service["volumes"] == ["${AWS_IDENTITY_DIR}/arxiv-lens:/run/aws:ro"]
 
 
 def test_all_container_images_are_immutable() -> None:
     airflow_dockerfile = (AIRFLOW_RUNTIME / "Dockerfile").read_text(encoding="utf-8")
     dbt_dockerfile = Path("analytics/dbt-project/Dockerfile").read_text(encoding="utf-8")
-    inspector_dockerfile = Path("apps/arxiv_inspector/Dockerfile").read_text(encoding="utf-8")
-    ocr_dockerfile = Path("ocr/Dockerfile").read_text(encoding="utf-8")
+    lens_dockerfile = Path("arxiv-lens/Dockerfile").read_text(encoding="utf-8")
     emr_dockerfile = Path("lakehouse/emr/Dockerfile").read_text(encoding="utf-8")
     compose = "\n".join(
         Path(path).read_text(encoding="utf-8")
@@ -474,13 +467,9 @@ def test_all_container_images_are_immutable() -> None:
     assert "COPY analytics/dbt-project/models ./models" in dbt_dockerfile
     assert "dbt deps" in dbt_dockerfile
     assert "USER dbt" in dbt_dockerfile
-    assert 'ENTRYPOINT ["document-ocr"]' in ocr_dockerfile
-    assert "openjdk-21-jre-headless" in ocr_dockerfile
-    assert "&& java -version" in ocr_dockerfile
-    assert "USER worker" in ocr_dockerfile
-    assert "USER inspector" in inspector_dockerfile
-    assert "HEALTHCHECK" in inspector_dockerfile
-    assert "PYTHONPATH=/app" in inspector_dockerfile
+    assert "USER lens" in lens_dockerfile
+    assert "HEALTHCHECK" in lens_dockerfile
+    assert "PYTHONPATH=/app/arxiv-lens/src" in lens_dockerfile
     dockerignore = Path(".dockerignore").read_text(encoding="utf-8")
     assert "!infra/runtime/identity/install-aws-signing-helper" in dockerignore
     assert '"apache-airflow[postgres]==3.3.0"' in (AIRFLOW_PROJECT / "pyproject.toml").read_text(
@@ -489,10 +478,8 @@ def test_all_container_images_are_immutable() -> None:
     assert "postgres:17.10@sha256:" in compose
     assert "public.ecr.aws/amazonlinux/amazonlinux:2023-minimal@sha256:" in emr_dockerfile
     assert "ghcr.io/astral-sh/uv:0.11.30@sha256:" in emr_dockerfile
-    dockerfiles = "\n".join(
-        (airflow_dockerfile, dbt_dockerfile, inspector_dockerfile, ocr_dockerfile, emr_dockerfile)
-    )
-    assert dockerfiles.count("ghcr.io/astral-sh/uv:0.11.30@sha256:") == 5
+    dockerfiles = "\n".join((airflow_dockerfile, dbt_dockerfile, lens_dockerfile, emr_dockerfile))
+    assert dockerfiles.count("ghcr.io/astral-sh/uv:0.11.30@sha256:") == 4
     assert ":latest" not in f"{dockerfiles}\n{compose}"
 
 
@@ -500,9 +487,9 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
     workspace = Path("pyproject.toml").read_text(encoding="utf-8")
     catalog = Path("lakehouse/catalog/pyproject.toml").read_text(encoding="utf-8")
     orchestration = (AIRFLOW_PROJECT / "pyproject.toml").read_text(encoding="utf-8")
-    inspector = Path("apps/arxiv_inspector/pyproject.toml").read_text(encoding="utf-8")
+    lens = Path("arxiv-lens/pyproject.toml").read_text(encoding="utf-8")
     analytics = Path("analytics/dbt-project/runtime/pyproject.toml").read_text(encoding="utf-8")
-    ocr = Path("ocr/pyproject.toml").read_text(encoding="utf-8")
+    ocr = Path("ocr-engine/pyproject.toml").read_text(encoding="utf-8")
 
     assert "apache-airflow" not in workspace
     assert "dbt-athena" not in workspace
@@ -518,7 +505,7 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
     assert "constraint-dependencies" not in orchestration
     assert "document-ocr" not in orchestration
     assert '"lakehouse"' not in orchestration
-    assert '"streamlit>=1.60,<1.61"' in inspector
+    assert '"streamlit>=1.60,<1.61"' in lens
     for dependency in (
         "awswrangler",
         "boto3",
@@ -529,20 +516,20 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
         "pydantic",
         "streamlit",
     ):
-        assert dependency in inspector
-    assert "worker = [" in ocr
+        assert dependency in lens
+    assert "cli = [" in ocr
     assert "providers = [" not in ocr
     assert "s3fs" not in ocr
     assert '"dbt-athena==1.11.0"' in analytics
-    assert 'members = ["apps/arxiv_inspector", "lakehouse/catalog", "ocr"]' in workspace
+    assert 'members = ["arxiv-lens", "lakehouse/catalog", "ocr-engine"]' in workspace
     assert (
         'exclude = ["analytics/dbt-project/runtime", "automation/airflow", "lakehouse/emr", '
-        '"ocr/glm_ocr"]' in workspace
+        '"ocr-engine/modal"]' in workspace
     )
     assert Path("analytics/dbt-project/runtime/uv.lock").is_file()
     assert (AIRFLOW_PROJECT / "uv.lock").is_file()
     assert "apache-airflow" not in Path("uv.lock").read_text(encoding="utf-8")
-    assert "opentelemetry-distro" in inspector
+    assert "opentelemetry-distro" in lens
     assert "apache-airflow" in (AIRFLOW_PROJECT / "uv.lock").read_text(encoding="utf-8")
     assert "opentelemetry" in (AIRFLOW_PROJECT / "uv.lock").read_text(encoding="utf-8")
 

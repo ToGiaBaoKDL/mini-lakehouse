@@ -121,9 +121,9 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
     assert 'athena_workgroup = "primary"' in normalized_environment
     assert "analytics_domains = {" in environment
     assert '"dbt_${domain}" => "dbt/${domain}"' in environment
-    assert 'arxiv_inspector = "arxiv-inspector"' in normalized_environment
+    assert 'arxiv_lens = "arxiv-lens"' in normalized_environment
     assert 'domain => "athena/dbt_${domain}_output_uri"' in runtime
-    assert '"athena/arxiv_inspector_output_uri"' in environment
+    assert '"athena/arxiv_lens_output_uri"' in environment
     assert '"airflow/remote_log_uri"' in environment
     assert '"deployment/release_manifest"' not in environment
     assert "workload_data_access = local.workload_data_access" in normalized_environment
@@ -138,10 +138,9 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
         "airflow",
         "catalog-admin",
         "services-deployer",
-        "arxiv-inspector",
+        "arxiv-lens",
         "lightdash",
         "metadata-postgres",
-        "ocr-worker",
         "github-image-publisher",
         "github-emr-publisher",
         "github-lightdash-deployer",
@@ -163,7 +162,7 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
     assert "curated_object_arns_by_workload" in identity
     assert "analytics_object_arns_by_workload" in identity
     assert "athena_result_prefixes[each.key]" in identity
-    assert "athena_result_prefixes.arxiv_inspector" in identity
+    assert "athena_result_prefixes.arxiv_lens" in identity
 
 
 def test_environment_uses_only_domain_modules() -> None:
@@ -249,10 +248,9 @@ def test_service_images_are_immutable_bounded_and_published_by_one_role() -> Non
 
     for repository in (
         "airflow",
-        "arxiv-inspector",
+        "arxiv-lens",
         "dbt",
         "lightdash",
-        "ocr-worker",
     ):
         assert f'"{repository}"' in environment
     assert 'image_tag_mutability = "IMMUTABLE"' in registry
@@ -289,21 +287,16 @@ def test_services_deployer_reads_only_the_connector_secret() -> None:
     assert "ocr_secret_arns" not in services
 
 
-def test_airflow_and_ocr_worker_have_separate_data_permissions() -> None:
+def test_airflow_has_no_ocr_data_permissions_or_runtime_identity() -> None:
     airflow = Path("infra/terraform/aws/modules/identity/airflow.tf").read_text(encoding="utf-8")
-    ocr = Path("infra/terraform/aws/modules/identity/ocr.tf").read_text(encoding="utf-8")
     postgres = Path("infra/terraform/aws/modules/identity/postgres.tf").read_text(encoding="utf-8")
 
+    assert not Path("infra/terraform/aws/modules/identity/ocr.tf").exists()
     assert "UpdateCuratedIceberg" not in airflow
     assert "UpdateCuratedStorage" not in airflow
     assert "ReadProviderCredentials" not in airflow
-    assert "UpdateCuratedIceberg" in ocr
-    assert "UpdateCuratedStorage" in ocr
-    assert "ReadProviderCredentials" in ocr
-    assert "local.curated_database_arns_by_workload.ocr_worker" in ocr
-    assert "local.curated_object_arns_by_workload.ocr_worker" in ocr
-    assert '"${var.bucket_arns.curated}/*"' not in ocr
-    assert "secretsmanager:DescribeSecret" not in airflow + ocr + postgres
+    assert "ocr_worker" not in _terraform_sources(Path("infra/terraform/aws/modules/identity"))
+    assert "secretsmanager:DescribeSecret" not in airflow + postgres
 
 
 def test_metadata_backup_uses_a_dedicated_bucket_and_postgres_scoped_grants() -> None:
@@ -342,9 +335,7 @@ def test_airflow_can_start_only_the_managed_emr_application() -> None:
 
 def test_data_consumers_use_reviewed_database_and_prefix_entitlements() -> None:
     dbt = Path("infra/terraform/aws/modules/identity/dbt.tf").read_text(encoding="utf-8")
-    inspector = Path("infra/terraform/aws/modules/identity/arxiv_inspector.tf").read_text(
-        encoding="utf-8"
-    )
+    lens = Path("infra/terraform/aws/modules/identity/arxiv_lens.tf").read_text(encoding="utf-8")
     lightdash = Path("infra/terraform/aws/modules/identity/lightdash.tf").read_text(
         encoding="utf-8"
     )
@@ -359,8 +350,8 @@ def test_data_consumers_use_reviewed_database_and_prefix_entitlements() -> None:
     assert '"glue:CreateDatabase"' not in dbt
     assert '"${var.bucket_arns.curated}/*"' not in dbt
     assert '"${var.bucket_arns.analytics}/*"' not in dbt
-    assert "local.curated_database_arns_by_workload.arxiv_inspector" in inspector
-    assert "local.curated_prefixes_by_workload.arxiv_inspector" in inspector
+    assert "local.curated_database_arns_by_workload.arxiv_lens" in lens
+    assert "local.curated_prefixes_by_workload.arxiv_lens" in lens
     assert "local.analytics_database_arns_by_workload.lightdash" in lightdash
     assert "local.analytics_object_arns_by_workload.lightdash" in lightdash
     assert "local.curated_object_arns_by_workload" not in lightdash
@@ -542,7 +533,7 @@ def test_reviewable_policy_is_not_hidden_in_tfvars() -> None:
     assert 'analytics_prefix   = "engineering"' in environment
     assert 'analytics_prefix   = "research"' in environment
     assert "notification_destinations" not in environment
-    assert "arxiv_inspector_access" not in example
+    assert "arxiv_lens_access" not in example
     assert "workload_data_access" not in example
     assert "alert_email" not in example
     assert "slack_channel" not in example

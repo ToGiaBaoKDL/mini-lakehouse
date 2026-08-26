@@ -4,17 +4,16 @@ locals {
     domain => "athena/dbt_${domain}_output_uri"
   }
   runtime_parameters = merge({
-    "storage/landing_uri"               = "s3://${module.storage.bucket_names.landing}"
-    "storage/curated_uri"               = "s3://${module.storage.bucket_names.curated}"
-    "storage/analytics_uri"             = "s3://${module.storage.bucket_names.analytics}"
-    "storage/lightdash_uri"             = "s3://${module.storage.bucket_names.lightdash}"
-    "athena/arxiv_inspector_output_uri" = "s3://${module.storage.bucket_names["query-results"]}/${local.athena_workload_prefixes.arxiv_inspector}"
-    "athena/lightdash_output_uri"       = "s3://${module.storage.bucket_names["query-results"]}/${local.athena_workload_prefixes.lightdash}"
-    "airflow/remote_log_uri"            = "s3://${module.storage.bucket_names.logs}/airflow/task-logs"
-    "backup/metadata_postgres_uri"      = "s3://${module.storage.bucket_names.backups}/metadata-postgres"
-    "emr/application_id"                = module.emr_serverless.application_id
-    "emr/execution_role_arn"            = module.identity.emr_runtime_role_arn
-    "ocr/providers/modal_secret_id"     = aws_secretsmanager_secret.ocr["modal"].name
+    "storage/landing_uri"          = "s3://${module.storage.bucket_names.landing}"
+    "storage/curated_uri"          = "s3://${module.storage.bucket_names.curated}"
+    "storage/analytics_uri"        = "s3://${module.storage.bucket_names.analytics}"
+    "storage/lightdash_uri"        = "s3://${module.storage.bucket_names.lightdash}"
+    "athena/arxiv_lens_output_uri" = "s3://${module.storage.bucket_names["query-results"]}/${local.athena_workload_prefixes.arxiv_lens}"
+    "athena/lightdash_output_uri"  = "s3://${module.storage.bucket_names["query-results"]}/${local.athena_workload_prefixes.lightdash}"
+    "airflow/remote_log_uri"       = "s3://${module.storage.bucket_names.logs}/airflow/task-logs"
+    "backup/metadata_postgres_uri" = "s3://${module.storage.bucket_names.backups}/metadata-postgres"
+    "emr/application_id"           = module.emr_serverless.application_id
+    "emr/execution_role_arn"       = module.identity.emr_runtime_role_arn
     }, {
     for domain, parameter_name in local.dbt_output_parameter_names : parameter_name =>
     "s3://${module.storage.bucket_names["query-results"]}/${local.athena_workload_prefixes["dbt_${domain}"]}"
@@ -35,9 +34,9 @@ locals {
     emr_publisher = [
       "emr/code_uri",
     ]
-    arxiv_inspector = [
+    arxiv_lens = [
       "storage/curated_uri",
-      "athena/arxiv_inspector_output_uri",
+      "athena/arxiv_lens_output_uri",
     ]
     lightdash = [
       "storage/lightdash_uri",
@@ -45,10 +44,6 @@ locals {
     ]
     metadata_postgres = [
       "backup/metadata_postgres_uri",
-    ]
-    ocr_worker = [
-      "storage/curated_uri",
-      "ocr/providers/modal_secret_id",
     ]
     }, {
     for domain, parameter_name in local.dbt_output_parameter_names : "dbt_${domain}" => [

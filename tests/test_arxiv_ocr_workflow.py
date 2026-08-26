@@ -1,4 +1,4 @@
-"""ArXiv OCR workflow and persistence tests."""
+"""ArXiv OCR publishing tests."""
 
 import gzip
 import hashlib
@@ -12,20 +12,19 @@ import pyarrow as pa
 import pytest
 import zstandard
 from botocore.exceptions import ClientError
+from document_ocr.arxiv.service import process_arxiv_document
 from document_ocr.arxiv.store import ArxivOcrStore
-from document_ocr.arxiv.workflow import ArxivOcrWorkflow, OcrError
-from document_ocr.config import GlmOcrConfig, load_arxiv_config
-from document_ocr.execution import ExecutionError
+from document_ocr.config import load_config
 from document_ocr.identity import canonical_json_bytes, processing_id
 from document_ocr.protocol import (
     ArtifactFile,
-    GlmOcrJob,
     OcrDocumentManifest,
-    OcrDocumentResult,
     OcrElement,
+    OcrError,
+    OcrJob,
+    OcrOutput,
     OcrPageMarkdown,
     OcrPageMarkdownBundle,
-    OcrRunResult,
 )
 from lakehouse.catalog.schema import iceberg_schema
 
@@ -41,14 +40,6 @@ class _Scan:
         return pa.Table.from_pylist(self._rows, schema=self._schema)
 
 
-class _Schema:
-    def __init__(self, schema: pa.Schema) -> None:
-        self._schema = schema
-
-    def as_arrow(self) -> pa.Schema:
-        return self._schema
-
-
 class _Table:
     def __init__(self, schema: pa.Schema, rows: list[dict[str, Any]]) -> None:
         self._schema = schema
@@ -56,7 +47,13 @@ class _Table:
         self.upserts = 0
 
     def schema(self) -> Any:
-        return _Schema(self._schema)
+        schema = self._schema
+
+        class _Schema:
+            def as_arrow(self) -> pa.Schema:
+                return schema
+
+        return _Schema()
 
     def scan(self, *, row_filter: Any) -> _Scan:
         field = row_filter.term.name
@@ -65,23 +62,9 @@ class _Table:
 
     def upsert(self, frame: pa.Table) -> None:
         self.upserts += 1
-        for incoming in frame.to_pylist():
-            self.rows = [row for row in self.rows if row["run_id"] != incoming["run_id"]]
-            self.rows.append(incoming)
-
-    def overwrite(self, frame: pa.Table, *, overwrite_filter: Any) -> None:
-        field = overwrite_filter.term.name
-        value = overwrite_filter.literal.value
-        self.rows = [row for row in self.rows if row.get(field) != value]
-        self.rows.extend(frame.to_pylist())
-
-
-class _Catalog:
-    def __init__(self, tables: dict[tuple[str, ...], _Table]) -> None:
-        self.tables = tables
-
-    def load_table(self, identifier: tuple[str, ...]) -> _Table:
-        return self.tables[identifier]
+        incoming = frame.to_pylist()[0]
+        self.rows = [row for row in self.rows if row["arxiv_id"] != incoming["arxiv_id"]]
+        self.rows.append(incoming)
 
 
 class _S3:
@@ -121,31 +104,20 @@ def _archive(files: dict[str, bytes]) -> bytes:
     return zstandard.ZstdCompressor(write_checksum=True).compress(bundle.getvalue())
 
 
-class _Execution:
-    name = "modal"
-    reference = "test/arxiv-ocr"
+class _Modal:
+    def __init__(self, *, error: str | None = None) -> None:
+        self.calls = 0
+        self.error = error
 
-    def __init__(self, processor: Any) -> None:
-        self._processor = processor
-        self.job: GlmOcrJob | None = None
-        self.submissions = 0
-
-    def submit(self, job: GlmOcrJob) -> str:
-        self.job = job
-        self.submissions += 1
-        return "test/arxiv-ocr"
-
-    def wait(self, provider_run_id: str, log: Any) -> None:
-        log(f"{provider_run_id}: complete")
-
-    def download_output(self, provider_run_id: str, destination: Path) -> None:
-        assert self.job is not None
-        request = self.job.document
+    def run(self, job: OcrJob, destination: Path) -> None:
+        self.calls += 1
+        if self.error:
+            raise OcrError(self.error)
         pdf_sha256 = "d" * 64
         process = processing_id(
-            document_id=request.document_id,
+            document_id=job.document_id,
             pdf_sha256=pdf_sha256,
-            configuration_hash=self.job.config_hash,
+            configuration_hash=job.config_hash,
         )
         element = OcrElement(
             element_id="e" * 64,
@@ -155,16 +127,14 @@ class _Execution:
             text_content="Test",
             markdown_content="Test",
         )
-        elements = gzip.compress(f"{element.model_dump_json()}\n".encode(), mtime=0)
-        pages = gzip.compress(
-            OcrPageMarkdownBundle(pages=(OcrPageMarkdown(page_number=1, markdown="Test"),))
-            .model_dump_json()
-            .encode(),
-            mtime=0,
-        )
         artifacts = {
-            "elements.jsonl.gz": elements,
-            "pages.json.gz": pages,
+            "elements.jsonl.gz": gzip.compress(f"{element.model_dump_json()}\n".encode(), mtime=0),
+            "pages.json.gz": gzip.compress(
+                OcrPageMarkdownBundle(pages=(OcrPageMarkdown(page_number=1, markdown="Test"),))
+                .model_dump_json()
+                .encode(),
+                mtime=0,
+            ),
             "layout_vis/page-0001.jpg": b"annotated",
         }
         files = tuple(
@@ -176,158 +146,115 @@ class _Execution:
             )
             for name, payload in sorted(artifacts.items())
         )
-        document_manifest = canonical_json_bytes(
-            OcrDocumentManifest(
-                document_id=request.document_id,
-                files=files,
-                page_count=1,
-                pdf_sha256=pdf_sha256,
-                pdf_size_bytes=100,
-                processing_id=process,
-            ).model_dump(mode="json")
+        manifest = OcrDocumentManifest(
+            document_id=job.document_id,
+            files=files,
+            page_count=1,
+            pdf_sha256=pdf_sha256,
+            pdf_size_bytes=100,
+            processing_id=process,
         )
         archive = _archive(artifacts)
-        document = OcrDocumentManifest.model_validate_json(document_manifest)
-        run_result = OcrRunResult(
-            run_id=self.job.run_id,
-            created_at=datetime.now(UTC),
-            archive_sha256=hashlib.sha256(archive).hexdigest(),
-            archive_size_bytes=len(archive),
-            result=OcrDocumentResult(
-                request_id=request.request_id,
-                document_id=request.document_id,
+        destination.mkdir()
+        (destination / "artifacts.tar.zst").write_bytes(archive)
+        (destination / "result.json").write_text(
+            OcrOutput(
+                job_id=job.job_id,
+                created_at=datetime.now(UTC),
+                archive_sha256=hashlib.sha256(archive).hexdigest(),
+                archive_size_bytes=len(archive),
+                document_id=job.document_id,
                 state="succeeded",
                 pdf_sha256=pdf_sha256,
                 pdf_size_bytes=100,
                 page_count=1,
                 processing_id=process,
-                manifest_sha256=hashlib.sha256(document_manifest).hexdigest(),
-            ),
-            document=document,
-        )
-        destination.mkdir()
-        (destination / "artifacts.tar.zst").write_bytes(archive)
-        (destination / "result.json").write_text(
-            run_result.model_dump_json(),
+                manifest_sha256=hashlib.sha256(
+                    canonical_json_bytes(manifest.model_dump(mode="json"))
+                ).hexdigest(),
+                manifest=manifest,
+            ).model_dump_json(),
             encoding="utf-8",
         )
 
-    def execute(
-        self,
-        job: GlmOcrJob,
-        destination: Path,
-        log: Any,
-        *,
-        resume_token: str | None,
-        checkpoint: Any,
-    ) -> None:
-        token = resume_token
-        if token is None:
-            token = self.submit(job)
-            checkpoint(token)
-        self.wait(token, log)
-        self.download_output(token, destination)
+    def cancel(self) -> None:
+        pass
 
 
-class _MissingExecution(_Execution):
-    def wait(self, provider_run_id: str, log: Any) -> None:
-        raise ExecutionError(f"{provider_run_id} is missing")
-
-
-def _workflow(
-    execution_type: type[_Execution] = _Execution,
-) -> tuple[
-    ArxivOcrWorkflow,
-    _Execution,
-    dict[tuple[str, ...], _Table],
-    Any,
-    _S3,
-]:
-    contracts = load_contracts()
-    product = contracts.curated_product("arxiv")
-    tables: dict[tuple[str, ...], _Table] = {}
-    for table in product.tables:
-        rows: list[dict[str, Any]] = []
-        if table.key == "papers":
-            rows.append(
-                {
-                    "arxiv_id": "2607.00001",
-                    "oai_identifier": "oai:arXiv.org:2607.00001",
-                    "title": "Test",
-                    "abstract": None,
-                    "license_uri": None,
-                    "doi": None,
-                    "journal_ref": None,
-                    "comments": None,
-                    "created_date": date(2026, 7, 1),
-                    "updated_date": date(2026, 7, 29),
-                    "oai_datestamp": date(2026, 7, 29),
-                    "pdf_url": "https://arxiv.org/pdf/2607.00001",
-                    "is_deleted": False,
-                    "source_record_sha256": "a" * 64,
-                    "curated_at": datetime.now(UTC),
-                }
-            )
-        tables[product.table_identifier(table.key).iceberg] = _Table(
-            iceberg_schema(table.columns, table.primary_key).as_arrow(),
-            rows,
-        )
-    processor = load_arxiv_config().pipeline("glm_ocr")
-    assert isinstance(processor, GlmOcrConfig)
-    execution = execution_type(processor)
+def _dependencies() -> tuple[ArxivOcrStore, _Table, _S3]:
+    product = load_contracts().curated_product("arxiv")
+    papers_contract = product.table("papers")
+    documents_contract = product.table("ocr_documents")
+    papers = _Table(
+        iceberg_schema(papers_contract.columns, papers_contract.primary_key).as_arrow(),
+        [
+            {
+                "arxiv_id": "2607.00001",
+                "oai_identifier": "oai:arXiv.org:2607.00001",
+                "title": "Test",
+                "abstract": None,
+                "license_uri": None,
+                "doi": None,
+                "journal_ref": None,
+                "comments": None,
+                "created_date": date(2026, 7, 1),
+                "updated_date": date(2026, 7, 29),
+                "oai_datestamp": date(2026, 7, 29),
+                "pdf_url": "https://arxiv.org/pdf/2607.00001",
+                "is_deleted": False,
+                "source_record_sha256": "a" * 64,
+                "curated_at": datetime.now(UTC),
+            }
+        ],
+    )
+    documents = _Table(
+        iceberg_schema(documents_contract.columns, documents_contract.primary_key).as_arrow(),
+        [],
+    )
     s3 = _S3()
-    catalog = _Catalog(tables)
-    store = ArxivOcrStore(
-        papers=cast(Any, catalog.load_table(product.table_identifier("papers").iceberg)),
-        runs=cast(
-            Any,
-            catalog.load_table(product.table_identifier("ocr_document_runs").iceberg),
+    return (
+        ArxivOcrStore(
+            papers=cast(Any, papers),
+            documents=cast(Any, documents),
+            curated_uri="s3://curated",
+            product_name=product.name,
+            s3_client=s3,
         ),
-        elements=cast(
-            Any,
-            catalog.load_table(product.table_identifier("ocr_document_elements").iceberg),
-        ),
-        curated_uri="s3://curated",
-        product_name=product.name,
-        s3_client=s3,
+        documents,
+        s3,
     )
-    workflow = ArxivOcrWorkflow(
-        store=store,
-        processor=processor,
-        execution=cast(Any, execution),
+
+
+def test_arxiv_ocr_publishes_once_and_reuses_current_document() -> None:
+    store, documents, s3 = _dependencies()
+    modal = _Modal()
+
+    first = process_arxiv_document(
+        "2607.00001", store=store, config=load_config(), modal=cast(Any, modal)
     )
-    return workflow, execution, tables, product, s3
+    second = process_arxiv_document(
+        "2607.00001", store=store, config=load_config(), modal=cast(Any, modal)
+    )
 
-
-def test_arxiv_workflow_runs_and_publishes_exactly_one_document() -> None:
-    workflow, execution, tables, product, s3 = _workflow()
-
-    first = workflow.run("2607.00001")
-    second = workflow.run("2607.00001")
-
-    assert first["state"] == "imported"
-    assert second["run_id"] == first["run_id"]
-    assert execution.submissions == 1
-    runs = tables[product.table_identifier("ocr_document_runs").iceberg]
-    assert len(runs.rows) == 1
-    assert runs.upserts == 3
-    assert len(tables[product.table_identifier("ocr_document_elements").iceberg].rows) == 1
+    assert second == first
+    assert modal.calls == 1
+    assert documents.upserts == 1
+    assert len(documents.rows) == 1
     keys = {key for _, key in s3.objects}
     assert any(key.endswith("/manifest.json") for key in keys)
     assert any(key.endswith("/pages.json.gz") for key in keys)
-    assert not any(key.endswith(".pdf") for key in keys)
 
 
-def test_arxiv_workflow_fails_a_missing_remote_run() -> None:
-    workflow, execution, tables, product, _ = _workflow(_MissingExecution)
+def test_arxiv_ocr_failure_does_not_persist_state() -> None:
+    store, documents, s3 = _dependencies()
 
-    with pytest.raises(OcrError, match="is missing"):
-        workflow.run("2607.00001")
-    with pytest.raises(OcrError, match="is missing"):
-        workflow.run("2607.00001")
+    with pytest.raises(OcrError, match="remote failed"):
+        process_arxiv_document(
+            "2607.00001",
+            store=store,
+            config=load_config(),
+            modal=cast(Any, _Modal(error="remote failed")),
+        )
 
-    runs = tables[product.table_identifier("ocr_document_runs").iceberg]
-    assert len(runs.rows) == 2
-    assert execution.submissions == 2
-    assert {row["attempt"] for row in runs.rows} == {1, 2}
-    assert {row["state"] for row in runs.rows} == {"failed"}
+    assert documents.rows == []
+    assert s3.objects == {}

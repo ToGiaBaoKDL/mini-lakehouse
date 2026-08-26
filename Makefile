@@ -62,20 +62,19 @@ lint: ## Run formatting, linting, and static type checks.
 		infra/runtime/postgres/initialize-secrets \
 		infra/runtime/postgres/deploy \
 		infra/runtime/postgres/restore \
-		observability/signoz/deploy/deploy \
-		observability/signoz/collector/deploy \
+		sysops/signoz/deploy/deploy \
+		sysops/signoz/collector/deploy \
 		lakehouse/emr/release/package \
 		automation/airflow/deploy/deploy \
 		automation/airflow/deploy/initialize-secrets \
 		automation/airflow/deploy/reconcile \
-		apps/arxiv_inspector/deploy/deploy \
-		apps/arxiv_inspector/deploy/reconcile \
+		arxiv-lens/deploy/deploy \
+		arxiv-lens/deploy/reconcile \
 		analytics/lightdash/deploy/deploy \
 		analytics/lightdash/deploy/initialize-secrets \
 		analytics/lightdash/deploy/reconcile \
 		analytics/lightdash/deploy/sync-ci-secret \
-		analytics/dbt-project/deploy/deploy \
-		ocr/deploy/deploy
+		analytics/dbt-project/deploy/deploy
 	uv run ruff format --check .
 	uv run ruff check .
 	uv run --all-packages --all-extras pyright
@@ -90,20 +89,20 @@ test: ## Run unit tests.
 compose-validate: ## Validate self-hosted service Compose files.
 	$(METADATA_POSTGRES_COMPOSE_CONFIG) config --quiet
 	$(AIRFLOW_COMPOSE_CONFIG) config --quiet
-	$(INSPECTOR_COMPOSE) config --quiet
+	$(ARXIV_LENS_COMPOSE) config --quiet
 	$(LIGHTDASH_COMPOSE_CONFIG) config --quiet
 	$(CLOUDFLARE_COMPOSE_CONFIG) config --quiet
 	COLLECTOR_IMAGE=validation:local COLLECTOR_CONFIG_SHA256=validation \
 		COLLECTOR_HOSTNAME=validation-host PG_MONITOR_PASSWORD=validation docker compose \
 		--project-name signoz-collection-agent \
-		-f observability/signoz/collector/compose.yaml config --quiet
+		-f sysops/signoz/collector/compose.yaml config --quiet
 
 check: ## Run the complete local quality gate.
 	uv lock --check
 	uv lock --check --project analytics/dbt-project/runtime
 	uv lock --check --project automation/airflow
 	uv lock --check --project lakehouse/emr
-	uv lock --check --directory ocr/glm_ocr
+	uv lock --check --directory ocr-engine/modal
 	$(MAKE) lakehouse-validate
 	$(MAKE) dbt-validate
 	$(MAKE) lightdash-validate

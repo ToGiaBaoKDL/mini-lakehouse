@@ -9,10 +9,9 @@ on:
         type: choice
         options:
           - airflow
-          - arxiv-inspector
+          - arxiv-lens
           - dbt
           - lightdash
-          - ocr-worker
       image:
         description: Exact ECR image reference by digest
         required: true
@@ -84,10 +83,9 @@ jobs:
             infra/runtime/delivery
             infra/runtime/postgres
             automation/airflow/deploy
-            apps/arxiv_inspector/deploy
+            arxiv-lens/deploy
             analytics/lightdash/deploy
             analytics/dbt-project/deploy
-            ocr/deploy
       - name: Verify the deployment bundle was reviewed on main
         shell: bash
         env:

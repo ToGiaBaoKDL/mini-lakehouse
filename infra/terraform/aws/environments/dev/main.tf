@@ -42,18 +42,14 @@ locals {
     }
   }
   athena_workload_prefixes = merge({
-    arxiv_inspector = "arxiv-inspector"
-    lightdash       = "lightdash"
+    arxiv_lens = "arxiv-lens"
+    lightdash  = "lightdash"
     }, {
     for domain in keys(local.analytics_domains) : "dbt_${domain}" => "dbt/${domain}"
   })
   workload_data_access = {
     curated = merge({
-      arxiv_inspector = {
-        databases = ["curated_arxiv"]
-        prefixes  = ["arxiv"]
-      }
-      ocr_worker = {
+      arxiv_lens = {
         databases = ["curated_arxiv"]
         prefixes  = ["arxiv"]
       }
@@ -102,10 +98,9 @@ module "container_registry" {
   name_prefix = local.name_prefix
   repositories = toset([
     "airflow",
-    "arxiv-inspector",
+    "arxiv-lens",
     "dbt",
     "lightdash",
-    "ocr-worker",
   ])
   retained_image_count = 20
   force_delete         = true
@@ -176,7 +171,6 @@ module "identity" {
   ])
   lightdash_ci_secret_arn = aws_secretsmanager_secret.lightdash_ci.arn
   signoz_ci_secret_arn    = aws_secretsmanager_secret.signoz_ci.arn
-  ocr_secret_arns         = toset([for secret in aws_secretsmanager_secret.ocr : secret.arn])
   services_deployer_secret_arns = toset([
     aws_secretsmanager_secret.cloudflare_tunnel.arn,
   ])

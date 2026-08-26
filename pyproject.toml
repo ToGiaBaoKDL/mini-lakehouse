@@ -1,6 +1,6 @@
 [tool.uv.workspace]
-members = ["apps/arxiv_inspector", "lakehouse/catalog", "ocr"]
-exclude = ["analytics/dbt-project/runtime", "automation/airflow", "lakehouse/emr", "ocr/glm_ocr"]
+members = ["arxiv-lens", "lakehouse/catalog", "ocr-engine"]
+exclude = ["analytics/dbt-project/runtime", "automation/airflow", "lakehouse/emr", "ocr-engine/modal"]
 
 [dependency-groups]
 dev = [
@@ -12,7 +12,12 @@ dev = [
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"
 testpaths = ["tests"]
-pythonpath = [".", "lakehouse/catalog/src", "lakehouse/emr/src", "ocr/src"]
+pythonpath = [
+    "arxiv-lens/src",
+    "lakehouse/catalog/src",
+    "lakehouse/emr/src",
+    "ocr-engine/src",
+]
 
 [tool.ruff]
 line-length = 100
@@ -27,9 +32,14 @@ quote-style = "double"
 [tool.pyright]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
-include = ["lakehouse/catalog/src", "ocr/src", "apps", "tests"]
+include = ["arxiv-lens/src", "lakehouse/catalog/src", "ocr-engine/src", "tests"]
 exclude = ["analytics/dbt-project", ".venv"]
-extraPaths = [".", "lakehouse/catalog/src", "lakehouse/emr/src", "ocr/src"]
+extraPaths = [
+    "arxiv-lens/src",
+    "lakehouse/catalog/src",
+    "lakehouse/emr/src",
+    "ocr-engine/src",
+]
 venvPath = "."
 venv = ".venv"
 reportMissingTypeStubs = false

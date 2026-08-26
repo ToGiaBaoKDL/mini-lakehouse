@@ -28,7 +28,6 @@ from operators.emr import LoggedEmrServerlessStartJobOperator
 ALLOWED_JOB_TYPES = {"etl", "tl", "rpt", "mon", "man", "bk", "stm", "cat", "gov", "test"}
 ALLOWED_WORKER_TYPES = {"emr", "glue", "k8spod", "afw", "docker", "mix"}
 EXPECTED_DAGS = {
-    "etl_docker_arxiv_document_ocr",
     "tl_docker_analytics",
     "etl_emr_arxiv_metadata",
     "etl_emr_github_archive",
@@ -122,16 +121,13 @@ def test_curated_assets_schedule_one_domain_aware_analytics_dag() -> None:
     bag = _bag()
     github_producer = _dag(bag, "etl_emr_github_archive")
     arxiv_producer = _dag(bag, "etl_emr_arxiv_metadata")
-    ocr_producer = _dag(bag, "etl_docker_arxiv_document_ocr")
     analytics = _dag(bag, "tl_docker_analytics")
 
     github_asset = github_producer.tasks[0].outlets[0]
     arxiv_asset = arxiv_producer.tasks[0].outlets[0]
-    ocr_asset = ocr_producer.tasks[0].outlets[0]
     assert github_asset.uri == "lakehouse://curated/github"
     assert arxiv_asset.uri == "lakehouse://curated/arxiv/metadata"
-    assert ocr_asset.uri == "lakehouse://curated/arxiv/ocr"
-    assert analytics.schedule == github_asset | arxiv_asset | ocr_asset
+    assert analytics.schedule == github_asset | arxiv_asset
 
     expectations = {
         "engineering": {
@@ -145,7 +141,7 @@ def test_curated_assets_schedule_one_domain_aware_analytics_dag() -> None:
             "image": "dbt:runtime",
             "identity": "/tmp/dbt-research",
             "selector": "research",
-            "inputs": [arxiv_asset, ocr_asset],
+            "inputs": [arxiv_asset],
             "output": "lakehouse://analytics/research",
         },
     }
@@ -226,30 +222,6 @@ def test_dags_share_timezone_and_expose_job_and_worker_tags() -> None:
         assert dag.timezone.name == "Asia/Ho_Chi_Minh"
         assert job_type in dag.tags
         assert worker_type in dag.tags
-
-
-def test_manual_ocr_dag_processes_exactly_one_requested_document() -> None:
-    dag = _dag(_bag(), "etl_docker_arxiv_document_ocr")
-    assert dag.schedule is None
-    assert dag.max_active_runs == 1
-    assert set(dag.params) == {"arxiv_id", "pipeline"}
-
-    task = dag.get_task("process_arxiv_pdf")
-    assert isinstance(task, LoggedDockerOperator)
-    assert task.image == "ocr-worker:runtime"
-    assert task.command == [
-        "--arxiv-id",
-        "{{ params.arxiv_id }}",
-        "--pipeline",
-        "{{ params.pipeline }}",
-    ]
-    assert task.cpus == 2.0
-    assert task.mem_limit == "6g"
-    assert task.retries == 0
-    assert task.environment["AWS_CONFIG_FILE"] == "/run/aws/config"
-    assert task.mounts[0]["Source"] == "/tmp/ocr-worker"
-    assert task.inlets[0].uri == "lakehouse://curated/arxiv/metadata"
-    assert task.outlets[0].uri == "lakehouse://curated/arxiv/ocr"
 
 
 def test_maintenance_dag_uses_the_shared_emr_lifecycle() -> None:

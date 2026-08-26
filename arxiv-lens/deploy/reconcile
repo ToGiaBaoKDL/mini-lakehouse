@@ -1,0 +1,29 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -gt 1 ]; then
+    printf '%s\n' "Usage: arxiv-lens/deploy/reconcile [image]" >&2
+    exit 2
+fi
+
+image=${1:-arxiv-lens:local}
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+environment=${LAKEHOUSE_ENVIRONMENT:-dev}
+identity_dir=${AWS_IDENTITY_DIR:-"$HOME/.config/lakehouse/$environment/aws"}
+test -r "$identity_dir/arxiv-lens/config" || {
+    printf '%s\n' "The arxiv-lens workload identity is missing." >&2
+    exit 1
+}
+docker network inspect lakehouse-observability >/dev/null 2>&1 || {
+    printf '%s\n' "lakehouse-observability is missing; reconcile the services host first." >&2
+    exit 1
+}
+
+export LAKEHOUSE_ENVIRONMENT=$environment
+export AWS_IDENTITY_DIR=$identity_dir
+export HOST_BIND_ADDRESS=${HOST_BIND_ADDRESS:-127.0.0.1}
+export LOCAL_UID=${LOCAL_UID:-$(id -u)}
+export ARXIV_LENS_IMAGE=$image
+
+docker compose --project-name arxiv-lens -f "$script_dir/compose.yaml" \
+    up -d --wait --wait-timeout 180

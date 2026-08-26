@@ -31,8 +31,8 @@ runs:
           airflow)
             bundle+=(infra/runtime/postgres automation/airflow/deploy)
             ;;
-          arxiv-inspector)
-            bundle+=(apps/arxiv_inspector/deploy)
+          arxiv-lens)
+            bundle+=(arxiv-lens/deploy)
             ;;
           cloudflare)
             bundle+=(infra/runtime/cloudflare)
@@ -42,9 +42,6 @@ runs:
             ;;
           dbt)
             bundle+=(analytics/dbt-project/deploy)
-            ;;
-          ocr-worker)
-            bundle+=(ocr/deploy)
             ;;
           *) exit 2 ;;
         esac

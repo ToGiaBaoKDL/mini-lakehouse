@@ -6,7 +6,7 @@ small self-hosted OCI runtime and keeps infrastructure, data contracts, processi
 applications independently deployable.
 
 The included reference workloads ingest GitHub Archive and ArXiv data, extract PDF content, build
-Iceberg tables and dbt models, and expose the results through Lightdash and a Streamlit inspector.
+Iceberg tables and dbt models, and expose the results through Lightdash and ArXiv Lens.
 
 ## What is included
 
@@ -14,7 +14,7 @@ Iceberg tables and dbt models, and expose the results through Lightdash and a St
 - Contract-driven Glue and Apache Iceberg catalogs defined in YAML.
 - Spark ingestion and transformation on EMR Serverless.
 - Self-hosted Airflow with versioned DAG bundles and isolated task images.
-- CPU-native PDF extraction with OpenDataLoader and optional remote GLM-OCR GPU runners.
+- Modal-native GLM-OCR extraction with pinned models and durable curated artifacts.
 - Athena and dbt analytics projects for engineering and research datasets.
 - Self-hosted Lightdash and a read-only ArXiv inspection application.
 - Immutable image and job releases, workload-scoped identities, and reproducible local checks.
@@ -37,7 +37,7 @@ flowchart LR
 
 AWS owns the durable data plane. A private OCI A1 host runs Airflow, PostgreSQL, Lightdash, and the
 application services behind Tailscale and Cloudflare Access. GPU OCR is optional and remote; the
-default OpenDataLoader pipeline runs on CPU.
+GLM-OCR runs on a scale-to-zero Modal GPU runtime.
 
 ## Demo
 
@@ -49,9 +49,9 @@ default OpenDataLoader pipeline runs on CPU.
 
 ![Lightdash Engineering dashboard showing GitHub activity metrics and trends](docs/assets/lightdash-engineering-dashboard.png)
 
-### ArXiv Inspector
+### ArXiv Lens
 
-![ArXiv Inspector showing an annotated PDF page alongside extracted Markdown](docs/assets/arxiv-inspector.png)
+![ArXiv Lens showing an annotated PDF page alongside extracted Markdown](docs/assets/arxiv-lens.png)
 
 ## Repository layout
 
@@ -61,15 +61,16 @@ default OpenDataLoader pipeline runs on CPU.
 | `lakehouse/contracts/` | YAML contracts for sources, curated products, and analytics domains |
 | `lakehouse/emr/` | Spark source ingestion, curated transformations, and maintenance jobs |
 | `automation/airflow/` | Airflow runtime, DAG bundle, and deployment |
-| `ocr/` | Provider-neutral document extraction and remote runners |
+| `ocr-engine/` | Local CLI and scale-to-zero Modal GLM-OCR runtime |
+| `arxiv-lens/` | Read-only Streamlit application and its deployment boundary |
 | `analytics/dbt-project/` | Athena analytics models and their isolated runtime |
 | `analytics/lightdash/` | Domain-owned BI content and Lightdash runtime/deployment |
-| `apps/` | Application code and self-hosted service runtime boundaries |
+| `sysops/` | Observability runtime, telemetry collection, dashboards, and alerts |
 | `infra/` | Terraform, shared services, delivery, and operations |
 
 Ownership follows these boundaries: Terraform provisions infrastructure, YAML contracts own the
 catalog, Spark and OCR own curated data, dbt owns analytics tables, Lightdash owns BI semantics and
-content, application deploy folders own runtimes, and Airflow only orchestrates.
+content, each top-level application owns its runtime, and Airflow only orchestrates.
 
 ## Getting started
 

@@ -4,10 +4,9 @@ from typing import Any, cast
 
 import modal
 import pytest
-from document_ocr.config import GlmOcrConfig, load_arxiv_config
-from document_ocr.execution import ExecutionError, ModalCredentials, ModalExecution
-from document_ocr.protocol import GlmOcrJob
-from pydantic import ValidationError
+from document_ocr.config import load_config
+from document_ocr.modal import ModalOcr
+from document_ocr.protocol import OcrError, OcrJob
 
 
 class _FakeCall:
@@ -31,73 +30,68 @@ class _FakeCall:
         self.cancelled = terminate_containers
 
 
-class _FakeLogEntry:
-    message = "worker started\n"
-
-
-class _FakeLogs:
-    def stream(self):
-        yield _FakeLogEntry()
-
-
-class _FakeFunction:
+class _FakeMethod:
     def __init__(self, call: _FakeCall) -> None:
-        self._call = call
+        self.call = call
         self.job_json: str | None = None
 
     def spawn(self, job_json: str) -> _FakeCall:
         self.job_json = job_json
-        return self._call
+        return self.call
+
+
+class _FakeLogs:
+    def stream(self) -> tuple[()]:
+        return ()
 
 
 class _FakeVolume:
     def __init__(self, objects: dict[str, bytes]) -> None:
-        self._objects = objects
+        self.objects = objects
 
     def read_file(self, path: str) -> tuple[bytes, ...]:
-        return (self._objects[path],)
+        return (self.objects[path],)
 
 
-def _pipeline() -> GlmOcrConfig:
-    pipeline = load_arxiv_config().pipeline("glm_ocr")
-    assert isinstance(pipeline, GlmOcrConfig)
-    return pipeline
+def _job() -> OcrJob:
+    return load_config().job(
+        document_id="2607.00001",
+        source_record_sha256="a" * 64,
+        pdf_url="https://arxiv.org/pdf/2607.00001",
+        reuse=None,
+    )
 
 
-def _execution() -> ModalExecution:
-    return ModalExecution(
-        ModalCredentials.model_validate({"token_id": "ak-test", "token_secret": "as-test"}),
-        _pipeline(),
+def _client() -> ModalOcr:
+    return ModalOcr(
+        token_id="ak-test",
+        token_secret="as-test",
+        config=load_config(),
         client=cast(Any, object()),
     )
 
 
-def _job() -> GlmOcrJob:
-    return GlmOcrJob.model_construct(run_id="run", adapter="glm_ocr")
-
-
-def test_modal_configuration_is_explicit_and_credentials_require_a_pair() -> None:
-    assert _pipeline().modal.environment == "main"
-    with pytest.raises(ValidationError, match="token_secret"):
-        cast(Any, ModalCredentials)(token_id="ak-incomplete")
-
-
-def test_modal_execution_submits_waits_and_downloads_committed_files(
+def _install_modal(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    method: _FakeMethod,
+    volume: _FakeVolume,
 ) -> None:
-    output_prefix = f"runs/{'b' * 64}"
-    call = _FakeCall(output_prefix)
-    function = _FakeFunction(call)
+    class _Remote:
+        run = method
+
+    class _RemoteClass:
+        def __call__(self) -> _Remote:
+            return _Remote()
+
+    remote_class = _RemoteClass()
     monkeypatch.setattr(
         modal,
-        "Function",
-        type("Function", (), {"from_name": staticmethod(lambda *_args, **_kwargs: function)}),
-    )
-    monkeypatch.setattr(
-        modal,
-        "FunctionCall",
-        type("FunctionCall", (), {"from_id": staticmethod(lambda *_args, **_kwargs: call)}),
+        "Cls",
+        type(
+            "Cls",
+            (),
+            {"from_name": staticmethod(lambda *_args, **_kwargs: remote_class)},
+        ),
     )
     monkeypatch.setattr(
         modal,
@@ -105,99 +99,61 @@ def test_modal_execution_submits_waits_and_downloads_committed_files(
         type(
             "Volume",
             (),
-            {
-                "from_name": staticmethod(
-                    lambda *_args, **_kwargs: _FakeVolume(
-                        {
-                            f"{output_prefix}/result.json": b"result",
-                            f"{output_prefix}/artifacts.tar.zst": b"archive",
-                        }
-                    )
-                )
-            },
+            {"from_name": staticmethod(lambda *_args, **_kwargs: volume)},
         ),
     )
-    checkpoints: list[str] = []
-    logs: list[str] = []
+
+
+def test_modal_run_submits_and_downloads_committed_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    prefix = f"jobs/{'b' * 64}"
+    method = _FakeMethod(_FakeCall(prefix))
+    _install_modal(
+        monkeypatch,
+        method,
+        _FakeVolume(
+            {
+                f"{prefix}/result.json": b"result",
+                f"{prefix}/artifacts.tar.zst": b"archive",
+            }
+        ),
+    )
+    job = _job()
     destination = tmp_path / "output"
 
-    _execution().execute(
-        _job(),
-        destination,
-        logs.append,
-        resume_token=None,
-        checkpoint=checkpoints.append,
-    )
+    _client().run(job, destination)
 
-    assert checkpoints == ["fc-test"]
-    assert function.job_json is not None
-    assert json.loads(function.job_json) == {
-        "schema_version": "3.0.0",
-        "run_id": "run",
-        "adapter": "glm_ocr",
-    }
-    assert logs == [
-        "Modal function call: https://modal.com/id/fc-test\n",
-        "worker started\n",
-    ]
+    assert json.loads(cast(str, method.job_json)) == job.model_dump(mode="json")
     assert (destination / "result.json").read_bytes() == b"result"
     assert (destination / "artifacts.tar.zst").read_bytes() == b"archive"
 
 
-def test_modal_execution_cancels_its_active_call(monkeypatch: pytest.MonkeyPatch) -> None:
-    call = _FakeCall(error=modal.exception.TimeoutError("still running"))
-    function = _FakeFunction(call)
-    monkeypatch.setattr(
-        modal,
-        "Function",
-        type("Function", (), {"from_name": staticmethod(lambda *_args, **_kwargs: function)}),
-    )
-    monkeypatch.setattr(
-        modal,
-        "FunctionCall",
-        type("FunctionCall", (), {"from_id": staticmethod(lambda *_args, **_kwargs: call)}),
-    )
-    execution = _execution()
+def test_modal_failure_can_cancel_the_active_call(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    call = _FakeCall(error=ValueError("invalid worker payload"))
+    method = _FakeMethod(call)
+    _install_modal(monkeypatch, method, _FakeVolume({}))
+    client = _client()
 
-    with pytest.raises(ExecutionError):
-        execution.execute(
-            _job(),
-            Path("unused"),
-            lambda _message: None,
-            resume_token=None,
-            checkpoint=lambda _token: None,
-        )
-    execution.cancel()
+    with pytest.raises(OcrError, match="invalid worker payload"):
+        client.run(_job(), tmp_path / "unused")
+    client.cancel()
 
     assert call.cancelled is True
 
 
-@pytest.mark.parametrize(
-    ("result", "error", "message"),
-    [
-        ({"state": "complete"}, None, "invalid output prefix"),
-        (None, ValueError("invalid worker payload"), "invalid worker payload"),
-    ],
-)
-def test_modal_execution_rejects_invalid_remote_results(
+@pytest.mark.parametrize("prefix", ["invalid", "runs/" + "a" * 64])
+def test_modal_rejects_invalid_output_prefix(
     monkeypatch: pytest.MonkeyPatch,
-    result: object,
-    error: Exception | None,
-    message: str,
+    tmp_path: Path,
+    prefix: str,
 ) -> None:
-    call = _FakeCall(result, error=error)
-    execution = _execution()
+    method = _FakeMethod(_FakeCall(prefix))
+    _install_modal(monkeypatch, method, _FakeVolume({}))
 
-    def find_call(_run_id: str) -> _FakeCall:
-        return call
-
-    monkeypatch.setattr(execution, "_call", find_call)
-
-    with pytest.raises(ExecutionError, match=message):
-        execution.execute(
-            _job(),
-            Path("unused"),
-            lambda _message: None,
-            resume_token="fc-test",
-            checkpoint=lambda _token: None,
-        )
+    with pytest.raises(OcrError, match="invalid output prefix"):
+        _client().run(_job(), tmp_path / "unused")

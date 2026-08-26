@@ -23,9 +23,9 @@ output "services_deployer_role_arn" {
   value       = aws_iam_role.services_deployer.arn
 }
 
-output "arxiv_inspector_role_arn" {
-  description = "Read-only data access role for ArXiv Inspector."
-  value       = aws_iam_role.arxiv_inspector.arn
+output "arxiv_lens_role_arn" {
+  description = "Read-only data access role for ArXiv Lens."
+  value       = aws_iam_role.arxiv_lens.arn
 }
 
 output "lightdash_role_arn" {
@@ -36,11 +36,6 @@ output "lightdash_role_arn" {
 output "dbt_domain_role_arns" {
   description = "Least-privilege IAM roles keyed by independently owned dbt domain workload."
   value       = { for workload, role in aws_iam_role.dbt_domain : workload => role.arn }
-}
-
-output "ocr_worker_role_arn" {
-  description = "IAM role used by the local OCR task container."
-  value       = aws_iam_role.ocr_worker.arn
 }
 
 output "github_image_publisher_role_arn" {

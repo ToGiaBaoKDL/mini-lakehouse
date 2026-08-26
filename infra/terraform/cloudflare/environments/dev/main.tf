@@ -5,7 +5,7 @@ locals {
       hostname = "airflow.tgblab.io.vn"
       origin   = "http://127.0.0.1:8080"
     }
-    arxiv_inspector = {
+    arxiv_lens = {
       hostname = "arxiv.tgblab.io.vn"
       origin   = "http://127.0.0.1:8501"
     }

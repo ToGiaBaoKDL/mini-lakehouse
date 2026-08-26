@@ -58,7 +58,7 @@ def test_component_release_publishes_before_protected_digest_deployment() -> Non
     assert "automation/airflow/runtime" in release
     assert "source-$revision" in release
     assert "cancel-in-progress: false" in release
-    assert "airflow|arxiv-inspector|dbt|lightdash|ocr-worker" in release
+    assert "airflow|arxiv-lens|dbt|lightdash" in release
     assert '[[ -z "$BUILD_ARGS" ]]' in release
     assert "^[0-9]{12}\\.dkr\\.ecr\\." in action
     assert "uses: ./.github/actions/reconcile-services-host" in action
@@ -106,15 +106,32 @@ def test_host_workload_identities_ignore_operator_credentials() -> None:
 
 
 def test_modal_worker_keeps_models_cached_before_application_source() -> None:
-    source = Path("ocr/glm_ocr/modal.py").read_text(encoding="utf-8")
+    source = Path("ocr-engine/modal/app.py").read_text(encoding="utf-8")
 
-    assert ".run_function(" not in source
-    assert source.index(".run_commands(") < source.index(".env(") < source.index(".add_local_dir(")
-    assert 'MODEL_DOWNLOAD_COMMAND = shlex.join(("python", "-c", MODEL_DOWNLOAD_SCRIPT))' in source
-    assert ".run_commands(MODEL_DOWNLOAD_COMMAND)" in source
-    assert 'MODEL_DOWNLOAD_SCRIPT = ";".join(' in source
-    assert '.env({"PYTHONPATH": str(GLM_OCR_ROOT)})' in source
-    assert '.add_local_dir("ocr/config", "/root/ocr/config")' in source
+    assert source.index(".run_function(") < source.index(".env(") < source.index(".add_local_dir(")
+    assert "def download_models(" in source
+    assert "snapshot_download(" in source
+    assert "run_commands" not in source
+    assert '.env({"PYTHONPATH": str(MODAL_ROOT)})' in source
+    assert '.add_local_file("ocr-engine/config.yaml", "/root/ocr-engine/config.yaml")' in source
+    assert "@app.cls(" in source
+    assert "@modal.enter()" in source
+    assert "@modal.exit()" in source
+    assert "@modal.method()" in source
+
+
+def test_ocr_is_local_cli_plus_modal_without_an_oci_runtime() -> None:
+    makefile = Path("make/data.mk").read_text(encoding="utf-8")
+
+    assert not Path("ocr-engine/Dockerfile").exists()
+    assert not Path("ocr-engine/deploy").exists()
+    assert not Path(".github/workflows/release-ocr-worker.yml").exists()
+    assert not Path(
+        "automation/airflow/bundle/dags/arxiv/etl_docker_arxiv_document_ocr.py"
+    ).exists()
+    assert "ocr-run: preflight" not in makefile
+    assert "document-ocr run" in makefile
+    assert "modal deploy" in makefile
 
 
 def test_each_component_owns_its_deployment_operation() -> None:
@@ -125,15 +142,14 @@ def test_each_component_owns_its_deployment_operation() -> None:
             "automation/airflow/deploy/reconcile",
         )
     )
-    inspector = "\n".join(
+    lens = "\n".join(
         Path(path).read_text(encoding="utf-8")
         for path in (
-            "apps/arxiv_inspector/deploy/deploy",
-            "apps/arxiv_inspector/deploy/reconcile",
+            "arxiv-lens/deploy/deploy",
+            "arxiv-lens/deploy/reconcile",
         )
     )
     dbt = Path("analytics/dbt-project/deploy/deploy").read_text(encoding="utf-8")
-    ocr = Path("ocr/deploy/deploy").read_text(encoding="utf-8")
     postgres = Path("infra/runtime/postgres/deploy").read_text(encoding="utf-8")
     lightdash = "\n".join(
         Path(path).read_text(encoding="utf-8")
@@ -155,14 +171,13 @@ def test_each_component_owns_its_deployment_operation() -> None:
     assert "docker compose --project-name lightdash" in lightdash
     assert '"$bundle_root/infra/runtime/postgres/deploy" lightdash' in lightdash
     assert "--force-recreate" not in lightdash
-    assert "docker compose --project-name arxiv-inspector" in inspector
+    assert "docker compose --project-name arxiv-lens" in lens
     assert '"$component:runtime"' in dbt
-    assert "ocr-worker:runtime" in ocr
     assert "docker compose --project-name cloudflare" in cloudflare
     assert "--token-file" in Path("infra/runtime/cloudflare/compose.yaml").read_text(
         encoding="utf-8"
     )
-    assert "git " not in airflow + inspector + lightdash + dbt + ocr + postgres + cloudflare
+    assert "git " not in airflow + lens + lightdash + dbt + postgres + cloudflare
 
 
 def test_cloudflare_connector_has_a_deploy_only_workflow() -> None:
@@ -271,17 +286,13 @@ def test_each_custom_component_has_a_thin_release_caller() -> None:
             "component: airflow",
             "dockerfile: automation/airflow/runtime/Dockerfile",
         ),
-        "release-arxiv-inspector.yml": (
-            "component: arxiv-inspector",
-            "dockerfile: apps/arxiv_inspector/Dockerfile",
+        "release-arxiv-lens.yml": (
+            "component: arxiv-lens",
+            "dockerfile: arxiv-lens/Dockerfile",
         ),
         "release-dbt.yml": (
             "component: dbt",
             "dockerfile: analytics/dbt-project/Dockerfile",
-        ),
-        "release-ocr-worker.yml": (
-            "component: ocr-worker",
-            "dockerfile: ocr/Dockerfile",
         ),
         "release-lightdash.yml": (
             "component: lightdash",
@@ -302,7 +313,6 @@ def test_each_custom_component_has_a_thin_release_caller() -> None:
         assert "infra/runtime/delivery/**" not in source
         for assertion in assertions:
             assert assertion in source
-    assert "apps/arxiv_inspector/pyproject.toml" in _workflow("release-ocr-worker.yml")
 
 
 def test_airflow_deploy_only_changes_reuse_the_runtime_image() -> None:

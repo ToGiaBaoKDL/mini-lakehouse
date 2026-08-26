@@ -58,9 +58,8 @@ the standard AWS `credential_process` chain.
 | `airflow` | Roles Anywhere certificate mounted read-only at `/run/aws` | Start, inspect, and cancel jobs in the owned EMR Serverless application; pass only `emr-runtime`; read its SSM parameters and Airflow secrets; read/write only the Airflow task-log prefix. It has no landing, curated, or analytics access. |
 | `emr-runtime` | AWS service role assumed by EMR Serverless | Read immutable EMR artifacts; read/write landing and curated objects; read/update the corresponding Glue Iceberg tables; use the lakehouse KMS key. |
 | `dbt-<domain>` | Separate Roles Anywhere certificate mounted into each ephemeral dbt container | Run Athena queries; read only the domain's curated databases/prefixes; manage only its analytics database/prefix; write only its Athena result prefix; read only its SSM parameters. |
-| `arxiv-inspector` | Roles Anywhere certificate mounted into the application | Read ArXiv curated catalog/objects, run Athena, and manage only its query-result prefix. |
+| `arxiv-lens` | Roles Anywhere certificate mounted into the application | Read ArXiv curated catalog/objects, run Athena, and manage only its query-result prefix. |
 | `lightdash` | Roles Anywhere certificate mounted into the application | Read Engineering and Research analytics only, run Athena, manage its query-result prefix and its dedicated S3 application bucket, and read its two runtime secrets. |
-| `ocr-worker` | Roles Anywhere certificate mounted into the task container | Read OCR provider secrets and update only ArXiv curated catalog/object prefixes. |
 | `metadata-postgres` | Roles Anywhere certificate on the OCI host | Read only metadata PostgreSQL secrets and its backup destination parameter, and manage only daily metadata database backup objects under the backup bucket's `metadata-postgres/` prefix. |
 | `catalog-admin` | Explicit operator `AssumeRole` | Apply and validate contract-owned Glue/Iceberg metadata. It does not run scheduled workloads. |
 
@@ -243,14 +242,13 @@ revision has no releases yet, dispatch the missing publishers explicitly:
 ```bash
 gh workflow run release-emr-jobs.yml --ref main
 gh workflow run release-dbt.yml --ref main
-gh workflow run release-ocr-worker.yml --ref main
 gh workflow run release-airflow.yml --ref main
-gh workflow run release-arxiv-inspector.yml --ref main
+gh workflow run release-arxiv-lens.yml --ref main
 gh workflow run release-lightdash.yml --ref main
 ```
 
-Image and EMR publish jobs do not require approval. Wait for EMR, dbt, and OCR publishing to
-complete; then approve the protected OCI deploy jobs for dbt and OCR before Airflow. Inspector and
+Image and EMR publish jobs do not require approval. Wait for EMR and dbt publishing to
+complete; then approve the protected OCI deploy job for dbt before Airflow. ArXiv Lens and
 Lightdash are independent and may be approved afterward. Deploy the Cloudflare connector once its
 Terraform resources and secret are ready:
 
@@ -259,11 +257,18 @@ gh workflow run deploy-cloudflare.yml --ref main
 ```
 
 Deploy the Modal GPU worker after its credential secret is available. This control-plane operation
-uses the selected operator AWS profile; it does not impersonate the runtime OCR role. Re-running it
-updates the same persistent Modal app in place:
+uses the selected operator AWS profile to read the Modal credential secret. Re-running it updates
+the same scale-to-zero Modal app in place:
 
 ```bash
 AWS_PROFILE=tgbao-dev make ocr-modal-deploy
+```
+
+Run one curated paper directly from the operator machine; there is no OCR Airflow DAG or OCI
+worker:
+
+```bash
+AWS_PROFILE=tgbao-dev make ocr-run ARXIV_ID=2607.00001
 ```
 
 The Lightdash workflow builds the unmodified upstream `1.146.0` commit on a native ARM GitHub
@@ -287,7 +292,7 @@ tailscale ping tgbao-dev-services
 tailscale ssh ubuntu@tgbao-dev-services 'docker ps'
 ```
 
-Open Airflow at `https://airflow.tgblab.io.vn`, ArXiv Inspector at
+Open Airflow at `https://airflow.tgblab.io.vn`, ArXiv Lens at
 `https://arxiv.tgblab.io.vn`, and Lightdash at `https://analytics.tgblab.io.vn`; Cloudflare Access
 restricts all applications to the reviewed email
 set. Tailnet endpoints remain available for private diagnosis. Airflow task logs are stored in the
@@ -344,7 +349,7 @@ backup with `make metadata-postgres-restore ARGS='<database> <utc-date> <am|pm>'
 bootstrapped cluster.
 
 The services deployer can pull reviewed ECR digests and read only the Cloudflare connector token;
-it cannot read application secrets or data. Airflow, metadata PostgreSQL, dbt, OCR, and Inspector
-use separate certificate-backed AWS roles. Only EMR and the catalog administrator have tier-wide
+it cannot read application secrets or data. Airflow, metadata PostgreSQL, dbt, and ArXiv Lens use
+separate certificate-backed AWS roles. Local OCR uses the selected operator profile. Only EMR and the catalog administrator have tier-wide
 landing/curated access. Dev is rebuildable; production should disable destructive bucket/ECR flags
 and replace the local CA with managed certificate issuance while preserving these boundaries.

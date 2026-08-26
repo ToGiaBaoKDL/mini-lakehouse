@@ -16,7 +16,6 @@ from config.assets import (
     ANALYTICS_ENGINEERING,
     ANALYTICS_RESEARCH,
     CURATED_ARXIV_METADATA,
-    CURATED_ARXIV_OCR,
     CURATED_GITHUB,
 )
 from config.templates import DAG_START_DATE, runtime_value
@@ -83,7 +82,7 @@ def _analytics_group(
 with DAG(
     dag_id="tl_docker_analytics",
     description="Build only analytics domains affected by curated asset events.",
-    schedule=CURATED_GITHUB | CURATED_ARXIV_METADATA | CURATED_ARXIV_OCR,
+    schedule=CURATED_GITHUB | CURATED_ARXIV_METADATA,
     start_date=DAG_START_DATE,
     catchup=False,
     max_active_runs=1,
@@ -98,6 +97,6 @@ with DAG(
     )
     _analytics_group(
         "research",
-        inputs=(CURATED_ARXIV_METADATA, CURATED_ARXIV_OCR),
+        inputs=(CURATED_ARXIV_METADATA,),
         output=ANALYTICS_RESEARCH,
     )

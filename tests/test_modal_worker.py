@@ -1,56 +1,47 @@
 import importlib
 import sys
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from document_ocr.artifacts import create_archive
-from document_ocr.config import GlmOcrConfig, load_arxiv_config
+from document_ocr.config import load_config
 from document_ocr.identity import (
     canonical_json_bytes,
+    canonical_json_sha256,
     file_sha256,
     processing_id,
-    request_id,
 )
 from document_ocr.output import extract_ocr_output
 from document_ocr.protocol import (
-    DocumentProcessingError,
-    GlmOcrJob,
-    OcrDocumentRequest,
+    OcrError,
+    OcrJob,
+    OcrOutput,
     OcrReuseReference,
-    OcrRunResult,
 )
 
 
-def _runner_modules(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
-    fitz = ModuleType("fitz")
+def _runtime(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    monkeypatch.syspath_prepend(str(Path("ocr-engine/modal").resolve()))
     glmocr = ModuleType("glmocr")
     glmocr.GlmOcr = object  # type: ignore[attr-defined]
-    config = ModuleType("glmocr.config")
-    config.GlmOcrConfig = object  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "fitz", fitz)
+    sdk_config = ModuleType("glmocr.config")
+    sdk_config.GlmOcrConfig = object  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "glmocr", glmocr)
-    monkeypatch.setitem(sys.modules, "glmocr.config", config)
-    module_names = (
-        "ocr.glm_ocr.worker.document",
-        "ocr.glm_ocr.worker.engine",
-        "ocr.glm_ocr.worker.job",
-    )
-    for name in module_names:
+    monkeypatch.setitem(sys.modules, "glmocr.config", sdk_config)
+    for name in ("server", "worker"):
         sys.modules.pop(name, None)
     return SimpleNamespace(
-        document=importlib.import_module(module_names[0]),
-        engine=importlib.import_module(module_names[1]),
-        job=importlib.import_module(module_names[2]),
+        server=importlib.import_module("server"),
+        worker=importlib.import_module("worker"),
         source=importlib.import_module("document_ocr.source"),
     )
 
 
-def _job() -> GlmOcrJob:
-    processor = load_arxiv_config().pipeline("glm_ocr")
-    assert isinstance(processor, GlmOcrConfig)
-    configuration_hash = processor.configuration_hash
+def _job() -> OcrJob:
+    config = load_config()
     document_id = "2607.00001"
     pdf_sha256 = "d" * 64
     reuse = OcrReuseReference(
@@ -60,116 +51,74 @@ def _job() -> GlmOcrJob:
         processing_id=processing_id(
             document_id=document_id,
             pdf_sha256=pdf_sha256,
-            configuration_hash=configuration_hash,
+            configuration_hash=config.configuration_hash,
         ),
         manifest_sha256="e" * 64,
     )
-    request = OcrDocumentRequest(
-        request_id=request_id(
-            document_id=document_id,
-            source_record_sha256="a" * 64,
-            configuration_hash=configuration_hash,
-        ),
+    return config.job(
         document_id=document_id,
-        source_updated_date=date(2026, 7, 27),
         source_record_sha256="a" * 64,
         pdf_url=f"https://arxiv.org/pdf/{document_id}",
         reuse=reuse,
     )
-    return processor.build_job(request, attempt=1)
 
 
-def test_unchanged_document_skips_model_validation_and_vllm(
+def test_unchanged_document_commits_reuse_without_running_the_parser(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    runner = _runner_modules(monkeypatch)
+    runtime = _runtime(monkeypatch)
     job = _job()
-    reuse = job.document.reuse
+    reuse = job.reuse
     assert reuse is not None
 
-    def download_pdf(_request: object, destination: Path, _maximum: int) -> tuple[str, int]:
+    def download_pdf(_url: str, destination: Path, _maximum: int) -> tuple[str, int]:
         destination.write_bytes(b"%PDF-placeholder")
         return reuse.pdf_sha256, reuse.pdf_size_bytes
 
     def pdf_page_sizes(_path: Path, _maximum: int) -> tuple[tuple[float, float], ...]:
         return ((612.0, 792.0),) * reuse.page_count
 
-    monkeypatch.setattr(runner.source, "download_pdf", download_pdf)
-    monkeypatch.setattr(runner.source, "pdf_page_sizes", pdf_page_sizes)
+    class _Parser:
+        def parse(self, *_args: object, **_kwargs: object) -> None:
+            raise AssertionError("unchanged documents must not run GLM-OCR")
 
-    runner.job.run(
-        job,
-        tmp_path,
-        model_path=tmp_path / "missing-model",
-        layout_model_path=tmp_path / "missing-layout-model",
-    )
+    monkeypatch.setattr(runtime.source, "download_pdf", download_pdf)
+    monkeypatch.setattr(runtime.source, "pdf_page_sizes", pdf_page_sizes)
 
-    result = OcrRunResult.model_validate_json((tmp_path / "result.json").read_bytes())
-    assert result.result.state == "reused"
+    runtime.worker.run(job, tmp_path, parser=cast(Any, _Parser()))
+
+    result = OcrOutput.model_validate_json((tmp_path / "result.json").read_bytes())
+    assert result.state == "reused"
 
 
-def test_document_error_aborts_without_committed_output(
+def test_document_error_removes_stale_uncommitted_output(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    runner = _runner_modules(monkeypatch)
+    runtime = _runtime(monkeypatch)
     (tmp_path / "result.json").write_text("stale", encoding="utf-8")
     (tmp_path / "artifacts.tar.zst").write_text("stale", encoding="utf-8")
 
     def fail_preparation(*_args: object, **_kwargs: object) -> None:
-        raise DocumentProcessingError("invalid_pdf", "test failure")
+        raise OcrError("test failure", code="invalid_pdf")
 
-    monkeypatch.setattr(runner.job, "prepare_document", fail_preparation)
+    monkeypatch.setattr(runtime.worker, "prepare_document", fail_preparation)
 
-    with pytest.raises(DocumentProcessingError, match="invalid_pdf: test failure"):
-        runner.job.run(
-            _job(),
-            tmp_path,
-            model_path=tmp_path / "model",
-            layout_model_path=tmp_path / "layout-model",
-        )
+    with pytest.raises(OcrError, match="invalid_pdf: test failure"):
+        runtime.worker.run(_job(), tmp_path, parser=cast(Any, object()))
     assert not (tmp_path / "result.json").exists()
     assert not (tmp_path / "artifacts.tar.zst").exists()
 
 
-def test_changed_pdf_is_prepared_for_inference(
+def test_glm_ocr_sdk_config_uses_pinned_prompts(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    runner = _runner_modules(monkeypatch)
-    job = _job()
-    work = tmp_path / "work"
-    work.mkdir()
-
-    def download_pdf(_request: object, destination: Path, _maximum: int) -> tuple[str, int]:
-        destination.write_bytes(b"%PDF-changed")
-        return "f" * 64, 120
-
-    def pdf_page_sizes(_path: Path, _maximum: int) -> tuple[tuple[float, float], ...]:
-        return ((612.0, 792.0),) * 4
-
-    monkeypatch.setattr(runner.source, "download_pdf", download_pdf)
-    monkeypatch.setattr(runner.source, "pdf_page_sizes", pdf_page_sizes)
-
-    prepared = runner.source.prepare_document(
-        job,
-        work,
-    )
-
-    assert isinstance(prepared, runner.source.PreparedDocument)
-    assert prepared.pdf_sha256 == "f" * 64
-    assert prepared.page_count == 4
-
-
-def test_sdk_config_uses_the_versioned_no_think_prompts(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    runner = _runner_modules(monkeypatch)
+    runtime = _runtime(monkeypatch)
 
     class _SdkConfig:
-        def __init__(self, value: dict[str, object]) -> None:
+        def __init__(self, value: dict[str, Any]) -> None:
             self.value = value
 
         @classmethod
@@ -186,17 +135,17 @@ def test_sdk_config_uses_the_versioned_no_think_prompts(
             )
 
         @classmethod
-        def model_validate(cls, value: dict[str, object]) -> "_SdkConfig":
+        def model_validate(cls, value: dict[str, Any]) -> "_SdkConfig":
             return cls(value)
 
-        def to_dict(self) -> dict[str, object]:
+        def to_dict(self) -> dict[str, Any]:
             return self.value
 
-    monkeypatch.setattr(runner.engine, "GlmOcrConfig", _SdkConfig)
+    monkeypatch.setattr(runtime.server, "GlmOcrConfig", _SdkConfig)
     path = tmp_path / "glmocr.yaml"
-    runner.engine.write_config(path, _job(), tmp_path / "layout-model")
+    runtime.server._sdk_config(path, load_config(), tmp_path / "layout-model")
 
-    configured = runner.engine.yaml.safe_load(path.read_text(encoding="utf-8"))
+    configured = runtime.server.yaml.safe_load(path.read_text(encoding="utf-8"))
     assert configured["pipeline"]["page_loader"]["task_prompt_mapping"] == {
         "formula": "Formula Recognition:/nothink",
         "table": "Table Recognition:/nothink",
@@ -204,12 +153,12 @@ def test_sdk_config_uses_the_versioned_no_think_prompts(
     }
 
 
-def test_canonical_elements_accepts_sdk_image_with_null_content(
+def test_canonical_elements_accept_sdk_image_with_null_content(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    runner = _runner_modules(monkeypatch)
+    runtime = _runtime(monkeypatch)
 
-    elements = runner.document._canonical_elements(
+    elements = runtime.worker._canonical_elements(
         [
             [
                 {
@@ -230,197 +179,115 @@ def test_canonical_elements_accepts_sdk_image_with_null_content(
     assert elements[0].markdown_content == "![Image 0-0](../imgs/cropped_page0_idx0.jpg)"
 
 
-def test_canonical_elements_rejects_null_content_for_non_image_block(
+def test_canonical_elements_reject_null_content_for_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    runner = _runner_modules(monkeypatch)
+    runtime = _runtime(monkeypatch)
 
     with pytest.raises(
-        DocumentProcessingError,
+        OcrError,
         match=r"invalid_model_output: Invalid GLM-OCR block 1:0: content must be text",
     ):
-        runner.document._canonical_elements(
+        runtime.worker._canonical_elements(
             [[{"index": 0, "label": "text", "content": None}]],
             "f" * 64,
         )
 
 
-def test_successful_document_publishes_the_shared_manifest(
+def test_sdk_save_is_normalized_into_the_shared_manifest(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    runner = _runner_modules(monkeypatch)
+    runtime = _runtime(monkeypatch)
     job = _job()
-    request = job.document
     work = tmp_path / "work"
     work.mkdir()
     pdf = work / "source.pdf"
     pdf.write_bytes(b"%PDF-test")
-    prepared = runner.source.PreparedDocument(
-        request=request,
+    prepared = runtime.source.PreparedDocument(
+        document_id=job.document_id,
         work_root=work,
         pdf_path=pdf,
         pdf_sha256="f" * 64,
         pdf_size_bytes=9,
         page_sizes=((612.0, 792.0),),
     )
+    sdk_options: dict[str, object] = {}
 
-    class _SdkImage:
-        def save(self, path: Path, **_kwargs: object) -> None:
-            path.write_bytes(b"sdk-layout")
-
-    parsed = SimpleNamespace(
-        json_result=[
-            [
-                {
-                    "label": "text",
-                    "content": "Hello",
-                    "bbox_2d": [0, 0, 10, 10],
-                }
+    class _Parsed:
+        def __init__(self) -> None:
+            self.json_result = [
+                [
+                    {
+                        "label": "text",
+                        "content": "Hello",
+                        "bbox_2d": [0, 0, 10, 10],
+                    }
+                ]
             ]
-        ],
-        layout_vis_images={0: _SdkImage()},
-        image_files={},
-    )
+
+        def save(self, destination: Path, **kwargs: object) -> None:
+            sdk_options.update(kwargs)
+            layout = destination / "source" / "layout_vis"
+            layout.mkdir(parents=True)
+            (layout / "page_0.jpg").write_bytes(b"sdk-layout")
 
     parse_options: dict[str, object] = {}
 
-    def parse(*_args: object, **kwargs: object) -> SimpleNamespace:
+    def parse(*_args: object, **kwargs: object) -> _Parsed:
         parse_options.update(kwargs)
-        return parsed
-
-    parser = SimpleNamespace(parse=parse)
+        return _Parsed()
 
     output_root = tmp_path / "output"
-    result, manifest = runner.document.process_document(
+    manifest = runtime.worker.process_document(
         job,
         prepared,
-        parser,
+        cast(Any, SimpleNamespace(parse=parse)),
         output_root,
     )
 
-    assert manifest.document_id == request.document_id
-    assert manifest.processing_id == result.processing_id
+    assert manifest.document_id == job.document_id
     assert manifest.file("pages.json.gz").size_bytes > 0
     assert parse_options == {"save_layout_visualization": True}
+    assert sdk_options == {"save_layout_visualization": True}
     assert (output_root / "layout_vis/page-0001.jpg").read_bytes() == b"sdk-layout"
     assert not (output_root / "manifest.json").exists()
-    assert result.manifest_sha256 == runner.document.canonical_json_sha256(
-        manifest.model_dump(mode="json")
-    )
 
-    provider_output = tmp_path / "provider-output"
-    provider_output.mkdir()
-    archive = provider_output / "artifacts.tar.zst"
+    modal_output = tmp_path / "modal-output"
+    modal_output.mkdir()
+    archive = modal_output / "artifacts.tar.zst"
     create_archive(output_root, archive)
-    (provider_output / "result.json").write_text(
-        OcrRunResult(
-            run_id=job.run_id,
+    (modal_output / "result.json").write_text(
+        OcrOutput(
+            job_id=job.job_id,
             created_at=datetime(2026, 7, 30, tzinfo=UTC),
             archive_sha256=file_sha256(archive),
             archive_size_bytes=archive.stat().st_size,
-            result=result,
-            document=manifest,
+            document_id=job.document_id,
+            state="succeeded",
+            pdf_sha256=prepared.pdf_sha256,
+            pdf_size_bytes=prepared.pdf_size_bytes,
+            page_count=prepared.page_count,
+            processing_id=manifest.processing_id,
+            manifest_sha256=canonical_json_sha256(manifest.model_dump(mode="json")),
+            manifest=manifest,
         ).model_dump_json(),
         encoding="utf-8",
     )
 
-    imported = extract_ocr_output(
-        provider_output,
-        tmp_path / "extracted",
-        job=job,
-    )
-    assert imported.result == result
+    imported = extract_ocr_output(modal_output, tmp_path / "extracted", job=job)
+    assert imported.processing_id == manifest.processing_id
     assert (tmp_path / "extracted" / "manifest.json").read_bytes() == canonical_json_bytes(
         manifest.model_dump(mode="json")
     )
 
 
-def test_compatible_inference_engine_reuses_one_vllm_server(
+def test_vllm_command_is_derived_from_the_single_config(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    runner = _runner_modules(monkeypatch)
-    starts: list[object] = []
-    stops: list[object] = []
+    runtime = _runtime(monkeypatch)
+    command = runtime.server._command(load_config(), Path("/models/model"))
 
-    class _Process:
-        def poll(self) -> None:
-            return None
-
-    class _Parser:
-        def __init__(self, **_kwargs: object) -> None:
-            pass
-
-        def __enter__(self) -> "_Parser":
-            return self
-
-        def __exit__(self, *_args: object) -> None:
-            pass
-
-    process = _Process()
-    log_file = object()
-    monkeypatch.setattr(runner.engine, "GlmOcr", _Parser)
-
-    def write_config(*_args: object, **_kwargs: object) -> None:
-        pass
-
-    monkeypatch.setattr(runner.engine, "write_config", write_config)
-
-    def start(*_args: object, **_kwargs: object) -> tuple[object, object]:
-        starts.append(process)
-        return process, log_file
-
-    def stop(*_args: object, **_kwargs: object) -> None:
-        stops.append(process)
-
-    monkeypatch.setattr(runner.engine, "start_vllm", start)
-    monkeypatch.setattr(runner.engine, "stop_process", stop)
-    engine = runner.engine.InferenceEngine(tmp_path / "engine")
-    job = _job()
-    model_path = tmp_path / "model"
-    layout_path = tmp_path / "layout"
-
-    first = engine.acquire(
-        job,
-        model_path=model_path,
-        layout_model_path=layout_path,
-    )
-    second = engine.acquire(
-        job,
-        model_path=model_path,
-        layout_model_path=layout_path,
-    )
-    engine.close()
-
-    assert first is second
-    assert starts == [process]
-    assert stops == [process]
-
-
-def test_vllm_disables_the_jit_flashinfer_sampler(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    runner = _runner_modules(monkeypatch)
-    captured: dict[str, object] = {}
-
-    class _FailedProcess:
-        returncode = 1
-
-        def poll(self) -> int:
-            return self.returncode
-
-    def popen(*args: object, **kwargs: object) -> _FailedProcess:
-        captured.update(kwargs)
-        return _FailedProcess()
-
-    monkeypatch.setattr(runner.engine.subprocess, "Popen", popen)
-    log_path = tmp_path / "vllm.log"
-
-    with pytest.raises(RuntimeError, match="vLLM exited with status 1"):
-        runner.engine.start_vllm(_job(), tmp_path / "model", log_path)
-
-    environment = captured["env"]
-    assert isinstance(environment, dict)
-    assert environment["VLLM_USE_FLASHINFER_SAMPLER"] == "0"
+    assert command[:3] == [sys.executable, "-m", "vllm.entrypoints.openai.api_server"]
+    assert command[command.index("--served-model-name") + 1] == "glm-ocr"
+    assert "--speculative-config" in command

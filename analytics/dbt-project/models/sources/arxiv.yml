@@ -73,50 +73,20 @@ sources:
           - name: is_primary
             data_tests: [not_null]
 
-      - name: ocr_document_runs
-        description: Durable state for one document-processing attempt over one ArXiv PDF.
+      - name: ocr_documents
+        description: Latest successfully published OCR document for each ArXiv paper.
         columns:
-          - name: run_id
-            data_tests: [not_null, unique]
-          - name: request_id
-            data_tests: [not_null]
           - name: arxiv_id
             data_tests:
               - not_null
+              - unique
               - relationships:
                   arguments:
                     to: source('arxiv', 'papers')
                     field: arxiv_id
-          - name: state
+          - name: artifact_uri
             data_tests: [not_null]
-          - name: attempt
+          - name: manifest_sha256
             data_tests: [not_null]
-          - name: started_at
-            data_tests: [not_null]
-          - name: provider
-            data_tests: [not_null]
-
-      - name: ocr_document_elements
-        description: Canonical layout/content elements for successful document processing.
-        data_tests:
-          - dbt_utils.unique_combination_of_columns:
-              arguments:
-                combination_of_columns: [processing_id, element_id]
-        columns:
-          - name: processing_id
-            data_tests: [not_null]
-          - name: element_id
-            data_tests: [not_null]
-          - name: arxiv_id
-            data_tests:
-              - not_null
-              - relationships:
-                  arguments:
-                    to: source('arxiv', 'papers')
-                    field: arxiv_id
-          - name: page_number
-            data_tests: [not_null]
-          - name: reading_order
-            data_tests: [not_null]
-          - name: element_type
+          - name: processed_at
             data_tests: [not_null]

@@ -117,7 +117,7 @@ variable "athena_result_prefixes" {
 
   validation {
     condition = (
-      contains(keys(var.athena_result_prefixes), "arxiv_inspector") &&
+      contains(keys(var.athena_result_prefixes), "arxiv_lens") &&
       alltrue([
         for prefix in values(var.athena_result_prefixes) :
         length(prefix) > 0 && trim(prefix, "/") == prefix
@@ -178,11 +178,6 @@ variable "signoz_ci_secret_arn" {
   }
 }
 
-variable "ocr_secret_arns" {
-  type        = set(string)
-  description = "Remote-provider credentials readable by the OCR worker."
-}
-
 variable "services_deployer_secret_arns" {
   type        = set(string)
   description = "Infrastructure connector secrets readable by the services deployer."
@@ -219,7 +214,7 @@ variable "workload_data_access" {
   validation {
     condition = (
       alltrue([
-        for workload in ["arxiv_inspector", "ocr_worker"] :
+        for workload in ["arxiv_lens"] :
         contains(keys(var.workload_data_access.curated), workload)
       ]) &&
       length([

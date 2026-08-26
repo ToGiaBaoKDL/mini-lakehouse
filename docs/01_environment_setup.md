@@ -9,7 +9,7 @@ The backend bootstrap keeps its local state outside the worktree under
 GitHub, and OCI use separate state keys with native lock files. Dev resources can be rebuilt;
 production should disable destructive bucket behavior while retaining the same module boundaries.
 
-Only shared metadata PostgreSQL, Airflow, and ArXiv Inspector are composed on the OCI services host.
+Only shared metadata PostgreSQL, Airflow, and ArXiv Lens are composed on the OCI services host.
 AWS owns S3, Glue, EMR Serverless, Athena, KMS, IAM, ECR, SSM, and Secrets Manager. OCI exposes no
 public ingress; Tailscale carries SSH and application traffic.
 
@@ -59,7 +59,7 @@ make workload-identities-render
 make workload-identities-install
 ```
 
-Airflow, metadata PostgreSQL, dbt, OCR, Inspector, and the services deployer exchange separate X.509
+Airflow, metadata PostgreSQL, dbt, OCR, ArXiv Lens, and the services deployer exchange separate X.509
 certificates for short-lived AWS credentials. The services deployer may pull reviewed ECR images but
 cannot read application secrets. The CA private key stays on the administrator machine; only leaf
 identities cross the private network.
@@ -173,9 +173,10 @@ No release uses `latest`, and there is no global service manifest. Component pat
 only files that affect that component; changing a shared CI helper does not rebuild unrelated
 images. Protected component rollback restores a verified image/deployment pair on OCI; EMR rollback
 only restores a completed release pointer and therefore does not enter the OCI environment. Airflow,
-Inspector, and Lightdash reconcile their own Compose services; each database-backed app reconciles
-only its PostgreSQL database. The dbt and OCR deployments advance their stable
-host-local aliases only after pulling an exact digest, so DAG files never contain image SHAs.
+ArXiv Lens and Lightdash reconcile their own Compose services; each database-backed app reconciles
+only its PostgreSQL database. The dbt deployment advances its stable host-local alias only after
+pulling an exact digest, so DAG files never contain image SHAs. OCR runs from the local CLI against
+the independently deployed Modal app and has no OCI image or Airflow DAG.
 
 Airflow uses the official versioned `GitDagBundle` for `automation/airflow/bundle`. A DAG-only merge is
 validated by the focused bundle CI, then fetched without rebuilding or restarting Airflow. Active
@@ -187,7 +188,7 @@ For unpublished local iteration:
 ```bash
 make images-build
 make airflow-up
-make arxiv-inspector-up
+make arxiv-lens-up
 make lightdash-up
 ```
 

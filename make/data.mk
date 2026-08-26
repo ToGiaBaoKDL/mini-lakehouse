@@ -3,7 +3,7 @@ DBT_RUNTIME := env -u VIRTUAL_ENV uv run --project $(DBT_PROJECT)/runtime
 AWS_WORKLOAD_ENV := env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
 	AWS_SHARED_CREDENTIALS_FILE=/dev/null AWS_PROFILE=default
 
-.PHONY: catalog-apply catalog-validate ocr-modal-deploy \
+.PHONY: catalog-apply catalog-validate ocr-modal-deploy ocr-run \
 	dbt-deps dbt-validate dbt-build \
 	emr-jobs-package
 
@@ -13,19 +13,24 @@ catalog-apply: ## Apply Glue/Iceberg YAML contracts with PyIceberg.
 catalog-validate: ## Validate Glue/Iceberg state against YAML contracts.
 	uv run --package lakehouse --extra catalog --extra cli python -m lakehouse.catalog.admin validate
 
-ocr-modal-deploy: preflight ## Deploy the persistent Modal OCR worker.
+ocr-modal-deploy: ## Deploy the scale-to-zero Modal OCR app.
+	@command -v aws >/dev/null
+	@command -v jq >/dev/null
 	@set -eu; \
-		SECRET_ID="$$(aws ssm get-parameter \
-			--name "$(RUNTIME_PARAMETER_PREFIX)/ocr/providers/modal_secret_id" \
-			--query Parameter.Value --output text)"; \
 		CREDENTIALS="$$(aws secretsmanager get-secret-value \
-			--secret-id "$${SECRET_ID}" --query SecretString --output text)"; \
-		MODAL_ENVIRONMENT="$$(uv run --project ocr python -c \
-			'from document_ocr.config import load_arxiv_config; print(load_arxiv_config().pipeline("glm_ocr").modal.environment)')"; \
+			--secret-id "lakehouse/$(LAKEHOUSE_ENVIRONMENT)/ocr/providers/modal" \
+			--query SecretString --output text)"; \
+		MODAL_ENVIRONMENT="$$(uv run --project ocr-engine python -c \
+			'from document_ocr.config import load_config; print(load_config().modal.environment)')"; \
 		MODAL_TOKEN_ID="$$(printf '%s' "$${CREDENTIALS}" | jq -er '.token_id | select(type == "string" and length > 0)')" \
 		MODAL_TOKEN_SECRET="$$(printf '%s' "$${CREDENTIALS}" | jq -er '.token_secret | select(type == "string" and length > 0)')" \
-			uv run --project ocr --extra worker modal deploy \
-				--env "$${MODAL_ENVIRONMENT}" ocr/glm_ocr/modal.py
+			uv run --project ocr-engine --extra cli modal deploy \
+				--env "$${MODAL_ENVIRONMENT}" ocr-engine/modal/app.py
+
+ocr-run: ## OCR one ArXiv paper from the local CLI (ARXIV_ID required).
+	@command -v aws >/dev/null
+	@test -n "$(ARXIV_ID)" || { printf '%s\n' "Usage: make ocr-run ARXIV_ID=<id>"; exit 2; }
+	uv run --project ocr-engine --extra cli document-ocr run --arxiv-id "$(ARXIV_ID)"
 
 dbt-deps: ## Install locked dbt packages.
 	DBT_DOMAIN=all DBT_SCHEMA=analytics_validation \

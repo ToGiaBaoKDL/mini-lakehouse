@@ -4,12 +4,12 @@ on:
   pull_request:
     paths:
       - .github/workflows/deploy-signoz.yml
-      - observability/signoz/**
+      - sysops/signoz/**
   push:
     branches: [main]
     paths:
       - .github/workflows/deploy-signoz.yml
-      - observability/signoz/**
+      - sysops/signoz/**
       - infra/runtime/postgres/bootstrap/**
       - infra/runtime/postgres/compose.yaml
       - infra/runtime/postgres/deploy
@@ -41,9 +41,9 @@ jobs:
           tar -xzf "$tool_dir/foundry.tar.gz" -C "$tool_dir"
           work_dir=$(mktemp -d)
           trap 'rm -rf "$tool_dir" "$work_dir"' EXIT
-          cp observability/signoz/casting.yaml "$work_dir/"
+          cp sysops/signoz/casting.yaml "$work_dir/"
           (cd "$work_dir" && "$tool_dir/foundry_linux_amd64/bin/foundryctl" forge -f casting.yaml)
-          cmp "$work_dir/casting.yaml.lock" observability/signoz/casting.yaml.lock
+          cmp "$work_dir/casting.yaml.lock" sysops/signoz/casting.yaml.lock
           compose="$work_dir/pours/deployment/compose.yaml"
           docker compose -f "$compose" config --quiet
           grep -Eq '^[[:space:]]*- 8082:8080$' "$compose"
@@ -55,7 +55,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          image=$(<observability/signoz/collector/image)
+          image=$(<sysops/signoz/collector/image)
           [[ "$image" =~ ^otel/opentelemetry-collector-contrib:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]
           docker pull "$image" >/dev/null
           hostfs=$(mktemp -d)
@@ -63,9 +63,9 @@ jobs:
           COLLECTOR_IMAGE="$image" COLLECTOR_CONFIG_SHA256=validation \
             COLLECTOR_HOSTNAME=validation-host PG_MONITOR_PASSWORD=validation \
             docker compose --project-name signoz-collection-agent \
-              -f observability/signoz/collector/compose.yaml config --quiet
+              -f sysops/signoz/collector/compose.yaml config --quiet
           docker run --rm \
-            -v "$PWD/observability/signoz/collector/config.yaml:/etc/otel-collector/config.yaml:ro" \
+            -v "$PWD/sysops/signoz/collector/config.yaml:/etc/otel-collector/config.yaml:ro" \
             -v "$hostfs:/hostfs:ro" \
             -e POSTGRES_MONITOR_ENDPOINT=metadata-postgres:5432 \
             -e PG_MONITOR_USER=lakehouse_monitor \
@@ -134,25 +134,25 @@ jobs:
         run: |
           set -euo pipefail
           remote_dir="/tmp/lakehouse-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          remote_command="set -eu; work_dir='$remote_dir'; trap 'rm -rf \"\$work_dir\"' EXIT; install -d -m 0700 \"\$work_dir\"; tar -C \"\$work_dir\" -xf -; \"\$work_dir/observability/signoz/deploy/deploy\""
+          remote_command="set -eu; work_dir='$remote_dir'; trap 'rm -rf \"\$work_dir\"' EXIT; install -d -m 0700 \"\$work_dir\"; tar -C \"\$work_dir\" -xf -; \"\$work_dir/sysops/signoz/deploy/deploy\""
           tar -cf - \
-            observability/signoz/casting.yaml \
-            observability/signoz/casting.yaml.lock \
-            observability/signoz/deploy/deploy \
+            sysops/signoz/casting.yaml \
+            sysops/signoz/casting.yaml.lock \
+            sysops/signoz/deploy/deploy \
             | tailscale ssh ubuntu@tgbao-dev-services "$remote_command"
 
       - name: Deploy collection agent
         shell: bash
         run: |
           set -euo pipefail
-          image=$(<observability/signoz/collector/image)
+          image=$(<sysops/signoz/collector/image)
           remote_dir="/tmp/lakehouse-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          remote_command="set -eu; work_dir='$remote_dir'; trap 'rm -rf \"\$work_dir\"' EXIT; install -d -m 0700 \"\$work_dir\"; tar -C \"\$work_dir\" -xf -; \"\$work_dir/observability/signoz/collector/deploy\" '$image'"
+          remote_command="set -eu; work_dir='$remote_dir'; trap 'rm -rf \"\$work_dir\"' EXIT; install -d -m 0700 \"\$work_dir\"; tar -C \"\$work_dir\" -xf -; \"\$work_dir/sysops/signoz/collector/deploy\" '$image'"
           tar -cf - \
-            observability/signoz/collector/config.yaml \
-            observability/signoz/collector/compose.yaml \
-            observability/signoz/collector/image \
-            observability/signoz/collector/deploy \
+            sysops/signoz/collector/config.yaml \
+            sysops/signoz/collector/compose.yaml \
+            sysops/signoz/collector/image \
+            sysops/signoz/collector/deploy \
             infra/runtime/postgres/deploy \
             infra/runtime/postgres/compose.yaml \
             infra/runtime/postgres/initialize-secrets \
@@ -174,7 +174,7 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s\n' "Applying SigNoz dashboards and alert rules via Terraform..."
-          cd observability/signoz/terraform
+          cd sysops/signoz/terraform
 
           printf '%s\n' "Initializing Terraform with S3 backend bucket: ${STATE_BUCKET}..."
           terraform init -backend-config="bucket=${STATE_BUCKET}"
