@@ -1,0 +1,49 @@
+---
+title: Sysops
+description: SigNoz, OpenTelemetry collection, dashboards, alerts, and telemetry retention.
+---
+
+SigNoz is the private observability plane, never a workflow dependency. An observability outage must
+not block ingestion, analytics, OCR, BI, or durable Airflow task logging.
+
+## Runtime ownership
+
+- Foundry casting and lock define the pinned SigNoz stack.
+- One OpenTelemetry Collector Contrib agent collects host, Docker, PostgreSQL, Airflow, synthetic,
+  and its own health signals.
+- Terraform owns dashboards and alerts using the SigNoz provider.
+- Generated Foundry output under `sysops/signoz/pours/` is ignored and never edited.
+
+## Collection policy
+
+Application containers retain normal local INFO logging. The Collector normalizes supported log
+formats, redacts credential-like values, and exports WARN and higher. Airflow task logs remain in S3;
+ephemeral dbt and OCR containers are excluded from file tailing to prevent duplicate ingestion.
+
+Airflow emits native OpenTelemetry metrics and traces to the shared gateway. PostgreSQL uses a
+least-privilege `pg_monitor` login. File offsets are checkpointed in the Collector storage volume so
+restarts resume from the last processed record.
+
+## Dashboards
+
+Names follow `<domain> / <system>`:
+
+- `Infrastructure / Host`
+- `Infrastructure / Containers`
+- `Infrastructure / Synthetic checks`
+- `Platform / Airflow`
+- `Platform / PostgreSQL`
+
+Each dashboard begins with compact key indicators, then diagnostic time series. CPU panels express
+logical cores or percentages explicitly; they do not mix the two units.
+
+## Retention
+
+| Signal  | Dev retention |
+| ------- | ------------- |
+| Logs    | 7 days        |
+| Traces  | 7 days        |
+| Metrics | 30 days       |
+
+Retention is SigNoz application state. S3 task logs and PostgreSQL backups are the durable records.
+See [Observability operations](/docs/operations/observability).

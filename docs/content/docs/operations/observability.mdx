@@ -1,0 +1,47 @@
+---
+title: Observability operations
+description: Deploy, validate, and interpret the SigNoz stack and its collection path.
+---
+
+## Delivery
+
+`deploy-signoz.yml` validates the Foundry casting and lock, validates the Collector image and
+configuration, deploys both over Tailscale, then applies dashboards and alerts through Terraform.
+
+The SigNoz UI is available at:
+
+- `https://observe.tgblab.io.vn` through Cloudflare Access;
+- `http://tgbao-dev-services:8082` over Tailscale;
+- `http://127.0.0.1:8082` on the host.
+
+OTLP ports 4317 and 4318 bind only to host loopback. Applications export through the shared Docker
+observability network to the Collector gateway.
+
+## Health checks
+
+1. Check the Collector health endpoint on host loopback port 13133.
+2. Inspect `otelcol_*` metrics for receive failures, queue pressure, send failures, process memory,
+   and uptime.
+3. Check the expected service's telemetry attributes before changing a dashboard query.
+4. Treat absent data as a collection-path issue until the producer, receiver, processor, and
+   exporter have each been verified.
+
+## Dashboard conventions
+
+- Names use `<domain> / <system>`.
+- Number panels state their unit and aggregation in the description.
+- CPU cores and CPU percentages are separate signals.
+- Histograms use matching duration units before percentile calculation.
+- Airflow attributes use `airflow.dag_id` and `airflow.task_id`.
+- Backup status is alert-only; it does not have a low-value dashboard.
+
+## Apply dashboards manually
+
+```bash
+export AWS_PROFILE=tgbao-dev
+export SIGNOZ_ACCESS_TOKEN='<service-account-key>'
+make signoz-plan
+make signoz-apply
+```
+
+Do not edit Terraform-managed dashboards or alerts through the UI.

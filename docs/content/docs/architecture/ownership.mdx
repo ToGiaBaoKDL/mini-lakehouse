@@ -1,0 +1,49 @@
+---
+title: Ownership and trust boundaries
+description: Which system may provision, mutate, execute, read, or publish each class of resource.
+---
+
+## Responsibility matrix
+
+| Concern                      | Canonical owner                              | Must not own                                      |
+| ---------------------------- | -------------------------------------------- | ------------------------------------------------- |
+| Cloud resources and IAM      | Terraform                                    | Secret values, Glue tables, schedules, dbt models |
+| Landing and curated metadata | YAML contracts and PyIceberg catalog control | Data transformation SQL                           |
+| Landing and curated writes   | EMR Spark jobs                               | Glue schema evolution                             |
+| OCR publication              | Local OCR CLI and Modal worker               | Airflow scheduling or OCI service state           |
+| Analytics tables             | dbt                                          | Source ingestion and curated contracts            |
+| BI semantics and content     | Lightdash project files                      | dbt table ownership                               |
+| Orchestration                | Airflow                                      | Business data or fallback storage                 |
+| Service telemetry            | OpenTelemetry Collector and SigNoz           | Workflow success criteria                         |
+
+## Identity model
+
+```mermaid
+flowchart LR
+  operator[Operator profiles] --> admin[Terraform and catalog roles]
+  github[GitHub OIDC] --> publishers[Artifact and deployment roles]
+  host[OCI workload certificates] --> roles[IAM Roles Anywhere roles]
+  roles --> airflow[Airflow]
+  roles --> dbt[dbt domains]
+  roles --> lens[ArXiv Lens]
+  roles --> lightdash[Lightdash]
+  aws[AWS service trust] --> emr[EMR runtime]
+```
+
+No workload mounts a shared AWS credentials directory. OCI workloads receive only their own
+certificate, private key, and `credential_process` configuration. GitHub Actions uses OIDC and
+short-lived STS credentials; it stores no AWS access key.
+
+## Permission shape
+
+- Airflow can submit and inspect the owned EMR application and write its S3 task logs; it cannot
+  read lakehouse data.
+- EMR owns landing and curated data-plane access.
+- Each dbt domain reads only its curated inputs and manages only its analytics database and prefix.
+- ArXiv Lens reads curated ArXiv data and writes only its Athena results.
+- Lightdash reads analytics databases and owns its application bucket and query results.
+- The services deployer pulls reviewed images and reads connector material, but cannot read
+  application secrets or data.
+
+See [Infrastructure](/docs/capabilities/infrastructure) for provisioning and
+[Storage and catalog](/docs/reference/storage-catalog) for physical boundaries.

@@ -1,0 +1,47 @@
+---
+title: Backup and restore
+description: Durable metadata backup, exact-slot recovery, and the boundary between data and disposable telemetry.
+---
+
+## Metadata PostgreSQL
+
+The services host runs a systemd timer twice daily at 02:30 and 14:30 UTC with jitter. Each Airflow
+and Lightdash database is dumped with PostgreSQL custom format, uploaded to the backup bucket, and
+completed by a SHA-256 marker uploaded last.
+
+```text
+metadata-postgres/<database>/<utc-date>/<am|pm>/
+├── database.dump
+└── database.dump.sha256
+```
+
+Dev retains backups for 35 days. The metadata-postgres workload can write only this prefix and
+cannot delete backups.
+
+Restore one exact slot:
+
+```bash
+make metadata-postgres-restore ARGS='lightdash 2026-08-15 pm'
+```
+
+The restore verifies the checksum, replaces the selected application database, and restores without
+changing ownership. Stop the owning application first when its connection pool cannot tolerate the
+database replacement.
+
+## Lakehouse data
+
+S3 objects and Glue/Iceberg metadata form one logical dataset. A production recovery plan must
+restore and validate them together. Restoring only catalog metadata or only object data is not a
+complete Iceberg recovery.
+
+## SigNoz
+
+Dev telemetry is disposable. Use an OCI boot-volume backup before risky host or SigNoz upgrades if a
+crash-consistent recovery point is required. Never archive a live ClickHouse volume with `tar` and
+call it an application-consistent backup.
+
+## Recovery evidence
+
+The backup script appends JSON audit records to
+`/var/log/lakehouse/metadata-backup-audit.log`. SigNoz alerts on explicit failure and missing recent
+success; it does not replace the S3 dump and checksum marker.

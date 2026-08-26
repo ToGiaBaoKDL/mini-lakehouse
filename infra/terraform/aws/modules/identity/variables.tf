@@ -168,6 +168,16 @@ variable "lightdash_ci_secret_arn" {
   }
 }
 
+variable "cloudflare_docs_ci_secret_arn" {
+  type        = string
+  description = "Exact Secrets Manager resource readable by protected documentation deployment jobs."
+
+  validation {
+    condition     = startswith(var.cloudflare_docs_ci_secret_arn, "arn:")
+    error_message = "cloudflare_docs_ci_secret_arn must be an ARN."
+  }
+}
+
 variable "signoz_ci_secret_arn" {
   type        = string
   description = "Exact Secrets Manager resource readable by protected SigNoz deployment jobs."

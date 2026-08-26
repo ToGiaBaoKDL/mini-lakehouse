@@ -1,10 +1,11 @@
 locals {
-  aws_region     = "ap-southeast-1"
-  environment    = "dev"
-  github_owner   = "ToGiaBaoKDL"
-  repository     = "mini-lakehouse"
-  aws_state_key  = "lakehouse/aws/dev/terraform.tfstate"
-  tail_state_key = "lakehouse/tailscale/dev/terraform.tfstate"
+  aws_region           = "ap-southeast-1"
+  environment          = "dev"
+  github_owner         = "ToGiaBaoKDL"
+  repository           = "mini-lakehouse"
+  aws_state_key        = "lakehouse/aws/dev/terraform.tfstate"
+  tail_state_key       = "lakehouse/tailscale/dev/terraform.tfstate"
+  cloudflare_state_key = "lakehouse/cloudflare/dev/terraform.tfstate"
 }
 
 data "terraform_remote_state" "aws" {
@@ -22,6 +23,16 @@ data "terraform_remote_state" "tailscale" {
   config = {
     bucket  = var.state_bucket
     key     = local.tail_state_key
+    region  = local.aws_region
+    encrypt = true
+  }
+}
+
+data "terraform_remote_state" "cloudflare" {
+  backend = "s3"
+  config = {
+    bucket  = var.state_bucket
+    key     = local.cloudflare_state_key
     region  = local.aws_region
     encrypt = true
   }
@@ -59,8 +70,11 @@ resource "github_repository_environment_deployment_policy" "main" {
 
 locals {
   environment_variables = {
+    AWS_DOCS_DEPLOYER_ROLE_ARN      = data.terraform_remote_state.aws.outputs.github_ci_role_arns.docs_deployer
     AWS_LIGHTDASH_DEPLOYER_ROLE_ARN = data.terraform_remote_state.aws.outputs.github_ci_role_arns.lightdash_deployer
     AWS_SIGNOZ_DEPLOYER_ROLE_ARN    = data.terraform_remote_state.aws.outputs.github_ci_role_arns.signoz_deployer
+    CLOUDFLARE_ACCOUNT_ID           = data.terraform_remote_state.cloudflare.outputs.account_id
+    CLOUDFLARE_DOCS_CI_SECRET_ID    = data.terraform_remote_state.aws.outputs.cloudflare_docs_ci_secret_id
     LIGHTDASH_CI_SECRET_ID          = data.terraform_remote_state.aws.outputs.lightdash_ci_secret_id
     LIGHTDASH_URL                   = "http://tgbao-dev-services:8081"
     SIGNOZ_CI_SECRET_ID             = data.terraform_remote_state.aws.outputs.signoz_ci_secret_id

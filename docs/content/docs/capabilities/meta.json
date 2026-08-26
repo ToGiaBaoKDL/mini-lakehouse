@@ -1,0 +1,13 @@
+{
+  "title": "Capabilities",
+  "pages": [
+    "index",
+    "lakehouse",
+    "automation",
+    "analytics",
+    "infrastructure",
+    "sysops",
+    "ocr-engine",
+    "arxiv-lens"
+  ]
+}

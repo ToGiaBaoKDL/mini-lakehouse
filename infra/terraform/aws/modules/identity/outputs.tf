@@ -48,6 +48,11 @@ output "github_emr_publisher_role_arn" {
   value       = aws_iam_role.github_emr_publisher.arn
 }
 
+output "github_docs_deployer_role_arn" {
+  description = "GitHub Actions role allowed to read the Cloudflare documentation CI token."
+  value       = aws_iam_role.github_docs_deployer.arn
+}
+
 output "github_lightdash_deployer_role_arn" {
   description = "GitHub Actions role allowed to read the Lightdash CI token."
   value       = aws_iam_role.github_lightdash_deployer.arn

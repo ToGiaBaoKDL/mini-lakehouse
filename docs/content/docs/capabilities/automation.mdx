@@ -1,0 +1,54 @@
+---
+title: Automation
+description: Self-hosted Airflow orchestration with versioned DAG bundles and isolated execution identities.
+---
+
+## Runtime
+
+Airflow runs on the private OCI services host with LocalExecutor, PostgreSQL metadata, a dedicated
+DAG processor, scheduler, and triggerer. Completed task logs are stored in the KMS-encrypted S3 log
+prefix with 30-day dev retention.
+
+The official `GitDagBundle` loads `automation/airflow/bundle` by Git commit. Active and retried runs
+keep their original bundle version. A DAG-only change therefore needs bundle validation, not a new
+Airflow image.
+
+## Production DAGs
+
+| DAG                             | Execution                 | Trigger                              |
+| ------------------------------- | ------------------------- | ------------------------------------ |
+| `etl_emr_ingest_github_archive` | EMR Serverless            | `30 7 * * *`                         |
+| `etl_emr_ingest_arxiv_metadata` | EMR Serverless            | `0 11 * * *`                         |
+| `tl_docker_build_analytics`     | Isolated dbt Docker tasks | Curated GitHub or ArXiv asset update |
+| `gov_emr_maintain_iceberg`      | EMR Serverless            | `0 3 * * 0`                          |
+
+There is no OCR DAG. OCR is an explicit local CLI action backed by Modal.
+
+## DAG naming
+
+```text
+<job_type>_<worker_type>_<verb>_<scope>
+```
+
+The bounded vocabulary and examples are in [Conventions](/docs/reference/conventions). Runtime
+technology belongs in `worker_type`, while `scope` describes stable business or data ownership.
+
+## Execution boundaries
+
+- EMR tasks use the official deferrable operator, deterministic client tokens, and remote
+  cancellation on kill.
+- dbt tasks use the shared immutable image but mount a domain-specific Roles Anywhere identity.
+- Airflow records logical asset success only after the producer succeeds.
+- Slack and SMTP notifications use Airflow connections loaded from Secrets Manager.
+- Airflow itself has no landing, curated, or analytics data permission.
+
+## Operations
+
+```bash
+make airflow-up
+make airflow-dags
+make airflow-logs
+```
+
+If no DAG appears, inspect DAG processor and scheduler logs separately, confirm the bundle commit is
+reachable, then list parsed DAGs with `make airflow-dags`.

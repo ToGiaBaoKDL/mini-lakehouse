@@ -1,0 +1,39 @@
+---
+title: ArXiv Lens
+description: A read-only Streamlit interface for curated ArXiv metadata and OCR artifacts.
+---
+
+ArXiv Lens is a separate application boundary under `arxiv-lens/`. It queries curated ArXiv tables
+through Athena and renders immutable OCR artifacts from S3. It does not trigger OCR or mutate
+catalog state.
+
+## Access
+
+The application runs on port 8501 on the OCI services host and is exposed through Cloudflare Access
+at `https://arxiv.tgblab.io.vn`. Its Roles Anywhere identity can:
+
+- read the `curated_arxiv` Glue database and its curated S3 prefix;
+- execute Athena queries in the reviewed workgroup;
+- write only its dedicated Athena query-result prefix.
+
+It cannot write curated tables or read other domains.
+
+## Lifecycle
+
+```bash
+make arxiv-lens-build
+make arxiv-lens-up
+make arxiv-lens-logs
+make arxiv-lens-down
+```
+
+GitHub Actions publishes the application image to its own ECR repository and deploys it by digest.
+Compose and deployment scripts live beside the application; Terraform owns only the supporting
+cloud resources and identity.
+
+## Failure modes
+
+- No paper found: confirm the ArXiv metadata job has published the curated row.
+- No OCR artifact: run the local OCR command for the paper and verify successful publication.
+- Athena access denied: verify the ArXiv Lens workload certificate, Glue grants, curated prefix, and
+  query-result prefix rather than adding static credentials.

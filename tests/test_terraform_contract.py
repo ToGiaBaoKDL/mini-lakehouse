@@ -84,6 +84,7 @@ def test_secret_containers_never_manage_secret_values() -> None:
     assert 'resource "aws_secretsmanager_secret" "ocr"' in environment
     assert 'for_each = toset(["modal"])' in environment
     assert 'resource "aws_secretsmanager_secret" "cloudflare_tunnel"' in environment
+    assert 'resource "aws_secretsmanager_secret" "cloudflare_docs_ci"' in environment
     assert '"lakehouse/${local.environment}/airflow/runtime"' in environment
     assert '"lakehouse/${local.environment}/airflow/connections/${connection}"' in environment
     assert '"lakehouse/${local.environment}/metadata-postgres/${each.key}"' in environment
@@ -92,6 +93,7 @@ def test_secret_containers_never_manage_secret_values() -> None:
     assert '"lakehouse/${local.environment}/signoz/ci"' in environment
     assert '"lakehouse/${local.environment}/ocr/providers/${each.key}"' in environment
     assert '"lakehouse/${local.environment}/cloudflare/tunnel-token"' in environment
+    assert '"lakehouse/${local.environment}/cloudflare/docs-ci"' in environment
     assert "aws_secretsmanager_secret_version" not in environment
 
 
@@ -295,6 +297,17 @@ def test_services_deployer_reads_only_the_connector_secret() -> None:
     assert 'actions   = ["secretsmanager:GetSecretValue"]' in services
     assert "airflow_secret_arns" not in services
     assert "ocr_secret_arns" not in services
+
+
+def test_docs_deployer_reads_only_the_cloudflare_docs_secret() -> None:
+    environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
+    identity = Path("infra/terraform/aws/modules/identity/github.tf").read_text(encoding="utf-8")
+
+    assert "cloudflare_docs_ci_secret_arn" in environment + identity
+    assert '"${var.name_prefix}-github-docs-deployer"' in identity
+    assert 'sid       = "ReadCloudflareDocsCiToken"' in identity
+    assert 'actions   = ["secretsmanager:GetSecretValue"]' in identity
+    assert "resources = [var.cloudflare_docs_ci_secret_arn]" in identity
 
 
 def test_airflow_has_no_ocr_data_permissions_or_runtime_identity() -> None:

@@ -1,0 +1,34 @@
+---
+title: "ADR-0001: Capability-oriented monorepo"
+description: Keep one repository while aligning code, validation, identity, artifact, and deployment ownership.
+---
+
+**Status:** Accepted
+
+## Context
+
+The platform contains infrastructure, Spark jobs, Airflow, analytics, observability, OCR, and an
+application. Splitting by technical layer produced stale compatibility paths and CI coupling, while
+separate repositories would add coordination overhead without a team-scale need.
+
+## Decision
+
+Keep one Git monorepo organized by capability. A capability owns its source, runtime, deployment,
+tests, and path-scoped workflow. Closely related products may share an ownership root while retaining
+independent images and identities; dbt and Lightdash are the primary example.
+
+## Consequences
+
+- Cross-capability changes remain atomic and reviewable.
+- Top-level paths communicate ownership without repository history.
+- CI and releases use capability paths rather than rebuilding the entire platform.
+- There are no compatibility directories, forwarding modules, or duplicate workflows after a
+  cutover.
+- One ECR repository still maps to one independently deployable image.
+
+## Rejected alternatives
+
+- Repository per component: unnecessary coordination and release overhead for the current scale.
+- One platform image and deployment: couples unrelated lifecycles and permissions.
+- Technical-layer folders such as generic `apps/`, `jobs/`, or `runners/`: obscure product
+  ownership.

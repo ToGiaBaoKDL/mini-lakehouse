@@ -1,0 +1,12 @@
+allowBuilds:
+  esbuild: true
+  unrs-resolver: true
+  workerd: true
+minimumReleaseAgeExclude:
+  - "@next/swc-linux-arm64-gnu@16.3.3"
+  - "@next/swc-win32-x64-msvc@16.3.3"
+  - fumadocs-core@16.15.2
+  - fumadocs-ui@16.15.2
+  - miniflare@5.20260825.0-alpha
+  - next@16.3.3
+  - wrangler@4.126.0

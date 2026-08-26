@@ -80,6 +80,25 @@ resource "aws_iam_role_policy" "github_emr_publisher" {
   policy = data.aws_iam_policy_document.emr_publisher.json
 }
 
+resource "aws_iam_role" "github_docs_deployer" {
+  name               = "${var.name_prefix}-github-docs-deployer"
+  assume_role_policy = data.aws_iam_policy_document.github_environment_trust.json
+  tags               = var.tags
+}
+
+data "aws_iam_policy_document" "github_docs_deployer" {
+  statement {
+    sid       = "ReadCloudflareDocsCiToken"
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [var.cloudflare_docs_ci_secret_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "github_docs_deployer" {
+  role   = aws_iam_role.github_docs_deployer.id
+  policy = data.aws_iam_policy_document.github_docs_deployer.json
+}
+
 resource "aws_iam_role" "github_lightdash_deployer" {
   name               = "${var.name_prefix}-github-lightdash-deployer"
   assume_role_policy = data.aws_iam_policy_document.github_environment_trust.json

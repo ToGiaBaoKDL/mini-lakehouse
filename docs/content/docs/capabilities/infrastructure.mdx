@@ -1,0 +1,48 @@
+---
+title: Infrastructure
+description: Terraform roots, private service foundations, workload identity, and cloud ownership.
+---
+
+## Terraform roots
+
+| Root                          | Responsibility                                              |
+| ----------------------------- | ----------------------------------------------------------- |
+| `aws/bootstrap/state`         | One-time versioned S3 backend bootstrap                     |
+| `aws/environments/dev`        | Data plane, IAM, ECR, EMR, SSM, and empty secret containers |
+| `tailscale/environments/dev`  | Private administration and host enrollment                  |
+| `github/environments/dev`     | Release variables and protected deployment policy           |
+| `oci/environments/dev`        | Rebuildable ARM services host                               |
+| `cloudflare/environments/dev` | Tunnel, DNS, and Access for private applications            |
+
+Terraform state keys are isolated by provider root and use native S3 lock files. Make keeps working
+directories outside the repository under `~/.cache/lakehouse/terraform/`.
+
+## Service topology
+
+- AWS: S3, KMS, Glue, Athena, EMR Serverless, IAM, ECR, SSM, and Secrets Manager.
+- OCI: one private ARM host for PostgreSQL, Airflow, Lightdash, ArXiv Lens, SigNoz, and the Collector.
+- Tailscale: operator SSH and private service access.
+- Cloudflare: Access-protected application ingress; documentation is deployed separately as static
+  edge assets.
+- GitHub Actions: immutable artifact publishing and approved deployments.
+
+## Apply order
+
+1. AWS state bootstrap and AWS data platform.
+2. Tailscale policy and identity.
+3. Cloudflare edge.
+4. GitHub environment and variables.
+5. OCI host and workload identity installation.
+6. Glue/Iceberg catalog contracts.
+7. Initial component releases and runtime secrets.
+
+The executable commands and prerequisites are in [Deployment](/docs/operations/deployment).
+
+## Guardrails
+
+- Review every plan before apply.
+- Terraform creates secret containers, never secret values.
+- Do not disable state locking or destroy resources to recover an interrupted apply.
+- Do not give Terraform ownership of Glue tables, schedules, or application migrations.
+- Production must replace dev-only destructive flags and local certificate issuance while
+  preserving the same ownership boundaries.

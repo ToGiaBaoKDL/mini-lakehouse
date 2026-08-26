@@ -23,6 +23,7 @@ include make/infra.mk
 include make/images.mk
 include make/services.mk
 include make/data.mk
+include make/docs.mk
 
 .PHONY: help preflight lakehouse-validate lightdash-validate lint test compose-validate check
 
@@ -75,6 +76,7 @@ lint: ## Run formatting, linting, and static type checks.
 		analytics/lightdash/deploy/initialize-secrets \
 		analytics/lightdash/deploy/reconcile \
 		analytics/lightdash/deploy/sync-ci-secret \
+		docs/deploy/sync-ci-secret \
 		analytics/dbt-project/deploy/deploy
 	uv run ruff format --check .
 	uv run ruff check .
@@ -107,6 +109,7 @@ check: ## Run the complete local quality gate.
 	$(MAKE) lakehouse-validate
 	$(MAKE) dbt-validate
 	$(MAKE) lightdash-validate
+	$(MAKE) docs-check
 	$(MAKE) lint
 	$(MAKE) test
 	$(MAKE) terraform-fmt

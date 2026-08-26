@@ -1,0 +1,9 @@
+{
+  "title": "Operations",
+  "pages": [
+    "deployment",
+    "observability",
+    "backup-restore",
+    "incident-response"
+  ]
+}

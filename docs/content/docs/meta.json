@@ -1,0 +1,12 @@
+{
+  "title": "Mini Lakehouse",
+  "pages": [
+    "index",
+    "getting-started",
+    "architecture",
+    "capabilities",
+    "operations",
+    "reference",
+    "decisions"
+  ]
+}

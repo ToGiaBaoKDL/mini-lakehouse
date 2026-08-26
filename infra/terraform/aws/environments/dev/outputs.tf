@@ -16,11 +16,17 @@ output "catalog_admin_role_arn" {
 output "github_ci_role_arns" {
   description = "Environment-scoped GitHub Actions roles keyed by release responsibility."
   value = {
+    docs_deployer      = module.identity.github_docs_deployer_role_arn
     emr_publisher      = module.identity.github_emr_publisher_role_arn
     image_publisher    = module.identity.github_image_publisher_role_arn
     lightdash_deployer = module.identity.github_lightdash_deployer_role_arn
     signoz_deployer    = module.identity.github_signoz_deployer_role_arn
   }
+}
+
+output "cloudflare_docs_ci_secret_id" {
+  description = "Secrets Manager identifier populated with the Cloudflare documentation deployment token."
+  value       = aws_secretsmanager_secret.cloudflare_docs_ci.name
 }
 
 output "lightdash_ci_secret_id" {

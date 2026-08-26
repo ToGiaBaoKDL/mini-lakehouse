@@ -1,0 +1,19 @@
+---
+title: Capabilities
+description: A map of independently owned code, runtime, validation, and deployment boundaries.
+---
+
+Capabilities are repository ownership boundaries, not necessarily single deployables.
+
+| Capability                         | Runtime units                                         | Primary validation                            |
+| ---------------------------------- | ----------------------------------------------------- | --------------------------------------------- |
+| [Lakehouse](./lakehouse)           | EMR Serverless jobs and catalog operator              | Contracts, unit tests, artifact package       |
+| [Automation](./automation)         | Airflow scheduler, DAG processor, triggerer, workers  | DAG parse and bundle tests                    |
+| [Analytics](./analytics)           | dbt task image and Lightdash service                  | dbt parse/build, Lightdash lint               |
+| [Infrastructure](./infrastructure) | AWS, OCI, Tailscale, Cloudflare, shared host services | Terraform and Compose validation              |
+| [Sysops](./sysops)                 | SigNoz and one collection agent                       | Foundry lock, Collector validation, Terraform |
+| [OCR Engine](./ocr-engine)         | Local CLI and Modal GPU app                           | Python tests and Modal deployment             |
+| [ArXiv Lens](./arxiv-lens)         | Streamlit application                                 | Python tests, image and Compose validation    |
+
+Code may depend inward on a stable interface, but deployment ownership does not move with that
+dependency. For example, Airflow calls the EMR API; it does not own EMR job code or data access.

@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Mini Lakehouse">
+  <rect width="64" height="64" rx="16" fill="#0a0a0a"/>
+  <path d="M14 22 32 12l18 10-18 10-18-10Zm0 10 18 10 18-10M14 42l18 10 18-10" fill="none" stroke="#fafafa" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

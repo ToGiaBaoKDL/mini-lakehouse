@@ -1,0 +1,45 @@
+---
+title: Conventions
+description: Naming, ownership, documentation, release, and configuration conventions used across the repository.
+---
+
+## DAG IDs
+
+```text
+<job_type>_<worker_type>_<verb>_<scope>
+```
+
+| Segment       | Allowed vocabulary                                                |
+| ------------- | ----------------------------------------------------------------- |
+| `job_type`    | `etl`, `el`, `tl`, `rpt`, `mon`, `bk`, `gov`, `test`              |
+| `worker_type` | `afw`, `docker`, `emr`, `k8spod`, `sparkonk8s`, `glue`, `mix`     |
+| `verb`        | One present-tense action such as `ingest`, `build`, or `maintain` |
+| `scope`       | Stable business or data scope; underscores are allowed            |
+
+Runtime technology belongs in `worker_type`. Renames are direct cutovers without compatibility
+DAGs.
+
+## Repository paths
+
+- Top-level folders describe capabilities, not deployment mechanics.
+- Runtime and deployment files stay beside the capability they operate.
+- Avoid generic `common`, `utils`, repository base classes, and workflow DSLs unless multiple owners
+  share a proven invariant.
+- Do not keep forwarding modules, compatibility directories, stale names, or duplicate workflows.
+
+## Cloud artifacts
+
+- `tgbao-<environment>-<capability>` for deployed cloud resources.
+- One ECR repository per independently deployable image.
+- Git commit tags and image digests are immutable; `latest` is forbidden.
+- SSM parameters contain non-secret discovery; Secrets Manager contains secret values.
+
+## Documentation
+
+- Content is English and uses sentence-case titles.
+- One page owns each stable fact; other pages link to it.
+- Use Mermaid for maintained architecture flows and screenshots only for meaningful UI behavior.
+- Use code blocks for executable commands, callouts for safety constraints, and tables for exact
+  mappings.
+- Plans explain implementation history; docs describe current operational truth.
+- Component README files are not retained. The root README is only a repository landing page.

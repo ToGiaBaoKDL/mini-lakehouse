@@ -1,0 +1,64 @@
+---
+title: Local environment
+description: Credential, secret, and runtime conventions for local development and operator commands.
+---
+
+## Configuration model
+
+The repository intentionally does not use `.env` files.
+
+| Configuration class                           | Owner                                                  |
+| --------------------------------------------- | ------------------------------------------------------ |
+| Stable application and infrastructure choices | Git, Terraform, Compose, Make, or YAML                 |
+| Non-secret runtime discovery                  | AWS Systems Manager Parameter Store                    |
+| Runtime credentials and passwords             | AWS Secrets Manager                                    |
+| Operator provider authentication              | Standard CLI credential chains and process environment |
+| Self-hosted AWS access                        | IAM Roles Anywhere leaf identities                     |
+
+Never put a provider token, secret value, temporary AWS session, or generated Terraform state in
+the repository.
+
+## AWS operator session
+
+```bash
+export AWS_PROFILE=tgbao-dev
+aws login --profile "$AWS_PROFILE"
+aws sts get-caller-identity
+```
+
+Catalog mutation uses the dedicated assumed-role profile described in
+[Lakehouse](/docs/capabilities/lakehouse). Runtime containers do not inherit this operator profile.
+
+## Local services
+
+Build and start only what you need:
+
+```bash
+make images-build
+make airflow-up
+make lightdash-up
+make arxiv-lens-up
+```
+
+Inspect the current state with `make services-ps`. `make services-down` stops application services
+and metadata PostgreSQL without deleting persistent volumes.
+
+<Callout type="warn" title="Cloud state is not local state">
+  Terraform working directories and the bootstrap state live under
+  `~/.cache/lakehouse/terraform/`. Do not move state into the worktree or
+  disable locking after an interrupted apply; verify that no apply is active,
+  then resolve the exact stale lock.
+</Callout>
+
+## Documentation development
+
+```bash
+pnpm --dir docs dev
+```
+
+Open `http://localhost:3000`. Production uses a static export; verify the same artifact with:
+
+```bash
+make docs-build
+pnpm --dir docs preview
+```

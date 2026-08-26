@@ -78,3 +78,10 @@ resource "aws_secretsmanager_secret" "cloudflare_tunnel" {
   recovery_window_in_days = 7
   tags                    = local.tags
 }
+
+resource "aws_secretsmanager_secret" "cloudflare_docs_ci" {
+  name                    = "lakehouse/${local.environment}/cloudflare/docs-ci"
+  description             = "Scoped Cloudflare API token for protected documentation deployments."
+  recovery_window_in_days = 7
+  tags                    = local.tags
+}

@@ -410,7 +410,10 @@ def test_lightdash_skills_match_the_pinned_runtime_cli() -> None:
         )
         assert manifest["version"] == "1.146.0"
 
-    assert "@lightdash/cli@1.146.0" in Path("infra/README.md").read_text(encoding="utf-8")
+    makefile = Path("Makefile").read_text(encoding="utf-8")
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert "LIGHTDASH_CLI_VERSION := 1.146.0" in makefile
+    assert "@lightdash/cli@1.146.0" in workflow
 
 
 def test_lightdash_content_and_runtime_have_separate_owners() -> None:
@@ -492,6 +495,27 @@ def test_lightdash_ci_token_has_an_owned_secret_sync_boundary() -> None:
     assert '--secret-string "file://$payload_file"' in sync
     assert "lightdash-ci-secret-sync:" in services
     assert ".secrets/$(LAKEHOUSE_ENVIRONMENT)/lightdash/ci.json" in services
+
+
+def test_docs_deployment_loads_cloudflare_token_through_aws_oidc() -> None:
+    workflow = _workflow("deploy-docs.yml")
+    sync = Path("docs/deploy/sync-ci-secret").read_text(encoding="utf-8")
+    makefile = Path("make/docs.mk").read_text(encoding="utf-8")
+    github_environment = Path("infra/terraform/github/environments/dev/main.tf").read_text(
+        encoding="utf-8"
+    )
+
+    assert "id-token: write" in workflow
+    assert "AWS_DOCS_DEPLOYER_ROLE_ARN" in workflow + github_environment
+    assert "CLOUDFLARE_DOCS_CI_SECRET_ID" in workflow + github_environment
+    assert "aws-actions/configure-aws-credentials@" in workflow
+    assert "aws-actions/aws-secretsmanager-get-secrets@" in workflow
+    assert "secrets.CLOUDFLARE_API_TOKEN" not in workflow
+    assert 'secret_id="lakehouse/$environment/cloudflare/docs-ci"' in sync
+    assert 'keys | sort == ["api_token", "version"]' in sync
+    assert '--secret-string "file://$payload_file"' in sync
+    assert "cloudflare-docs-ci-secret-sync:" in makefile
+    assert ".secrets/$(LAKEHOUSE_ENVIRONMENT)/cloudflare/docs-ci.json" in makefile
 
 
 def test_emr_has_an_independent_release_pointer() -> None:

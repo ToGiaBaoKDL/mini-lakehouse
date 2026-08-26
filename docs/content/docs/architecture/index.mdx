@@ -1,0 +1,68 @@
+---
+title: Architecture
+description: The platform topology and the boundaries between management, execution, storage, and consumption.
+---
+
+Mini Lakehouse separates control-plane decisions from data-plane execution. Terraform provisions
+cloud resources, YAML contracts define catalog intent, compute engines write data, and Airflow
+coordinates work without becoming a data source of truth.
+
+```mermaid
+flowchart TB
+  subgraph management[Management plane]
+    tf[Terraform]
+    contracts[YAML contracts]
+    ci[GitHub Actions]
+  end
+
+  subgraph execution[Execution plane]
+    airflow[Airflow on OCI]
+    emr[EMR Serverless Spark]
+    modal[Modal GPU]
+    dbt[dbt task containers]
+  end
+
+  subgraph data[Durable data plane]
+    s3[(S3 tiers)]
+    glue[Glue Data Catalog]
+    athena[Athena]
+  end
+
+  subgraph consumption[Consumption]
+    lightdash[Lightdash]
+    lens[ArXiv Lens]
+  end
+
+  tf -. provisions .-> execution
+  tf -. provisions .-> data
+  contracts -. applies metadata .-> glue
+  ci -. releases .-> execution
+  airflow --> emr
+  emr --> s3
+  emr --> glue
+  modal --> s3
+  dbt --> athena
+  athena --> s3
+  glue --- athena
+  athena --> lightdash
+  athena --> lens
+```
+
+## Data layers
+
+- **Landing** preserves replayable source records and source lineage. A source owns its raw capture
+  and landing tables.
+- **Curated** publishes canonical, validated products through deterministic merges or bounded
+  replacement.
+- **Analytics** contains consumer-owned dbt marts for Engineering and Research.
+
+AWS is the durable boundary. OCI services can be rebuilt from Terraform, immutable releases,
+Secrets Manager, Parameter Store, and PostgreSQL backups. SigNoz telemetry is operational evidence,
+not durable business data.
+
+## Network topology
+
+The OCI host has outbound internet access and no public ingress. Tailscale is the administrative
+path. Cloudflare Tunnel and Access expose Airflow, Lightdash, ArXiv Lens, and SigNoz to approved
+users. The documentation site is different: it is a public static Cloudflare asset deployment and
+does not traverse OCI or the tunnel.

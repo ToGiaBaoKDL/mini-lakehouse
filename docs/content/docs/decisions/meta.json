@@ -1,0 +1,8 @@
+{
+  "title": "Decisions",
+  "pages": [
+    "index",
+    "0001-capability-monorepo",
+    "0002-contract-driven-lakehouse"
+  ]
+}

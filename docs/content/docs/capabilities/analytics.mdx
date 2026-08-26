@@ -1,0 +1,54 @@
+---
+title: Analytics
+description: One dbt project and one Lightdash ownership boundary with domain-isolated execution.
+---
+
+## Structure
+
+```text
+analytics/
+├── dbt-project/
+│   └── models/
+│       ├── sources/
+│       ├── staging/
+│       ├── intermediate/
+│       └── marts/
+└── lightdash/
+    ├── projects/
+    └── deploy/
+```
+
+One dbt project owns both domains. `engineering` selects GitHub-derived models and `research`
+selects ArXiv-derived models. Staging and intermediate models are ephemeral; marts are physical
+Iceberg tables in `analytics_engineering` and `analytics_research`.
+
+The current project-level mart materialization is `table`: a dbt run replaces each selected logical
+mart. The Athena adapter owns the physical table location within the domain's analytics prefix.
+Source YAML contains only dbt mappings, freshness policy, and source tests; the platform contract
+remains the canonical curated schema.
+
+## Execution
+
+```bash
+make dbt-deps
+make dbt-validate
+make dbt-build DBT_DOMAIN=engineering
+make dbt-build DBT_DOMAIN=research
+```
+
+The two domains share an image but use separate Roles Anywhere identities, Glue databases, S3
+prefixes, and Athena query-result prefixes. Airflow runs both through one asset-aware analytics DAG.
+
+## Lightdash
+
+Lightdash consumes the analytics databases through Athena. Git owns managed spaces, charts, and
+dashboards under `analytics/lightdash/projects/<domain>/content`. UI-authored content must live
+outside those managed spaces.
+
+```bash
+make lightdash-validate
+```
+
+The protected workflow compiles the matching dbt selector, deploys its semantic layer, uploads
+managed content, and validates the result. Lightdash has its own image, database, secrets, and
+release lifecycle even though it shares Analytics ownership with dbt.

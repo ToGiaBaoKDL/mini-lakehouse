@@ -1,0 +1,49 @@
+---
+title: Command reference
+description: Stable entry points for validation, infrastructure, services, data, analytics, OCR, and documentation.
+---
+
+`make help` is the executable source of truth. This page groups the stable entry points by intent.
+
+## Quality
+
+| Command                   | Purpose                                                     |
+| ------------------------- | ----------------------------------------------------------- |
+| `make check`              | Complete local quality gate                                 |
+| `make lint`               | Shell, Python formatting/lint, and type checks              |
+| `make test`               | Unit and Airflow bundle tests                               |
+| `make docs-check`         | Docs formatting, types, links, and static build             |
+| `make terraform-validate` | Initialize all Terraform roots without backend and validate |
+| `make compose-validate`   | Render every Compose project without starting it            |
+
+## Data platform
+
+| Command                              | Purpose                                         |
+| ------------------------------------ | ----------------------------------------------- |
+| `make lakehouse-validate`            | Validate settings and contracts without AWS I/O |
+| `make catalog-apply`                 | Apply Glue/Iceberg contract intent              |
+| `make catalog-validate`              | Read-only catalog drift check                   |
+| `make emr-jobs-package`              | Build the immutable EMR job bundle              |
+| `make dbt-validate`                  | Parse both dbt domains without AWS data access  |
+| `make dbt-build DBT_DOMAIN=<domain>` | Build one isolated analytics domain             |
+
+## Services
+
+| Command                                   | Purpose                                       |
+| ----------------------------------------- | --------------------------------------------- |
+| `make services-up` / `make services-down` | Start or stop the self-hosted application set |
+| `make services-ps`                        | Show service state                            |
+| `make airflow-dags`                       | List parsed DAGs and bundle versions          |
+| `make <service>-logs`                     | Follow the selected service logs              |
+
+## OCR and docs
+
+```bash
+AWS_PROFILE=tgbao-dev make ocr-modal-deploy
+AWS_PROFILE=tgbao-dev make ocr-run ARXIV_ID=2607.00001
+make docs-dev
+make docs-build
+```
+
+Plan/apply pairs exist for AWS, Tailscale, GitHub, OCI, Cloudflare, and SigNoz. Always review the plan
+before its matching apply.

@@ -1,0 +1,15 @@
+---
+title: Architecture decisions
+description: Stable decisions that constrain the current platform rather than implementation history or future proposals.
+---
+
+Decision records explain why a durable constraint exists. They are concise and do not duplicate
+runbooks or component documentation.
+
+| Decision                                                                        | Status   | Consequence                                                        |
+| ------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------ |
+| [ADR-0001: Capability-oriented monorepo](./0001-capability-monorepo)            | Accepted | One repository with explicit ownership and independent deployments |
+| [ADR-0002: Contract-driven lakehouse catalog](./0002-contract-driven-lakehouse) | Accepted | YAML and PyIceberg own landing and curated metadata                |
+
+New records use a monotonically increasing number and capture context, decision, consequences, and
+rejected alternatives. Operational instructions belong elsewhere.

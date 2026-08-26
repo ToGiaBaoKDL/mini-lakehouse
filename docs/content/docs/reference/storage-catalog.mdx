@@ -1,0 +1,48 @@
+---
+title: Storage and catalog
+description: Logical S3 tiers, canonical prefixes, Glue databases, ownership, and retention.
+---
+
+## Storage tiers
+
+Terraform provisions separate buckets for landing, curated, analytics, artifacts, query results,
+logs, backups, and Lightdash application data. Bucket names are environment-specific; workloads
+discover their URIs through Parameter Store rather than embedding physical names.
+
+## Canonical data prefixes
+
+| Tier              | Pattern                                       | Example                                 |
+| ----------------- | --------------------------------------------- | --------------------------------------- |
+| Source raw        | `<source_type>/<source>/raw[/<subpath>]`      | `api/arxiv/raw/oai/`                    |
+| Landing Iceberg   | `<source_type>/<source>/tables/<table>/`      | `api/github_archive/tables/events_raw/` |
+| Curated Iceberg   | `<product>/tables/<table>/`                   | `arxiv/tables/papers/`                  |
+| Analytics         | `<domain>/<adapter-owned-table-location>/`    | `engineering/...`                       |
+| Athena results    | `<workload>/`                                 | `dbt/engineering/`, `arxiv-lens/`       |
+| Airflow task logs | `airflow/task-logs/`                          | One prefix in the logs bucket           |
+| PostgreSQL backup | `metadata-postgres/<database>/<date>/<slot>/` | Exact AM/PM recovery slot               |
+
+The dbt Athena profile currently uses `s3_data_naming: table_unique`, so the adapter may include a
+unique physical identifier below the domain prefix. Glue table location is authoritative; consumers
+must not construct analytics object paths.
+
+## Glue databases
+
+| Layer     | Databases                                     | Owner                                  |
+| --------- | --------------------------------------------- | -------------------------------------- |
+| Landing   | `landing_github_archive`, `landing_arxiv`     | Source contracts and catalog operator  |
+| Curated   | `curated_github`, `curated_arxiv`             | Product contracts and catalog operator |
+| Analytics | `analytics_engineering`, `analytics_research` | dbt domains                            |
+
+Analytics domain contracts declare ownership and upstream products, but dbt creates and manages
+their tables. Platform catalog apply does not claim dbt relations.
+
+## Retention
+
+| Bucket class                                      | Dev retention     |
+| ------------------------------------------------- | ----------------- |
+| Athena query results                              | 7 days            |
+| Airflow logs                                      | 30 days           |
+| Metadata PostgreSQL backups                       | 35 days           |
+| Landing, curated, analytics, artifacts, Lightdash | No blanket expiry |
+
+All data buckets block public access, require TLS, and use the environment KMS key.

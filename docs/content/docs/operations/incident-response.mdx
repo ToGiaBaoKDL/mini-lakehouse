@@ -1,0 +1,34 @@
+---
+title: Incident response
+description: Focused diagnosis paths for orchestration, compute, catalog, analytics, access, and telemetry failures.
+---
+
+Start from the failing ownership boundary. Preserve immutable artifacts and evidence; do not work
+around a permission or contract failure with shared credentials or automatic schema mutation.
+
+| Symptom                           | First checks                                                                   | Corrective boundary        |
+| --------------------------------- | ------------------------------------------------------------------------------ | -------------------------- |
+| Airflow shows no DAGs             | DAG processor log, scheduler log, `make airflow-dags`, Git bundle reachability | Airflow bundle/runtime     |
+| EMR task waits                    | Linked EMR run, application capacity, queue timeout, triggerer                 | EMR or Airflow deferral    |
+| Spark reports missing table       | `catalog-validate`, contract deployment order                                  | Catalog operator           |
+| Contract validation reports drift | Exact schema, field IDs, partition spec, identifier fields, location           | Explicit catalog migration |
+| Athena access denied              | Workload certificate, Glue grants, data prefix, result prefix, KMS             | Terraform IAM              |
+| dbt model missing                 | Domain selector, enabled model, curated source, previous dbt task              | Analytics                  |
+| ArXiv Lens has no OCR             | `ocr_documents` row and immutable artifact URI                                 | Local OCR publication      |
+| SigNoz panel has no data          | Producer, receiver, processor, exporter, metric attributes                     | Sysops collection path     |
+| Host service unavailable publicly | Local health, Tailscale, tunnel connector, Access policy                       | Infrastructure             |
+
+## Safe retry rules
+
+- Retry a complete bounded EMR source window; never append a partial recovery manually.
+- Re-run idempotent secret initialization; it preserves a valid current secret.
+- Re-run a Terraform apply only after confirming no other apply owns the lock.
+- Redeploy an immutable component digest; do not retag mutable releases.
+- Re-run local OCR for the same `processing_id`; publication converges on immutable artifacts and one
+  current row.
+
+## Escalation evidence
+
+Record the commit or digest, environment, UTC time window, workload identity, remote job/run ID, and
+the first failing boundary. Do not include tokens, signed URLs, database passwords, or secret
+payloads in an issue or log excerpt.

@@ -1,0 +1,131 @@
+---
+title: Deployment
+description: Bootstrap and release the dev platform in dependency order without crossing ownership boundaries.
+---
+
+## Provider prerequisites
+
+Use the AWS and OCI profiles named `tgbao-dev`, a local authenticated Tailscale client, scoped
+Tailscale and Cloudflare provider tokens, and a fine-grained GitHub token for repository
+administration. Keep provider credentials in their standard process-level chains.
+
+## Bootstrap sequence
+
+<Steps>
+  <Step>
+    Bootstrap remote state and the AWS platform.
+
+    ```bash
+    export AWS_PROFILE=tgbao-dev
+    make aws-state-plan
+    make aws-state-apply
+    make workload-pki-init
+    make aws-plan
+    make aws-apply
+    make workload-identities-render
+    ```
+
+  </Step>
+  <Step>
+    Apply Tailscale and the private Cloudflare edge.
+
+    ```bash
+    make tailscale-plan
+    make tailscale-apply
+    make cloudflare-plan
+    make cloudflare-apply
+    AWS_PROFILE=tgbao-dev make cloudflare-secret-sync
+    ```
+
+  </Step>
+  <Step>
+    Apply GitHub and OCI, then install workload identities.
+
+    ```bash
+    make github-plan
+    make github-apply
+    make oci-plan
+    make oci-apply
+    make workload-identities-install
+    ```
+
+  </Step>
+  <Step>
+    Apply the data contracts before running producers.
+
+    ```bash
+    AWS_PROFILE=tgbao-dev-catalog make catalog-apply
+    AWS_PROFILE=tgbao-dev-catalog make catalog-validate
+    ```
+
+  </Step>
+</Steps>
+
+Review every plan. An interrupted apply is normally resumable; never delete state or disable locking
+as a first response.
+
+## Runtime secrets
+
+```bash
+AWS_PROFILE=tgbao-dev make metadata-postgres-secrets-init
+AWS_PROFILE=tgbao-dev make airflow-secrets-init
+AWS_PROFILE=tgbao-dev make lightdash-secrets-init
+AWS_PROFILE=tgbao-dev make cloudflare-docs-ci-secret-sync
+```
+
+Terraform creates the secret containers. Initialization and explicit operator handoffs set values
+without putting them in Terraform state.
+
+## Release workflows
+
+Merges to `main` publish only affected artifacts. On a fresh environment, manually dispatch the
+missing EMR, Airflow, dbt, Lightdash, and ArXiv Lens workflows. Deploy Modal separately with
+`make ocr-modal-deploy`.
+
+The documentation workflow runs only for documentation and delivery-file changes. It builds
+`docs/out` and deploys it with Wrangler to `mini-lakehouse-docs.tgblab.io.vn`; no OCI approval,
+image publication, or tunnel reconciliation is involved.
+
+### Documentation delivery ownership
+
+| Owner                        | Responsibility                                                        |
+| ---------------------------- | --------------------------------------------------------------------- |
+| Cloudflare Terraform         | Private tunnel, application DNS/Access, and account ID output         |
+| AWS Terraform                | Empty docs CI secret and least-privilege GitHub OIDC role             |
+| AWS Secrets Manager          | Scoped Cloudflare API token                                           |
+| GitHub Terraform             | Protected environment, role ARN, secret ID, and Cloudflare account ID |
+| `docs/wrangler.jsonc` and CI | Versioned Worker, static assets, custom domain, and release           |
+
+The Worker and its custom domain deliberately stay with Wrangler. They are part of the same
+versioned release as `docs/out`; Terraform does not upload application artifacts or compete with CI
+for Worker configuration ownership.
+
+Before its first run, create `.secrets/dev/cloudflare/docs-ci.json` with a token scoped to edit
+Workers scripts and routes for the documentation zone. Synchronize it only after AWS Terraform has
+created the empty secret container.
+
+```json title=".secrets/dev/cloudflare/docs-ci.json"
+{
+  "version": 1,
+  "api_token": "<cloudflare-api-token>"
+}
+```
+
+```bash
+AWS_PROFILE=tgbao-dev make cloudflare-docs-ci-secret-sync
+```
+
+GitHub stores no Cloudflare credential. The protected workflow uses OIDC to assume the dedicated
+AWS role and loads the token only for the deployment steps.
+
+## Verification
+
+```bash
+tailscale status
+tailscale ping tgbao-dev-services
+make services-ps
+make airflow-dags
+```
+
+Verify public applications through their Cloudflare Access hostnames and use tailnet endpoints for
+private diagnosis.

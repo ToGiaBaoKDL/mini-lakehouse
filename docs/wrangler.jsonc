@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mini-lakehouse-docs",
+  "compatibility_date": "2026-08-26",
+  "preview_urls": true,
+  "assets": {
+    "directory": "./out",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page",
+  },
+  "routes": [
+    {
+      "pattern": "mini-lakehouse-docs.tgblab.io.vn",
+      "custom_domain": true,
+    },
+  ],
+}

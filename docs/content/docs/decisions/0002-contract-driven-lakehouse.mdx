@@ -1,0 +1,36 @@
+---
+title: "ADR-0002: Contract-driven lakehouse catalog"
+description: Separate cloud provisioning, catalog intent, and data writes across Terraform, YAML with PyIceberg, and compute engines.
+---
+
+**Status:** Accepted
+
+## Context
+
+Terraform is effective for cloud resources but is not the right owner for evolving Iceberg table
+schemas. Spark jobs must write data but should not silently create or mutate catalog contracts. dbt
+must retain ownership of consumer-facing analytics relations.
+
+## Decision
+
+- Terraform provisions S3, Glue service access, KMS, IAM, EMR, Athena, and discovery parameters.
+- Versioned YAML contracts define landing and curated namespaces, schemas, field IDs, identifiers,
+  partition specs, and deterministic locations.
+- A PyIceberg catalog operator explicitly applies safe changes and validates drift.
+- EMR Spark owns landing and curated writes but fails when required catalog state is absent.
+- dbt independently owns analytics tables; domain contracts describe ownership and upstream
+  products only.
+
+## Consequences
+
+- Schema and partition changes are reviewed independently from job retries.
+- Producers cannot hide drift with `mergeSchema` or implicit table creation.
+- Physical table locations are deterministic for contract-managed tiers.
+- Structural changes outside the compatible apply set require explicit migrations.
+- S3 data and Glue/Iceberg metadata must be recovered as one logical system.
+
+## Rejected alternatives
+
+- Terraform-managed Glue/Iceberg tables: poor fit for application-level schema evolution.
+- Writer-created tables: makes runtime execution an implicit control plane.
+- One universal transformation contract: hides source-specific and product-specific invariants.

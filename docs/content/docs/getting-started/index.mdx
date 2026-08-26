@@ -1,0 +1,67 @@
+---
+title: Getting started
+description: Validate the repository locally before selecting a cloud or runtime workflow.
+---
+
+The repository is designed around focused commands rather than a single always-running local
+stack. Start with read-only validation, then run only the capability you are changing.
+
+## Prerequisites
+
+- Linux with Docker and Docker Compose.
+- Python version declared in `.python-version` and [uv](https://docs.astral.sh/uv/).
+- Node.js 24 and pnpm for this documentation site.
+- Terraform, AWS CLI, OCI CLI, Tailscale CLI, `jq`, and GitHub CLI for infrastructure work.
+- AWS CLI profile `tgbao-dev` for dev operator actions.
+
+## First validation
+
+<Steps>
+  <Step>
+    Install the locked Python environments.
+
+    ```bash
+    uv sync --frozen --all-packages --all-extras --all-groups
+    uv sync --frozen --project analytics/dbt-project/runtime
+    uv sync --frozen --project automation/airflow --all-groups
+    ```
+
+  </Step>
+  <Step>
+    Install the documentation dependencies.
+
+    ```bash
+    corepack enable
+    pnpm --dir docs install --frozen-lockfile
+    ```
+
+  </Step>
+  <Step>
+    Discover the supported commands and run the complete quality gate.
+
+    ```bash
+    make help
+    make check
+    ```
+
+  </Step>
+</Steps>
+
+`make check` validates lockfiles, contracts, dbt, Lightdash content, Python, Terraform, Compose,
+container definitions, tests, and documentation. Use focused targets during iteration, but run the
+complete gate before committing a cross-capability change.
+
+## Choose the owning workflow
+
+| Change                   | Start with                                                   |
+| ------------------------ | ------------------------------------------------------------ |
+| Contract or catalog code | `make lakehouse-validate` and `make catalog-validate`        |
+| EMR job                  | `make emr-jobs-package`                                      |
+| Airflow DAG              | Airflow bundle tests under `automation/airflow/bundle/tests` |
+| dbt model                | `make dbt-validate`                                          |
+| Lightdash content        | `make lightdash-validate`                                    |
+| Infrastructure           | The matching `*-plan` target                                 |
+| Documentation            | `make docs-check`                                            |
+
+Continue with [Local environment](./local-environment) before using cloud credentials or starting
+self-hosted services.
