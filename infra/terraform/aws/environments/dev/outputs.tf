@@ -39,6 +39,16 @@ output "signoz_ci_secret_id" {
   value       = aws_secretsmanager_secret.signoz_ci.name
 }
 
+output "t0_trading_ssi_secret_id" {
+  description = "Secrets Manager identifier populated with the SSI FastConnect v3 credential."
+  value       = aws_secretsmanager_secret.t0_trading_ssi.name
+}
+
+output "t0_trading_database_secret_id" {
+  description = "Secrets Manager identifier for the T0 trading operational database credential."
+  value       = aws_secretsmanager_secret.metadata_postgres["t0_trading"].name
+}
+
 output "container_repository_urls" {
   description = "Immutable ECR repositories keyed by deployable service."
   value       = module.container_registry.repository_urls

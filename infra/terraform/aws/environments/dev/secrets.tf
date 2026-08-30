@@ -17,6 +17,7 @@ locals {
     bootstrap  = "Bootstrap credential for the shared metadata PostgreSQL server."
     lightdash  = "Database credential owned by the Lightdash metadata database."
     pg_monitor = "Read-only pg_monitor credential for host metrics collection."
+    t0_trading = "Database credential owned by the T0 trading operational ledger."
   }
 }
 
@@ -68,6 +69,13 @@ resource "aws_secretsmanager_secret" "ocr" {
 
   name                    = "lakehouse/${local.environment}/ocr/providers/${each.key}"
   description             = "${title(each.key)} credentials for remote OCR execution."
+  recovery_window_in_days = 7
+  tags                    = local.tags
+}
+
+resource "aws_secretsmanager_secret" "t0_trading_ssi" {
+  name                    = "lakehouse/${local.environment}/t0-trading/ssi"
+  description             = "SSI FastConnect v3 credential for the T0 market-data capability."
   recovery_window_in_days = 7
   tags                    = local.tags
 }

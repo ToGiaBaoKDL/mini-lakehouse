@@ -82,6 +82,7 @@ def test_secret_containers_never_manage_secret_values() -> None:
     assert 'resource "aws_secretsmanager_secret" "lightdash_ci"' in environment
     assert 'resource "aws_secretsmanager_secret" "signoz_ci"' in environment
     assert 'resource "aws_secretsmanager_secret" "ocr"' in environment
+    assert 'resource "aws_secretsmanager_secret" "t0_trading_ssi"' in environment
     assert 'for_each = toset(["modal"])' in environment
     assert 'resource "aws_secretsmanager_secret" "cloudflare_tunnel"' in environment
     assert 'resource "aws_secretsmanager_secret" "cloudflare_docs_ci"' in environment
@@ -92,6 +93,7 @@ def test_secret_containers_never_manage_secret_values() -> None:
     assert '"lakehouse/${local.environment}/lightdash/ci"' in environment
     assert '"lakehouse/${local.environment}/signoz/ci"' in environment
     assert '"lakehouse/${local.environment}/ocr/providers/${each.key}"' in environment
+    assert '"lakehouse/${local.environment}/t0-trading/ssi"' in environment
     assert '"lakehouse/${local.environment}/cloudflare/tunnel-token"' in environment
     assert '"lakehouse/${local.environment}/cloudflare/docs-ci"' in environment
     assert "aws_secretsmanager_secret_version" not in environment
@@ -143,6 +145,7 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
         "arxiv-lens",
         "lightdash",
         "metadata-postgres",
+        "t0-trading",
         "github-image-publisher",
         "github-emr-publisher",
         "github-lightdash-deployer",
@@ -255,6 +258,7 @@ def test_service_images_are_immutable_bounded_and_published_by_one_role() -> Non
         "analytics-dbt",
         "analytics-lightdash",
         "automation-airflow",
+        "t0-trading",
         # ArXiv Lens is already capability-scoped and does not need a rename.
         "arxiv-lens",
     ):
@@ -297,6 +301,30 @@ def test_services_deployer_reads_only_the_connector_secret() -> None:
     assert 'actions   = ["secretsmanager:GetSecretValue"]' in services
     assert "airflow_secret_arns" not in services
     assert "ocr_secret_arns" not in services
+
+
+def test_t0_trading_runtime_is_bound_to_owned_raw_prefixes_and_secrets() -> None:
+    environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
+    identity = Path("infra/terraform/aws/modules/identity/t0_trading.tf").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"t0-trading"' in environment
+    assert "t0_trading_secret_arns" in environment + identity
+    assert "aws_secretsmanager_secret.t0_trading_ssi.arn" in environment
+    assert 'aws_secretsmanager_secret.metadata_postgres["t0_trading"].arn' in environment
+    for prefix in (
+        "api/ssi_fastconnect_rest/raw",
+        "stream/ssi_fastconnect_stream/raw",
+        "rdbms/t0_trading/raw",
+    ):
+        assert f'"{prefix}"' in identity
+    assert 'actions   = ["secretsmanager:GetSecretValue"]' in identity
+    assert 'actions   = ["ssm:GetParameter"]' in identity
+    assert '"s3:PutObject"' in identity
+    assert '"s3:DeleteObject"' not in identity
+    assert "glue:" not in identity
+    assert "var.bucket_arns.curated" not in identity
 
 
 def test_docs_deployer_reads_only_the_cloudflare_docs_secret() -> None:

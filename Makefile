@@ -76,6 +76,8 @@ lint: ## Run formatting, linting, and static type checks.
 		analytics/lightdash/deploy/initialize-secrets \
 		analytics/lightdash/deploy/reconcile \
 		analytics/lightdash/deploy/sync-ci-secret \
+		t0-trading/deploy/deploy \
+		t0-trading/deploy/sync-ssi-secret \
 		docs/deploy/sync-ci-secret \
 		analytics/dbt-project/deploy/deploy
 	uv run ruff format --check .

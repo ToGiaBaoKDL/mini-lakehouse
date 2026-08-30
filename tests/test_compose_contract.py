@@ -157,6 +157,7 @@ def test_airflow_runtime_secrets_are_service_scoped_files() -> None:
     assert "infra/runtime/postgres/initialize-secrets bootstrap" in services_makefile
     assert "infra/runtime/postgres/initialize-secrets airflow" in services_makefile
     assert "infra/runtime/postgres/initialize-secrets lightdash" in services_makefile
+    assert "infra/runtime/postgres/initialize-secrets t0_trading" in services_makefile
     assert "automation/airflow/deploy/initialize-secrets" in services_makefile
     assert "secretsmanager put-secret-value" not in services_makefile
 
@@ -185,8 +186,9 @@ def test_airflow_runtime_components_have_role_appropriate_healthchecks() -> None
         "airflow.sql",
         "lightdash.sql",
         "pg_monitor.sql",
+        "t0_trading.sql",
     }
-    for path in ("airflow.sql", "lightdash.sql"):
+    for path in ("airflow.sql", "lightdash.sql", "t0_trading.sql"):
         source = (Path("infra/runtime/postgres/bootstrap") / path).read_text(encoding="utf-8")
         database = Path(path).stem
         assert "REVOKE CONNECT ON DATABASE postgres FROM PUBLIC" in source
@@ -490,6 +492,7 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
     lens = Path("arxiv-lens/pyproject.toml").read_text(encoding="utf-8")
     analytics = Path("analytics/dbt-project/runtime/pyproject.toml").read_text(encoding="utf-8")
     ocr = Path("ocr-engine/pyproject.toml").read_text(encoding="utf-8")
+    t0_trading = Path("t0-trading/pyproject.toml").read_text(encoding="utf-8")
 
     assert "apache-airflow" not in workspace
     assert "dbt-athena" not in workspace
@@ -521,7 +524,9 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
     assert "providers = [" not in ocr
     assert "s3fs" not in ocr
     assert '"dbt-athena==1.11.0"' in analytics
-    assert 'members = ["arxiv-lens", "lakehouse/catalog", "ocr-engine"]' in workspace
+    assert 'members = ["arxiv-lens", "lakehouse/catalog", "ocr-engine", "t0-trading"]' in workspace
+    assert '"ssi-sdk==3.2.0"' in t0_trading
+    assert '"boto3>=1.42,<2"' in t0_trading
     assert (
         'exclude = ["analytics/dbt-project/runtime", "automation/airflow", "lakehouse/emr", '
         '"ocr-engine/modal"]' in workspace

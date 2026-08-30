@@ -1,0 +1,55 @@
+version: 1
+name: ssi_fastconnect_rest
+database: landing_ssi_fastconnect_rest
+source_type: api
+owner: market-data
+contact:
+  name: Market Data
+  email: baokdl2226@gmail.com
+description: Immutable records captured through the official SSI FastConnect Data SDK.
+
+tables:
+  - key: records
+    name: records
+    description: Source-shaped SDK records with request, object, and publication lineage.
+    primary_key: [request_id, page, record_index]
+    columns:
+      - {field_id: 1, name: request_id, data_type: string, required: true, description: Deterministic identifier for one bounded SDK request.}
+      - {field_id: 2, name: endpoint, data_type: string, required: true, description: Public SDK method used to obtain the record.}
+      - {field_id: 3, name: request_parameters_sha256, data_type: string, required: true, description: SHA-256 of canonical non-secret request parameters.}
+      - {field_id: 4, name: page, data_type: long, required: true, description: One-based provider page number when pagination applies.}
+      - {field_id: 5, name: record_index, data_type: long, required: true, description: Zero-based position within the provider page.}
+      - {field_id: 6, name: requested_at, data_type: timestamptz, required: true, description: UTC time immediately before the SDK request.}
+      - {field_id: 7, name: received_at, data_type: timestamptz, required: true, description: UTC time when the SDK response was available to the capture process.}
+      - {field_id: 8, name: record_type, data_type: string, required: true, description: Exported SSI SDK model type.}
+      - {field_id: 9, name: symbol, data_type: string, required: false, description: Provider symbol when exposed by the SDK model.}
+      - {field_id: 10, name: source_time_text, data_type: string, required: false, description: Provider timestamp text preserved without reinterpretation.}
+      - {field_id: 11, name: record_json, data_type: string, required: true, description: Canonical serialization of every field exposed by the SDK model.}
+      - {field_id: 12, name: record_sha256, data_type: string, required: true, description: SHA-256 of record_json.}
+      - {field_id: 13, name: api_version, data_type: string, required: true, description: SSI API version reported by the capture runtime.}
+      - {field_id: 14, name: sdk_version, data_type: string, required: true, description: Pinned SSI SDK package version.}
+      - {field_id: 15, name: object_key, data_type: string, required: true, description: Immutable S3 capture object containing the record.}
+      - {field_id: 16, name: object_sha256, data_type: string, required: true, description: SHA-256 of the immutable capture object.}
+      - {field_id: 17, name: published_at, data_type: timestamptz, required: true, description: UTC time the object publication became durable.}
+    partitioning:
+      - {field_id: 1000, field: requested_at, transform: day, name: request_day}
+
+  - key: request_publications
+    name: request_publications
+    description: One immutable completion record for each bounded SDK request publication.
+    primary_key: [request_id]
+    columns:
+      - {field_id: 1, name: request_id, data_type: string, required: true, description: Deterministic identifier for one bounded SDK request.}
+      - {field_id: 2, name: endpoint, data_type: string, required: true, description: Public SDK method used by the request.}
+      - {field_id: 3, name: request_parameters_sha256, data_type: string, required: true, description: SHA-256 of canonical non-secret request parameters.}
+      - {field_id: 4, name: requested_at, data_type: timestamptz, required: true, description: UTC request start time.}
+      - {field_id: 5, name: completed_at, data_type: timestamptz, required: true, description: UTC request completion time.}
+      - {field_id: 6, name: page_count, data_type: long, required: true, description: Number of provider pages captured.}
+      - {field_id: 7, name: record_count, data_type: long, required: true, description: Number of SDK records captured.}
+      - {field_id: 8, name: capture_status, data_type: string, required: true, description: Terminal bounded-capture outcome.}
+      - {field_id: 9, name: error_code, data_type: string, required: false, description: Sanitized provider or SDK error classification.}
+      - {field_id: 10, name: manifest_key, data_type: string, required: true, description: Immutable S3 manifest for every object in the request.}
+      - {field_id: 11, name: manifest_sha256, data_type: string, required: true, description: SHA-256 of the immutable request manifest.}
+      - {field_id: 12, name: published_at, data_type: timestamptz, required: true, description: UTC time the terminal publication marker became durable.}
+    partitioning:
+      - {field_id: 1000, field: requested_at, transform: day, name: request_day}

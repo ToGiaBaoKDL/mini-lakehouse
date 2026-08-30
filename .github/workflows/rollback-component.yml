@@ -12,6 +12,7 @@ on:
           - arxiv-lens
           - dbt
           - lightdash
+          - t0-trading
       image:
         description: Exact ECR image reference by digest
         required: true
@@ -86,6 +87,7 @@ jobs:
             arxiv-lens/deploy
             analytics/lightdash/deploy
             analytics/dbt-project/deploy
+            t0-trading/deploy
       - name: Verify the deployment bundle was reviewed on main
         shell: bash
         env:

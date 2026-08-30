@@ -70,11 +70,19 @@ as a first response.
 AWS_PROFILE=tgbao-dev make metadata-postgres-secrets-init
 AWS_PROFILE=tgbao-dev make airflow-secrets-init
 AWS_PROFILE=tgbao-dev make lightdash-secrets-init
+AWS_PROFILE=tgbao-dev make t0-trading-secrets-init
 AWS_PROFILE=tgbao-dev make cloudflare-docs-ci-secret-sync
+AWS_PROFILE=tgbao-dev make t0-trading-ssi-secret-sync
 ```
 
 Terraform creates the secret containers. Initialization and explicit operator handoffs set values
 without putting them in Terraform state.
+
+The T0 handoff is `.secrets/dev/t0-trading/ssi.json`. Its canonical payload contains exactly
+`version`, `client_id`, `api_key`, and `api_secret`. After applying AWS infrastructure, initialize
+the dedicated database with `infra/runtime/postgres/deploy t0_trading`. The bounded REST-to-Iceberg
+DAG remains manual while its reconciliation gate is exercised; continuous streaming, signals, and
+execution remain disabled until their later delivery gates pass.
 
 ## Release workflows
 

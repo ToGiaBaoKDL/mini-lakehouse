@@ -58,7 +58,7 @@ def test_component_release_publishes_before_protected_digest_deployment() -> Non
     assert "automation/airflow/runtime" in release
     assert "source-$revision" in release
     assert "cancel-in-progress: false" in release
-    assert "airflow|arxiv-lens|dbt|lightdash" in release
+    assert "airflow|arxiv-lens|dbt|lightdash|t0-trading" in release
     assert '[[ -z "$BUILD_ARGS" ]]' in release
     assert "^[0-9]{12}\\.dkr\\.ecr\\." in action
     assert "uses: ./.github/actions/reconcile-services-host" in action
@@ -102,6 +102,7 @@ def test_image_repositories_follow_capability_ownership() -> None:
         "arxiv-lens) capability=arxiv-lens",
         "dbt) capability=analytics-dbt",
         "lightdash) capability=analytics-lightdash",
+        "t0-trading) capability=t0-trading",
     ):
         assert mapping in repository
     assert "printf '%s\\n' \"tgbao-$environment-$capability\"" in repository
@@ -154,6 +155,49 @@ def test_ocr_is_local_cli_plus_modal_without_an_oci_runtime() -> None:
     assert "ocr-run: preflight" not in makefile
     assert "document-ocr run" in makefile
     assert "modal deploy" in makefile
+
+
+def test_t0_certification_uses_the_official_read_only_sdk_boundary() -> None:
+    project = Path("t0-trading/pyproject.toml").read_text(encoding="utf-8")
+    certification = Path("t0-trading/src/t0_trading/certification.py").read_text(encoding="utf-8")
+    capture = Path("t0-trading/src/t0_trading/capture.py").read_text(encoding="utf-8")
+    cli = Path("t0-trading/src/t0_trading/cli.py").read_text(encoding="utf-8")
+    credentials = Path("t0-trading/src/t0_trading/credentials.py").read_text(encoding="utf-8")
+    provider = Path("t0-trading/src/t0_trading/provider.py").read_text(encoding="utf-8")
+
+    assert '"ssi-sdk==3.2.0"' in project
+    assert "from ssi_sdk import Data, Stream" in certification
+    assert "from ssi_sdk import Data" in cli
+    assert "from ssi_sdk import Auth, Config" in provider
+    assert "market.get_ohlc_1minute_historical" in capture
+    assert "market.get_master_data_historical" in capture
+    assert "SSI_SDK_VERSION" in certification
+    assert "importlib.metadata" not in certification
+    assert "auth.authenticate()" in provider
+    assert "auth.token_manager" not in certification
+    assert "get_master_data_historical" in certification
+    assert "get_ohlc_1minute" in certification
+    assert "get_securities_summary_by_index" in certification
+    assert "subscribe_symbol" in certification
+    assert "subscribe_symbol_ohlcv" in certification
+    assert "subscribe_index" in certification
+    assert "client.ping()" in certification
+    assert "Trading" not in certification
+    assert "private_key=" not in certification
+    assert 'boto3.client("secretsmanager"' in credentials
+    capability = "\n".join(
+        path.read_text(encoding="utf-8") for path in Path("t0-trading/src/t0_trading").glob("*.py")
+    )
+    for direct_client in ("import httpx", "import requests", "import websockets"):
+        assert direct_client not in capability
+    for protocol_literal in (
+        "fc-data.ssi.com.vn",
+        "fc-datahub.ssi.com.vn",
+        "B:VIC",
+        "X-QUOTE:VIC",
+        "MI:ALL",
+    ):
+        assert protocol_literal not in capability
 
 
 def test_each_component_owns_its_deployment_operation() -> None:
@@ -354,6 +398,13 @@ def test_each_custom_component_has_a_thin_release_caller() -> None:
             "repository: tgbao-dev-analytics-lightdash",
             "runner: ubuntu-24.04-arm",
         ),
+        "release-t0-trading.yml": (
+            "component: t0-trading",
+            "dockerfile: t0-trading/Dockerfile",
+            "repository: tgbao-dev-t0-trading",
+            "- pyproject.toml",
+            "- uv.lock",
+        ),
     }
 
     for workflow, assertions in expected.items():
@@ -495,6 +546,20 @@ def test_lightdash_ci_token_has_an_owned_secret_sync_boundary() -> None:
     assert '--secret-string "file://$payload_file"' in sync
     assert "lightdash-ci-secret-sync:" in services
     assert ".secrets/$(LAKEHOUSE_ENVIRONMENT)/lightdash/ci.json" in services
+
+
+def test_t0_trading_has_an_owned_ssi_secret_sync_boundary() -> None:
+    sync = Path("t0-trading/deploy/sync-ssi-secret").read_text(encoding="utf-8")
+    services = Path("make/services.mk").read_text(encoding="utf-8")
+
+    assert 'secret_id="lakehouse/$environment/t0-trading/ssi"' in sync
+    assert 'has("private_key")' not in sync
+    assert '"private_key"' not in sync
+    assert 'keys | sort == ["api_key", "api_secret", "client_id", "version"]' in sync
+    assert "{version, client_id, api_key, api_secret}" in sync
+    assert "--secret-string file:///dev/stdin" in sync
+    assert "t0-trading-ssi-secret-sync:" in services
+    assert ".secrets/$(LAKEHOUSE_ENVIRONMENT)/t0-trading/ssi.json" in services
 
 
 def test_docs_deployment_loads_cloudflare_token_through_aws_oidc() -> None:

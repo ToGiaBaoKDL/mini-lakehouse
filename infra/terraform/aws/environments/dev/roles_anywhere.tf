@@ -5,6 +5,7 @@ locals {
     lightdash         = module.identity.lightdash_role_arn
     metadata_postgres = module.identity.metadata_postgres_role_arn
     services_deployer = module.identity.services_deployer_role_arn
+    t0_trading        = module.identity.t0_trading_role_arn
   }, module.identity.dbt_domain_role_arns)
 }
 

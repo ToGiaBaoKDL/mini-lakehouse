@@ -158,6 +158,16 @@ variable "lightdash_secret_arns" {
   }
 }
 
+variable "t0_trading_secret_arns" {
+  type        = set(string)
+  description = "Exact SSI and PostgreSQL secrets readable by the T0 trading runtime."
+
+  validation {
+    condition     = length(var.t0_trading_secret_arns) == 2
+    error_message = "T0 trading requires exactly its SSI and PostgreSQL secrets."
+  }
+}
+
 variable "lightdash_ci_secret_arn" {
   type        = string
   description = "Exact Secrets Manager resource readable by protected Lightdash deployment jobs."

@@ -39,6 +39,7 @@ ALLOWED_ACTIONS = {"build", "ingest", "maintain"}
 EXPECTED_DAGS = {
     "etl_emr_ingest_arxiv_metadata",
     "etl_emr_ingest_github_archive",
+    "etl_mix_ingest_market_data",
     "gov_emr_maintain_iceberg",
     "tl_docker_build_analytics",
 }
@@ -125,6 +126,30 @@ def test_source_dags_are_bounded_parameterized_emr_jobs() -> None:
 
     arxiv = _dag(bag, "etl_emr_ingest_arxiv_metadata").tasks[0]
     assert arxiv.outlets[0].uri == "lakehouse://curated/arxiv/metadata"
+
+
+def test_market_data_dag_keeps_capture_and_publication_bounded() -> None:
+    dag = _dag(_bag(), "etl_mix_ingest_market_data")
+
+    assert dag.schedule is None
+    assert dag.max_active_runs == 1
+    assert "trade_date" in dag.params
+    capture = dag.get_task("capture_rest")
+    publish = dag.get_task("publish_market_data")
+    assert isinstance(capture, LoggedDockerOperator)
+    assert isinstance(publish, LoggedEmrServerlessStartJobOperator)
+    assert capture.image == "t0-trading:runtime"
+    assert capture.mounts is not None
+    assert capture.mounts[0]["Source"] == "/tmp/t0-trading"
+    assert isinstance(capture.command, list)
+    assert capture.command[:2] == ["capture-rest", "--trade-date"]
+    assert "--job-token" in capture.command
+    assert "--landing-uri" in capture.command
+    assert capture.downstream_task_ids == {"publish_market_data"}
+    arguments = publish.job_driver["sparkSubmit"]["entryPointArguments"]
+    assert "--capture-manifest-uri" in arguments
+    assert "{{ ti.xcom_pull(task_ids='capture_rest') }}" in arguments
+    assert publish.outlets[0].uri == "lakehouse://curated/market-data"
 
 
 def test_curated_assets_schedule_one_domain_aware_analytics_dag() -> None:

@@ -16,6 +16,8 @@ from pyiceberg.transforms import (
 from pyiceberg.types import (
     BooleanType,
     DateType,
+    DecimalType,
+    DoubleType,
     IcebergType,
     LongType,
     NestedField,
@@ -32,6 +34,7 @@ ICEBERG_TYPES: dict[str, IcebergType] = {
     "boolean": BooleanType(),
     "timestamptz": TimestamptzType(),
     "date": DateType(),
+    "double": DoubleType(),
 }
 
 TRANSFORMS: dict[str, Transform[Any, Any]] = {
@@ -41,6 +44,14 @@ TRANSFORMS: dict[str, Transform[Any, Any]] = {
     "month": MonthTransform(),
     "year": YearTransform(),
 }
+
+
+def iceberg_type(column: ColumnContract) -> IcebergType:
+    if column.data_type == "decimal":
+        if column.precision is None or column.scale is None:
+            raise ValueError(f"Decimal column {column.name!r} has no precision or scale")
+        return DecimalType(column.precision, column.scale)
+    return ICEBERG_TYPES[column.data_type]
 
 
 def iceberg_schema(
@@ -53,7 +64,7 @@ def iceberg_schema(
             NestedField(
                 field_id=column.field_id,
                 name=column.name,
-                field_type=ICEBERG_TYPES[column.data_type],
+                field_type=iceberg_type(column),
                 required=column.required,
             )
             for column in columns

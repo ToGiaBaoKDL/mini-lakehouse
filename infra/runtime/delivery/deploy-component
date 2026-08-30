@@ -33,6 +33,9 @@ case "$component" in
     dbt)
         deploy="$bundle_root/analytics/dbt-project/deploy/deploy"
         ;;
+    t0-trading)
+        deploy="$bundle_root/t0-trading/deploy/deploy"
+        ;;
     *)
         printf '%s\n' "Unknown component: $component" >&2
         exit 2

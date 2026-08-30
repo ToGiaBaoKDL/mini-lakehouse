@@ -21,6 +21,7 @@ locals {
     "lightdash",
     "metadata_postgres",
     "services_deployer",
+    "t0_trading",
   ]), local.dbt_workloads)
 }
 

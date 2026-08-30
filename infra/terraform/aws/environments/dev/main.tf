@@ -101,6 +101,7 @@ module "container_registry" {
     "analytics-lightdash",
     "arxiv-lens",
     "automation-airflow",
+    "t0-trading",
   ])
   retained_image_count = 20
   force_delete         = true
@@ -168,6 +169,10 @@ module "identity" {
   lightdash_secret_arns = toset([
     aws_secretsmanager_secret.lightdash.arn,
     aws_secretsmanager_secret.metadata_postgres["lightdash"].arn,
+  ])
+  t0_trading_secret_arns = toset([
+    aws_secretsmanager_secret.t0_trading_ssi.arn,
+    aws_secretsmanager_secret.metadata_postgres["t0_trading"].arn,
   ])
   cloudflare_docs_ci_secret_arn = aws_secretsmanager_secret.cloudflare_docs_ci.arn
   lightdash_ci_secret_arn       = aws_secretsmanager_secret.lightdash_ci.arn

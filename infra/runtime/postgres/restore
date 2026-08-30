@@ -3,7 +3,7 @@ set -eu
 
 if [ "$#" -ne 3 ]; then
     printf '%s\n' \
-        "Usage: infra/runtime/postgres/restore <airflow|lightdash> <utc-date> <am|pm>" \
+        "Usage: infra/runtime/postgres/restore <airflow|lightdash|t0_trading> <utc-date> <am|pm>" \
         "The metadata cluster must be bootstrapped before restoring." >&2
     exit 2
 fi
@@ -12,7 +12,7 @@ database=$1
 restore_date=$2
 restore_slot=$3
 case "$database" in
-    airflow | lightdash) ;;
+    airflow | lightdash | t0_trading) ;;
     *)
         printf '%s\n' "Unknown metadata database: $database" >&2
         exit 2

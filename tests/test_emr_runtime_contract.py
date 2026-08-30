@@ -40,6 +40,7 @@ def test_emr_entrypoints_are_thin_python_adapters() -> None:
         "arxiv_metadata.py",
         "github_archive.py",
         "iceberg_maintenance.py",
+        "market_data.py",
     }
     for path in entrypoints:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -67,3 +68,11 @@ def test_emr_uses_one_shared_iceberg_catalog_boundary() -> None:
     assert "from lakehouse.catalog import CATALOG_NAME" in common
     assert "catalog_name" not in entrypoints
     assert 'default     = "glue"' in terraform
+
+
+def test_spark_contract_adapter_supports_every_declared_numeric_type() -> None:
+    adapter = Path("lakehouse/emr/src/emr_jobs/common/contracts.py").read_text(encoding="utf-8")
+
+    assert '"double": DoubleType()' in adapter
+    assert 'if column.data_type == "decimal"' in adapter
+    assert "return DecimalType(column.precision, column.scale)" in adapter

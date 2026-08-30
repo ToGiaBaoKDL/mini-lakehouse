@@ -43,6 +43,9 @@ runs:
           dbt)
             bundle+=(analytics/dbt-project/deploy)
             ;;
+          t0-trading)
+            bundle+=(t0-trading/deploy)
+            ;;
           *) exit 2 ;;
         esac
         case "$COMPONENT" in

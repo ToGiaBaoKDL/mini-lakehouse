@@ -2,14 +2,14 @@
 set -eu
 
 if [ "$#" -gt 1 ]; then
-    printf '%s\n' "Usage: infra/runtime/postgres/backup [airflow|lightdash]" >&2
+    printf '%s\n' "Usage: infra/runtime/postgres/backup [airflow|lightdash|t0_trading]" >&2
     exit 2
 fi
 
-databases="airflow lightdash"
+databases="airflow lightdash t0_trading"
 case "${1:-}" in
     "") ;;
-    airflow | lightdash) databases="$1" ;;
+    airflow | lightdash | t0_trading) databases="$1" ;;
     *)
         printf '%s\n' "Unknown metadata database: $1" >&2
         exit 2

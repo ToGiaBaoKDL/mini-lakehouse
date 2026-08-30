@@ -1,0 +1,108 @@
+---
+title: T0 Trading
+description: An evidence-gated SSI market-data and assisted-decision capability.
+---
+
+T0 Trading has a catalog foundation and a manual, bounded REST publication path. It does not run a
+continuous service, emit signals, initialize an SSI trading client, or place broker orders. The
+manual path is intentionally unscheduled until the remaining full-session evidence passes the
+provider-certification gate.
+
+## Provider boundary
+
+The capability uses `ssi-sdk` 3.2.0 for authentication, Data REST calls, streaming connections, and
+subscriptions. Each bounded streaming cycle also sends one SDK-owned heartbeat ping after
+subscribing. Application code does not reproduce SSI endpoints, WebSocket topics, retry logic, or
+protocol messages. Certification uses only the Data and Stream DATA clients.
+
+Terraform owns the empty SSI and PostgreSQL secret containers, an immutable ECR repository, and a
+dedicated Roles Anywhere identity. The runtime role can read only those two secrets and the landing
+URI, and can write only the SSI REST, SSI stream, and exported-journal raw prefixes. It has no Glue
+or curated-table permissions.
+
+## Data contracts
+
+`landing_ssi_fastconnect_rest` and `landing_ssi_fastconnect_stream` preserve canonical SDK records
+with request/session, object, checksum, and publication lineage. A local stream receive sequence
+records callback order but is never represented as a provider event identifier.
+
+`curated_market_data` owns effective-dated securities, revision-preserving daily summaries and
+one-minute bars, at-least-once trade ticks, quote snapshots and levels, index snapshots, market
+status events, and structured corporate actions. Every decision-relevant fact separates event,
+receipt, availability, and processing time where the source permits it. Prices and monetary values
+use explicit decimal precision and scale through Pydantic, PyIceberg, and Spark; quantities and
+sequences remain integers. Live and historical bars converge into one table through source and
+revision lineage.
+
+`market_status_events` and `corporate_actions` are structured facts, not news or sentiment feeds.
+Their tables remain empty until an official structured source is certified; the implementation will
+not scrape prose or construct an undocumented SSI subscription to populate them.
+
+The physical tables intentionally use one table per durable grain, not one table per engine:
+
+| Tables                                                                          | State                           | Reason                                                                                                               |
+| ------------------------------------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| REST `records`, `request_publications`                                          | Active in bounded publication   | Immutable records and one terminal request marker are different grains.                                              |
+| `securities`, `daily_security_summaries`, `intraday_bars_1m`, `index_snapshots` | Active in bounded publication   | Current certified REST normalization output.                                                                         |
+| Stream `messages`, `batch_publications`, `sessions`                             | Reserved for continuous capture | Message, durable batch, and connection-session completeness are independently auditable grains.                      |
+| `trade_ticks`, `quote_snapshots`, `quote_levels`                                | Reserved for replay             | Quotes use a parent snapshot plus one-to-many levels; ticks retain receive order.                                    |
+| `market_status_events`, `corporate_actions`                                     | Deferred                        | Required for fail-closed gates and adjusted replay, but have no writer until their structured sources are certified. |
+
+The bounded EMR job requires only its four active curated tables. Reserved contracts do not add a
+runtime branch, generic repository, or empty application service.
+
+## Bounded publication
+
+The manual `etl_mix_ingest_market_data` DAG accepts one `trade_date` and has a single writer path:
+
+1. the `t0-trading` image composes official Data SDK calls and writes content-addressed, gzipped
+   records plus checksum manifests below the SSI REST source prefix;
+2. the EMR job validates the exact request scope, SDK/API compatibility, timestamp order, object and
+   request counts, object metadata, model types, record hashes, and duplicate keys before
+   append-only landing publication;
+3. EMR publishes effective-dated securities and revision-preserving daily, one-minute, and index
+   facts only after date/symbol scope and OHLC reconciliation checks pass. SSI all-zero minute
+   placeholders are omitted; zero sentinels inside a positive-volume auction bar are normalized
+   from its positive close while the immutable source record remains unchanged in landing.
+
+An Airflow retry reuses the same capture manifest. A new DAG run creates a new raw observation, but
+unchanged curated source fingerprints do not create another revision. Historical REST index
+summaries retain a null `event_time` because the SDK supplies a date but no event timestamp; the
+pipeline does not invent a market-close time.
+
+## Synchronize and certify
+
+The ignored local handoff is `.secrets/dev/t0-trading/ssi.json`. Synchronization validates file
+permissions and payload shape, projects only market-data credentials, and writes no values to
+Terraform state or command output.
+
+```bash
+AWS_PROFILE=tgbao-dev make t0-trading-ssi-secret-sync
+AWS_PROFILE=tgbao-dev make t0-trading-certify
+```
+
+The certification command reads the managed secret through the standard AWS credential chain and
+writes a sanitized, bounded report to `/tmp/mini-lakehouse-t0-certification.json`. It captures field
+types, nullability, small public samples, pagination overlap, message counts, and duplicate
+fingerprints. SDK exception messages and internal request state are deliberately excluded. The
+command writes the report before returning non-zero when any probe is partial, so unresolved
+provider behavior remains a visible gate. Generated reports are disposable local evidence and are
+not committed.
+
+The REST scope includes one completed trading date of SDK-auto-paginated master data for reference,
+floor, and ceiling prices; current and historical one-minute bars; security summaries; and index
+context. Streaming uses the SDK aggregate symbol subscription for trades, quotes, and foreign-room
+updates, plus the SDK one-minute interval and index subscriptions. Provider interval bars are
+reconciliation evidence; deterministic bars built from captured trades remain the replay source.
+
+## Delivery gates
+
+1. Certify history boundaries, units, source timestamps, pagination, quote semantics, and index
+   availability.
+2. Observe disconnect, reconnect, resubscribe, and ordering behavior over a market session.
+3. Keep the bounded publication DAG manual while reconciliation behavior is exercised over the
+   certified window.
+4. Only then schedule bounded capture or enable continuous runtime behavior.
+
+The canonical implementation checklist remains the repository plan during development; this page
+documents only behavior that already exists.

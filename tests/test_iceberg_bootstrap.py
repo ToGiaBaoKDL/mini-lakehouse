@@ -15,7 +15,7 @@ from pyiceberg.catalog import Catalog
 from pyiceberg.partitioning import PartitionSpec
 from pyiceberg.schema import Schema
 from pyiceberg.table import Table
-from pyiceberg.types import NestedField
+from pyiceberg.types import DecimalType, NestedField
 
 from lakehouse.contracts import ManagedIcebergTableContract, load_contracts
 
@@ -122,6 +122,32 @@ def test_apply_rejects_incompatible_schema_before_mutation() -> None:
     catalog = create_autospec(Catalog, instance=True)
     table = _matching_table(contract, location)
     cast(Any, table.schema).side_effect = [incompatible, incompatible, incompatible]
+    catalog.create_table_if_not_exists.return_value = table
+
+    with pytest.raises(RuntimeError, match=r"explicit migration: schema"):
+        apply_table(catalog, identifier, location, contract)
+
+    cast(Any, table.update_schema).assert_not_called()
+
+
+def test_apply_never_changes_decimal_scale_implicitly() -> None:
+    identifier, location, contract = _binding(("curated_market_data", "trade_ticks"))
+    expected = iceberg_schema(contract.columns, contract.primary_key)
+    previous = Schema(
+        *[
+            NestedField(
+                field_id=field.field_id,
+                name=field.name,
+                field_type=DecimalType(18, 2) if field.name == "price" else field.field_type,
+                required=field.required,
+            )
+            for field in expected.fields
+        ],
+        identifier_field_ids=expected.identifier_field_ids,
+    )
+    catalog = create_autospec(Catalog, instance=True)
+    table = _matching_table(contract, location)
+    cast(Any, table.schema).side_effect = [previous, previous, previous]
     catalog.create_table_if_not_exists.return_value = table
 
     with pytest.raises(RuntimeError, match=r"explicit migration: schema"):

@@ -5,9 +5,9 @@ description: Durable metadata backup, exact-slot recovery, and the boundary betw
 
 ## Metadata PostgreSQL
 
-The services host runs a systemd timer twice daily at 02:30 and 14:30 UTC with jitter. Each Airflow
-and Lightdash database is dumped with PostgreSQL custom format, uploaded to the backup bucket, and
-completed by a SHA-256 marker uploaded last.
+The services host runs a systemd timer twice daily at 02:30 and 14:30 UTC with jitter. Each Airflow,
+Lightdash, and T0 operational-ledger database is dumped with PostgreSQL custom format, uploaded to
+the backup bucket, and completed by a SHA-256 marker uploaded last.
 
 ```text
 metadata-postgres/<database>/<utc-date>/<am|pm>/

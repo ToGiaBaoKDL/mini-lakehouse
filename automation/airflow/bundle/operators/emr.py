@@ -1,5 +1,6 @@
 """Shared construction of thin EMR Serverless Airflow tasks."""
 
+import hashlib
 from collections.abc import Mapping, Sequence
 from datetime import timedelta
 from typing import Any
@@ -37,6 +38,13 @@ class LoggedEmrServerlessStartJobOperator(EmrServerlessStartJobOperator):
             self.log.warning("Unable to create the Spark driver-log URL", exc_info=True)
 
     def execute(self, context: Context, event: dict[str, Any] | None = None) -> str | None:
+        run_id = context.get("run_id")
+        if not isinstance(run_id, str) or not run_id:
+            raise RuntimeError("Airflow context is missing run_id")
+        task_instance = context.get("task_instance")
+        try_number = getattr(task_instance, "try_number", 1)
+        identity = f"{self.dag_id}|{self.task_id}|{run_id}|{try_number}".encode()
+        self.client_request_token = hashlib.sha256(identity).hexdigest()
         try:
             job_id = super().execute(context, event)
         except Exception:

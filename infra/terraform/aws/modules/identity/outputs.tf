@@ -33,6 +33,11 @@ output "lightdash_role_arn" {
   value       = aws_iam_role.lightdash.arn
 }
 
+output "t0_trading_role_arn" {
+  description = "IAM role used by the OCI T0 trading runtime."
+  value       = aws_iam_role.t0_trading.arn
+}
+
 output "dbt_domain_role_arns" {
   description = "Least-privilege IAM roles keyed by independently owned dbt domain workload."
   value       = { for workload, role in aws_iam_role.dbt_domain : workload => role.arn }

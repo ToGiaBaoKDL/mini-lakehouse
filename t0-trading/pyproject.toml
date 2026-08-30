@@ -1,0 +1,18 @@
+[build-system]
+requires = ["uv_build>=0.11.0,<0.12.0"]
+build-backend = "uv_build"
+
+[project]
+name = "t0-trading"
+version = "0.1.0"
+description = "Evidence-gated SSI market-data certification and T0 decision support."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "boto3>=1.42,<2",
+    "pydantic>=2.12,<3",
+    "ssi-sdk==3.2.0",
+    "typer==0.25.1",
+]
+
+[project.scripts]
+t0-trading = "t0_trading.cli:app"

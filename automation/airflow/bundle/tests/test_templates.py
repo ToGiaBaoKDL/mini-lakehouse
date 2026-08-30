@@ -38,6 +38,20 @@ def test_explicit_source_date_takes_precedence() -> None:
     assert _render_source_date("2025-01-02") == "2025-01-02"
 
 
+def test_previous_local_date_supports_domain_specific_parameter_names() -> None:
+    rendered = (
+        SandboxedEnvironment()
+        .from_string(previous_local_date("trade_date"))
+        .render(
+            dag_run=SimpleNamespace(run_after=datetime(2026, 8, 5, 17, 30, tzinfo=UTC)),
+            macros=macros,
+            params={"trade_date": "2026-08-04"},
+        )
+    )
+
+    assert rendered == "2026-08-04"
+
+
 def test_required_runtime_value_renders_exactly() -> None:
     template = runtime_value("emr/code_uri")
     rendered = (

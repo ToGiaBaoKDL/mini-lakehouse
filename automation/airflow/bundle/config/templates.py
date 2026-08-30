@@ -13,10 +13,15 @@ def runtime_value(path: str) -> str:
     return f"{{{{ var.value[{json.dumps(path)}] }}}}"
 
 
-def previous_local_date(timezone: str = LOCAL_TIMEZONE) -> str:
+def previous_local_date(
+    parameter: str = "source_date",
+    timezone: str = LOCAL_TIMEZONE,
+) -> str:
     """Resolve an optional source date for scheduled and manual DAG runs."""
+    if not parameter.isidentifier():
+        raise ValueError("Airflow date parameter must be an identifier")
     return (
-        "{{ params.source_date or "
+        f"{{{{ params.{parameter} or "
         "((dag_run.run_after.astimezone("
         f"macros.dateutil.tz.gettz('{timezone}'))) "
         "- macros.timedelta(days=1)).strftime('%Y-%m-%d') }}"
