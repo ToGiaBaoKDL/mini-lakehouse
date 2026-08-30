@@ -7,6 +7,8 @@ test "$(id -u)" -eq 0 || {
 }
 
 network=lakehouse-observability
+subnet=172.24.0.0/16
+gateway=172.24.0.1
 exec 9>/run/lock/lakehouse-docker-networks.lock
 flock 9
 
@@ -15,12 +17,21 @@ if docker network inspect "$network" >/dev/null 2>&1; then
         printf '%s\n' "$network exists but is not a bridge network." >&2
         exit 1
     }
+    actual_ipam=$(docker network inspect -f '{{json .IPAM.Config}}' "$network")
+    test "$actual_ipam" = "[{\"Subnet\":\"$subnet\",\"Gateway\":\"$gateway\"}]" || {
+        printf '%s\n' \
+            "$network has unexpected IPAM: $actual_ipam (expected $subnet via $gateway)." >&2
+        exit 1
+    }
     printf '%s\n' "$network is current."
     exit 0
 fi
 
 docker network create \
     --driver bridge \
+    --subnet "$subnet" \
+    --gateway "$gateway" \
+    --opt com.docker.network.bridge.name=br-lh-observe \
     --label lakehouse.owner=services-host \
     "$network" >/dev/null
 printf '%s\n' "$network created."

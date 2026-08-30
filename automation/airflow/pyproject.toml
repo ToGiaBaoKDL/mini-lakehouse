@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Self-hosted Airflow runtime and provider integration for the lakehouse."
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "apache-airflow[postgres]==3.3.0",
+    "apache-airflow[postgres,statsd]==3.3.0",
     "apache-airflow-providers-amazon==9.32.0",
     "apache-airflow-providers-docker==4.5.7",
     "apache-airflow-providers-git==0.4.1",

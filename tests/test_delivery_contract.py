@@ -271,6 +271,7 @@ def test_cloudflare_connector_has_a_deploy_only_workflow() -> None:
     assert "${{ steps.release.outputs.image }}" in source
     assert "docker/build-push-action" not in source
     assert "amazon-ecr-login" not in source
+    assert ".github/actions/deploy-component/action.yml" not in source
     assert "infra/runtime/cloudflare" in action
     assert "file:///dev/stdin" in sync
     assert "CLOUDFLARE_API_TOKEN" in sync
@@ -301,6 +302,9 @@ def test_services_host_owns_the_shared_observability_network() -> None:
     assert "lakehouse-observability" in reconcile
     assert "docker network inspect" in reconcile
     assert "docker network create" in reconcile
+    assert "subnet=172.24.0.0/16" in reconcile
+    assert "gateway=172.24.0.1" in reconcile
+    assert "unexpected IPAM" in reconcile
     assert "flock 9" in reconcile
 
 

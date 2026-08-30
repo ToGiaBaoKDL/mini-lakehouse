@@ -13,6 +13,10 @@ locals {
       hostname = "analytics.tgblab.io.vn"
       origin   = "http://127.0.0.1:8081"
     }
+    netdata = {
+      hostname = "netdata.tgblab.io.vn"
+      origin   = "http://127.0.0.1:19999"
+    }
     signoz = {
       hostname = "observe.tgblab.io.vn"
       origin   = "http://127.0.0.1:8082"

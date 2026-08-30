@@ -40,6 +40,9 @@ runs:
           lightdash)
             bundle+=(infra/runtime/postgres analytics/lightdash/deploy)
             ;;
+          netdata)
+            bundle+=(infra/runtime/postgres sysops/netdata)
+            ;;
           dbt)
             bundle+=(analytics/dbt-project/deploy)
             ;;
@@ -51,6 +54,9 @@ runs:
         case "$COMPONENT" in
           cloudflare)
             [[ "$IMAGE" =~ ^cloudflare/cloudflared:[0-9]{4}\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]
+            ;;
+          netdata)
+            [[ "$IMAGE" =~ ^netdata/netdata:v[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]
             ;;
           *)
             repository=$("$SOURCE_ROOT/infra/runtime/delivery/image-repository" "$COMPONENT")

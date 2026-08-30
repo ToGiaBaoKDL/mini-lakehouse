@@ -1,0 +1,47 @@
+#!/bin/sh
+set -eu
+
+test "$(id -u)" -eq 0 || {
+    printf '%s\n' "netdata-statsd-firewall must run as root." >&2
+    exit 1
+}
+
+network=lakehouse-observability
+subnet=172.24.0.0/16
+gateway=172.24.0.1
+chain=LAKEHOUSE-NETDATA
+
+command -v docker >/dev/null 2>&1
+command -v iptables >/dev/null 2>&1
+exec 9>/run/lock/lakehouse-netdata-statsd.lock
+flock 9
+
+actual_ipam=$(docker network inspect -f '{{json .IPAM.Config}}' "$network")
+test "$actual_ipam" = "[{\"Subnet\":\"$subnet\",\"Gateway\":\"$gateway\"}]" || {
+    printf '%s\n' "$network does not have the reviewed StatsD IPAM." >&2
+    exit 1
+}
+
+bridge=$(docker network inspect -f '{{index .Options "com.docker.network.bridge.name"}}' "$network")
+if [ -z "$bridge" ]; then
+    network_id=$(docker network inspect -f '{{.Id}}' "$network")
+    bridge="br-$(printf '%.12s' "$network_id")"
+fi
+test -e "/sys/class/net/$bridge" || {
+    printf '%s\n' "Docker bridge interface $bridge is unavailable." >&2
+    exit 1
+}
+
+iptables -w 10 -N "$chain" 2>/dev/null || true
+iptables -w 10 -F "$chain"
+iptables -w 10 -A "$chain" \
+    -i "$bridge" -s "$subnet" -d "$gateway" \
+    -p udp --dport 8125 -j ACCEPT
+iptables -w 10 -A "$chain" -j RETURN
+
+while iptables -w 10 -C INPUT -j "$chain" 2>/dev/null; do
+    iptables -w 10 -D INPUT -j "$chain"
+done
+iptables -w 10 -I INPUT 1 -j "$chain"
+
+printf '%s\n' "Netdata StatsD accepts only $subnet on $bridge via $gateway:8125/udp."

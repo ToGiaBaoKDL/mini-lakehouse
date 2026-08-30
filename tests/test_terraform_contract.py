@@ -502,6 +502,8 @@ def test_cloudflare_edge_uses_current_tunnel_and_access_resources() -> None:
     assert 'decision   = "allow"' in cloudflare
     assert 'hostname = "analytics.tgblab.io.vn"' in cloudflare
     assert 'origin   = "http://127.0.0.1:8081"' in cloudflare
+    assert 'hostname = "netdata.tgblab.io.vn"' in cloudflare
+    assert 'origin   = "http://127.0.0.1:19999"' in cloudflare
     assert "self_hosted_domains" not in cloudflare
     assert 'variable "cloudflare_api_token"' not in cloudflare
     assert "tunnel_secret" not in cloudflare

@@ -1,0 +1,235 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 1 ]; then
+    printf '%s\n' "Usage: sysops/netdata/deploy <netdata-image@sha256:digest>" >&2
+    exit 2
+fi
+
+image=$1
+printf '%s' "$image" \
+    | grep -Eq '^netdata/netdata:v[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$' \
+    || {
+    printf '%s\n' "Image must be a versioned netdata/netdata multi-architecture digest." >&2
+    exit 2
+}
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+bundle_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
+expected_image=$(cat "$script_dir/image")
+test "$image" = "$expected_image" || {
+    printf '%s\n' "Image does not match the reviewed Netdata release." >&2
+    exit 2
+}
+
+docker compose version >/dev/null 2>&1 || {
+    printf '%s\n' "Docker Compose is required on the services host." >&2
+    exit 1
+}
+command -v curl >/dev/null 2>&1 || {
+    printf '%s\n' "curl is required on the services host." >&2
+    exit 1
+}
+command -v jq >/dev/null 2>&1 || {
+    printf '%s\n' "jq is required on the services host." >&2
+    exit 1
+}
+command -v ss >/dev/null 2>&1 || {
+    printf '%s\n' "ss is required on the services host." >&2
+    exit 1
+}
+
+environment=${LAKEHOUSE_ENVIRONMENT:-dev}
+identity_dir=${AWS_IDENTITY_DIR:-"$HOME/.config/lakehouse/$environment/aws"}
+host_config="$identity_dir/metadata-postgres/host-config"
+test -r "$host_config" || {
+    printf '%s\n' "The metadata-postgres workload identity is missing." >&2
+    exit 1
+}
+
+aws_runtime() {
+    env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+        AWS_SHARED_CREDENTIALS_FILE=/dev/null \
+        AWS_CONFIG_FILE="$host_config" AWS_PROFILE=default AWS_PAGER= aws "$@"
+}
+
+monitor_secret=$(aws_runtime secretsmanager get-secret-value \
+    --secret-id "lakehouse/$environment/metadata-postgres/pg_monitor" \
+    --query SecretString --output text)
+printf '%s' "$monitor_secret" | jq -e \
+    '.version == 1
+     and ((.username // "lakehouse_monitor") == "lakehouse_monitor")
+     and (.password | type == "string" and length > 0 and test("[\\r\\n]") | not)' \
+    >/dev/null
+
+# Reconcile the read-only role and pg_stat_statements before Netdata depends on them.
+"$bundle_root/infra/runtime/postgres/deploy" pg_monitor
+
+monitor_password=$(printf '%s' "$monitor_secret" | jq -r '.password')
+escaped_password=$(printf '%s' "$monitor_password" | sed 's/\\/\\\\/g; s/:/\\:/g')
+NETDATA_POSTGRES_PGPASS="*:*:*:lakehouse_monitor:$escaped_password"
+export NETDATA_POSTGRES_PGPASS
+unset escaped_password monitor_password monitor_secret
+
+compose() {
+    docker compose --project-name netdata -f "$script_dir/compose.yaml" "$@"
+}
+
+show_logs() {
+    compose logs --tail=150 >&2 || true
+}
+
+NETDATA_IMAGE=$image
+NETDATA_HOSTNAME=$(hostname)
+NETDATA_CONFIG_SHA256=$(
+    cd "$script_dir"
+    find config -type f -print \
+        | LC_ALL=C sort \
+        | xargs sha256sum \
+        | sha256sum \
+        | awk '{print $1}'
+)
+export NETDATA_CONFIG_SHA256 NETDATA_HOSTNAME NETDATA_IMAGE
+
+docker pull "$image" >/dev/null
+if ! compose up -d --force-recreate --wait --wait-timeout 120; then
+    show_logs
+    printf '%s\n' "Netdata did not become healthy within 120 seconds." >&2
+    exit 1
+fi
+
+info=$(curl -fsS --connect-timeout 2 --max-time 10 \
+    http://127.0.0.1:19999/api/v1/info) || {
+    show_logs
+    printf '%s\n' "Netdata API is unavailable on the loopback listener." >&2
+    exit 1
+}
+
+expected_version=${image#*:}
+expected_version=${expected_version%@*}
+printf '%s' "$info" \
+    | jq -e --arg hostname "$NETDATA_HOSTNAME" --arg version "$expected_version" \
+        '.version == $version and (.mirrored_hosts | index($hostname)) != null' >/dev/null || {
+    show_logs
+    printf '%s\n' "Netdata API identity does not match the reviewed runtime." >&2
+    exit 1
+}
+
+attempt=0
+while [ "$attempt" -lt 12 ]; do
+    charts=$(curl -fsS --connect-timeout 2 --max-time 10 \
+        http://127.0.0.1:19999/api/v1/charts) || charts=
+    if printf '%s' "$charts" \
+        | jq -e '[.charts[] | select(.plugin == "go.d" and .module == "postgres")] | length >= 10' \
+            >/dev/null 2>&1; then
+        break
+    fi
+    attempt=$((attempt + 1))
+    sleep 5
+done
+test "$attempt" -lt 12 || {
+    show_logs
+    printf '%s\n' "Netdata PostgreSQL collector did not publish its native chart set." >&2
+    exit 1
+}
+
+functions=$(curl -fsS --connect-timeout 2 --max-time 10 \
+    http://127.0.0.1:19999/api/v1/functions) || {
+    show_logs
+    printf '%s\n' "Netdata Functions API is unavailable." >&2
+    exit 1
+}
+printf '%s' "$functions" | jq -e '
+    [
+      .functions["postgres:top-queries"].access,
+      .functions["postgres:running-queries"].access
+    ]
+    | all(. == ["signed-in", "same-space", "sensitive-data"])' >/dev/null || {
+    show_logs
+    printf '%s\n' "Sensitive PostgreSQL query Functions are unavailable or insufficiently protected." >&2
+    exit 1
+}
+
+ss -lntH \
+    | awk '$4 ~ /^127\.0\.0\.1:19999$/ { found = 1 } END { exit !found }' || {
+    show_logs
+    printf '%s\n' "Netdata is not bound exclusively to the expected loopback listener." >&2
+    exit 1
+}
+statsd_sockets=$(ss -lunH | awk '$4 ~ /:8125$/ { print $4 }')
+test "$statsd_sockets" = "172.24.0.1:8125" || {
+    show_logs
+    printf '%s\n' \
+        "Netdata StatsD must listen only on the observability bridge gateway." >&2
+    exit 1
+}
+sudo -n iptables -w 10 -C INPUT -j LAKEHOUSE-NETDATA >/dev/null 2>&1 || {
+    show_logs
+    printf '%s\n' "The reviewed Netdata StatsD INPUT rule is unavailable." >&2
+    exit 1
+}
+
+container_id=$(compose ps -q netdata)
+test -n "$container_id" || {
+    show_logs
+    printf '%s\n' "Netdata container is unavailable." >&2
+    exit 1
+}
+docker exec "$container_id" test -s /var/lib/netdata/mcp_dev_preview_api_key || {
+    show_logs
+    printf '%s\n' "Netdata did not generate its local MCP API key." >&2
+    exit 1
+}
+
+# Exercise one native counter, gauge, and millisecond timer. Airflow supplies
+# the real stream; this bounded probe verifies the receiver and chart profile.
+printf '%s\n' \
+    'airflow.scheduler_heartbeat:1|c' \
+    'airflow.scheduler.tasks.executable:0|g' \
+    'airflow.task.duration:1|ms' \
+    | docker run --rm -i --pull never --read-only --cap-drop ALL \
+        --network lakehouse-observability --entrypoint bash "$image" \
+        -c 'cat >/dev/udp/172.24.0.1/8125'
+sleep 2
+statsd_charts=$(curl -fsS --connect-timeout 2 --max-time 10 \
+    http://127.0.0.1:19999/api/v1/charts) || {
+    show_logs
+    printf '%s\n' "Netdata StatsD charts API is unavailable." >&2
+    exit 1
+}
+printf '%s' "$statsd_charts" | jq -e '
+    [.charts[] | {context, units}]
+    | contains([
+        {"context": "airflow.heartbeats", "units": "heartbeats/s"},
+        {"context": "airflow.scheduler_tasks", "units": "tasks"},
+        {"context": "airflow.task_duration", "units": "milliseconds"}
+      ])' >/dev/null || {
+    show_logs
+    printf '%s\n' "Netdata did not render the reviewed Airflow StatsD chart contract." >&2
+    exit 1
+}
+
+management_token=$(docker exec "$container_id" cat /var/lib/netdata/netdata.api.key)
+test -n "$management_token" || {
+    show_logs
+    printf '%s\n' "Netdata did not generate its Health Management API key." >&2
+    exit 1
+}
+health_api() {
+    command=$1
+    printf 'header = "X-Auth-Token: %s"\n' "$management_token" \
+        | curl --config - --fail --silent --show-error --get \
+            --connect-timeout 2 --max-time 10 \
+            --data-urlencode "cmd=$command" \
+            http://127.0.0.1:19999/api/v1/manage/health
+}
+health_api "SILENCE ALL" >/dev/null
+health_state=$(health_api "LIST")
+printf '%s' "$health_state" \
+    | jq -e '.all == true and .type == "SILENCE"' >/dev/null || {
+    show_logs
+    printf '%s\n' "Netdata Health notifications are not silenced for the acceptance soak." >&2
+    exit 1
+}
+
+printf '%s\n' "Netdata is healthy on 127.0.0.1:19999 with notifications silenced."

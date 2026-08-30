@@ -1,7 +1,18 @@
 services:
   metadata-postgres:
     image: postgres:17.10@sha256:a426e44bac0b759c95894d68e1a0ac03ecc20b619f498a91aae373bf06d8508d
-    command: ["postgres", "-c", "log_min_messages=warning"]
+    command:
+      - postgres
+      - -c
+      - log_min_messages=warning
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.max=1000
+      - -c
+      - pg_stat_statements.track=top
+      - -c
+      - pg_stat_statements.track_utility=off
     environment:
       POSTGRES_DB: postgres
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password

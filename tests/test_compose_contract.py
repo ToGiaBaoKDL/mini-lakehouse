@@ -112,8 +112,8 @@ def test_airflow_uses_local_executor_and_required_runtime_components() -> None:
     assert "airflow-auth:/opt/airflow/auth" in common["volumes"]
     assert "airflow-dag-bundles:/opt/airflow/dag-bundles" in common["volumes"]
     assert payload["networks"]["metadata"]["external"] is True
-    assert set(common["networks"]) == {"metadata", "runtime", "telemetry"}
-    assert payload["networks"]["telemetry"] == {
+    assert set(common["networks"]) == {"metadata", "observability", "runtime"}
+    assert payload["networks"]["observability"] == {
         "external": True,
         "name": "lakehouse-observability",
     }
@@ -202,7 +202,10 @@ def test_airflow_runtime_components_have_role_appropriate_healthchecks() -> None
     assert "CREATE ROLE lakehouse_monitor" in pg_monitor_bootstrap
     assert "GRANT CONNECT ON DATABASE postgres TO lakehouse_monitor" in pg_monitor_bootstrap
     assert "GRANT pg_monitor TO lakehouse_monitor" in pg_monitor_bootstrap
-    assert "CONNECTION LIMIT 12" in pg_monitor_bootstrap
+    assert "CONNECTION LIMIT 16" in pg_monitor_bootstrap
+    assert "CREATE EXTENSION IF NOT EXISTS pg_stat_statements" in pg_monitor_bootstrap
+    assert "SELECT 1 FROM pg_stat_statements LIMIT 0" in pg_monitor_bootstrap
+    assert "'t0_trading'" in pg_monitor_bootstrap
     assert "SUPERUSER" not in pg_monitor_bootstrap
     # PostgreSQL reserves every role name that starts with pg_.
     assert "pg_monitor_user" not in pg_monitor_bootstrap
@@ -296,7 +299,7 @@ def test_airflow_emits_structured_info_while_other_services_start_at_warning() -
     assert not (AIRFLOW_RUNTIME / "airflow_runtime/logging_config.py").exists()
     assert lens["environment"]["LAKEHOUSE_LOG_LEVEL"] == "WARNING"
     assert lens["environment"]["STREAMLIT_LOGGER_LEVEL"] == "warning"
-    assert postgres["command"] == ["postgres", "-c", "log_min_messages=warning"]
+    assert postgres["command"][:3] == ["postgres", "-c", "log_min_messages=warning"]
 
 
 def test_collector_drops_structured_airflow_info_after_parsing_json_level() -> None:
@@ -345,39 +348,43 @@ def test_collector_observes_itself_and_scopes_postgres_severity_parsing() -> Non
     assert all("^metadata-postgres-" in statement for statement in severity_statements)
 
 
-def test_airflow_metric_allowlist_keeps_operational_health_signals() -> None:
+def test_airflow_uses_bounded_native_statsd_metrics() -> None:
     airflow = _compose(AIRFLOW_COMPOSE)
     environment = airflow["x-airflow-common"]["environment"]
     allowlist = environment["AIRFLOW__METRICS__METRICS_ALLOW_LIST"]
-    collector = yaml.safe_load(
-        Path("sysops/signoz/collector/config.yaml").read_text(encoding="utf-8")
-    )
-    airflow_metric_statements = collector["processors"]["transform/airflow_metrics"][
-        "metric_statements"
-    ]
-    dashboard = Path("sysops/signoz/terraform/dashboards_airflow.tf").read_text(encoding="utf-8")
 
     for family in (
         "critical_section_duration",
         "dag_processor_heartbeat",
         "tasks\\.(executable|starving)",
         "queued_duration",
-        "pool\\.",
     ):
         assert family in allowlist
+    assert environment["AIRFLOW__METRICS__STATSD_ON"] == "true"
+    assert environment["AIRFLOW__METRICS__STATSD_HOST"] == "172.24.0.1"
+    assert environment["AIRFLOW__METRICS__STATSD_PORT"] == "8125"
+    assert environment["AIRFLOW__METRICS__STATSD_PREFIX"] == "airflow"
     assert environment["AIRFLOW__METRICS__LEGACY_NAMES_ON"] == "false"
     assert "^task\\." in allowlist
     assert "^dag\\..+" not in allowlist
+    assert "pool\\." not in allowlist
     assert "ti_(successes|failures)" not in allowlist
     assert "last_duration" not in allowlist
     assert "last_run\\.seconds_ago" not in allowlist
-    assert [statement["context"] for statement in airflow_metric_statements] == ["metric"]
-    assert "ExtractPatterns" not in str(airflow_metric_statements)
-    assert "airflow.ti_successes" not in dashboard
-    assert "airflow.ti_failures" not in dashboard
-    assert "service.name = 'airflow' AND airflow.dag_id EXISTS" in dashboard
-    assert 'name            = "airflow.dag_id"' in dashboard
-    assert 'name            = "airflow.task_id"' in dashboard
+    assert environment.keys().isdisjoint(
+        {
+            "AIRFLOW__METRICS__OTEL_ON",
+            "AIRFLOW__TRACES__OTEL_ON",
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE",
+            "OTEL_EXPORTER_OTLP_PROTOCOL",
+            "OTEL_RESOURCE_ATTRIBUTES",
+            "OTEL_SERVICE_NAME",
+        }
+    )
+    assert (
+        airflow["services"]["airflow-init"]["environment"]["AIRFLOW__METRICS__STATSD_ON"] == "false"
+    )
 
 
 def test_container_cpu_panels_normalize_docker_percent_to_logical_cores() -> None:
@@ -474,9 +481,9 @@ def test_all_container_images_are_immutable() -> None:
     assert "PYTHONPATH=/app/arxiv-lens/src" in lens_dockerfile
     dockerignore = Path(".dockerignore").read_text(encoding="utf-8")
     assert "!infra/runtime/identity/install-aws-signing-helper" in dockerignore
-    assert '"apache-airflow[postgres]==3.3.0"' in (AIRFLOW_PROJECT / "pyproject.toml").read_text(
-        encoding="utf-8"
-    )
+    assert '"apache-airflow[postgres,statsd]==3.3.0"' in (
+        AIRFLOW_PROJECT / "pyproject.toml"
+    ).read_text(encoding="utf-8")
     assert "postgres:17.10@sha256:" in compose
     assert "public.ecr.aws/amazonlinux/amazonlinux:2023-minimal@sha256:" in emr_dockerfile
     assert "ghcr.io/astral-sh/uv:0.11.30@sha256:" in emr_dockerfile
@@ -498,7 +505,7 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
     assert "dbt-athena" not in workspace
     assert "streamlit" not in workspace
     assert 'name = "lakehouse"' in catalog
-    assert '"apache-airflow[postgres]==3.3.0"' in orchestration
+    assert '"apache-airflow[postgres,statsd]==3.3.0"' in orchestration
     assert '"apache-airflow-providers-amazon==9.32.0"' in orchestration
     assert "aiobotocore" not in orchestration
     assert '"apache-airflow-providers-docker==4.5.7"' in orchestration
@@ -536,7 +543,10 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
     assert "apache-airflow" not in Path("uv.lock").read_text(encoding="utf-8")
     assert "opentelemetry-distro" in lens
     assert "apache-airflow" in (AIRFLOW_PROJECT / "uv.lock").read_text(encoding="utf-8")
-    assert "opentelemetry" in (AIRFLOW_PROJECT / "uv.lock").read_text(encoding="utf-8")
+    assert "statsd" in (AIRFLOW_PROJECT / "uv.lock").read_text(encoding="utf-8")
+    dockerfile = (AIRFLOW_PROJECT / "runtime/Dockerfile").read_text(encoding="utf-8")
+    assert "from statsd import StatsClient" in dockerfile
+    assert "OTLPMetricExporter" not in dockerfile
 
 
 def test_airflow_bundle_and_runtime_have_one_way_ownership() -> None:

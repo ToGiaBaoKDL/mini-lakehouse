@@ -23,18 +23,14 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__FERNET_KEY_CMD: cat /run/secrets/airflow_fernet_key
     AIRFLOW__SECRETS__BACKEND: airflow_runtime.secrets.AwsSecretsBackend
     AIRFLOW__SECRETS__BACKEND_KWARGS: '{"connections_prefix":"lakehouse/${LAKEHOUSE_ENVIRONMENT}/airflow/connections","connections_lookup_pattern":"^(slack_api_default|smtp_default)$","variables_prefix":"/lakehouse/${LAKEHOUSE_ENVIRONMENT}"}'
-    AIRFLOW__METRICS__OTEL_ON: "true"
+    AIRFLOW__METRICS__STATSD_ON: "true"
+    AIRFLOW__METRICS__STATSD_HOST: 172.24.0.1
+    AIRFLOW__METRICS__STATSD_PORT: "8125"
+    AIRFLOW__METRICS__STATSD_PREFIX: airflow
     AIRFLOW__METRICS__LEGACY_NAMES_ON: "false"
-    # Keep a bounded production baseline: scheduler/processor health,
-    # concurrency pressure and DAG/task latency. Traces are
-    # unaffected; high-cardinality serialization/debug families stay out.
-    AIRFLOW__METRICS__METRICS_ALLOW_LIST: "^scheduler\\.(scheduler_loop_duration|critical_section_duration|critical_section_query_duration|executor_heartbeat_duration|dagruns\\.running|tasks\\.(executable|starving))$,^scheduler_heartbeat$,^dag_processor_heartbeat$,^dag_processing\\.file_path_queue_size$,^dagrun\\.(duration\\.(success|failed)|schedule_delay|first_task_(scheduling|start)_delay)$,^task\\.(duration|scheduled_duration|queued_duration)$,^executor\\.(running_tasks|queued_tasks|open_slots)$,^pool\\.(open_slots|queued_slots|running_slots|deferred_slots|scheduled_slots)$"
-    AIRFLOW__TRACES__OTEL_ON: "true"
-    OTEL_EXPORTER_OTLP_ENDPOINT: http://signoz-collection-agent:4317
-    OTEL_EXPORTER_OTLP_PROTOCOL: grpc
-    OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE: delta
-    OTEL_SERVICE_NAME: airflow
-    OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=${LAKEHOUSE_ENVIRONMENT}"
+    # Plain StatsD intentionally exports modern, tag-free aggregate names. Pool
+    # gauges are omitted because dropping pool_name would make them ambiguous.
+    AIRFLOW__METRICS__METRICS_ALLOW_LIST: "^scheduler\\.(scheduler_loop_duration|critical_section_duration|critical_section_query_duration|executor_heartbeat_duration|dagruns\\.running|tasks\\.(executable|starving))$,^scheduler_heartbeat$,^dag_processor_heartbeat$,^dag_processing\\.file_path_queue_size$,^dagrun\\.(duration\\.(success|failed)|schedule_delay|first_task_(scheduling|start)_delay)$,^task\\.(duration|scheduled_duration|queued_duration)$,^executor\\.(running_tasks|queued_tasks|open_slots)$"
     AIRFLOW__LOGGING__REMOTE_LOGGING: "true"
     AIRFLOW__LOGGING__REMOTE_BASE_LOG_FOLDER: "${AIRFLOW_REMOTE_LOG_URI}"
     AIRFLOW__LOGGING__DELETE_LOCAL_LOGS: "true"
@@ -61,7 +57,7 @@ x-airflow-common: &airflow-common
   networks:
     - metadata
     - runtime
-    - telemetry
+    - observability
   depends_on:
     airflow-init:
       condition: service_completed_successfully
@@ -88,6 +84,7 @@ services:
     user: "${LOCAL_UID}:0"
     environment:
       <<: *airflow-environment
+      AIRFLOW__METRICS__STATSD_ON: "false"
     secrets: *airflow-secrets
     volumes:
       - airflow-auth:/opt/airflow/auth
@@ -168,7 +165,7 @@ networks:
     external: true
     name: lakehouse-metadata
   runtime:
-  telemetry:
+  observability:
     external: true
     name: lakehouse-observability
 

@@ -4,11 +4,14 @@ ARXIV_LENS_COMPOSE := docker compose --project-name arxiv-lens -f arxiv-lens/dep
 LIGHTDASH_COMPOSE := docker compose --project-name lightdash -f analytics/lightdash/deploy/compose.yaml
 CLOUDFLARE_COMPOSE := docker compose --project-name cloudflare -f infra/runtime/cloudflare/compose.yaml
 CLOUDFLARE_CONNECTOR_IMAGE := $(shell sed -n '1p' infra/runtime/cloudflare/image)
+NETDATA_COMPOSE := docker compose --project-name netdata -f sysops/netdata/compose.yaml
+NETDATA_IMAGE := $(shell sed -n '1p' sysops/netdata/image)
 
 METADATA_POSTGRES_COMPOSE_CONFIG := METADATA_POSTGRES_PASSWORD=unused $(METADATA_POSTGRES_COMPOSE)
 AIRFLOW_COMPOSE_CONFIG := AIRFLOW_DATABASE_PASSWORD=unused AIRFLOW_FERNET_KEY=unused AIRFLOW_JWT_SECRET=unused AIRFLOW_ADMIN_PASSWORDS='{"admin":"unused"}' AIRFLOW_REMOTE_LOG_URI=s3://validation/airflow $(AIRFLOW_COMPOSE)
 LIGHTDASH_COMPOSE_CONFIG := AWS_REGION=ap-southeast-1 LIGHTDASH_DATABASE_PASSWORD=unused LIGHTDASH_IMAGE=lightdash:local LIGHTDASH_S3_BUCKET=validation LIGHTDASH_SECRET=unused-unused-unused-unused-unused-unused LIGHTDASH_SITE_URL=https://analytics.tgblab.io.vn $(LIGHTDASH_COMPOSE)
 CLOUDFLARE_COMPOSE_CONFIG := CLOUDFLARE_IMAGE=$(CLOUDFLARE_CONNECTOR_IMAGE) CLOUDFLARE_TUNNEL_TOKEN_FILE=/dev/null LOCAL_GID=0 $(CLOUDFLARE_COMPOSE)
+NETDATA_COMPOSE_CONFIG := NETDATA_CONFIG_SHA256=validation NETDATA_HOSTNAME=validation-host NETDATA_IMAGE=$(NETDATA_IMAGE) NETDATA_POSTGRES_PGPASS='*:*:*:lakehouse_monitor:validation' $(NETDATA_COMPOSE)
 
 .PHONY: metadata-postgres-secrets-init metadata-postgres-up metadata-postgres-down metadata-postgres-logs \
 	metadata-postgres-backup metadata-postgres-restore \

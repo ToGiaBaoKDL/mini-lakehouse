@@ -1,11 +1,19 @@
-name: Deploy Cloudflare connector
+name: Deploy Netdata
 
 on:
   push:
     branches: [main]
     paths:
-      - .github/workflows/deploy-cloudflare.yml
-      - infra/runtime/cloudflare/**
+      - .github/actions/deploy-component/action.yml
+      - .github/actions/reconcile-services-host/action.yml
+      - .github/workflows/deploy-netdata.yml
+      - infra/runtime/delivery/deploy-component
+      - infra/runtime/host/netdata-statsd-firewall
+      - infra/runtime/host/reconcile-docker-networks
+      - infra/runtime/host/reconcile-netdata-statsd
+      - infra/runtime/host/systemd/lakehouse-netdata-statsd.service
+      - infra/runtime/postgres/bootstrap/pg_monitor.sql
+      - sysops/netdata/**
   workflow_dispatch:
 
 jobs:
@@ -15,7 +23,7 @@ jobs:
     timeout-minutes: 20
     environment: dev
     concurrency:
-      group: dev-cloudflare
+      group: dev-netdata
       cancel-in-progress: false
     permissions:
       contents: read
@@ -28,16 +36,22 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Validate Netdata runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          make netdata-validate
+
       - name: Resolve reviewed upstream image
         id: release
         shell: bash
         run: |
           set -euo pipefail
-          image=$(<infra/runtime/cloudflare/image)
-          [[ "$image" =~ ^cloudflare/cloudflared:[0-9]{4}\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]
+          image=$(<sysops/netdata/image)
+          [[ "$image" =~ ^netdata/netdata:v[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$ ]]
           echo "image=$image" >> "$GITHUB_OUTPUT"
 
       - uses: ./.github/actions/deploy-component
         with:
-          component: cloudflare
+          component: netdata
           image: ${{ steps.release.outputs.image }}

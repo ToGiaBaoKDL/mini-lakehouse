@@ -1,0 +1,55 @@
+services:
+  netdata:
+    image: "${NETDATA_IMAGE:?NETDATA_IMAGE is required}"
+    hostname: "${NETDATA_HOSTNAME:?NETDATA_HOSTNAME is required}"
+    pid: host
+    network_mode: host
+    environment:
+      DISABLE_TELEMETRY: "1"
+      NETDATA_HEALTHCHECK_TARGET: http://127.0.0.1:19999/api/v1/info
+    labels:
+      lakehouse.config.sha256: "${NETDATA_CONFIG_SHA256:?NETDATA_CONFIG_SHA256 is required}"
+    secrets:
+      - source: postgres_pgpass
+        target: postgres_pgpass
+        uid: "0"
+        gid: "0"
+        mode: 0400
+    volumes:
+      - ./config/netdata.conf:/etc/netdata/netdata.conf:ro
+      - ./config/go.d.conf:/etc/netdata/go.d.conf:ro
+      - ./config/go.d:/etc/netdata/go.d:ro
+      - ./config/statsd.d:/etc/netdata/statsd.d:ro
+      - ./config/health_alarm_notify.conf:/etc/netdata/health_alarm_notify.conf:ro
+      - netdata-lib:/var/lib/netdata
+      - netdata-cache:/var/cache/netdata
+      - /:/host/root:ro,rslave
+      - /etc/passwd:/host/etc/passwd:ro
+      - /etc/group:/host/etc/group:ro
+      - /etc/localtime:/etc/localtime:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /etc/os-release:/host/etc/os-release:ro
+      - /var/log:/host/var/log:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /run/dbus:/run/dbus:ro
+    cap_add:
+      - SYS_ADMIN
+      - SYS_PTRACE
+    security_opt:
+      - apparmor:unconfined
+    restart: unless-stopped
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+volumes:
+  netdata-lib:
+  netdata-cache:
+
+secrets:
+  postgres_pgpass:
+    environment: NETDATA_POSTGRES_PGPASS

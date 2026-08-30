@@ -1,0 +1,13 @@
+[Unit]
+Description=Reconcile the private Netdata StatsD firewall rule
+Requires=docker.service
+After=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/lakehouse-netdata-statsd-firewall
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target docker.service

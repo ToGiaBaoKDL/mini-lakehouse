@@ -19,7 +19,7 @@ COPY --from=uv /uv /usr/local/bin/uv
 COPY --from=requirements /build/requirements.txt /tmp/orchestration-requirements.txt
 RUN uv pip sync --python /home/airflow/.local/bin/python --no-cache \
         /tmp/orchestration-requirements.txt \
-    && /home/airflow/.local/bin/python -c "import asyncpg, psycopg; from airflow.providers.amazon.aws.operators.emr import EmrServerlessStartJobOperator; from airflow.providers.docker.operators.docker import DockerOperator; from airflow.providers.git.bundles.git import GitDagBundle; from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter" \
+    && /home/airflow/.local/bin/python -c "import asyncpg, psycopg; from airflow.providers.amazon.aws.operators.emr import EmrServerlessStartJobOperator; from airflow.providers.docker.operators.docker import DockerOperator; from airflow.providers.git.bundles.git import GitDagBundle; from statsd import StatsClient" \
     && /tmp/install-aws-signing-helper "$TARGETARCH" \
     && install -d -o airflow -g 0 -m 0770 /opt/airflow/auth \
     && rm /tmp/install-aws-signing-helper /tmp/orchestration-requirements.txt /usr/local/bin/uv

@@ -32,6 +32,18 @@ runs:
         tar -cf - infra/runtime/host/reconcile-docker-networks \
           | tailscale ssh ubuntu@tgbao-dev-services "$remote_command"
 
+    - name: Reconcile Netdata StatsD firewall
+      shell: bash
+      run: |
+        set -euo pipefail
+        remote_dir="/tmp/lakehouse-host-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+        remote_command="set -eu; work_dir='$remote_dir'; trap 'rm -rf \"\$work_dir\"' EXIT; install -d -m 0700 \"\$work_dir\"; tar -C \"\$work_dir\" -xf -; sudo \"\$work_dir/infra/runtime/host/reconcile-netdata-statsd\""
+        tar -cf - \
+          infra/runtime/host/netdata-statsd-firewall \
+          infra/runtime/host/reconcile-netdata-statsd \
+          infra/runtime/host/systemd/lakehouse-netdata-statsd.service \
+          | tailscale ssh ubuntu@tgbao-dev-services "$remote_command"
+
     - name: Reconcile metadata backup scheduling
       shell: bash
       run: |

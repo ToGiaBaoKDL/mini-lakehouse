@@ -25,7 +25,7 @@ include make/services.mk
 include make/data.mk
 include make/docs.mk
 
-.PHONY: help preflight lakehouse-validate lightdash-validate lint test compose-validate check
+.PHONY: help preflight lakehouse-validate lightdash-validate netdata-validate lint test compose-validate check
 
 help: ## Show available commands.
 	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-28s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -47,12 +47,22 @@ lightdash-validate: ## Validate managed Lightdash content with the pinned CLI.
 		lightdash lint --path "$$content"; \
 	done
 
+netdata-validate: ## Validate the Netdata runtime without contacting the services host.
+	sh -n infra/runtime/host/netdata-statsd-firewall \
+		infra/runtime/host/reconcile-docker-networks \
+		infra/runtime/host/reconcile-netdata-statsd \
+		sysops/netdata/deploy
+	$(NETDATA_COMPOSE_CONFIG) config --quiet
+
 lint: ## Run formatting, linting, and static type checks.
 	bash -n lakehouse/emr/release/publish
 	sh -n infra/runtime/host/install-aws-cli \
 		infra/runtime/host/install-tailscale \
 		infra/runtime/host/reconcile-docker-logging \
+		infra/runtime/host/netdata-statsd-firewall \
+		infra/runtime/host/reconcile-docker-networks \
 		infra/runtime/host/reconcile-metadata-backup \
+		infra/runtime/host/reconcile-netdata-statsd \
 		infra/runtime/identity/install-aws-signing-helper \
 		infra/runtime/identity/workload-identities \
 		infra/runtime/delivery/deploy-component \
@@ -66,6 +76,7 @@ lint: ## Run formatting, linting, and static type checks.
 		infra/runtime/postgres/restore \
 		sysops/signoz/deploy/deploy \
 		sysops/signoz/collector/deploy \
+		sysops/netdata/deploy \
 		lakehouse/emr/release/package \
 		automation/airflow/deploy/deploy \
 		automation/airflow/deploy/initialize-secrets \
@@ -97,6 +108,7 @@ compose-validate: ## Validate self-hosted service Compose files.
 	$(ARXIV_LENS_COMPOSE) config --quiet
 	$(LIGHTDASH_COMPOSE_CONFIG) config --quiet
 	$(CLOUDFLARE_COMPOSE_CONFIG) config --quiet
+	$(NETDATA_COMPOSE_CONFIG) config --quiet
 	COLLECTOR_IMAGE=validation:local COLLECTOR_CONFIG_SHA256=validation \
 		COLLECTOR_HOSTNAME=validation-host PG_MONITOR_PASSWORD=validation docker compose \
 		--project-name signoz-collection-agent \

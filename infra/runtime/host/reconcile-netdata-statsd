@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+
+test "$(id -u)" -eq 0 || {
+    printf '%s\n' "reconcile-netdata-statsd must run as root." >&2
+    exit 1
+}
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+unit=lakehouse-netdata-statsd.service
+
+install -m 0755 \
+    "$script_dir/netdata-statsd-firewall" \
+    /usr/local/sbin/lakehouse-netdata-statsd-firewall
+install -m 0644 \
+    "$script_dir/systemd/$unit" \
+    "/etc/systemd/system/$unit"
+systemctl daemon-reload
+systemctl enable "$unit" >/dev/null
+systemctl restart "$unit"
+systemctl is-active --quiet "$unit"
+
+printf '%s\n' "Netdata StatsD firewall reconciliation is active."
