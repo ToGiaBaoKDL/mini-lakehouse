@@ -215,6 +215,22 @@ def test_airflow_runtime_components_have_role_appropriate_healthchecks() -> None
     )
     assert 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp"' in lightdash_bootstrap
 
+    postgres_command = postgres["metadata-postgres"]["command"]
+    assert "shared_preload_libraries=pg_stat_statements" in postgres_command
+    assert "pg_stat_statements.max=1000" in postgres_command
+    assert "pg_stat_statements.track=top" in postgres_command
+    assert "pg_stat_statements.track_utility=off" in postgres_command
+
+    t0_bootstrap = Path("infra/runtime/postgres/bootstrap/t0_trading.sql").read_text(
+        encoding="utf-8"
+    )
+    backup = Path("infra/runtime/postgres/backup").read_text(encoding="utf-8")
+    restore = Path("infra/runtime/postgres/restore").read_text(encoding="utf-8")
+    assert "CREATE DATABASE t0_trading OWNER t0_trading" in t0_bootstrap
+    assert "GRANT CONNECT ON DATABASE t0_trading TO lakehouse_monitor" in t0_bootstrap
+    assert 'databases="airflow lightdash t0_trading"' in backup
+    assert "airflow | lightdash | t0_trading" in backup + restore
+
 
 def test_compose_uses_aws_credential_chain_without_static_keys() -> None:
     rendered = "\n".join(
