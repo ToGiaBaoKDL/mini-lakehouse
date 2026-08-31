@@ -16,8 +16,19 @@ command -v iptables >/dev/null 2>&1
 exec 9>/run/lock/lakehouse-netdata-statsd.lock
 flock 9
 
-actual_ipam=$(docker network inspect -f '{{json .IPAM.Config}}' "$network")
-test "$actual_ipam" = "[{\"Subnet\":\"$subnet\",\"Gateway\":\"$gateway\"}]" || {
+docker network inspect "$network" >/dev/null 2>&1 || {
+    printf '%s\n' "$network is unavailable." >&2
+    exit 1
+}
+ipam_count=$(docker network inspect -f '{{len .IPAM.Config}}' "$network")
+test "$ipam_count" = 1 || {
+    printf '%s\n' "$network does not have exactly one IPAM entry." >&2
+    exit 1
+}
+actual_subnet=$(docker network inspect -f '{{(index .IPAM.Config 0).Subnet}}' "$network")
+actual_gateway=$(docker network inspect -f '{{(index .IPAM.Config 0).Gateway}}' "$network")
+test "$actual_subnet" = "$subnet" \
+    && test "$actual_gateway" = "$gateway" || {
     printf '%s\n' "$network does not have the reviewed StatsD IPAM." >&2
     exit 1
 }

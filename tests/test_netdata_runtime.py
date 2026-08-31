@@ -355,7 +355,11 @@ def test_netdata_statsd_network_and_firewall_are_exact_and_persistent() -> None:
     for source in (network, firewall):
         assert "172.24.0.0/16" in source
         assert "172.24.0.1" in source
-        assert "{{json .IPAM.Config}}" in source
+        assert "{{len .IPAM.Config}}" in source
+        assert "{{(index .IPAM.Config 0).Subnet}}" in source
+        assert "{{(index .IPAM.Config 0).Gateway}}" in source
+        assert "{{json .IPAM.Config}}" not in source
+        assert ".IPRange" not in source
     assert '--subnet "$subnet"' in network
     assert '--gateway "$gateway"' in network
     assert "unexpected IPAM" in network
