@@ -1,4 +1,5 @@
 name: Release T0 trading
+# Manual redeploy marker: 2026-08-31.
 
 on:
   push:

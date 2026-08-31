@@ -1,4 +1,5 @@
 name: Deploy Mini Lakehouse docs
+# Manual redeploy marker: 2026-08-31.
 
 on:
   push:

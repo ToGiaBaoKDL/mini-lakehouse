@@ -1,4 +1,5 @@
 name: Deploy Netdata
+# Manual redeploy marker: 2026-08-31.
 
 on:
   push:

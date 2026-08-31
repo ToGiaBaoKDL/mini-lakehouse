@@ -1,4 +1,5 @@
 name: Deploy SigNoz stack
+# Manual redeploy marker: 2026-08-31.
 
 on:
   pull_request:

@@ -1,4 +1,5 @@
 name: Release Lightdash
+# Manual redeploy marker: 2026-08-31.
 
 on:
   push:

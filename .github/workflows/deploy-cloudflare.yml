@@ -1,4 +1,5 @@
 name: Deploy Cloudflare connector
+# Manual redeploy marker: 2026-08-31.
 
 on:
   push:

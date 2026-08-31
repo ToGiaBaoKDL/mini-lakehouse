@@ -1,4 +1,5 @@
 name: Release dbt
+# Manual redeploy marker: 2026-08-31.
 
 on:
   push:
