@@ -22,7 +22,6 @@ administration. Keep provider credentials in their standard process-level chains
     make workload-pki-init
     make aws-plan
     make aws-apply
-    make workload-identities-render
     ```
 
   </Step>
@@ -39,7 +38,8 @@ administration. Keep provider credentials in their standard process-level chains
 
   </Step>
   <Step>
-    Apply GitHub and OCI, then install workload identities.
+    Apply GitHub and OCI, then reconcile workload identities. The install target renders every
+    identity from the applied AWS outputs before atomically synchronizing the services host.
 
     ```bash
     make github-plan
@@ -63,6 +63,8 @@ administration. Keep provider credentials in their standard process-level chains
 
 Review every plan. An interrupted apply is normally resumable; never delete state or disable locking
 as a first response.
+
+Run `make workload-identities-install` again whenever the applied AWS workload-role outputs change.
 
 ## Runtime secrets
 

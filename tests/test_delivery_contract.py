@@ -326,6 +326,7 @@ def test_workload_identity_install_reconciles_the_host_desired_state() -> None:
     renderer = Path("infra/runtime/identity/workload-identities").read_text(encoding="utf-8")
     target = makefile[makefile.index("workload-identities-install:") :]
 
+    assert "workload-identities-install: workload-identities-render" in makefile
     assert 'desired_workloads="$(printf' in renderer
     assert "Refusing to remove unmanaged identity directory: $bundle" in renderer
     assert 'rm -rf "$bundle"' in renderer

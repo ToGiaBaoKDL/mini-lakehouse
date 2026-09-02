@@ -168,7 +168,7 @@ workload-identities-render: aws-init ## Issue certificates and render configs fr
 	TF_DATA_DIR="$(AWS_TERRAFORM_DATA_DIR)" \
 		infra/runtime/identity/workload-identities render "$(AWS_IDENTITY_DIR)" "$(AWS_TERRAFORM_DIR)"
 
-workload-identities-install: aws-init ## Install leaf workload identities on the private services host.
+workload-identities-install: workload-identities-render ## Render and install workload identities on the private services host.
 	@command -v tailscale >/dev/null
 	@set -eu; \
 		WORKLOADS="$$(TF_DATA_DIR="$(AWS_TERRAFORM_DATA_DIR)" \
