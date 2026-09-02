@@ -86,7 +86,7 @@ resource "signoz_dashboard" "containers_overview" {
         spec = {
           display = {
             name        = "CPU cores by compose service"
-            description = "CPU cores used across containers in each Compose service; Docker CPU percentage is normalized so 1 means one logical core."
+            description = "CPU cores used across containers in each Compose service, derived from cumulative CPU time; 1 means one logical core."
           }
           links = []
           plugin = {
@@ -142,8 +142,8 @@ resource "signoz_dashboard" "containers_overview" {
                                 disabled = true
                                 aggregations = [
                                   {
-                                    metric_name       = "container.cpu.utilization"
-                                    time_aggregation  = "avg"
+                                    metric_name       = "container.cpu.usage.total"
+                                    time_aggregation  = "rate"
                                     space_aggregation = "sum"
                                   },
                                 ]
@@ -165,7 +165,7 @@ resource "signoz_dashboard" "containers_overview" {
                                 order = [
                                   {
                                     key = {
-                                      name = "sum(avg(container.cpu.utilization))"
+                                      name = "sum(rate(container.cpu.usage.total))"
                                     }
                                     direction = "desc"
                                   },
@@ -179,7 +179,7 @@ resource "signoz_dashboard" "containers_overview" {
                             type = "builder_formula"
                             spec = {
                               name       = "F1"
-                              expression = "A / 100"
+                              expression = "A / 1000000000"
                               disabled   = false
                               having = {
                                 expression = ""
@@ -303,7 +303,7 @@ resource "signoz_dashboard" "containers_overview" {
         spec = {
           display = {
             name        = "CPU cores by container"
-            description = "CPU cores used by each container; Docker CPU percentage is normalized so 1 means one logical core."
+            description = "CPU cores used by each container, derived from cumulative CPU time; 1 means one logical core."
           }
           links = []
           plugin = {
@@ -359,9 +359,9 @@ resource "signoz_dashboard" "containers_overview" {
                                 disabled = true
                                 aggregations = [
                                   {
-                                    metric_name       = "container.cpu.utilization"
-                                    time_aggregation  = "avg"
-                                    space_aggregation = "avg"
+                                    metric_name       = "container.cpu.usage.total"
+                                    time_aggregation  = "rate"
+                                    space_aggregation = "sum"
                                   },
                                 ]
                                 filter = {
@@ -382,7 +382,7 @@ resource "signoz_dashboard" "containers_overview" {
                                 order = [
                                   {
                                     key = {
-                                      name = "avg(avg(container.cpu.utilization))"
+                                      name = "sum(rate(container.cpu.usage.total))"
                                     }
                                     direction = "desc"
                                   },
@@ -396,7 +396,7 @@ resource "signoz_dashboard" "containers_overview" {
                             type = "builder_formula"
                             spec = {
                               name       = "F1"
-                              expression = "A / 100"
+                              expression = "A / 1000000000"
                               disabled   = false
                               having = {
                                 expression = ""

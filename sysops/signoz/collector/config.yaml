@@ -78,7 +78,6 @@ receivers:
         metrics:
           system.memory.utilization:
             enabled: true
-      network: {}
       paging: {}
       processes: {}
 

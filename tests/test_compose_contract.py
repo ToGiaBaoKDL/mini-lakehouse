@@ -403,14 +403,26 @@ def test_airflow_uses_bounded_native_statsd_metrics() -> None:
     )
 
 
-def test_container_cpu_panels_normalize_docker_percent_to_logical_cores() -> None:
+def test_container_cpu_panels_derive_logical_cores_from_cumulative_cpu_time() -> None:
     components = Path("sysops/signoz/terraform/dashboard_components.tf").read_text(encoding="utf-8")
     dashboard = Path("sysops/signoz/terraform/dashboards_containers.tf").read_text(encoding="utf-8")
 
-    assert components.count('formula           = "A / 100"') == 1
-    assert dashboard.count('expression = "A / 100"') == 2
-    assert dashboard.count('metric_name       = "container.cpu.utilization"') == 2
+    assert components.count('formula           = "A / 1000000000"') == 1
+    assert dashboard.count('expression = "A / 1000000000"') == 2
+    assert dashboard.count('metric_name       = "container.cpu.usage.total"') == 2
+    assert dashboard.count('time_aggregation  = "rate"') >= 2
     assert dashboard.count("limit = 10000") >= 2
+
+
+def test_signoz_host_dashboard_does_not_present_collector_network_as_host_network() -> None:
+    collector = Path("sysops/signoz/collector/config.yaml").read_text(encoding="utf-8")
+    dashboard = Path("sysops/signoz/terraform/dashboards_host.tf").read_text(encoding="utf-8")
+    components = Path("sysops/signoz/terraform/dashboard_components.tf").read_text(encoding="utf-8")
+
+    assert "      network: {}" not in collector
+    assert "system.network.io" not in dashboard
+    assert 'name              = "Host CPU utilization"' in components
+    assert 'unit              = "percentunit"' in components
 
 
 def test_airflow_remote_logging_uses_workload_identity_without_secret_lookup() -> None:

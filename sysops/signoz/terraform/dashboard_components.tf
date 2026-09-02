@@ -5,10 +5,10 @@ locals {
   dashboard_metric_kpis = {
     "c0ac575a-c5be-4392-9d53-2c78f7315159" = {
       dashboard         = "host"
-      name              = "Active CPU cores"
-      description       = "Logical CPU cores currently used across selected hosts."
-      unit              = "short"
-      decimal_precision = "2"
+      name              = "Host CPU utilization"
+      description       = "Current non-idle CPU as a percentage of the selected host's total capacity."
+      unit              = "percentunit"
+      decimal_precision = "1"
       metric_name       = "system.cpu.utilization"
       time_aggregation  = "avg"
       space_aggregation = "sum"
@@ -58,12 +58,12 @@ locals {
       description       = "Logical CPU cores used by selected Compose services, averaged over the latest interval."
       unit              = "short"
       decimal_precision = "2"
-      metric_name       = "container.cpu.utilization"
-      time_aggregation  = "avg"
+      metric_name       = "container.cpu.usage.total"
+      time_aggregation  = "rate"
       space_aggregation = "sum"
       reduce_to         = "last"
       filter            = "lakehouse.compose.service IN $compose_service"
-      formula           = "A / 100"
+      formula           = "A / 1000000000"
     }
     "2940fec6-f705-41d4-b65b-9631144f6f26" = {
       dashboard         = "containers"

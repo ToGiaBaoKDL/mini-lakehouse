@@ -23,7 +23,7 @@ resource "signoz_dashboard" "host_overview" {
   spec = {
     display = {
       name        = "Infrastructure / Host"
-      description = "Host CPU, memory, load, filesystem, disk and network from the hostmetrics receiver."
+      description = "Host CPU, memory, load, filesystem and disk from the hostmetrics receiver."
     }
     links = []
     variables = [
@@ -35,8 +35,8 @@ resource "signoz_dashboard" "host_overview" {
               name        = "host_name"
               description = "Host reporting hostmetrics"
             }
-            allow_all_value = true
-            allow_multiple  = true
+            allow_all_value = false
+            allow_multiple  = false
             sort            = "alphabetical-asc"
             name            = "host_name"
             plugin = {
@@ -632,108 +632,6 @@ resource "signoz_dashboard" "host_overview" {
           ]
         }
       }
-      "34878f77-4459-5302-b39d-7a2586df87d9" = {
-        kind = "Panel"
-        spec = {
-          display = {
-            name        = "Network I/O"
-            description = "Network receive/transmit rate (bytes/s) by device."
-          }
-          links = []
-          plugin = {
-            time_series_panel = {
-              kind = "signoz/TimeSeriesPanel"
-              spec = {
-                visualization = {
-                  time_preference = "global_time"
-                  fill_spans      = false
-                }
-                formatting = {
-                  unit              = "Bps"
-                  decimal_precision = "2"
-                }
-                chart_appearance = {
-                  line_interpolation = "spline"
-                  show_points        = false
-                  line_style         = "solid"
-                  fill_mode          = "none"
-                  span_gaps = {
-                    fill_only_below = false
-                    fill_less_than  = "0s"
-                  }
-                }
-                axes = {
-                  soft_min     = 0
-                  is_log_scale = false
-                }
-                legend = {
-                  position = "bottom"
-                  mode     = "list"
-                }
-              }
-            }
-          }
-          queries = [
-            {
-              kind = "time_series"
-              spec = {
-                name = "A"
-                plugin = {
-                  builder_query = {
-                    kind = "signoz/BuilderQuery"
-                    spec = {
-                      metrics = {
-                        name   = "A"
-                        signal = "metrics"
-                        aggregations = [
-                          {
-                            metric_name       = "system.network.io"
-                            time_aggregation  = "rate"
-                            space_aggregation = "sum"
-                          },
-                        ]
-                        filter = {
-                          expression = "host.name IN $host_name"
-                        }
-                        group_by = [
-                          {
-                            name            = "host.name"
-                            field_context   = "resource"
-                            field_data_type = "string"
-                          },
-                          {
-                            name            = "device"
-                            field_context   = "attribute"
-                            field_data_type = "string"
-                          },
-                          {
-                            name            = "direction"
-                            field_context   = "attribute"
-                            field_data_type = "string"
-                          },
-                        ]
-                        having = {
-                          expression = ""
-                        }
-                        legend = "{{host.name}} / {{device}} {{direction}}"
-                        limit  = 100
-                        order = [
-                          {
-                            key = {
-                              name = "sum(rate(system.network.io))"
-                            }
-                            direction = "desc"
-                          },
-                        ]
-                      }
-                    }
-                  }
-                }
-              }
-            },
-          ]
-        }
-      }
     })
     layouts = [
       {
@@ -852,19 +750,10 @@ resource "signoz_dashboard" "host_overview" {
               {
                 x      = 0
                 y      = 0
-                width  = 6
+                width  = 12
                 height = 6
                 content = {
                   ref = "#/spec/panels/ae42dd7f-d9d0-5b9f-afc0-889b5e48a9b0"
-                }
-              },
-              {
-                x      = 6
-                y      = 0
-                width  = 6
-                height = 6
-                content = {
-                  ref = "#/spec/panels/34878f77-4459-5302-b39d-7a2586df87d9"
                 }
               },
             ]
