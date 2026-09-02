@@ -6,7 +6,6 @@ services:
     network_mode: host
     environment:
       DISABLE_TELEMETRY: "1"
-      NETDATA_DISABLE_CLOUD: "1"
       NETDATA_HEALTHCHECK_TARGET: http://127.0.0.1:19999/api/v1/info
     labels:
       lakehouse.config.sha256: "${NETDATA_CONFIG_SHA256:?NETDATA_CONFIG_SHA256 is required}"

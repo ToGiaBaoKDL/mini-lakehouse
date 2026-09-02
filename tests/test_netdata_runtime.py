@@ -30,7 +30,6 @@ def test_netdata_runtime_is_pinned_private_and_bounded() -> None:
     }
     assert service["environment"] == {
         "DISABLE_TELEMETRY": "1",
-        "NETDATA_DISABLE_CLOUD": "1",
         "NETDATA_HEALTHCHECK_TARGET": "http://127.0.0.1:19999/api/v1/info",
     }
     assert "ports" not in service
@@ -281,8 +280,9 @@ def test_netdata_postgres_discovery_is_exact_and_uses_a_secret_file() -> None:
     assert 'infra/runtime/postgres/deploy" pg_monitor' in deploy
     assert 'select(.plugin == "go.d" and .module == "postgres")' in deploy
     assert 'select(.plugin == "go.d" and .module == "docker")' in deploy
-    assert '.functions["postgres:top-queries"].access' in deploy
-    assert '.functions["postgres:running-queries"].access' in deploy
+    assert "http://127.0.0.1:19999/api/v3/functions" in deploy
+    assert '.name == "postgres:top-queries"' in deploy
+    assert '.name == "postgres:running-queries"' in deploy
     assert '["signed-in", "same-space", "sensitive-data"]' in deploy
 
 
@@ -458,11 +458,16 @@ def test_netdata_release_and_deploy_are_immutable_and_secret_safe() -> None:
     assert "http://127.0.0.1:19999/api/v1/info" in deploy
     assert ".mirrored_hosts | index($hostname)" in deploy
     assert "mcp_dev_preview_api_key" in deploy
+    assert "http://127.0.0.1:19999/mcp" in deploy
+    assert '"protocolVersion":"2025-03-26"' in deploy
+    assert "Accept: application/json, text/event-stream" in deploy
+    assert "unset mcp_token" in deploy
     assert 'management_token=$(docker exec "$container_id" cat' in deploy
     assert "health_api RESET" in deploy
     assert 'health_state=$(health_api "LIST")' in deploy
     assert '.type == "None"' in deploy
     assert "curl --config -" in deploy
+    assert "printf '%s' \"$mcp_token\"" not in deploy
     assert "printf '%s' \"$management_token\"" not in deploy
     assert "AWS_ACCESS_KEY_ID=" not in deploy
     assert "AWS_SECRET_ACCESS_KEY=" not in deploy

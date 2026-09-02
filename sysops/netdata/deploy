@@ -209,17 +209,17 @@ printf '%s' "$alarms" | jq -e '
 }
 
 functions=$(curl -fsS --connect-timeout 2 --max-time 10 \
-    http://127.0.0.1:19999/api/v1/functions) || {
+    http://127.0.0.1:19999/api/v3/functions) || {
     show_logs
-    printf '%s\n' "Netdata Functions API is unavailable." >&2
+    printf '%s\n' "Netdata Functions v3 metadata API is unavailable." >&2
     exit 1
 }
 printf '%s' "$functions" | jq -e '
-    [
-      .functions["postgres:top-queries"].access,
-      .functions["postgres:running-queries"].access
-    ]
-    | all(. == ["signed-in", "same-space", "sensitive-data"])' >/dev/null || {
+    [.functions[]
+      | select(.name == "postgres:top-queries" or .name == "postgres:running-queries")
+      | select(.access == ["signed-in", "same-space", "sensitive-data"])
+      | .name]
+    | sort == ["postgres:running-queries", "postgres:top-queries"]' >/dev/null || {
     show_logs
     printf '%s\n' "Sensitive PostgreSQL query Functions are unavailable or insufficiently protected." >&2
     exit 1
@@ -275,6 +275,34 @@ docker exec "$container_id" test -s /var/lib/netdata/mcp_dev_preview_api_key || 
     printf '%s\n' "Netdata did not generate its local MCP API key." >&2
     exit 1
 }
+mcp_token=$(docker exec "$container_id" cat /var/lib/netdata/mcp_dev_preview_api_key)
+mcp_response=$(
+    printf 'header = "Authorization: Bearer %s"\n' "$mcp_token" \
+        | curl --config - --fail --silent --show-error \
+            --connect-timeout 2 --max-time 10 \
+            --header 'Content-Type: application/json' \
+            --header 'Accept: application/json, text/event-stream' \
+            --data-binary '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"lakehouse-smoke","version":"1"}}}' \
+            http://127.0.0.1:19999/mcp
+) || {
+    show_logs
+    printf '%s\n' "Netdata MCP Streamable HTTP endpoint is unavailable." >&2
+    exit 1
+}
+unset mcp_token
+printf '%s' "$mcp_response" \
+    | sed -n 's/^data: //p' \
+    | jq -s -e '
+        [.[]
+          | select(.id == 1)
+          | select(.result.protocolVersion == "2025-03-26")
+          | select(.result.serverInfo.name == "Netdata")]
+        | length == 1' >/dev/null || {
+    show_logs
+    printf '%s\n' "Netdata MCP did not negotiate the reviewed protocol." >&2
+    exit 1
+}
+unset mcp_response
 
 # Exercise one native counter, gauge, and millisecond timer. Airflow supplies
 # the real stream; this bounded probe verifies the receiver and chart profile.
