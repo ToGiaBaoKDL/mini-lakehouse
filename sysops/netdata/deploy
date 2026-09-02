@@ -39,6 +39,44 @@ command -v ss >/dev/null 2>&1 || {
     exit 1
 }
 
+config_sha256=$(
+    cd "$script_dir"
+    find config -type f -print \
+        | LC_ALL=C sort \
+        | xargs sha256sum \
+        | sha256sum \
+        | awk '{print $1}'
+)
+release_sha256=$(
+    cd "$script_dir"
+    {
+        sha256sum deploy
+        sha256sum compose.yaml
+        find config -type f -print \
+            | LC_ALL=C sort \
+            | xargs sha256sum
+    } | sha256sum | awk '{print $1}'
+)
+runtime_root=${NETDATA_RUNTIME_ROOT:-"$HOME/.local/share/lakehouse/netdata"}
+release_dir="$runtime_root/releases/$release_sha256"
+if [ ! -d "$release_dir" ]; then
+    install -d -m 0700 "$runtime_root/releases"
+    staging_dir=$(mktemp -d "$runtime_root/releases/.staging.XXXXXX")
+    cleanup_staging() {
+        rm -rf "$staging_dir"
+    }
+    trap cleanup_staging EXIT
+    trap 'exit 1' HUP INT TERM
+
+    install -m 0644 "$script_dir/compose.yaml" "$staging_dir/compose.yaml"
+    install -d -m 0755 "$staging_dir/config"
+    cp -R "$script_dir/config/." "$staging_dir/config/"
+    find "$staging_dir/config" -type d -exec chmod 0755 {} +
+    find "$staging_dir/config" -type f -exec chmod 0644 {} +
+    mv "$staging_dir" "$release_dir"
+    trap - EXIT HUP INT TERM
+fi
+
 environment=${LAKEHOUSE_ENVIRONMENT:-dev}
 identity_dir=${AWS_IDENTITY_DIR:-"$HOME/.config/lakehouse/$environment/aws"}
 host_config="$identity_dir/metadata-postgres/host-config"
@@ -72,7 +110,7 @@ export NETDATA_POSTGRES_PGPASS
 unset escaped_password monitor_password monitor_secret
 
 compose() {
-    docker compose --project-name netdata -f "$script_dir/compose.yaml" "$@"
+    docker compose --project-name netdata -f "$release_dir/compose.yaml" "$@"
 }
 
 show_logs() {
@@ -81,14 +119,7 @@ show_logs() {
 
 NETDATA_IMAGE=$image
 NETDATA_HOSTNAME=$(hostname)
-NETDATA_CONFIG_SHA256=$(
-    cd "$script_dir"
-    find config -type f -print \
-        | LC_ALL=C sort \
-        | xargs sha256sum \
-        | sha256sum \
-        | awk '{print $1}'
-)
+NETDATA_CONFIG_SHA256=$config_sha256
 export NETDATA_CONFIG_SHA256 NETDATA_HOSTNAME NETDATA_IMAGE
 
 docker pull "$image" >/dev/null
@@ -119,8 +150,12 @@ attempt=0
 while [ "$attempt" -lt 12 ]; do
     charts=$(curl -fsS --connect-timeout 2 --max-time 10 \
         http://127.0.0.1:19999/api/v1/charts) || charts=
-    if printf '%s' "$charts" \
-        | jq -e '[.charts[] | select(.plugin == "go.d" and .module == "postgres")] | length >= 10' \
+    if printf '%s' "$charts" | jq -e '
+        ([.charts[] | select(.plugin == "go.d" and .module == "postgres")] | length >= 10)
+        and ([.charts[] | select(.plugin == "go.d" and .module == "docker")] | length >= 5)
+        and (.charts["httpcheck_airflow_origin.request_status"].units == "boolean")
+        and (.charts["httpcheck_lightdash_origin.request_status"].units == "boolean")
+        and (.charts["httpcheck_arxiv_lens_origin.request_status"].units == "boolean")' \
             >/dev/null 2>&1; then
         break
     fi
@@ -129,7 +164,47 @@ while [ "$attempt" -lt 12 ]; do
 done
 test "$attempt" -lt 12 || {
     show_logs
-    printf '%s\n' "Netdata PostgreSQL collector did not publish its native chart set." >&2
+    printf '%s\n' "Netdata native service collectors did not publish their reviewed chart set." >&2
+    exit 1
+}
+
+# x509check performs a connection check immediately, then publishes its first
+# chart on the configured ten-minute interval. Verify the native startup check
+# instead of delaying every deployment until that first scheduled collection.
+container_id=$(compose ps -q netdata)
+test -n "$container_id" || {
+    show_logs
+    printf '%s\n' "Netdata container is unavailable." >&2
+    exit 1
+}
+x509_logs=$(docker logs "$container_id" 2>&1)
+for job in airflow_edge analytics_edge arxiv_lens_edge netdata_edge; do
+    printf '%s' "$x509_logs" \
+        | grep -F 'msg="check success"' \
+        | grep -F 'collector=x509check' \
+        | grep -F "job=$job " >/dev/null || {
+        show_logs
+        printf '%s\n' "Netdata x509check job $job did not pass its startup check." >&2
+        exit 1
+    }
+done
+unset x509_logs
+
+alarms=$(curl -fsS --connect-timeout 2 --max-time 10 \
+    http://127.0.0.1:19999/api/v1/alarms?all) || {
+    show_logs
+    printf '%s\n' "Netdata Alerts API is unavailable." >&2
+    exit 1
+}
+printf '%s' "$alarms" | jq -e '
+    [.alarms[] | select(.name == "postgres_db_transactions_rollback_ratio")]
+    | length >= 3
+      and all(.[];
+        (.source | contains("/etc/netdata/health.d/postgres.conf"))
+        and (.warn | contains("(1)"))
+        and (.warn | contains("(2)")))' >/dev/null || {
+    show_logs
+    printf '%s\n' "Netdata did not load the reviewed PostgreSQL rollback alert." >&2
     exit 1
 }
 
@@ -169,12 +244,32 @@ sudo -n iptables -w 10 -C INPUT -j LAKEHOUSE-NETDATA >/dev/null 2>&1 || {
     exit 1
 }
 
-container_id=$(compose ps -q netdata)
-test -n "$container_id" || {
+docker inspect "$container_id" \
+    | jq -e --arg release_dir "$release_dir" '
+        .[0].Mounts
+        | [
+            .[]
+            | select(.Type == "bind" and (.Destination | startswith("/etc/netdata/")))
+            | .Source
+          ] as $sources
+        | ($sources | length == 6)
+          and all($sources[]; startswith($release_dir + "/"))' >/dev/null || {
     show_logs
-    printf '%s\n' "Netdata container is unavailable." >&2
+    printf '%s\n' "Netdata configuration is not mounted from its persistent release." >&2
     exit 1
 }
+for config_path in \
+    /etc/netdata/netdata.conf \
+    /etc/netdata/go.d.conf \
+    /etc/netdata/go.d/sd/docker.conf \
+    /etc/netdata/health.d/postgres.conf \
+    /etc/netdata/statsd.d/airflow.conf; do
+    docker exec "$container_id" test -r "$config_path" || {
+        show_logs
+        printf '%s\n' "Netdata cannot read $config_path from its persistent release." >&2
+        exit 1
+    }
+done
 docker exec "$container_id" test -s /var/lib/netdata/mcp_dev_preview_api_key || {
     show_logs
     printf '%s\n' "Netdata did not generate its local MCP API key." >&2
@@ -202,7 +297,7 @@ printf '%s' "$statsd_charts" | jq -e '
     | contains([
         {"context": "airflow.heartbeats", "units": "heartbeats/s"},
         {"context": "airflow.scheduler_tasks", "units": "tasks"},
-        {"context": "airflow.task_duration", "units": "milliseconds"}
+        {"context": "airflow.task_duration", "units": "ms"}
       ])' >/dev/null || {
     show_logs
     printf '%s\n' "Netdata did not render the reviewed Airflow StatsD chart contract." >&2
@@ -223,13 +318,13 @@ health_api() {
             --data-urlencode "cmd=$command" \
             http://127.0.0.1:19999/api/v1/manage/health
 }
-health_api "SILENCE ALL" >/dev/null
+health_api RESET >/dev/null
 health_state=$(health_api "LIST")
 printf '%s' "$health_state" \
-    | jq -e '.all == true and .type == "SILENCE"' >/dev/null || {
+    | jq -e '.all == false and .type == "None" and (.silencers | length == 0)' >/dev/null || {
     show_logs
-    printf '%s\n' "Netdata Health notifications are not silenced for the acceptance soak." >&2
+    printf '%s\n' "Netdata Health is not in its normal operating mode." >&2
     exit 1
 }
 
-printf '%s\n' "Netdata is healthy on 127.0.0.1:19999 with notifications silenced."
+printf '%s\n' "Netdata is healthy on 127.0.0.1:19999."

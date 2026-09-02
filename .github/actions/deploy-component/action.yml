@@ -43,11 +43,11 @@ runs:
           netdata)
             bundle+=(infra/runtime/postgres sysops/netdata)
             ;;
+          t0-trading)
+            bundle+=(infra/runtime/postgres t0-trading/deploy)
+            ;;
           dbt)
             bundle+=(analytics/dbt-project/deploy)
-            ;;
-          t0-trading)
-            bundle+=(t0-trading/deploy)
             ;;
           *) exit 2 ;;
         esac

@@ -67,6 +67,7 @@ def test_component_release_publishes_before_protected_digest_deployment() -> Non
     assert "deployment/release_manifest" not in release + action + script
     assert "latest" not in release + action + script
     assert 'tar -C "$SOURCE_ROOT" -cf -' in action
+    assert "bundle+=(infra/runtime/postgres t0-trading/deploy)" in action
     assert "source_root:" in action
     assert "revision:" not in action
     assert "git init" not in script
@@ -225,6 +226,7 @@ def test_each_component_owns_its_deployment_operation() -> None:
         )
     )
     cloudflare = Path("infra/runtime/cloudflare/deploy").read_text(encoding="utf-8")
+    t0_trading = Path("t0-trading/deploy/deploy").read_text(encoding="utf-8")
 
     assert "docker compose --project-name airflow" in airflow
     assert "--force-recreate" not in airflow
@@ -236,6 +238,7 @@ def test_each_component_owns_its_deployment_operation() -> None:
     assert '"$bundle_root/infra/runtime/postgres/deploy" airflow' in airflow
     assert "docker compose --project-name lightdash" in lightdash
     assert '"$bundle_root/infra/runtime/postgres/deploy" lightdash' in lightdash
+    assert '"$bundle_root/infra/runtime/postgres/deploy" t0_trading' in t0_trading
     assert "--force-recreate" not in lightdash
     assert "docker compose --project-name arxiv-lens" in lens
     assert '"$1" dbt:runtime' in dbt
@@ -244,7 +247,7 @@ def test_each_component_owns_its_deployment_operation() -> None:
     assert "--token-file" in Path("infra/runtime/cloudflare/compose.yaml").read_text(
         encoding="utf-8"
     )
-    assert "git " not in airflow + lens + lightdash + dbt + postgres + cloudflare
+    assert "git " not in airflow + lens + lightdash + dbt + postgres + cloudflare + t0_trading
 
 
 def test_top_level_arxiv_lens_resolves_the_release_bundle_root() -> None:

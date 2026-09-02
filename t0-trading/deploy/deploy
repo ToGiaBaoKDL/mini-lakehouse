@@ -8,5 +8,6 @@ fi
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 bundle_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
+"$bundle_root/infra/runtime/postgres/deploy" t0_trading
 "$bundle_root/infra/runtime/delivery/pull-image" t0-trading "$1"
 docker tag "$1" t0-trading:runtime

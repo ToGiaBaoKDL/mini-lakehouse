@@ -30,6 +30,7 @@ def test_netdata_runtime_is_pinned_private_and_bounded() -> None:
     }
     assert service["environment"] == {
         "DISABLE_TELEMETRY": "1",
+        "NETDATA_DISABLE_CLOUD": "1",
         "NETDATA_HEALTHCHECK_TARGET": "http://127.0.0.1:19999/api/v1/info",
     }
     assert "ports" not in service
@@ -49,6 +50,7 @@ def test_netdata_runtime_is_pinned_private_and_bounded() -> None:
     assert {
         "./config/go.d.conf:/etc/netdata/go.d.conf:ro",
         "./config/go.d:/etc/netdata/go.d:ro",
+        "./config/health.d:/etc/netdata/health.d:ro",
         "./config/statsd.d:/etc/netdata/statsd.d:ro",
         "netdata-lib:/var/lib/netdata",
         "netdata-cache:/var/cache/netdata",
@@ -144,9 +146,9 @@ def test_netdata_container_and_systemd_scope_is_bounded() -> None:
         "jobs": [
             {
                 "name": "local",
-                "update_every": 10,
+                "update_every": 30,
                 "address": "unix:///var/run/docker.sock",
-                "timeout": 2,
+                "timeout": 10,
                 "collect_container_size": False,
             }
         ]
@@ -180,6 +182,7 @@ def test_netdata_container_and_systemd_scope_is_bounded() -> None:
     assert "/system.slice/tailscaled.service" in config
     assert "!netdata-netdata-1 !cloudflare-cloudflare-tunnel-1 *" in config
     for unavailable_context in (
+        "/proc/net/stat/conntrack",
         "/proc/net/sctp/snmp",
         "/proc/net/ip_vs/stats",
         "/proc/net/stat/synproxy",
@@ -189,6 +192,8 @@ def test_netdata_container_and_systemd_scope_is_bounded() -> None:
         "/sys/fs/btrfs",
     ):
         assert f"{unavailable_context} = no" in config
+    assert "[plugin:proc:diskspace]" in config
+    assert "/run/docker/netns/*" in config
 
 
 def test_netdata_separates_origin_health_from_edge_certificates() -> None:
@@ -275,6 +280,7 @@ def test_netdata_postgres_discovery_is_exact_and_uses_a_secret_file() -> None:
     assert "metadata-postgres/pg_monitor" in deploy
     assert 'infra/runtime/postgres/deploy" pg_monitor' in deploy
     assert 'select(.plugin == "go.d" and .module == "postgres")' in deploy
+    assert 'select(.plugin == "go.d" and .module == "docker")' in deploy
     assert '.functions["postgres:top-queries"].access' in deploy
     assert '.functions["postgres:running-queries"].access' in deploy
     assert '["signed-in", "same-space", "sensitive-data"]' in deploy
@@ -300,15 +306,15 @@ def test_netdata_airflow_statsd_is_private_bounded_and_unit_explicit() -> None:
     for context, units in (
         ("airflow.heartbeats", "heartbeats/s"),
         ("airflow.scheduler_tasks", "tasks"),
-        ("airflow.running_dag_runs", "DAG runs"),
+        ("airflow.running_dag_runs", "runs"),
         ("airflow.dag_file_queue", "files"),
         ("airflow.executor_tasks", "tasks"),
         ("airflow.executor_slots", "slots"),
-        ("airflow.task_duration", "milliseconds"),
-        ("airflow.task_queue_duration", "milliseconds"),
-        ("airflow.dag_run_duration", "milliseconds"),
-        ("airflow.dag_run_delay", "milliseconds"),
-        ("airflow.scheduler_duration", "milliseconds"),
+        ("airflow.task_duration", "ms"),
+        ("airflow.task_queue_duration", "ms"),
+        ("airflow.dag_run_duration", "ms"),
+        ("airflow.dag_run_delay", "ms"),
+        ("airflow.scheduler_duration", "ms"),
     ):
         assert f"context = {context}" in profile
         section = profile[profile.index(f"context = {context}") :]
@@ -339,6 +345,30 @@ def test_netdata_airflow_statsd_is_private_bounded_and_unit_explicit() -> None:
     ):
         assert f"airflow.{metric}" in profile
     assert "airflow.pool." not in profile
+
+    for title in (
+        "Active DAG runs",
+        "Queued DAG files",
+        "Open executor slots",
+        "Observed task duration (p95)",
+        "Observed task state duration (p95)",
+        "Observed DAG run duration by outcome (p95)",
+        "Observed DAG run scheduling delay (p95)",
+        "Observed scheduler internal duration (p95)",
+    ):
+        assert f"title = {title}" in profile
+
+
+def test_netdata_overrides_the_sticky_postgres_rollback_alert() -> None:
+    alert = (NETDATA_ROOT / "config/health.d/postgres.conf").read_text(encoding="utf-8")
+    volumes = set(_compose()["services"]["netdata"]["volumes"])
+
+    assert "./config/health.d:/etc/netdata/health.d:ro" in volumes
+    assert "template: postgres_db_transactions_rollback_ratio" in alert
+    assert "on: postgres.db_transactions_ratio" in alert
+    assert "lookup: average -5m unaligned of rollback" in alert
+    assert "warn: $this > (($status >= $WARNING) ? (1) : (2))" in alert
+    assert "delay: down 15m multiplier 1.5 max 1h" in alert
 
 
 def test_netdata_statsd_network_and_firewall_are_exact_and_persistent() -> None:
@@ -399,6 +429,13 @@ def test_netdata_has_one_deploy_only_protected_workflow() -> None:
     assert "airflow.heartbeats" in deploy
     assert "airflow.scheduler_tasks" in deploy
     assert "airflow.task_duration" in deploy
+    assert "NETDATA_RUNTIME_ROOT" in deploy
+    assert 'release_dir="$runtime_root/releases/$release_sha256"' in deploy
+    assert 'startswith($release_dir + "/")' in deploy
+    assert "Netdata configuration is not mounted from its persistent release." in deploy
+    assert "x509check performs a connection check immediately" in deploy
+    assert "for job in airflow_edge analytics_edge arxiv_lens_edge netdata_edge" in deploy
+    assert "collector=x509check" in deploy
     assert "--network lakehouse-observability" in deploy
     assert "--pull never --read-only --cap-drop ALL" in deploy
     assert "docker exec -i" not in deploy
@@ -414,13 +451,17 @@ def test_netdata_release_and_deploy_are_immutable_and_secret_safe() -> None:
     assert 'docker pull "$image"' in deploy
     assert "find config -type f -print" in deploy
     assert "LC_ALL=C sort" in deploy
+    assert "sha256sum deploy" in deploy
+    assert 'find "$staging_dir/config" -type d -exec chmod 0755 {} +' in deploy
+    assert 'find "$staging_dir/config" -type f -exec chmod 0644 {} +' in deploy
     assert "--force-recreate --wait --wait-timeout 120" in deploy
     assert "http://127.0.0.1:19999/api/v1/info" in deploy
     assert ".mirrored_hosts | index($hostname)" in deploy
     assert "mcp_dev_preview_api_key" in deploy
     assert 'management_token=$(docker exec "$container_id" cat' in deploy
-    assert 'health_api "SILENCE ALL"' in deploy
+    assert "health_api RESET" in deploy
     assert 'health_state=$(health_api "LIST")' in deploy
+    assert '.type == "None"' in deploy
     assert "curl --config -" in deploy
     assert "printf '%s' \"$management_token\"" not in deploy
     assert "AWS_ACCESS_KEY_ID=" not in deploy

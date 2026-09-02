@@ -1,9 +1,37 @@
 ---
 title: Observability operations
-description: Deploy, validate, and interpret the SigNoz stack and its collection path.
+description: Operate Netdata for native infrastructure monitoring and retain SigNoz as the optional telemetry stack.
 ---
 
-## Delivery
+## Netdata
+
+Netdata is the primary host, container, PostgreSQL, service-health, certificate, systemd, and
+Airflow StatsD view. Its UI is available at `https://netdata.tgblab.io.vn` through Cloudflare
+Access and at `http://127.0.0.1:19999` on the services host.
+
+`deploy-netdata.yml` deploys a pinned upstream image and an immutable configuration release. The
+runtime validates its persistent mounts, loopback-only UI, bridge-only StatsD listener, native
+collectors, PostgreSQL query-function access, Airflow chart contract, and normal Health mode.
+
+The Agent stores three bounded tiers: seven days at full resolution, 90 days at the first
+aggregation tier, and one year at the second aggregation tier. Size limits cap each tier before
+its time limit.
+
+### Reading native units
+
+- Host CPU is normalized to the whole host and ranges from 0 to 100 percent.
+- Container `cpu` is relative to one logical core and can exceed 100 percent; `cpu_limit` is the
+  normalized quota or host-capacity view.
+- RAM and container memory use MiB; filesystem capacity uses GiB.
+- Disk throughput uses KiB/s and network throughput uses kilobits/s. Negative write or transmit
+  dimensions indicate chart direction, not negative activity.
+- Airflow timers use `ms`. Netdata StatsD emits zero for an idle timer interval, so charts named
+  `Observed ... (p95)` should be interpreted only where duration events are present.
+
+External notification channels remain disabled until an owned receiver is configured. Native
+Health evaluation, history, and dashboard status remain enabled.
+
+## SigNoz
 
 `deploy-signoz.yml` validates the Foundry casting and lock, validates the Collector image and
 configuration, deploys both over Tailscale, then applies dashboards and alerts through Terraform.
