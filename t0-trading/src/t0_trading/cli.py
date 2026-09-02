@@ -10,12 +10,20 @@ from typing import Annotated
 
 import boto3
 import typer
+from botocore.exceptions import ClientError
 from ssi_sdk import Data
 
 from t0_trading.capture import CaptureOptions, S3CaptureStore, capture_rest
 from t0_trading.certification import CertificationOptions, run_certification
 from t0_trading.credentials import CredentialError, load_credentials
 from t0_trading.provider import authenticated
+
+
+def _safe_error(error: Exception) -> str:
+    if isinstance(error, ClientError):
+        code = error.response.get("Error", {}).get("Code", "Unknown")
+        return f"ClientError operation={error.operation_name} code={code}"
+    return type(error).__name__
 
 
 def _values(value: str, label: str) -> tuple[str, ...]:
@@ -61,8 +69,8 @@ def certify(
     except CredentialError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error
-    except Exception as error:  # SDK boundary: print only the type, never provider request state.
-        typer.echo(f"SSI certification failed: {type(error).__name__}", err=True)
+    except Exception as error:  # SDK boundary: never print provider request state.
+        typer.echo(f"SSI certification failed: {_safe_error(error)}", err=True)
         raise typer.Exit(code=1) from None
 
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -130,7 +138,7 @@ def capture_rest_command(
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error
     except Exception as error:  # SDK/AWS boundary: never print provider payload or credentials.
-        typer.echo(f"SSI REST capture failed: {type(error).__name__}", err=True)
+        typer.echo(f"SSI REST capture failed: {_safe_error(error)}", err=True)
         raise typer.Exit(code=1) from None
     typer.echo(manifest_uri)
 

@@ -11,6 +11,19 @@ data "aws_iam_policy_document" "t0_trading" {
     resources = [var.t0_trading_secret_arn]
   }
   statement {
+    sid       = "ListOwnedRestCaptures"
+    actions   = ["s3:ListBucket"]
+    resources = [var.bucket_arns.landing]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values = [
+        "api/ssi_fastconnect_rest/raw",
+        "api/ssi_fastconnect_rest/raw/*",
+      ]
+    }
+  }
+  statement {
     sid = "PublishImmutableRestCaptures"
     actions = [
       "s3:GetObject",

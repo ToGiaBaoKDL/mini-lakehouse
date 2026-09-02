@@ -232,3 +232,34 @@ def test_cli_help_and_trade_date_validation_do_not_initialize_aws() -> None:
     )
     assert invalid.exit_code == 2
     assert "YYYY-MM-DD" in invalid.output
+
+
+def test_capture_cli_reports_safe_aws_failure_details(monkeypatch: Any) -> None:
+    def denied(*_args: object, **_kwargs: object) -> None:
+        raise ClientError(
+            {
+                "Error": {
+                    "Code": "AccessDenied",
+                    "Message": "sensitive provider detail",
+                }
+            },
+            "HeadObject",
+        )
+
+    monkeypatch.setattr("t0_trading.cli.load_credentials", denied)
+    result = CliRunner().invoke(
+        app,
+        [
+            "capture-rest",
+            "--trade-date",
+            "2026-08-26",
+            "--job-token",
+            "test-run",
+            "--landing-uri",
+            "s3://landing",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "ClientError operation=HeadObject code=AccessDenied" in result.output
+    assert "sensitive provider detail" not in result.output

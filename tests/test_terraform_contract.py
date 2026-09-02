@@ -318,7 +318,10 @@ def test_t0_trading_runtime_is_bound_to_owned_raw_prefixes_and_secrets() -> None
     assert '"rdbms/t0_trading/raw"' not in identity
     assert 'actions   = ["secretsmanager:GetSecretValue"]' in identity
     assert '"s3:PutObject"' in identity
-    assert '"s3:ListBucket"' not in identity
+    assert 'sid       = "ListOwnedRestCaptures"' in identity
+    assert 'actions   = ["s3:ListBucket"]' in identity
+    assert 'variable = "s3:prefix"' in identity
+    assert '"api/ssi_fastconnect_rest/raw/*"' in identity
     assert '"s3:AbortMultipartUpload"' not in identity
     assert '"s3:DeleteObject"' not in identity
     assert "glue:" not in identity
