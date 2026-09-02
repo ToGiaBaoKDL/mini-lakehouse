@@ -57,12 +57,13 @@ flowchart TB
 - **Analytics** contains consumer-owned dbt marts for Engineering and Research.
 
 AWS is the durable boundary. OCI services can be rebuilt from Terraform, immutable releases,
-Secrets Manager, Parameter Store, and PostgreSQL backups. SigNoz telemetry is operational evidence,
-not durable business data.
+Secrets Manager, Parameter Store, and PostgreSQL backups. Netdata history and optional SigNoz
+telemetry are operational evidence, not durable business data.
 
 ## Network topology
 
 The OCI host has outbound internet access and no public ingress. Tailscale is the administrative
-path. Cloudflare Tunnel and Access expose Airflow, Lightdash, ArXiv Lens, and SigNoz to approved
-users. The documentation site is different: it is a public static Cloudflare asset deployment and
+path. Cloudflare Tunnel and Access expose Airflow, Lightdash, ArXiv Lens, and Netdata to approved
+users. The dormant SigNoz hostname becomes useful only during an explicitly started diagnostics
+session. The documentation site is different: it is a public static Cloudflare asset deployment and
 does not traverse OCI or the tunnel.

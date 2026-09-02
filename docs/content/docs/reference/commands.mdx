@@ -13,6 +13,7 @@ description: Stable entry points for validation, infrastructure, services, data,
 | `make lint`               | Shell, Python formatting/lint, and type checks              |
 | `make test`               | Unit and Airflow bundle tests                               |
 | `make docs-check`         | Docs formatting, types, links, and static build             |
+| `make netdata-validate`   | Validate Netdata shell and Compose contracts offline        |
 | `make terraform-validate` | Initialize all Terraform roots without backend and validate |
 | `make compose-validate`   | Render every Compose project without starting it            |
 
@@ -45,5 +46,7 @@ make docs-dev
 make docs-build
 ```
 
-Plan/apply pairs exist for AWS, Tailscale, GitHub, OCI, Cloudflare, and SigNoz. Always review the plan
-before its matching apply.
+Plan/apply pairs exist for AWS, Tailscale, GitHub, OCI, Cloudflare, and the dormant SigNoz dashboard
+configuration. Always review the plan before its matching apply. Netdata is delivered by its
+path-scoped workflow; see [Observability](/docs/operations/observability) for verification and
+recovery commands.

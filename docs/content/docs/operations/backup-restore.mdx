@@ -34,14 +34,18 @@ S3 objects and Glue/Iceberg metadata form one logical dataset. A production reco
 restore and validate them together. Restoring only catalog metadata or only object data is not a
 complete Iceberg recovery.
 
-## SigNoz
+## Observability history
 
-Dev telemetry is disposable. Use an OCI boot-volume backup before risky host or SigNoz upgrades if a
-crash-consistent recovery point is required. Never archive a live ClickHouse volume with `tar` and
-call it an application-consistent backup.
+Netdata metrics and dormant SigNoz telemetry are disposable operational evidence. Their volumes are
+not backed up separately and must never become a platform recovery dependency. Git is the source of
+truth for both runtimes' configuration.
+
+Use an OCI boot-volume backup before a risky host or on-demand SigNoz upgrade only when a
+crash-consistent diagnostic snapshot is genuinely valuable. Never archive a live Netdata DBEngine
+or ClickHouse volume with `tar` and call it an application-consistent backup.
 
 ## Recovery evidence
 
 The backup script appends JSON audit records to
-`/var/log/lakehouse/metadata-backup-audit.log`. SigNoz alerts on explicit failure and missing recent
-success; it does not replace the S3 dump and checksum marker.
+`/var/log/lakehouse/metadata-backup-audit.log`. Netdata monitors the systemd backup service and
+timer; the S3 dump and checksum marker remain the durable evidence of a successful backup.

@@ -1,5 +1,6 @@
 name: Deploy SigNoz stack
-# Manual redeploy marker: 2026-08-31.
+# SigNoz is an on-demand diagnostics stack: pull requests validate its code,
+# while only an explicit workflow dispatch may start or update the runtime.
 
 on:
   pull_request:
@@ -75,7 +76,7 @@ jobs:
               --feature-gates=receiver.postgresql.connectionPool
 
   deploy:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     needs: validate
     runs-on: ubuntu-24.04
     timeout-minutes: 40

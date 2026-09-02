@@ -90,6 +90,10 @@ Merges to `main` publish only affected artifacts. On a fresh environment, manual
 missing EMR, Airflow, dbt, Lightdash, and ArXiv Lens workflows. Deploy Modal separately with
 `make ocr-modal-deploy`.
 
+Netdata deploys from its own path-scoped workflow and is the always-on monitoring runtime. SigNoz is
+different: pull requests validate its dormant code, but only a manual `deploy-signoz.yml` dispatch
+starts or updates the optional diagnostics stack.
+
 The documentation workflow runs only for documentation and delivery-file changes. It builds
 `docs/out` and deploys it with Wrangler to `mini-lakehouse-docs.tgblab.io.vn`; no OCI approval,
 image publication, or tunnel reconciliation is involved.

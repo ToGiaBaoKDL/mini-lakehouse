@@ -24,6 +24,16 @@ def test_external_github_actions_are_pinned_by_commit() -> None:
     assert workflows.count("actions/checkout@") == workflows.count("persist-credentials: false")
 
 
+def test_signoz_validates_on_changes_but_deploys_only_on_demand() -> None:
+    source = _workflow("deploy-signoz.yml")
+    triggers = source[source.index("on:\n") : source.index("\njobs:\n")]
+
+    assert "pull_request:" in triggers
+    assert "push:" in triggers
+    assert "workflow_dispatch:" in triggers
+    assert "github.event_name == 'workflow_dispatch'" in source
+
+
 def test_component_release_publishes_before_protected_digest_deployment() -> None:
     release = _workflow("_release-image.yml")
     action = Path(".github/actions/deploy-component/action.yml").read_text(encoding="utf-8")

@@ -16,7 +16,7 @@ const platformPlanes = [
   },
   {
     label: "Service plane",
-    services: "Airflow · Lightdash · SigNoz · ArXiv Lens",
+    services: "Airflow · Lightdash · Netdata · ArXiv Lens",
     target: "OCI",
   },
   {

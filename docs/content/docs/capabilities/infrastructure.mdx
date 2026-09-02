@@ -20,7 +20,8 @@ directories outside the repository under `~/.cache/lakehouse/terraform/`.
 ## Service topology
 
 - AWS: S3, KMS, Glue, Athena, EMR Serverless, IAM, ECR, SSM, and Secrets Manager.
-- OCI: one private ARM host for PostgreSQL, Airflow, Lightdash, ArXiv Lens, SigNoz, and the Collector.
+- OCI: one private ARM host for PostgreSQL, Airflow, Lightdash, ArXiv Lens, and Netdata. Dormant
+  SigNoz volumes and deployable code are retained for on-demand diagnostics.
 - Tailscale: operator SSH and private service access.
 - Cloudflare: Access-protected application ingress; documentation is deployed separately as static
   edge assets.

@@ -1,75 +1,205 @@
 ---
-title: Observability operations
-description: Operate Netdata for native infrastructure monitoring and retain SigNoz as the optional telemetry stack.
+title: Observability
+description: Operate the always-on Netdata Agent and the optional SigNoz diagnostics stack.
 ---
 
-## Netdata
+<Callout type="info" title="Current runtime mode">
+  Netdata is the only always-on observability runtime. SigNoz and its collection
+  agent are stopped; their volumes and reviewed deployment code are retained for
+  an explicit diagnostics session.
+</Callout>
 
-Netdata is the primary host, container, PostgreSQL, service-health, certificate, systemd, and
-Airflow StatsD view. Its UI is available at `https://netdata.tgblab.io.vn` through Cloudflare
-Access and at `http://127.0.0.1:19999` on the services host.
+## Signal ownership
 
-`deploy-netdata.yml` deploys a pinned upstream image and an immutable configuration release. The
-runtime validates its persistent mounts, loopback-only UI, bridge-only StatsD listener, native
-collectors, PostgreSQL query-function access, Airflow chart contract, and normal Health mode.
+| Signal                                                               | Source of truth                      | Retention or fallback                 |
+| -------------------------------------------------------------------- | ------------------------------------ | ------------------------------------- |
+| Host CPU, load, memory, disk, filesystem, network, pressure, and OOM | Netdata native host collectors       | Bounded Netdata DBEngine              |
+| Docker state, health, and container CPU, memory, and I/O             | Netdata Docker and cgroup collectors | Docker CLI for current state          |
+| PostgreSQL health, transactions, locks, WAL, and query activity      | Netdata PostgreSQL collector         | PostgreSQL native views               |
+| Airflow scheduler, executor, DAG-run, and task timers                | Airflow StatsD in Netdata            | Airflow metadata for semantic history |
+| Internal HTTP health and public certificate validity                 | Netdata `httpcheck` and `x509check`  | Direct origin and edge checks         |
+| Airflow task logs                                                    | Airflow UI and S3                    | S3 is durable                         |
+| Service logs                                                         | Docker logs and systemd journal      | No centralized log archive            |
+| Application traces and centralized WARN/ERROR logs                   | On-demand SigNoz only                | Not collected in steady state         |
 
-The Agent stores three bounded tiers: seven days at full resolution, 90 days at the first
-aggregation tier, and one year at the second aggregation tier. Size limits cap each tier before
-its time limit.
+Observability never defines workflow success and must not block Airflow, data processing, analytics,
+OCR, or application serving.
 
-### Reading native units
+## Access and security
 
-- Host CPU is normalized to the whole host and ranges from 0 to 100 percent.
-- Container `cpu` is relative to one logical core and can exceed 100 percent; `cpu_limit` is the
-  normalized quota or host-capacity view.
-- RAM and container memory use MiB; filesystem capacity uses GiB.
-- Disk throughput uses KiB/s and network throughput uses kilobits/s. Negative write or transmit
-  dimensions indicate chart direction, not negative activity.
-- Airflow timers use `ms`. Netdata StatsD emits zero for an idle timer interval, so charts named
-  `Observed ... (p95)` should be interpreted only where duration events are present.
+The dashboard is `https://netdata.tgblab.io.vn`, protected by Cloudflare Access. The Agent binds
+only to `127.0.0.1:19999` on `tgbao-dev-services`; port 19999 is not exposed publicly or through the
+tailnet. StatsD binds only to `172.24.0.1:8125`, and the host firewall accepts UDP only from the
+`lakehouse-observability` bridge.
 
-External notification channels remain disabled until an owned receiver is configured. Native
-Health evaluation, history, and dashboard status remain enabled.
+The Agent is unclaimed and does not use Netdata Cloud. Anonymous telemetry, streaming, exporting,
+and bearer protection for the ordinary dashboard are disabled. Sensitive PostgreSQL Functions and
+the Health Management API use Agent-generated keys stored only in the persistent Netdata volume.
+Never print, copy into Git, or place either key in a URL.
 
-## SigNoz
+## Deploy and verify
 
-`deploy-signoz.yml` validates the Foundry casting and lock, validates the Collector image and
-configuration, deploys both over Tailscale, then applies dashboards and alerts through Terraform.
+Changes under `sysops/netdata/` run the path-scoped `deploy-netdata.yml` workflow after they reach
+`main`. The workflow deploys the reviewed upstream digest over Tailscale, reconciles PostgreSQL
+monitoring and the StatsD firewall, recreates only the Netdata project, and verifies collectors,
+units, Functions, MCP, Health mode, mounts, and listener boundaries.
 
-The SigNoz UI is available at:
+<Steps>
+  <Step>
+    Validate locally before pushing.
 
-- `https://observe.tgblab.io.vn` through Cloudflare Access;
-- `http://tgbao-dev-services:8082` over Tailscale;
-- `http://127.0.0.1:8082` on the host.
+    ```bash
+    make netdata-validate
+    make check
+    ```
 
-OTLP ports 4317 and 4318 bind only to host loopback. Applications export through the shared Docker
-observability network to the Collector gateway.
+  </Step>
+  <Step>
+    Confirm the runtime and identity on the services host.
 
-## Health checks
+    ```bash
+    tailscale ssh ubuntu@tgbao-dev-services \
+      'docker ps --filter label=com.docker.compose.project=netdata --format "{{.Names}} {{.Status}}"'
 
-1. Check the Collector health endpoint on host loopback port 13133.
-2. Inspect `otelcol_*` metrics for receive failures, queue pressure, send failures, process memory,
-   and uptime.
-3. Check the expected service's telemetry attributes before changing a dashboard query.
-4. Treat absent data as a collection-path issue until the producer, receiver, processor, and
-   exporter have each been verified.
+    tailscale ssh ubuntu@tgbao-dev-services \
+      'curl -fsS http://127.0.0.1:19999/api/v1/info | jq "{version, mirrored_hosts}"'
+    ```
 
-## Dashboard conventions
+  </Step>
+  <Step>
+    Inspect active alerts, resource use, and recent collector errors.
 
-- Names use `<domain> / <system>`.
-- Number panels state their unit and aggregation in the description.
-- CPU cores and CPU percentages are separate signals.
-- Histograms use matching duration units before percentile calculation.
-- Airflow attributes use `airflow.dag_id` and `airflow.task_id`.
-- Backup status is alert-only; it does not have a low-value dashboard.
+    ```bash
+    tailscale ssh ubuntu@tgbao-dev-services \
+      'curl -fsS "http://127.0.0.1:19999/api/v1/alarms?active" | jq ".alarms | length"'
 
-## Apply dashboards manually
+    tailscale ssh ubuntu@tgbao-dev-services \
+      'docker stats --no-stream netdata-netdata-1'
+
+    tailscale ssh ubuntu@tgbao-dev-services \
+      'docker logs --since 30m netdata-netdata-1 2>&1 | grep -Ei "error|failed" | tail -100'
+    ```
+
+  </Step>
+</Steps>
+
+Use the dashboard's Metrics, Nodes, Containers, Alerts, Live Views, and PostgreSQL Functions before
+adding a custom chart. Inspect the context and unit contract directly when a value is surprising:
 
 ```bash
-export AWS_PROFILE=tgbao-dev
-export SIGNOZ_ACCESS_TOKEN='<service-account-key>'
-make signoz-plan
-make signoz-apply
+tailscale ssh ubuntu@tgbao-dev-services \
+  'curl -fsS http://127.0.0.1:19999/api/v1/charts | jq -r ".charts[] | [.context, .units] | @tsv" | sort -u'
 ```
 
-Do not edit Terraform-managed dashboards or alerts through the UI.
+## Units and interpretation
+
+| Quantity            | Netdata representation                                                                  |
+| ------------------- | --------------------------------------------------------------------------------------- |
+| Host CPU            | Percentage of total host capacity, bounded to 0-100%                                    |
+| Container CPU       | `cgroup.cpu`; 100% means one logical core and a container may exceed 100%               |
+| CPU quota           | `cgroup.cpu_limit`; percentage of the configured limit, not core consumption            |
+| Memory              | MiB/GiB for bytes; percent only when a host-total or container-limit denominator exists |
+| Filesystem capacity | GiB plus utilization percentage, kept separate by mount                                 |
+| Disk throughput     | Native KiB/s                                                                            |
+| Network throughput  | Native kilobits/s; do not compare directly with bytes/s                                 |
+| Airflow duration    | Milliseconds; `Observed ... (p95)` is meaningful only when events occurred              |
+
+Negative write or transmit dimensions show chart direction, not negative activity. An idle StatsD
+timer interval is rendered as zero; it is not a zero-duration task observation.
+
+## Alerts and noise control
+
+The native Health engine and transition history stay enabled, but every external notification
+transport is `NO`. A warning in the UI is therefore diagnostic state, not evidence that a page was
+sent. Calculation helpers may be `UNDEFINED` after restart or without enough history; investigate
+the associated chart before treating them as collector failures.
+
+The only repository-owned health override is PostgreSQL aborted-transaction ratio: it evaluates a
+five-minute average each minute, enters warning above 2%, recovers at or below 1%, and routes to the
+`dba` role when notification delivery is eventually configured. Keep stock alerts unless measured
+noise demonstrates a specific bad threshold. Do not silence all cgroups, container health, or host
+load to hide one noisy workload.
+
+Before enabling notifications:
+
+1. Observe warning and critical transitions across normal workload cycles.
+2. Define one owner and receiver for disk/inode pressure, memory/swap/OOM, sustained CPU/load or
+   I/O pressure, unhealthy containers, endpoint failures, and Agent-data absence.
+3. State the signal, window, threshold, recovery condition, and unit in each override.
+4. Test one controlled transition and recovery without adding duplicate SigNoz routing.
+
+## Retention and capacity
+
+The Agent uses DBEngine with three combined time-and-size ceilings:
+
+| Tier | Resolution | Time ceiling | Size ceiling |
+| ---- | ---------- | ------------ | ------------ |
+| 0    | 1 second   | 7 days       | 1 GiB        |
+| 1    | 1 minute   | 90 days      | 1 GiB        |
+| 2    | 1 hour     | 1 year       | 512 MiB      |
+
+The size limit can shorten the time window and is the safety boundary. The accepted v2.10.4 runtime
+had 984 charts and 2,862 dimensions, averaged about 1.44% of one logical core, peaked near 2.33%,
+used roughly 84-87 MiB internally, and held about 263 MiB of cache after the four-hour comparison.
+The container remains capped at 0.5 CPU and 512 MiB. Revisit retention only from longer steady-state
+disk evidence, while preserving at least 20 GiB free disk and 20% free host RAM.
+
+```bash
+tailscale ssh ubuntu@tgbao-dev-services \
+  'docker exec netdata-netdata-1 du -sh /var/cache/netdata /var/lib/netdata'
+```
+
+## Upgrade and rollback
+
+The reviewed release is the versioned, multi-architecture digest in `sysops/netdata/image`; never
+replace it with `latest` or an unpinned channel. For an upgrade, review upstream release notes and
+the image manifest, change only the reviewed reference and required configuration, run the local
+validation, then let the Netdata workflow deploy it. Confirm version, alerts, collector errors,
+history, and resource limits after recreation.
+
+Rollback by reverting the complete Netdata release commit and manually dispatching
+`deploy-netdata.yml`. Preserve `netdata-lib` and `netdata-cache` when the versions are storage
+compatible. If an incompatible database migration prevents startup, Netdata history may be
+discarded and rebuilt; application recovery must never depend on it.
+
+## Backup and recovery
+
+Netdata's metric database is disposable operational history, not business data and not a backup.
+Git owns collector, alert, retention, and deployment configuration. No separate Netdata volume
+backup is required. Recreating the Agent must preserve workload availability even when its history
+is deliberately discarded.
+
+Airflow logs remain in S3, metadata PostgreSQL uses its own checked backups, and lakehouse data is
+recovered with S3 and Iceberg catalog metadata together.
+
+## Troubleshooting
+
+| Symptom                                   | First checks                                                                            | Likely boundary         |
+| ----------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------- |
+| Dashboard is unreachable                  | Container health, loopback API, Cloudflare Tunnel, Access policy                        | Netdata or edge         |
+| A chart disappeared                       | Collector logs, source service state, context in `/api/v1/charts`                       | Native collector        |
+| Airflow charts are empty                  | Scheduler/DAG processor health, StatsD socket, firewall chain, bounded metric allowlist | Airflow StatsD path     |
+| PostgreSQL charts are empty               | Metadata container, `pg_monitor` secret/role, Docker discovery, `pg_stat_statements`    | PostgreSQL collector    |
+| Container CPU exceeds 100%                | Confirm `cgroup.cpu`; divide by 100 only when reasoning in logical cores                | Expected unit semantics |
+| Certificate succeeds but origin fails     | Compare `x509check` with the corresponding loopback `httpcheck`                         | Edge versus origin      |
+| Many alerts are `UNDEFINED` after restart | Allow history to accumulate; inspect whether the source chart exists                    | Calculation warm-up     |
+| Agent approaches its limit                | Chart cardinality, enabled collectors, cache tiers; do not raise limits first           | Netdata scope/retention |
+
+## On-demand SigNoz
+
+SigNoz is retained only for an incident that explicitly requires centralized logs, traces, or its
+APM workflow. Pull requests still validate Foundry, Collector, dashboards, and alerts, but pushes do
+not deploy it. Start or update the stack only by manually dispatching `deploy-signoz.yml`; that
+workflow deploys SigNoz and the Collector before applying Terraform-managed dashboards and alerts.
+
+When the diagnostic session ends, stop both Compose projects on the host without deleting volumes:
+
+```bash
+docker ps --filter label=com.docker.compose.project=signoz --format '{{.Names}}' \
+  | xargs -r docker stop
+docker ps --filter label=com.docker.compose.project=signoz-collection-agent --format '{{.Names}}' \
+  | xargs -r docker stop
+```
+
+The dormant UI hostname remains `https://observe.tgblab.io.vn`; an unavailable origin is expected
+while the stack is stopped. Do not edit Terraform-managed SigNoz dashboards or alerts in the UI.
