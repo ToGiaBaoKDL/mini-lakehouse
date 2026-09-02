@@ -10,15 +10,15 @@ provider-certification gate.
 
 ## Provider boundary
 
-The capability uses `ssi-sdk` 3.2.0 for authentication, Data REST calls, streaming connections, and
+The capability uses `ssi-sdk` 3.2.1 for authentication, Data REST calls, streaming connections, and
 subscriptions. Each bounded streaming cycle also sends one SDK-owned heartbeat ping after
 subscribing. Application code does not reproduce SSI endpoints, WebSocket topics, retry logic, or
 protocol messages. Certification uses only the Data and Stream DATA clients.
 
 Terraform owns the empty SSI and PostgreSQL secret containers, an immutable ECR repository, and a
-dedicated Roles Anywhere identity. The runtime role can read only those two secrets and the landing
-URI, and can write only the SSI REST, SSI stream, and exported-journal raw prefixes. It has no Glue
-or curated-table permissions.
+dedicated Roles Anywhere identity. The capture runtime can read only the SSI credential and can
+read or write only the SSI REST raw prefix. It has no Parameter Store, stream, operational-ledger,
+Glue, or curated-table permissions.
 
 ## Data contracts
 
@@ -69,6 +69,11 @@ An Airflow retry reuses the same capture manifest. A new DAG run creates a new r
 unchanged curated source fingerprints do not create another revision. Historical REST index
 summaries retain a null `event_time` because the SDK supplies a date but no event timestamp; the
 pipeline does not invent a market-close time.
+
+Each bounded capture stays below one deterministic source-owned boundary:
+`api/ssi_fastconnect_rest/raw/trade_date=<date>/run=<token-sha256-prefix>/`. Landing and curated
+Iceberg data use the catalog-wide `tables/<table>/` namespace; capture code never constructs those
+table locations.
 
 ## Synchronize and certify
 

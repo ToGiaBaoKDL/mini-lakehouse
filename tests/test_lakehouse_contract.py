@@ -40,6 +40,12 @@ def test_table_locations_separate_raw_transport_and_iceberg_storage() -> None:
         "s3://test-landing/api/arxiv/tables/oai_records_raw"
     )
     assert bindings[("curated_github", "events")] == ("s3://test-curated/github/tables/events")
+    assert bindings[("landing_ssi_fastconnect_rest", "records")] == (
+        "s3://test-landing/api/ssi_fastconnect_rest/tables/records"
+    )
+    assert bindings[("curated_market_data", "daily_security_summaries")] == (
+        "s3://test-curated/market_data/tables/daily_security_summaries"
+    )
 
 
 def test_table_location_uses_physical_name_instead_of_contract_lookup_key() -> None:

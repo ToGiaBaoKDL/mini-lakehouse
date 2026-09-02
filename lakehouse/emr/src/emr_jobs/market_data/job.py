@@ -18,7 +18,7 @@ def run(*, source_date: str, capture_manifest_uri: str, contracts_uri: str) -> N
     contracts = load_contracts(contracts_uri)
     source = contracts.source("ssi_fastconnect_rest")
     product = contracts.curated_product("market_data")
-    capture = load_capture(capture_manifest_uri, source_date)
+    capture = load_capture(capture_manifest_uri, source_date, source.raw_object_prefix)
     require_bounded_scope(capture)
     required_identifiers = (
         *(source.table_identifier(table.key) for table in source.tables),

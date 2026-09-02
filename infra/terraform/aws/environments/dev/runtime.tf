@@ -45,9 +45,6 @@ locals {
     metadata_postgres = [
       "backup/metadata_postgres_uri",
     ]
-    t0_trading = [
-      "storage/landing_uri",
-    ]
     }, {
     for domain, parameter_name in local.dbt_output_parameter_names : "dbt_${domain}" => [
       "storage/analytics_uri",

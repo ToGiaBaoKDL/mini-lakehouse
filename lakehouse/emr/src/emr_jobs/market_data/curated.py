@@ -27,27 +27,25 @@ def _capture_view(
     )
 
 
-def _symbols(spark: SparkSession, endpoint: str) -> set[str]:
-    return {
-        row["symbol"]
-        for row in spark.sql(
-            f"""
-            SELECT DISTINCT symbol
-            FROM ssi_capture_records
-            WHERE endpoint = '{endpoint}' AND symbol IS NOT NULL
-            """
-        ).collect()
-    }
-
-
 def _validate_scope(spark: SparkSession, capture: CaptureRun) -> bool:
     expected_symbols = set(capture.symbols)
     expected_indices = set(capture.indices)
-    info = _symbols(spark, "get_securities_info")
-    daily = _symbols(spark, "get_ohlc_1day_historical")
-    minute = _symbols(spark, "get_ohlc_1minute_historical")
-    master = _symbols(spark, "get_master_data_historical")
-    indices = _symbols(spark, "get_index_summary_historical")
+    scopes = {
+        row["endpoint"]: set(row["symbols"])
+        for row in spark.sql(
+            """
+            SELECT endpoint, collect_set(symbol) AS symbols
+            FROM ssi_capture_records
+            WHERE symbol IS NOT NULL
+            GROUP BY endpoint
+            """
+        ).collect()
+    }
+    info = scopes.get("get_securities_info", set())
+    daily = scopes.get("get_ohlc_1day_historical", set())
+    minute = scopes.get("get_ohlc_1minute_historical", set())
+    master = scopes.get("get_master_data_historical", set())
+    indices = scopes.get("get_index_summary_historical", set())
     if info != expected_symbols:
         raise RuntimeError(f"SSI security scope mismatch: expected={len(expected_symbols)}")
     has_market_data = bool(daily or minute or master or indices)
@@ -283,6 +281,26 @@ def _market_views(spark: SparkSession, source_date: str) -> None:
                 AS matched_volume,
             try_cast(get_json_object(record_json, '$.total_match_value') AS decimal(24, 0))
                 AS matched_value,
+            try_cast(get_json_object(record_json, '$.total_deal') AS bigint)
+                AS deal_volume,
+            try_cast(get_json_object(record_json, '$.total_deal_value') AS decimal(24, 0))
+                AS deal_value,
+            try_cast(get_json_object(record_json, '$.total_foreign_buy') AS bigint)
+                AS foreign_buy_volume,
+            try_cast(get_json_object(record_json, '$.total_foreign_sell') AS bigint)
+                AS foreign_sell_volume,
+            try_cast(get_json_object(record_json, '$.total_foreign_buy_value') AS decimal(24, 0))
+                AS foreign_buy_value,
+            try_cast(get_json_object(record_json, '$.total_foreign_sell_value') AS decimal(24, 0))
+                AS foreign_sell_value,
+            try_cast(get_json_object(record_json, '$.remain_foreign_room') AS bigint)
+                AS remaining_foreign_room,
+            try_cast(get_json_object(record_json, '$.total_foreign_room') AS bigint)
+                AS total_foreign_room,
+            try_cast(get_json_object(record_json, '$.open_interest') AS decimal(24, 0))
+                AS open_interest,
+            try_cast(get_json_object(record_json, '$.settlement_price') AS decimal(18, 0))
+                AS settlement_price,
             received_at,
             record_sha256
         FROM ssi_capture_records
@@ -382,6 +400,11 @@ def _validate_market_data(spark: SparkSession, capture: CaptureRun) -> None:
            OR low_price IS NULL OR close_price IS NULL
            OR matched_volume IS NULL OR matched_volume < 0
            OR matched_value IS NULL OR matched_value < 0
+           OR deal_volume < 0 OR deal_value < 0
+           OR foreign_buy_volume < 0 OR foreign_sell_volume < 0
+           OR foreign_buy_value < 0 OR foreign_sell_value < 0
+           OR remaining_foreign_room < 0 OR total_foreign_room < 0
+           OR open_interest < 0 OR settlement_price < 0
         LIMIT 1
         """
     ).count()
@@ -446,18 +469,22 @@ def _publish_daily(spark: SparkSession, target: str) -> None:
             master.floor_price,
             summary.matched_volume,
             summary.matched_value,
-            CAST(NULL AS bigint) AS deal_volume,
-            CAST(NULL AS decimal(24, 0)) AS deal_value,
-            CAST(NULL AS bigint) AS foreign_buy_volume,
-            CAST(NULL AS bigint) AS foreign_sell_volume,
-            CAST(NULL AS decimal(24, 0)) AS foreign_buy_value,
-            CAST(NULL AS decimal(24, 0)) AS foreign_sell_value,
+            summary.deal_volume,
+            summary.deal_value,
+            summary.foreign_buy_volume,
+            summary.foreign_sell_volume,
+            summary.foreign_buy_value,
+            summary.foreign_sell_value,
             greatest(daily.received_at, master.received_at, summary.received_at)
                 AS available_at,
             current_timestamp() AS processed_at,
             true AS is_final,
             sha2(concat_ws('|', daily.record_sha256, master.record_sha256,
-                coalesce(summary.record_sha256, '')), 256) AS source_record_sha256
+                coalesce(summary.record_sha256, '')), 256) AS source_record_sha256,
+            summary.remaining_foreign_room,
+            summary.total_foreign_room,
+            summary.open_interest,
+            summary.settlement_price
         FROM ssi_daily_ohlc daily
         JOIN ssi_master_data master USING (symbol, trade_date)
         JOIN ssi_security_summary summary USING (symbol, trade_date)
@@ -489,7 +516,11 @@ def _publish_daily(spark: SparkSession, target: str) -> None:
             candidate.available_at,
             candidate.processed_at,
             candidate.is_final,
-            candidate.source_record_sha256
+            candidate.source_record_sha256,
+            candidate.remaining_foreign_room,
+            candidate.total_foreign_room,
+            candidate.open_interest,
+            candidate.settlement_price
         FROM ssi_daily_candidates candidate
         LEFT JOIN (
             SELECT symbol, trade_date, max(revision) AS max_revision

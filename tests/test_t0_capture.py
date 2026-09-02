@@ -7,7 +7,12 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from botocore.exceptions import ClientError
-from t0_trading.capture import CaptureOptions, S3CaptureStore, capture_rest
+from t0_trading.capture import (
+    SSI_REST_RAW_PREFIX,
+    CaptureOptions,
+    S3CaptureStore,
+    capture_rest,
+)
 from t0_trading.cli import app
 from typer.testing import CliRunner
 
@@ -123,7 +128,7 @@ def test_rest_capture_is_immutable_scoped_and_idempotent() -> None:
     assert capture_rest(market, store, options, clock=clock) == manifest_uri
     assert market.calls == initial_calls
     assert s3.puts == initial_puts
-    assert manifest_uri.startswith("s3://landing/root/api/ssi_fastconnect_rest/raw/")
+    assert manifest_uri.startswith(f"s3://landing/root/{SSI_REST_RAW_PREFIX}/")
 
     manifest_key = manifest_uri.removeprefix("s3://landing/")
     manifest = json.loads(s3.objects[f"landing/{manifest_key}"][0])
@@ -149,6 +154,35 @@ def test_rest_capture_is_immutable_scoped_and_idempotent() -> None:
         )
         if "get_master_data_historical" in {record["endpoint"] for record in records}:
             assert {record["symbol"] for record in records} == {"VIC", "VHM"}
+
+
+def test_rest_capture_rejects_an_existing_manifest_from_another_sdk() -> None:
+    s3 = _S3()
+    store = S3CaptureStore(s3, "s3://landing/root")
+    options = CaptureOptions(
+        trade_date=date(2026, 8, 26),
+        job_token="manual__2026-08-27",
+    )
+    manifest_uri = capture_rest(_Market(), store, options)
+    manifest_key = manifest_uri.removeprefix("s3://landing/")
+    object_id = f"landing/{manifest_key}"
+    manifest = json.loads(s3.objects[object_id][0])
+    manifest["sdk_version"] = "3.2.0"
+    body = json.dumps(
+        manifest,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+    s3.objects[object_id] = (body, {"sha256": hashlib.sha256(body).hexdigest()})
+
+    try:
+        capture_rest(_Market(), store, options)
+    except RuntimeError as error:
+        assert "does not match the requested scope" in str(error)
+    else:
+        raise AssertionError("Expected an old SDK capture manifest to be rejected")
 
 
 def test_capture_options_reject_unbounded_pagination() -> None:

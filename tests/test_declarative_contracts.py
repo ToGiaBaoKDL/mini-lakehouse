@@ -119,6 +119,19 @@ def test_market_data_contracts_are_ssi_only_replayable_and_conformed() -> None:
         "level",
     )
     assert "available_at" in {column.name for column in product.table("intraday_bars_1m").columns}
+    daily_columns = {column.name for column in product.table("daily_security_summaries").columns}
+    assert {
+        "deal_volume",
+        "deal_value",
+        "foreign_buy_volume",
+        "foreign_buy_value",
+        "foreign_sell_volume",
+        "foreign_sell_value",
+        "remaining_foreign_room",
+        "total_foreign_room",
+        "open_interest",
+        "settlement_price",
+    } <= daily_columns
 
     market_contracts = "\n".join(
         path.read_text(encoding="utf-8")

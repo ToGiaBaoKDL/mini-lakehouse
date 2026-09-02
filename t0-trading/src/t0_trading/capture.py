@@ -17,7 +17,7 @@ from ssi_sdk import __version__ as SSI_SDK_VERSION
 from t0_trading.evidence import public_value
 
 API_VERSION = "v3"
-RAW_PREFIX = "api/ssi_fastconnect_rest/raw"
+SSI_REST_RAW_PREFIX = "api/ssi_fastconnect_rest/raw"
 
 
 def canonical_json(value: object) -> bytes:
@@ -186,7 +186,7 @@ def _capture_request(
     request: _Request,
     *,
     store: CaptureStore,
-    prefix: str,
+    run_prefix: str,
     job_token_sha256: str,
     clock: Callable[[], datetime],
 ) -> dict[str, object]:
@@ -203,7 +203,7 @@ def _capture_request(
             }
         )
     )
-    request_prefix = f"{prefix}/requests/{request_id}"
+    request_prefix = f"{run_prefix}/requests/{request_id}"
     manifest_key = f"{request_prefix}/manifest.json"
     current = store.read_json(manifest_key)
     if current is not None:
@@ -304,8 +304,8 @@ def capture_rest(
     """Capture one trade date and return its immutable run-manifest URI."""
     job_token_sha256 = sha256(options.job_token.encode("utf-8"))
     run_id = job_token_sha256[:32]
-    prefix = f"{RAW_PREFIX}/trade_date={options.trade_date.isoformat()}/run={run_id}"
-    run_manifest_key = f"{prefix}/manifest.json"
+    run_prefix = f"{SSI_REST_RAW_PREFIX}/trade_date={options.trade_date.isoformat()}/run={run_id}"
+    run_manifest_key = f"{run_prefix}/manifest.json"
     current = store.read_json(run_manifest_key)
     if current is not None:
         expected_scope = {
@@ -313,6 +313,8 @@ def capture_rest(
             "symbols": list(options.symbols),
             "indices": list(options.indices),
             "job_token_sha256": job_token_sha256,
+            "api_version": API_VERSION,
+            "sdk_version": SSI_SDK_VERSION,
         }
         if any(current.get(key) != value for key, value in expected_scope.items()):
             raise RuntimeError("Existing capture manifest does not match the requested scope")
@@ -412,7 +414,7 @@ def capture_rest(
         _capture_request(
             request,
             store=store,
-            prefix=prefix,
+            run_prefix=run_prefix,
             job_token_sha256=job_token_sha256,
             clock=clock,
         )

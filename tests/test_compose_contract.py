@@ -560,7 +560,7 @@ def test_python_dependencies_are_owned_by_their_runtime_domain() -> None:
     assert "s3fs" not in ocr
     assert '"dbt-athena==1.11.0"' in analytics
     assert 'members = ["arxiv-lens", "lakehouse/catalog", "ocr-engine", "t0-trading"]' in workspace
-    assert '"ssi-sdk==3.2.0"' in t0_trading
+    assert '"ssi-sdk==3.2.1"' in t0_trading
     assert '"boto3>=1.42,<2"' in t0_trading
     assert (
         'exclude = ["analytics/dbt-project/runtime", "automation/airflow", "lakehouse/emr", '

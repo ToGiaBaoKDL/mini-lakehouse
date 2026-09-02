@@ -11,15 +11,15 @@ discover their URIs through Parameter Store rather than embedding physical names
 
 ## Canonical data prefixes
 
-| Tier              | Pattern                                       | Example                                 |
-| ----------------- | --------------------------------------------- | --------------------------------------- |
-| Source raw        | `<source_type>/<source>/raw[/<subpath>]`      | `api/arxiv/raw/oai/`                    |
-| Landing Iceberg   | `<source_type>/<source>/tables/<table>/`      | `api/github_archive/tables/events_raw/` |
-| Curated Iceberg   | `<product>/tables/<table>/`                   | `arxiv/tables/papers/`                  |
-| Analytics         | `<domain>/<adapter-owned-table-location>/`    | `engineering/...`                       |
-| Athena results    | `<workload>/`                                 | `dbt/engineering/`, `arxiv-lens/`       |
-| Airflow task logs | `airflow/task-logs/`                          | One prefix in the logs bucket           |
-| PostgreSQL backup | `metadata-postgres/<database>/<date>/<slot>/` | Exact AM/PM recovery slot               |
+| Tier              | Pattern                                       | Example                                    |
+| ----------------- | --------------------------------------------- | ------------------------------------------ |
+| Source raw        | `<source_type>/<source>/raw[/<subpath>]`      | `api/arxiv/raw/oai/`                       |
+| Landing Iceberg   | `<source_type>/<source>/tables/<table>/`      | `api/ssi_fastconnect_rest/tables/records/` |
+| Curated Iceberg   | `<product>/tables/<table>/`                   | `market_data/tables/intraday_bars_1m/`     |
+| Analytics         | `<domain>/<adapter-owned-table-location>/`    | `engineering/...`                          |
+| Athena results    | `<workload>/`                                 | `dbt/engineering/`, `arxiv-lens/`          |
+| Airflow task logs | `airflow/task-logs/`                          | One prefix in the logs bucket              |
+| PostgreSQL backup | `metadata-postgres/<database>/<date>/<slot>/` | Exact AM/PM recovery slot                  |
 
 The dbt Athena profile currently uses `s3_data_naming: table_unique`, so the adapter may include a
 unique physical identifier below the domain prefix. Glue table location is authoritative; consumers

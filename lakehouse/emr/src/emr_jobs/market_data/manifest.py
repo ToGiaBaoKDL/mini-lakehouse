@@ -9,9 +9,8 @@ from typing import Any
 
 from emr_jobs.common.s3 import head_object, read_bytes, split_uri
 
-RAW_PREFIX = "api/ssi_fastconnect_rest/raw/"
 API_VERSION = "v3"
-SDK_VERSION = "3.2.0"
+SDK_VERSION = "3.2.1"
 
 
 @dataclass(frozen=True)
@@ -98,8 +97,8 @@ def _count(value: dict[str, Any], field: str) -> int:
     return count
 
 
-def _physical_key(base_prefix: str, logical_key: str) -> str:
-    if not logical_key.startswith(RAW_PREFIX) or ".." in logical_key.split("/"):
+def _physical_key(base_prefix: str, logical_key: str, raw_prefix: str) -> str:
+    if not logical_key.startswith(raw_prefix) or ".." in logical_key.split("/"):
         raise RuntimeError("Capture object escaped its source-owned prefix")
     return f"{base_prefix}{logical_key}"
 
@@ -114,13 +113,31 @@ def _canonical_json(value: object) -> bytes:
     ).encode()
 
 
-def load_capture(uri: str, expected_trade_date: str) -> CaptureRun:
-    bucket, manifest_key = split_uri(uri)
-    marker = manifest_key.find(RAW_PREFIX)
-    if marker < 0 or not manifest_key.endswith("/manifest.json"):
+def _capture_key(manifest_key: str, raw_object_prefix: str) -> tuple[str, str]:
+    """Split an S3 key into its deployment root and source-owned logical key."""
+    raw_prefix = f"{raw_object_prefix.strip('/')}/"
+    if manifest_key.startswith(raw_prefix):
+        return "", manifest_key
+    base_prefix, separator, suffix = manifest_key.rpartition(f"/{raw_prefix}")
+    if not separator:
         raise RuntimeError("Unexpected SSI capture manifest URI")
-    base_prefix = manifest_key[:marker]
-    logical_run_key = manifest_key[marker:]
+    return f"{base_prefix}/", f"{raw_prefix}{suffix}"
+
+
+def load_capture(uri: str, expected_trade_date: str, raw_object_prefix: str) -> CaptureRun:
+    raw_prefix = f"{raw_object_prefix.strip('/')}/"
+    bucket, manifest_key = split_uri(uri)
+    base_prefix, logical_run_key = _capture_key(manifest_key, raw_object_prefix)
+    expected_run_prefix = f"{raw_prefix}trade_date={expected_trade_date}/run="
+    run_suffix = logical_run_key.removeprefix(expected_run_prefix)
+    run_id, separator, filename = run_suffix.partition("/")
+    if (
+        not logical_run_key.startswith(expected_run_prefix)
+        or not run_id
+        or separator != "/"
+        or filename != "manifest.json"
+    ):
+        raise RuntimeError("Unexpected SSI capture manifest URI")
     run_prefix = logical_run_key.removesuffix("/manifest.json")
     run = _json_object(read_bytes(uri), uri)
     if run.get("schema_version") != 1 or run.get("trade_date") != expected_trade_date:
@@ -152,7 +169,9 @@ def load_capture(uri: str, expected_trade_date: str) -> CaptureRun:
         if not logical_manifest_key.startswith(f"{run_prefix}/requests/"):
             raise RuntimeError("SSI request manifest escaped its capture run")
         expected_sha256 = _required(reference, "manifest_sha256", str)
-        request_uri = f"s3://{bucket}/{_physical_key(base_prefix, logical_manifest_key)}"
+        request_uri = (
+            f"s3://{bucket}/{_physical_key(base_prefix, logical_manifest_key, raw_prefix)}"
+        )
         body = read_bytes(request_uri)
         if hashlib.sha256(body).hexdigest() != expected_sha256:
             raise RuntimeError("SSI request manifest checksum mismatch")
@@ -212,7 +231,7 @@ def load_capture(uri: str, expected_trade_date: str) -> CaptureRun:
             if not logical_key.startswith(f"{request_prefix}/"):
                 raise RuntimeError("SSI capture object escaped its request")
             object_sha256 = _required(page, "object_sha256", str)
-            physical_key = _physical_key(base_prefix, logical_key)
+            physical_key = _physical_key(base_prefix, logical_key, raw_prefix)
             metadata = head_object(bucket, physical_key)
             if metadata is None or metadata.get("Metadata", {}).get("sha256") != object_sha256:
                 raise RuntimeError("SSI capture object is missing or has checksum drift")

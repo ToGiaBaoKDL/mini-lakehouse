@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import cast
 
 import yaml
+from t0_trading.capture import SSI_REST_RAW_PREFIX
 
 from lakehouse.contracts import load_contracts
 
@@ -13,6 +14,16 @@ def _yaml(path: str) -> dict[str, object]:
     payload = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     assert isinstance(payload, dict)
     return cast(dict[str, object], payload)
+
+
+def test_ssi_capture_writes_to_the_contract_owned_raw_prefix() -> None:
+    source = load_contracts().source("ssi_fastconnect_rest")
+    identity = Path("infra/terraform/aws/modules/identity/t0_trading.tf").read_text(
+        encoding="utf-8"
+    )
+
+    assert source.raw_object_prefix == SSI_REST_RAW_PREFIX
+    assert f"/{source.raw_object_prefix}/*" in identity
 
 
 def test_dbt_sources_match_curated_product_contracts() -> None:

@@ -59,6 +59,10 @@ tables:
       - {field_id: 21, name: processed_at, data_type: timestamptz, required: true, description: UTC normalization completion time.}
       - {field_id: 22, name: is_final, data_type: boolean, required: true, description: Whether this revision is session-final.}
       - {field_id: 23, name: source_record_sha256, data_type: string, required: true, description: Immutable landing record lineage.}
+      - {field_id: 24, name: remaining_foreign_room, data_type: long, required: false, description: Remaining foreign ownership room after the session.}
+      - {field_id: 25, name: total_foreign_room, data_type: long, required: false, description: Total foreign ownership room supplied by SSI.}
+      - {field_id: 26, name: open_interest, data_type: decimal, precision: 24, scale: 0, required: false, description: Open derivative contract quantity when applicable.}
+      - {field_id: 27, name: settlement_price, data_type: decimal, precision: 18, scale: 0, required: false, description: Derivative settlement price in VND when applicable.}
     partitioning:
       - {field_id: 1000, field: trade_date, transform: year, name: trade_year}
 

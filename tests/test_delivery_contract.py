@@ -77,7 +77,7 @@ def test_component_release_publishes_before_protected_digest_deployment() -> Non
     assert "deployment/release_manifest" not in release + action + script
     assert "latest" not in release + action + script
     assert 'tar -C "$SOURCE_ROOT" -cf -' in action
-    assert "bundle+=(infra/runtime/postgres t0-trading/deploy)" in action
+    assert "bundle+=(t0-trading/deploy)" in action
     assert "source_root:" in action
     assert "revision:" not in action
     assert "git init" not in script
@@ -176,7 +176,7 @@ def test_t0_certification_uses_the_official_read_only_sdk_boundary() -> None:
     credentials = Path("t0-trading/src/t0_trading/credentials.py").read_text(encoding="utf-8")
     provider = Path("t0-trading/src/t0_trading/provider.py").read_text(encoding="utf-8")
 
-    assert '"ssi-sdk==3.2.0"' in project
+    assert '"ssi-sdk==3.2.1"' in project
     assert "from ssi_sdk import Data, Stream" in certification
     assert "from ssi_sdk import Data" in cli
     assert "from ssi_sdk import Auth, Config" in provider
@@ -248,7 +248,7 @@ def test_each_component_owns_its_deployment_operation() -> None:
     assert '"$bundle_root/infra/runtime/postgres/deploy" airflow' in airflow
     assert "docker compose --project-name lightdash" in lightdash
     assert '"$bundle_root/infra/runtime/postgres/deploy" lightdash' in lightdash
-    assert '"$bundle_root/infra/runtime/postgres/deploy" t0_trading' in t0_trading
+    assert "infra/runtime/postgres/deploy" not in t0_trading
     assert "--force-recreate" not in lightdash
     assert "docker compose --project-name arxiv-lens" in lens
     assert '"$1" dbt:runtime' in dbt

@@ -170,10 +170,7 @@ module "identity" {
     aws_secretsmanager_secret.lightdash.arn,
     aws_secretsmanager_secret.metadata_postgres["lightdash"].arn,
   ])
-  t0_trading_secret_arns = toset([
-    aws_secretsmanager_secret.t0_trading_ssi.arn,
-    aws_secretsmanager_secret.metadata_postgres["t0_trading"].arn,
-  ])
+  t0_trading_secret_arn         = aws_secretsmanager_secret.t0_trading_ssi.arn
   cloudflare_docs_ci_secret_arn = aws_secretsmanager_secret.cloudflare_docs_ci.arn
   lightdash_ci_secret_arn       = aws_secretsmanager_secret.lightdash_ci.arn
   signoz_ci_secret_arn          = aws_secretsmanager_secret.signoz_ci.arn

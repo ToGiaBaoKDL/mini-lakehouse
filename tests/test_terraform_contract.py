@@ -310,18 +310,16 @@ def test_t0_trading_runtime_is_bound_to_owned_raw_prefixes_and_secrets() -> None
     )
 
     assert '"t0-trading"' in environment
-    assert "t0_trading_secret_arns" in environment + identity
+    assert "t0_trading_secret_arn" in environment + identity
     assert "aws_secretsmanager_secret.t0_trading_ssi.arn" in environment
-    assert 'aws_secretsmanager_secret.metadata_postgres["t0_trading"].arn' in environment
-    for prefix in (
-        "api/ssi_fastconnect_rest/raw",
-        "stream/ssi_fastconnect_stream/raw",
-        "rdbms/t0_trading/raw",
-    ):
-        assert f'"{prefix}"' in identity
+    assert 'aws_secretsmanager_secret.metadata_postgres["t0_trading"].arn' not in identity
+    assert "/api/ssi_fastconnect_rest/raw/*" in identity
+    assert '"stream/ssi_fastconnect_stream/raw"' not in identity
+    assert '"rdbms/t0_trading/raw"' not in identity
     assert 'actions   = ["secretsmanager:GetSecretValue"]' in identity
-    assert 'actions   = ["ssm:GetParameter"]' in identity
     assert '"s3:PutObject"' in identity
+    assert '"s3:ListBucket"' not in identity
+    assert '"s3:AbortMultipartUpload"' not in identity
     assert '"s3:DeleteObject"' not in identity
     assert "glue:" not in identity
     assert "var.bucket_arns.curated" not in identity

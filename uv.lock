@@ -1512,16 +1512,16 @@ wheels = [
 
 [[package]]
 name = "ssi-sdk"
-version = "3.2.0"
+version = "3.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
     { name = "websocket-client" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/02/9f/5d0b82aed93b5bb958f5346aa88d20a73407cf0df96c2aeb102feb78550c/ssi_sdk-3.2.0.tar.gz", hash = "sha256:928572efe04f1a364011ed958f7138e1f3e2afa71399ec6347c9e0dc0a1e3c84", size = 79336, upload-time = "2026-08-12T08:02:21.305Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e0/7e/6a5ed9b97fb1a5f4929bd63a853775d20b05d0b39e665e63b326037bd617/ssi_sdk-3.2.1.tar.gz", hash = "sha256:5d328cf42bcc03f6710bcf182fd0ce8cec5f9e556f6e1bbe1d69f8431add1f2f", size = 79932, upload-time = "2026-08-27T08:13:29.559Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8a/1d/b38c30b3038f278196ebc86a8a3b14538605d3ba371cac2c2186c25f85cd/ssi_sdk-3.2.0-py3-none-any.whl", hash = "sha256:60cde7e3afe4ef91971665620a842a38e2134d3f778056a1066b422e56d417f8", size = 77440, upload-time = "2026-08-12T08:02:19.794Z" },
+    { url = "https://files.pythonhosted.org/packages/97/a8/03589b3f713542fc8693cacf45acb03a8d7bab586a854f6dfce4fc1c2a02/ssi_sdk-3.2.1-py3-none-any.whl", hash = "sha256:cbdda45bd26b57a9f3ebf5d7628f09fc0f5606aab4f187a37ecd930c56f208e0", size = 77794, upload-time = "2026-08-27T08:13:27.864Z" },
 ]
 
 [[package]]
@@ -1610,7 +1610,7 @@ dependencies = [
 requires-dist = [
     { name = "boto3", specifier = ">=1.42,<2" },
     { name = "pydantic", specifier = ">=2.12,<3" },
-    { name = "ssi-sdk", specifier = "==3.2.0" },
+    { name = "ssi-sdk", specifier = "==3.2.1" },
     { name = "typer", specifier = "==0.25.1" },
 ]
 

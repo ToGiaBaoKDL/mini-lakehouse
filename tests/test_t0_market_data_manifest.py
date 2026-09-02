@@ -6,12 +6,21 @@ from datetime import UTC, datetime
 import pytest
 from emr_jobs.market_data import manifest
 
+from lakehouse.contracts import load_contracts
+
+RAW_PREFIX = load_contracts().source("ssi_fastconnect_rest").raw_object_prefix
+
 
 def _json(value: object) -> bytes:
     return json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
 
 
-def _capture(monkeypatch: pytest.MonkeyPatch, *, request_body: bytes | None = None):
+def _capture(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    request_body: bytes | None = None,
+    sdk_version: str = "3.2.1",
+):
     captured_at = datetime(2026, 8, 27, tzinfo=UTC).isoformat()
     object_key = (
         "api/ssi_fastconnect_rest/raw/trade_date=2026-08-26/run=run/"
@@ -32,7 +41,7 @@ def _capture(monkeypatch: pytest.MonkeyPatch, *, request_body: bytes | None = No
         "record_count": 1,
         "capture_status": "success",
         "api_version": "v3",
-        "sdk_version": "3.2.0",
+        "sdk_version": sdk_version,
         "pages": [
             {
                 "page": 1,
@@ -54,7 +63,7 @@ def _capture(monkeypatch: pytest.MonkeyPatch, *, request_body: bytes | None = No
         "symbols": ["VIC", "VHM"],
         "indices": ["VNINDEX", "VN30"],
         "api_version": "v3",
-        "sdk_version": "3.2.0",
+        "sdk_version": sdk_version,
         "requests": [
             {
                 "request_id": "request",
@@ -85,7 +94,7 @@ def _capture(monkeypatch: pytest.MonkeyPatch, *, request_body: bytes | None = No
 def test_capture_manifest_resolves_only_verified_source_objects(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    capture = manifest.load_capture(_capture(monkeypatch), "2026-08-26")
+    capture = manifest.load_capture(_capture(monkeypatch), "2026-08-26", RAW_PREFIX)
 
     assert capture.symbols == ("VIC", "VHM")
     assert capture.indices == ("VNINDEX", "VN30")
@@ -99,13 +108,40 @@ def test_capture_manifest_rejects_request_checksum_drift(
     run_uri = _capture(monkeypatch, request_body=b"{}")
 
     with pytest.raises(RuntimeError, match="request manifest checksum mismatch"):
-        manifest.load_capture(run_uri, "2026-08-26")
+        manifest.load_capture(run_uri, "2026-08-26", RAW_PREFIX)
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "s3://landing/root/api/other/raw/trade_date=2026-08-26/run=run/manifest.json",
+        "s3://landing/root/api/ssi_fastconnect_rest/raw/"
+        "trade_date=2026-08-25/run=run/manifest.json",
+        "s3://landing/root/api/ssi_fastconnect_rest/raw/"
+        "trade_date=2026-08-26/run=run/nested/manifest.json",
+    ],
+)
+def test_capture_manifest_rejects_noncanonical_location(
+    monkeypatch: pytest.MonkeyPatch,
+    uri: str,
+) -> None:
+    _capture(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="Unexpected SSI capture manifest URI"):
+        manifest.load_capture(uri, "2026-08-26", RAW_PREFIX)
+
+
+def test_capture_manifest_rejects_previous_sdk_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(RuntimeError, match="Unsupported SSI capture API or SDK version"):
+        manifest.load_capture(_capture(monkeypatch, sdk_version="3.2.0"), "2026-08-26", RAW_PREFIX)
 
 
 def test_bounded_scope_must_match_every_requested_symbol_and_index(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    capture = manifest.load_capture(_capture(monkeypatch), "2026-08-26")
+    capture = manifest.load_capture(_capture(monkeypatch), "2026-08-26", RAW_PREFIX)
     publication = capture.requests[0]
     endpoints = (
         *("get_securities_info",) * 2,

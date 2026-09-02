@@ -44,7 +44,7 @@ runs:
             bundle+=(infra/runtime/postgres sysops/netdata)
             ;;
           t0-trading)
-            bundle+=(infra/runtime/postgres t0-trading/deploy)
+            bundle+=(t0-trading/deploy)
             ;;
           dbt)
             bundle+=(analytics/dbt-project/deploy)

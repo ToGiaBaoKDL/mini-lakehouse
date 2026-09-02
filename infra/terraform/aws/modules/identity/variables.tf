@@ -158,13 +158,13 @@ variable "lightdash_secret_arns" {
   }
 }
 
-variable "t0_trading_secret_arns" {
-  type        = set(string)
-  description = "Exact SSI and PostgreSQL secrets readable by the T0 trading runtime."
+variable "t0_trading_secret_arn" {
+  type        = string
+  description = "Exact SSI credential secret readable by the T0 trading capture runtime."
 
   validation {
-    condition     = length(var.t0_trading_secret_arns) == 2
-    error_message = "T0 trading requires exactly its SSI and PostgreSQL secrets."
+    condition     = startswith(var.t0_trading_secret_arn, "arn:")
+    error_message = "t0_trading_secret_arn must be an ARN."
   }
 }
 

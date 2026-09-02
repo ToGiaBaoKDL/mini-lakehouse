@@ -214,7 +214,7 @@ def test_certification_uses_only_official_data_and_stream_boundaries(
     monkeypatch.setattr(provider, "Auth", _Auth)
     monkeypatch.setattr(certification, "Data", _Data)
     monkeypatch.setattr(certification, "Stream", _Stream)
-    monkeypatch.setattr(certification, "SSI_SDK_VERSION", "3.2.0")
+    monkeypatch.setattr(certification, "SSI_SDK_VERSION", "3.2.1")
 
     report = run_certification(
         Credentials.from_json(

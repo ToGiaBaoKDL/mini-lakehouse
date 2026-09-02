@@ -160,7 +160,7 @@ def _stream_cycle(auth: Any, options: CertificationOptions, cycle: int) -> dict[
             client.on_data = evidence.record
             client.on_heartbeat = evidence.heartbeat
             client.connect()
-            # ssi-sdk 3.2.0 prints RequestMessage from its synchronous subscribe helper.
+            # The synchronous SDK helper prints RequestMessage objects while subscribing.
             # Keep the SDK-owned subscriptions while preventing protocol noise in CLI output.
             with redirect_stdout(StringIO()):
                 client.subscribe_symbol(list(options.symbols))
