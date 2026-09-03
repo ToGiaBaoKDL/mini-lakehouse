@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import date
 
 import pytest
-from t0_trading.trading_dates import TradingDateError, resolve_completed_trade_date
+from t0_trading.trading_dates import TradingDateError, require_observed_trade_date
 
 
 @dataclass
@@ -22,43 +22,17 @@ class _Market:
         return [_Summary(value) for value in self.dates]
 
 
-def test_latest_completed_date_skips_weekends_and_holidays() -> None:
-    market = _Market(["2026/08/27", "2026/08/28"])
-
-    result = resolve_completed_trade_date(
-        market,
-        before_date=date(2026, 9, 3),
-    )
-
-    assert result == date(2026, 8, 28)
-    assert market.calls == [("VN30", "2026/08/03", "2026/09/02")]
-
-
-def test_requested_date_must_be_completed_and_observed() -> None:
+def test_trade_date_must_be_observed_by_ssi() -> None:
     market = _Market(["2026/08/28"])
 
-    assert resolve_completed_trade_date(
+    assert require_observed_trade_date(
         market,
-        before_date=date(2026, 9, 3),
-        requested_date=date(2026, 8, 28),
+        trade_date=date(2026, 8, 28),
     ) == date(2026, 8, 28)
+    assert market.calls == [("VN30", "2026/08/28", "2026/08/28")]
+
     with pytest.raises(TradingDateError, match="not an SSI-observed"):
-        resolve_completed_trade_date(
+        require_observed_trade_date(
             market,
-            before_date=date(2026, 9, 3),
-            requested_date=date(2026, 9, 2),
+            trade_date=date(2026, 9, 2),
         )
-
-
-@pytest.mark.parametrize("requested", [date(2026, 9, 3), date(2026, 9, 4)])
-def test_current_and_future_dates_fail_before_calling_ssi(requested: date) -> None:
-    market = _Market([])
-
-    with pytest.raises(TradingDateError, match="earlier than"):
-        resolve_completed_trade_date(
-            market,
-            before_date=date(2026, 9, 3),
-            requested_date=requested,
-        )
-
-    assert market.calls == []

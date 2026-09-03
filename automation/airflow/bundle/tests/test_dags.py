@@ -16,7 +16,7 @@ os.environ["LAKEHOUSE_ENVIRONMENT"] = "ci"
 
 from airflow.models import DagBag
 from airflow.providers.standard.operators.python import ShortCircuitOperator
-from airflow.sdk import DAG, Asset
+from airflow.sdk import DAG, Asset, CronPartitionTimetable
 from airflow.utils.file import list_py_file_paths
 from airflow.utils.types import DagRunType
 from jinja2 import StrictUndefined
@@ -40,7 +40,7 @@ EXPECTED_DAGS = {
     "etl_emr_ingest_arxiv_metadata",
     "etl_emr_ingest_github_archive",
     "etl_emr_ingest_market_data_stream",
-    "etl_mix_ingest_market_data",
+    "etl_mix_ingest_market_data_rest",
     "gov_emr_maintain_iceberg",
     "tl_docker_build_analytics",
 }
@@ -87,7 +87,7 @@ def test_dag_files_are_domain_scoped_and_follow_worker_aware_naming() -> None:
     assert "Asset(" not in sources
 
 
-def test_source_dags_are_bounded_parameterized_emr_jobs() -> None:
+def test_source_dags_are_bounded_interval_scoped_emr_jobs() -> None:
     bag = _bag()
     schedules = {
         "etl_emr_ingest_github_archive": "30 7 * * *",
@@ -97,7 +97,7 @@ def test_source_dags_are_bounded_parameterized_emr_jobs() -> None:
         dag = _dag(bag, dag_id)
         assert dag.schedule == schedule
         assert dag.max_active_runs == 1
-        assert "source_date" in dag.params
+        assert not dag.params
         task = dag.tasks[0]
         assert isinstance(task, LoggedEmrServerlessStartJobOperator)
         assert task.wait_for_completion is True
@@ -108,6 +108,9 @@ def test_source_dags_are_bounded_parameterized_emr_jobs() -> None:
         assert task.retry_delay == timedelta(minutes=10)
         assert re.fullmatch(r"[A-Za-z0-9._-]{1,64}", task.client_request_token)
         arguments = task.job_driver["sparkSubmit"]["entryPointArguments"]
+        assert arguments[arguments.index("--source-date") + 1].startswith(
+            "{{ data_interval_start.astimezone("
+        )
         assert "--landing-uri" in arguments
         assert "--contracts-uri" in arguments
         assert "--catalog-name" not in arguments
@@ -129,16 +132,16 @@ def test_source_dags_are_bounded_parameterized_emr_jobs() -> None:
     assert arxiv.outlets[0].uri == "lakehouse://curated/arxiv/metadata"
 
 
-def test_market_data_dag_keeps_capture_and_publication_bounded() -> None:
-    dag = _dag(_bag(), "etl_mix_ingest_market_data")
+def test_market_data_rest_dag_keeps_capture_and_publication_bounded() -> None:
+    dag = _dag(_bag(), "etl_mix_ingest_market_data_rest")
 
-    assert str(dag.schedule) == "30 1 * * 2-6"
+    assert isinstance(dag.timetable, CronPartitionTimetable)
+    assert dag.timetable.expression == "0 21 * * 1-5"
+    assert dag.timetable.key_format == "%Y-%m-%d"
     assert dag.max_active_runs == 1
-    assert "trade_date" in dag.params
-    resolve = dag.get_task("resolve_trade_date")
+    assert not dag.params
     capture = dag.get_task("capture_rest")
-    publish = dag.get_task("publish_market_data")
-    assert isinstance(resolve, LoggedDockerOperator)
+    publish = dag.get_task("publish_market_data_rest")
     assert isinstance(capture, LoggedDockerOperator)
     assert isinstance(publish, LoggedEmrServerlessStartJobOperator)
     assert capture.image == "t0-trading:runtime"
@@ -148,30 +151,28 @@ def test_market_data_dag_keeps_capture_and_publication_bounded() -> None:
     assert capture.command[:2] == ["capture-rest", "--trade-date"]
     assert "--job-token" in capture.command
     assert "--landing-uri" in capture.command
-    assert isinstance(resolve.command, list)
-    assert resolve.command[:2] == ["resolve-trade-date", "--before-date"]
-    assert "--trade-date" in resolve.command
-    assert resolve.downstream_task_ids == {"capture_rest"}
-    assert capture.downstream_task_ids == {"publish_market_data"}
+    assert "{{ dag_run.partition_key }}" in capture.command
+    assert capture.skip_on_exit_code == [99]
+    assert capture.downstream_task_ids == {"publish_market_data_rest"}
     arguments = publish.job_driver["sparkSubmit"]["entryPointArguments"]
     assert "--capture-manifest-uri" in arguments
     assert "{{ ti.xcom_pull(task_ids='capture_rest') }}" in arguments
     assert publish.outlets[0].uri == "lakehouse://curated/market-data"
 
 
-def test_market_data_stream_replay_is_manual_and_manifest_scoped() -> None:
+def test_market_data_stream_replay_discovers_one_date_partition() -> None:
     dag = _dag(_bag(), "etl_emr_ingest_market_data_stream")
 
-    assert dag.schedule is None
+    assert isinstance(dag.timetable, CronPartitionTimetable)
+    assert dag.timetable.expression == "0 21 * * 1-5"
+    assert dag.timetable.key_format == "%Y-%m-%d"
     assert dag.max_active_runs == 1
-    assert set(dag.params) == {"capture_manifest_uri"}
+    assert not dag.params
     replay = dag.get_task("replay_stream_session")
     assert isinstance(replay, LoggedEmrServerlessStartJobOperator)
     arguments = replay.job_driver["sparkSubmit"]["entryPointArguments"]
-    assert arguments[:2] == [
-        "--capture-manifest-uri",
-        "{{ params.capture_manifest_uri or '' }}",
-    ]
+    assert arguments[:2] == ["--source-date", "{{ dag_run.partition_key }}"]
+    assert "--landing-uri" in arguments
     assert "--contracts-uri" in arguments
     assert replay.outlets[0].uri == "lakehouse://curated/market-data"
 

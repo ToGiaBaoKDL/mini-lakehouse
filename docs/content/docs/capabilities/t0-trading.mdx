@@ -86,12 +86,15 @@ This validates the deployed runtime without silently enabling an all-day or holi
 
 ## Bounded publication
 
-The `etl_mix_ingest_market_data` DAG runs at 01:30 Tuesday through Saturday in
-`Asia/Ho_Chi_Minh`, mapping the five weekday runs to the preceding Monday-through-Friday market
-dates. It also accepts an optional `trade_date` for a bounded manual backfill. Before capture, it
-uses SSI's historical VN30 summaries to validate an explicit completed date or resolve the latest
-observed trading day before the market-local DAG run date. Current and future dates fail closed, so
-an accidental in-session trigger cannot publish partial REST facts as final.
+The `etl_mix_ingest_market_data_rest` DAG uses Airflow 3's daily partition timetable at 21:00 Monday
+through Friday in `Asia/Ho_Chi_Minh`. Its partition key is the exact exchange-local trade date used
+by capture and publication. Historical ranges use Airflow's native Backfill action; there is no
+date Param, resolver task, or separate backfill DAG.
+
+Capture rejects future dates and asks SSI for the exact VN30 historical date before writing raw
+evidence. A weekday with no SSI-observed session exits through DockerOperator's supported skip code,
+so exchange holidays do not create empty captures. Backfills and scheduled runs therefore share the
+same bounded data-readiness rule without branching on the Airflow run type.
 
 The publication flow is:
 
@@ -117,10 +120,12 @@ table locations.
 
 ## Stream replay
 
-The manual `etl_emr_ingest_market_data_stream` DAG accepts exactly one terminal manifest URI. EMR
-verifies the manifest checksum stored in S3 metadata, clean disconnect state, heartbeat evidence,
-SDK/API versions, contiguous session and batch sequences, batch identities, object locations,
-checksums, record counts, message hashes, timestamps, and duplicate keys before writing anything.
+At 21:00 Monday through Friday, `etl_emr_ingest_market_data_stream` passes only its Airflow partition
+date and landing root to EMR. The data-plane job uses the AWS SDK paginator to discover every direct
+terminal session manifest under that date's source-owned raw prefix; Airflow never lists lakehouse
+objects. An empty day is a clean no-op. Each discovered session must pass manifest checksum, clean
+disconnect, heartbeat, SDK/API version, contiguous sequence, batch identity, object location,
+record-count, message-hash, timestamp, and duplicate-key validation before any write.
 
 Landing publication merges `messages` by `(stream_session_id, receive_sequence)` and writes the
 terminal `sessions` row last. Curated publication then maps only certified `TradeMessage` and

@@ -1,6 +1,5 @@
-from datetime import datetime
+from datetime import date, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from botocore.exceptions import ClientError
 from t0_trading.cli import app
@@ -48,20 +47,20 @@ def test_cli_help_and_validation_do_not_initialize_aws(monkeypatch: Any) -> None
     assert invalid_stream.exit_code == 2
     assert "must exceed heartbeat_seconds" in invalid_stream.output
 
-    current = runner.invoke(
+    future = runner.invoke(
         app,
         [
             "capture-rest",
             "--trade-date",
-            datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date().isoformat(),
+            (date.today() + timedelta(days=2)).isoformat(),
             "--job-token",
             "test-run",
             "--landing-uri",
             "s3://landing/root",
         ],
     )
-    assert current.exit_code == 2
-    assert "current market" in current.output
+    assert future.exit_code == 2
+    assert "current market" in future.output
 
 
 def test_cli_reports_safe_aws_failure_details(monkeypatch: Any) -> None:

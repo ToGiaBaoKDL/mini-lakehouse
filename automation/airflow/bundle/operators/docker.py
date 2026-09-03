@@ -36,6 +36,7 @@ def docker_task(
     mem_limit: str | None = None,
     inlets: Sequence[Asset] = (),
     outlets: Sequence[Asset] = (),
+    skip_on_exit_code: int | None = None,
 ) -> LoggedDockerOperator:
     task_environment = {
         **(environment or {}),
@@ -67,4 +68,5 @@ def docker_task(
         inlets=list(inlets),
         outlets=list(outlets),
         on_failure_callback=task_failure_callbacks(),
+        skip_on_exit_code=skip_on_exit_code,
     )

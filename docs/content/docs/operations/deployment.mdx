@@ -82,11 +82,11 @@ without putting them in Terraform state.
 
 The T0 handoff is `.secrets/dev/t0-trading/ssi.json`. Its canonical payload contains exactly
 `version`, `client_id`, `api_key`, and `api_secret`. After applying AWS infrastructure, initialize
-the dedicated database with `infra/runtime/postgres/deploy t0_trading`. The bounded REST-to-Iceberg
-DAG runs at 01:30 Tuesday through Saturday in the market timezone. A T0 image release starts one
-non-restarting 10-minute stream capture canary on OCI; continuous scheduling, signals, and execution
-remain disabled until their later delivery gates pass. Replay one successful terminal manifest with
-the manual `etl_emr_ingest_market_data_stream` DAG; the manifest URI is its only runtime parameter.
+the dedicated database with `infra/runtime/postgres/deploy t0_trading`. The REST and stream replay
+DAGs use exchange-local daily partitions and run at 21:00 Monday through Friday. A T0 image release
+starts one non-restarting 10-minute stream capture canary on OCI; continuous capture, signals, and
+execution remain disabled until their later delivery gates pass. Stream replay discovers terminal
+manifests below its exact trade-date prefix and is a clean no-op when none exist.
 
 ## Release workflows
 

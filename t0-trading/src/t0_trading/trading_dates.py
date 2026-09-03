@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import date, timedelta
+from datetime import date
 from typing import Protocol
 
 
@@ -32,36 +32,19 @@ def _record_date(record: object) -> date:
         raise TradingDateError("SSI trading history returned an invalid trading date.") from error
 
 
-def resolve_completed_trade_date(
+def require_observed_trade_date(
     market: MarketHistory,
     *,
-    before_date: date,
-    requested_date: date | None = None,
+    trade_date: date,
     index: str = "VN30",
-    lookback_days: int = 31,
 ) -> date:
-    """Resolve one SSI-observed trading date strictly before ``before_date``."""
-    if requested_date is not None and requested_date >= before_date:
-        raise TradingDateError("trade_date must be earlier than the current market date.")
-    if lookback_days < 1:
-        raise ValueError("lookback_days must be positive")
-
-    end_date = requested_date or before_date - timedelta(days=1)
-    start_date = requested_date or before_date - timedelta(days=lookback_days)
+    """Require SSI history to contain the exact requested trading date."""
+    formatted = trade_date.strftime("%Y/%m/%d")
     records = market.get_securities_summary_by_index_historical(
         index,
-        start_date.strftime("%Y/%m/%d"),
-        end_date.strftime("%Y/%m/%d"),
+        formatted,
+        formatted,
     )
-    observed_dates = {
-        observed
-        for record in records
-        if start_date <= (observed := _record_date(record)) <= end_date
-    }
-    if requested_date is not None:
-        if requested_date not in observed_dates:
-            raise TradingDateError("trade_date is not an SSI-observed completed trading day.")
-        return requested_date
-    if not observed_dates:
-        raise TradingDateError("SSI returned no completed trading day in the lookback window.")
-    return max(observed_dates)
+    if trade_date not in {_record_date(record) for record in records}:
+        raise TradingDateError("trade_date is not an SSI-observed trading day.")
+    return trade_date

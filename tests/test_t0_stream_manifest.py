@@ -14,6 +14,37 @@ SESSION_ID = "6b710ea5-f0eb-457e-bb58-73961428670a"
 TRADE_DATE = "2026-09-03"
 
 
+def test_stream_manifest_discovery_is_date_scoped_and_terminal_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    day_prefix = f"root/{RAW_PREFIX}/trade_date={TRADE_DATE}/"
+
+    def list_keys(*, bucket: str, prefix: str) -> tuple[str, ...]:
+        assert bucket == "landing"
+        assert prefix == day_prefix
+        return (
+            f"{day_prefix}session=bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/manifest.json",
+            f"{day_prefix}session=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/batches/one.json.gz",
+            f"{day_prefix}session=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/manifest.json",
+            f"{day_prefix}nested/session=ignored/manifest.json",
+        )
+
+    monkeypatch.setattr(
+        stream_manifest,
+        "list_keys",
+        list_keys,
+    )
+
+    assert stream_manifest.capture_manifest_uris(
+        "s3://landing/root",
+        TRADE_DATE,
+        RAW_PREFIX,
+    ) == (
+        f"s3://landing/{day_prefix}session=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/manifest.json",
+        f"s3://landing/{day_prefix}session=bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/manifest.json",
+    )
+
+
 def _capture(
     monkeypatch: pytest.MonkeyPatch,
     *,

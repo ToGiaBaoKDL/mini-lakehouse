@@ -22,7 +22,7 @@ from t0_trading.credentials import CredentialError, load_credentials
 from t0_trading.provider import authenticated
 from t0_trading.rest_capture import RestCaptureOptions, capture_rest
 from t0_trading.stream_capture import StreamCaptureOptions, capture_stream
-from t0_trading.trading_dates import TradingDateError, resolve_completed_trade_date
+from t0_trading.trading_dates import TradingDateError, require_observed_trade_date
 
 MARKET_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 
@@ -125,9 +125,9 @@ def capture_rest_command(
         raise typer.BadParameter(
             "must use YYYY-MM-DD format.", param_hint="--trade-date"
         ) from error
-    if parsed_trade_date >= datetime.now(MARKET_TIMEZONE).date():
+    if parsed_trade_date > datetime.now(MARKET_TIMEZONE).date():
         raise typer.BadParameter(
-            "must be earlier than the current market date.", param_hint="--trade-date"
+            "must not be later than the current market date.", param_hint="--trade-date"
         )
     environment = os.environ.get("LAKEHOUSE_ENVIRONMENT", "dev")
     effective_secret_id = secret_id or f"lakehouse/{environment}/t0-trading/ssi"
@@ -135,6 +135,10 @@ def capture_rest_command(
         credentials = load_credentials(effective_secret_id, region)
         store = S3CaptureStore(boto3.client("s3", region_name=region), landing_uri)
         with authenticated(credentials) as auth, Data(auth) as data:
+            require_observed_trade_date(
+                data.market_data,
+                trade_date=parsed_trade_date,
+            )
             manifest_uri = capture_rest(
                 data.market_data,
                 store,
@@ -149,53 +153,13 @@ def capture_rest_command(
     except CredentialError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error
+    except TradingDateError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=99) from error
     except Exception as error:  # SDK/AWS boundary: never print provider payload or credentials.
         typer.echo(f"SSI REST capture failed: {_safe_error(error)}", err=True)
         raise typer.Exit(code=1) from None
     typer.echo(manifest_uri)
-
-
-def resolve_trade_date_command(
-    before_date: Annotated[
-        str,
-        typer.Option(help="Exclusive market-local date in YYYY-MM-DD format."),
-    ],
-    trade_date: Annotated[
-        str,
-        typer.Option(help="Requested date, or an empty value to discover the latest trading day."),
-    ] = "",
-    secret_id: Annotated[
-        str | None,
-        typer.Option(help="Managed SSI market-data secret; defaults from the environment."),
-    ] = None,
-    region: Annotated[str, typer.Option(help="AWS region containing the managed secret.")] = (
-        "ap-southeast-1"
-    ),
-) -> None:
-    """Resolve and validate one completed SSI trading date."""
-    try:
-        exclusive_date = date.fromisoformat(before_date)
-        requested_date = date.fromisoformat(trade_date) if trade_date.strip() else None
-    except ValueError as error:
-        raise typer.BadParameter("dates must use YYYY-MM-DD format.") from error
-
-    environment = os.environ.get("LAKEHOUSE_ENVIRONMENT", "dev")
-    effective_secret_id = secret_id or f"lakehouse/{environment}/t0-trading/ssi"
-    try:
-        credentials = load_credentials(effective_secret_id, region)
-        with authenticated(credentials) as auth, Data(auth) as data:
-            resolved = resolve_completed_trade_date(
-                data.market_data,
-                before_date=exclusive_date,
-                requested_date=requested_date,
-            )
-    except (CredentialError, TradingDateError) as error:
-        typer.echo(str(error), err=True)
-        raise typer.Exit(code=1) from error
-    except Exception as error:  # SDK/AWS boundary: never print provider payload or credentials.
-        typer.echo(f"SSI trading-date resolution failed: {_safe_error(error)}", err=True)
-        raise typer.Exit(code=1) from None
-    typer.echo(resolved.isoformat())
 
 
 def capture_stream_command(
@@ -277,4 +241,3 @@ def main() -> None:
 app.command("certify")(certify)
 app.command("capture-rest")(capture_rest_command)
 app.command("capture-stream")(capture_stream_command)
-app.command("resolve-trade-date")(resolve_trade_date_command)

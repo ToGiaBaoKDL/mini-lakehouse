@@ -5,51 +5,31 @@ from airflow.sdk.execution_time import macros
 from config.templates import (
     DAG_START_DATE,
     LOCAL_TIMEZONE,
-    previous_local_date,
+    data_interval_start_date,
     runtime_value,
 )
 from jinja2 import StrictUndefined
 from jinja2.sandbox import SandboxedEnvironment
 
 
-def _render_source_date(source_date: str | None) -> str:
-    run_at = datetime(2026, 8, 5, 17, 30, tzinfo=UTC)
-    logical_date = datetime(2026, 8, 4, 17, 30, tzinfo=UTC)
+def _render_source_date() -> str:
+    interval_start = datetime(2026, 8, 4, 0, 30, tzinfo=UTC)
     return (
         SandboxedEnvironment()
-        .from_string(previous_local_date())
+        .from_string(data_interval_start_date())
         .render(
-            dag_run=SimpleNamespace(logical_date=logical_date, run_after=run_at),
+            data_interval_start=interval_start,
             macros=macros,
-            params={"source_date": source_date},
         )
     )
 
 
-def test_previous_local_date_accepts_standard_datetime() -> None:
-    assert _render_source_date(None) == "2026-08-05"
+def test_data_interval_start_date_accepts_standard_datetime() -> None:
+    assert _render_source_date() == "2026-08-04"
 
 
 def test_dag_start_date_uses_the_canonical_local_timezone() -> None:
     assert DAG_START_DATE.timezone_name == LOCAL_TIMEZONE
-
-
-def test_explicit_source_date_takes_precedence() -> None:
-    assert _render_source_date("2025-01-02") == "2025-01-02"
-
-
-def test_previous_local_date_supports_domain_specific_parameter_names() -> None:
-    rendered = (
-        SandboxedEnvironment()
-        .from_string(previous_local_date("trade_date"))
-        .render(
-            dag_run=SimpleNamespace(run_after=datetime(2026, 8, 5, 17, 30, tzinfo=UTC)),
-            macros=macros,
-            params={"trade_date": "2026-08-04"},
-        )
-    )
-
-    assert rendered == "2026-08-04"
 
 
 def test_required_runtime_value_renders_exactly() -> None:

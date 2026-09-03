@@ -1,13 +1,12 @@
 """Daily GitHub Archive source-to-curated processing on EMR Serverless."""
 
-from airflow.sdk import DAG, Param
-from airflow.sdk.definitions.param import ParamsDict
+from airflow.sdk import DAG
 from callbacks.notifications import dag_failure_callbacks, dag_success_callbacks
 from config.assets import CURATED_GITHUB
-from config.templates import DAG_START_DATE, previous_local_date, runtime_value
+from config.templates import DAG_START_DATE, data_interval_start_date, runtime_value
 from operators.emr import emr_spark_job
 
-SOURCE_DATE = previous_local_date()
+SOURCE_DATE = data_interval_start_date()
 
 with DAG(
     dag_id="etl_emr_ingest_github_archive",
@@ -18,16 +17,6 @@ with DAG(
     max_active_runs=1,
     on_failure_callback=dag_failure_callbacks(),
     on_success_callback=dag_success_callbacks(),
-    params=ParamsDict(
-        {
-            "source_date": Param(
-                default=None,
-                type=["null", "string"],
-                format="date",
-                description="UTC source day; defaults to the previous local calendar day.",
-            )
-        }
-    ),
     tags=["github", "etl", "emr", "iceberg"],
 ) as dag:
     emr_spark_job(

@@ -39,6 +39,16 @@ def head_object(bucket: str, key: str):
         raise
 
 
+def list_keys(*, bucket: str, prefix: str) -> tuple[str, ...]:
+    """List every object key below a bounded prefix using the SDK paginator."""
+    paginator = client().get_paginator("list_objects_v2")
+    return tuple(
+        item["Key"]
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix)
+        for item in page.get("Contents", [])
+    )
+
+
 def put_if_changed(
     *,
     bucket: str,
@@ -65,13 +75,7 @@ def put_if_changed(
 
 def delete_unlisted(*, bucket: str, prefix: str, retained_keys: set[str]) -> None:
     """Delete stale objects below one authoritative prefix in bounded batches."""
-    paginator = client().get_paginator("list_objects_v2")
-    stale = [
-        item["Key"]
-        for page in paginator.paginate(Bucket=bucket, Prefix=prefix)
-        for item in page.get("Contents", [])
-        if item["Key"] not in retained_keys
-    ]
+    stale = [key for key in list_keys(bucket=bucket, prefix=prefix) if key not in retained_keys]
     for offset in range(0, len(stale), 1000):
         client().delete_objects(
             Bucket=bucket,

@@ -6,7 +6,7 @@ from datetime import datetime
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from emr_jobs.common.s3 import head_object, read_bytes, split_uri
+from emr_jobs.common.s3 import head_object, join_key, list_keys, read_bytes, split_uri
 from emr_jobs.market_data.capture_manifest import (
     API_VERSION,
     SDK_VERSION,
@@ -54,6 +54,38 @@ class StreamCapture:
     api_version: str
     sdk_version: str
     batches: tuple[StreamBatch, ...]
+
+
+def capture_manifest_uris(
+    landing_uri: str,
+    trade_date: str,
+    raw_object_prefix: str,
+) -> tuple[str, ...]:
+    """Discover terminal session manifests for one source-owned trade-date prefix."""
+    try:
+        datetime.strptime(trade_date, "%Y-%m-%d")
+    except ValueError as error:
+        raise ValueError("source_date must use YYYY-MM-DD format") from error
+
+    bucket, landing_prefix = split_uri(landing_uri)
+    day_prefix = (
+        join_key(
+            landing_prefix,
+            raw_object_prefix,
+            f"trade_date={trade_date}",
+        )
+        + "/"
+    )
+    manifests = []
+    for key in list_keys(bucket=bucket, prefix=day_prefix):
+        relative = key.removeprefix(day_prefix)
+        if (
+            relative.startswith("session=")
+            and relative.count("/") == 1
+            and relative.endswith("/manifest.json")
+        ):
+            manifests.append(f"s3://{bucket}/{key}")
+    return tuple(sorted(manifests))
 
 
 def _digest(value: object, field: str) -> str:

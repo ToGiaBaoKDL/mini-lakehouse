@@ -15,12 +15,14 @@ Airflow image.
 
 ## Production DAGs
 
-| DAG                             | Execution                 | Trigger                              |
-| ------------------------------- | ------------------------- | ------------------------------------ |
-| `etl_emr_ingest_github_archive` | EMR Serverless            | `30 7 * * *`                         |
-| `etl_emr_ingest_arxiv_metadata` | EMR Serverless            | `0 11 * * *`                         |
-| `tl_docker_build_analytics`     | Isolated dbt Docker tasks | Curated GitHub or ArXiv asset update |
-| `gov_emr_maintain_iceberg`      | EMR Serverless            | `0 3 * * 0`                          |
+| DAG                                 | Execution                 | Trigger                               |
+| ----------------------------------- | ------------------------- | ------------------------------------- |
+| `etl_emr_ingest_github_archive`     | EMR Serverless            | `30 7 * * *`                          |
+| `etl_emr_ingest_arxiv_metadata`     | EMR Serverless            | `0 11 * * *`                          |
+| `etl_mix_ingest_market_data_rest`   | Docker + EMR Serverless   | 21:00 Monday-Friday, Asia/Ho_Chi_Minh |
+| `etl_emr_ingest_market_data_stream` | EMR Serverless            | 21:00 Monday-Friday, Asia/Ho_Chi_Minh |
+| `tl_docker_build_analytics`         | Isolated dbt Docker tasks | Curated GitHub or ArXiv asset update  |
+| `gov_emr_maintain_iceberg`          | EMR Serverless            | `0 3 * * 0`                           |
 
 There is no OCR DAG. OCR is an explicit local CLI action backed by Modal.
 
@@ -41,6 +43,25 @@ technology belongs in `worker_type`, while `scope` describes stable business or 
 - Airflow records logical asset success only after the producer succeeds.
 - Slack and SMTP notifications use Airflow connections loaded from Secrets Manager.
 - Airflow itself has no landing, curated, or analytics data permission.
+
+## Historical runs
+
+GitHub Archive, ArXiv metadata, and SSI REST derive their bounded source date from Airflow's
+time-based run context. Use Airflow 3's Backfill action for a date range instead of passing a custom
+date Param or maintaining a second DAG. Keep `catchup=False`: the scheduler processes only the
+latest interval automatically, while an explicit backfill controls historical creation with
+`none`, `failed`, or `completed` reprocessing behavior and its own concurrency limit.
+
+Use `none` to fill missing dates, `failed` after repairing a failed workflow, and `completed` only
+when intentionally taking and publishing a new source observation. Preview the range with the
+Backfill dry-run before a large request and keep source backfills at one active run unless the
+upstream API has been capacity-tested.
+
+The stream replay DAG discovers existing immutable terminal manifests for each partition date.
+Native backfill can therefore repair or republish captured raw sessions, but it cannot reconstruct a
+market session that the OCI capture service never recorded. Iceberg maintenance operates on current
+table state, and analytics is asset-triggered; both are rerun directly rather than historically
+backfilled.
 
 ## Operations
 
