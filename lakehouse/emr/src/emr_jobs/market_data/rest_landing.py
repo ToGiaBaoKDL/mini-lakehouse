@@ -6,7 +6,7 @@ from pyspark.sql.types import LongType, StringType, StructField, StructType
 
 from emr_jobs.common.contracts import spark_schema
 from emr_jobs.common.iceberg import qualified_name
-from emr_jobs.market_data.manifest import CaptureRun
+from emr_jobs.market_data.rest_manifest import CaptureRun
 from lakehouse.contracts.sources import SourceContract
 
 RAW_SCHEMA = StructType(

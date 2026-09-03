@@ -39,6 +39,7 @@ ALLOWED_ACTIONS = {"build", "ingest", "maintain"}
 EXPECTED_DAGS = {
     "etl_emr_ingest_arxiv_metadata",
     "etl_emr_ingest_github_archive",
+    "etl_emr_ingest_market_data_stream",
     "etl_mix_ingest_market_data",
     "gov_emr_maintain_iceberg",
     "tl_docker_build_analytics",
@@ -156,6 +157,23 @@ def test_market_data_dag_keeps_capture_and_publication_bounded() -> None:
     assert "--capture-manifest-uri" in arguments
     assert "{{ ti.xcom_pull(task_ids='capture_rest') }}" in arguments
     assert publish.outlets[0].uri == "lakehouse://curated/market-data"
+
+
+def test_market_data_stream_replay_is_manual_and_manifest_scoped() -> None:
+    dag = _dag(_bag(), "etl_emr_ingest_market_data_stream")
+
+    assert dag.schedule is None
+    assert dag.max_active_runs == 1
+    assert set(dag.params) == {"capture_manifest_uri"}
+    replay = dag.get_task("replay_stream_session")
+    assert isinstance(replay, LoggedEmrServerlessStartJobOperator)
+    arguments = replay.job_driver["sparkSubmit"]["entryPointArguments"]
+    assert arguments[:2] == [
+        "--capture-manifest-uri",
+        "{{ params.capture_manifest_uri or '' }}",
+    ]
+    assert "--contracts-uri" in arguments
+    assert replay.outlets[0].uri == "lakehouse://curated/market-data"
 
 
 def test_curated_assets_schedule_one_domain_aware_analytics_dag() -> None:

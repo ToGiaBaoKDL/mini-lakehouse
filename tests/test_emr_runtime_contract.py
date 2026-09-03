@@ -40,7 +40,8 @@ def test_emr_entrypoints_are_thin_python_adapters() -> None:
         "arxiv_metadata.py",
         "github_archive.py",
         "iceberg_maintenance.py",
-        "market_data.py",
+        "market_data_rest.py",
+        "market_data_stream.py",
     }
     for path in entrypoints:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -79,7 +80,9 @@ def test_spark_contract_adapter_supports_every_declared_numeric_type() -> None:
 
 
 def test_market_data_publication_uses_sdk_summary_fields() -> None:
-    source = Path("lakehouse/emr/src/emr_jobs/market_data/curated.py").read_text(encoding="utf-8")
+    source = Path("lakehouse/emr/src/emr_jobs/market_data/rest_curated.py").read_text(
+        encoding="utf-8"
+    )
 
     for sdk_field, curated_field in {
         "total_deal": "deal_volume",
@@ -101,10 +104,34 @@ def test_market_data_publication_uses_sdk_summary_fields() -> None:
 
 
 def test_market_data_manifest_uses_the_source_owned_raw_prefix() -> None:
-    job = Path("lakehouse/emr/src/emr_jobs/market_data/job.py").read_text(encoding="utf-8")
-    manifest = Path("lakehouse/emr/src/emr_jobs/market_data/manifest.py").read_text(
+    job = Path("lakehouse/emr/src/emr_jobs/market_data/rest_job.py").read_text(encoding="utf-8")
+    manifest = Path("lakehouse/emr/src/emr_jobs/market_data/rest_manifest.py").read_text(
         encoding="utf-8"
     )
 
     assert "source.raw_object_prefix" in job
     assert "RAW_PREFIX" not in manifest
+
+
+def test_market_data_stream_replay_uses_verified_sdk_models_and_top_three_quotes() -> None:
+    job = Path("lakehouse/emr/src/emr_jobs/market_data/stream_job.py").read_text(encoding="utf-8")
+    landing = Path("lakehouse/emr/src/emr_jobs/market_data/stream_landing.py").read_text(
+        encoding="utf-8"
+    )
+    curated = Path("lakehouse/emr/src/emr_jobs/market_data/stream_curated.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "source.raw_object_prefix" in job
+    assert '"trade_ticks", "quote_snapshots", "quote_levels"' in job
+    assert 'F.sha2("message_json", 256)' in landing
+    assert "duplicate_keys" in landing
+    assert "batch_count_mismatches" in landing
+    assert "TradeMessage" in curated
+    assert "QuoteMessage" in curated
+    assert "FULL_TOP_3" in curated
+    assert "size(bid_prices) != 10" in curated
+    assert "exists(slice(bid_prices, 4, 7), value -> value != 0)" in curated
+    assert "IntervalMessage" not in curated
+    assert "ForeignRoomMessage" not in curated
+    assert "WHEN NOT MATCHED THEN INSERT *" in curated

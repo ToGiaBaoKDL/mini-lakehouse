@@ -3,9 +3,10 @@ title: T0 Trading
 description: An evidence-gated SSI market-data and assisted-decision capability.
 ---
 
-T0 Trading has a catalog foundation, a scheduled bounded REST publication path, and a bounded stream
-capture command. Continuous scheduling remains disabled while full-session behavior is certified.
-The capability does not emit signals, initialize an SSI trading client, or place broker orders.
+T0 Trading has a catalog foundation, a scheduled bounded REST publication path, and bounded stream
+capture plus manifest-scoped replay. Continuous streaming remains disabled while full-session
+behavior is certified. The capability does not emit signals, initialize an SSI trading client, or
+place broker orders.
 
 ## Provider boundary
 
@@ -46,23 +47,37 @@ not scrape prose or construct an undocumented SSI subscription to populate them.
 
 The physical tables intentionally use one table per durable grain, not one table per engine:
 
-| Tables                                                                          | State                                | Reason                                                                                                               |
-| ------------------------------------------------------------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| REST `records`, `request_publications`                                          | Active in bounded publication        | Immutable records and one terminal request marker are different grains.                                              |
-| `securities`, `daily_security_summaries`, `intraday_bars_1m`, `index_snapshots` | Active in bounded publication        | Current certified REST normalization output.                                                                         |
-| Stream `messages`, `sessions`                                                   | Capture implemented; replay deferred | Message lineage and terminal connection-session completeness are the two durable grains.                             |
-| `trade_ticks`, `quote_snapshots`, `quote_levels`                                | Reserved for replay                  | Quotes use a parent snapshot plus one-to-many levels; ticks retain receive order.                                    |
-| `market_status_events`, `corporate_actions`                                     | Deferred                             | Required for fail-closed gates and adjusted replay, but have no writer until their structured sources are certified. |
+| Tables                                                                          | State                            | Reason                                                                                                               |
+| ------------------------------------------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| REST `records`, `request_publications`                                          | Active in bounded publication    | Immutable records and one terminal request marker are different grains.                                              |
+| `securities`, `daily_security_summaries`, `intraday_bars_1m`, `index_snapshots` | Active in bounded publication    | Current certified REST normalization output.                                                                         |
+| Stream `messages`, `sessions`                                                   | Active in manifest-scoped replay | Message lineage and terminal connection-session completeness are the two durable grains.                             |
+| `trade_ticks`, `quote_snapshots`, `quote_levels`                                | Active in manifest-scoped replay | Quotes use a parent snapshot plus one-to-many levels; ticks retain receive order.                                    |
+| `market_status_events`, `corporate_actions`                                     | Deferred                         | Required for fail-closed gates and adjusted replay, but have no writer until their structured sources are certified. |
 
-The bounded EMR job requires only its four active curated tables. Reserved contracts do not add a
-runtime branch, generic repository, or empty application service.
+Each bounded EMR job requires only the landing and curated tables that it writes. Deferred
+contracts do not add a runtime branch, generic repository, or empty application service.
 
 The bounded stream command subscribes to aggregate symbol data and one-minute intervals for
 `VIC,VHM`. SDK callbacks only serialize into a bounded in-memory queue; the main process writes
 content-addressed gzip micro-batches, so S3 latency cannot block the WebSocket receive thread. Each
 terminal session manifest owns batch/object checksums, sequence bounds, heartbeat health, and the
-disconnect classification. Landing publication will enrich message rows with that manifest lineage;
-a separate batch-publication table would repeat the same fact and is intentionally absent.
+disconnect classification. Replay enriches landing messages with that manifest lineage; a separate
+batch-publication table would repeat the same fact and is intentionally absent.
+
+The deployed canary established the concrete callback shapes used by replay:
+
+| SDK callback         | Certified shape                                                     | Replay destination                        |
+| -------------------- | ------------------------------------------------------------------- | ----------------------------------------- |
+| `TradeMessage`       | Symbol, provider time, price, quantity, side, and cumulative volume | `trade_ticks`                             |
+| `QuoteMessage`       | Ten price/quantity slots with the advertised Top 3 populated        | `quote_snapshots` and `quote_levels`      |
+| `IntervalMessage`    | Provider one-minute OHLCV observation                               | Landing evidence for later reconciliation |
+| `ForeignRoomMessage` | Cumulative foreign flow and room observation                        | Landing evidence; not a final daily fact  |
+| `dict`               | DATA-channel subscription acknowledgement                           | Landing evidence only                     |
+
+Replay does not turn interval observations into authoritative bars or partial foreign-room updates
+into final daily summaries. Completed-day REST bars remain the current authoritative path;
+deterministic trade-built bars are deferred until full-session replay is certified.
 
 An image release reconciles one 10-minute OCI canary with `restart: no` and waits for the first
 provider heartbeat before declaring the deployment healthy. The process handles
@@ -100,6 +115,18 @@ Each bounded capture stays below one deterministic source-owned boundary:
 Iceberg data use the catalog-wide `tables/<table>/` namespace; capture code never constructs those
 table locations.
 
+## Stream replay
+
+The manual `etl_emr_ingest_market_data_stream` DAG accepts exactly one terminal manifest URI. EMR
+verifies the manifest checksum stored in S3 metadata, clean disconnect state, heartbeat evidence,
+SDK/API versions, contiguous session and batch sequences, batch identities, object locations,
+checksums, record counts, message hashes, timestamps, and duplicate keys before writing anything.
+
+Landing publication merges `messages` by `(stream_session_id, receive_sequence)` and writes the
+terminal `sessions` row last. Curated publication then maps only certified `TradeMessage` and
+`QuoteMessage` records. Retries reuse the same manifest and insert no duplicates; a conflicting
+manifest, message, tick, snapshot, or level fails closed.
+
 ## Synchronize and certify
 
 The ignored local handoff is `.secrets/dev/t0-trading/ssi.json`. Synchronization validates file
@@ -121,16 +148,17 @@ not committed.
 
 The REST scope includes one completed trading date of SDK-auto-paginated master data for reference,
 floor, and ceiling prices; current and historical one-minute bars; security summaries; and index
-context. Streaming uses the SDK aggregate symbol subscription for trades, quotes, and foreign-room
-updates, plus the SDK one-minute interval and index subscriptions. Provider interval bars are
-reconciliation evidence; deterministic bars built from captured trades remain the replay source.
+context. Bounded capture uses the SDK aggregate symbol subscription for trades, quotes, and
+foreign-room updates plus the SDK one-minute interval subscription. Certification separately probes
+the index subscription. Provider interval bars are reconciliation evidence; deterministic bars
+built from captured trades remain a later delivery gate.
 
 ## Delivery gates
 
 1. Keep the scheduled REST capture bounded to one SSI-observed completed trading date.
-2. Run the bounded capture command on OCI and observe disconnect, reconnect, resubscribe, and
-   ordering behavior over a full market session.
-3. Add replay from terminal session manifests into the reserved landing and curated stream tables.
+2. Replay the deployed canary and reconcile its landing and curated counts.
+3. Run capture and replay over a full market session to observe disconnect, reconnect, resubscribe,
+   ordering, duplicate payloads, and Top-3 completeness behavior.
 4. Enable continuous scheduling only after durable capture and stale-data gates pass.
 
 The canonical implementation checklist remains the repository plan during development; this page

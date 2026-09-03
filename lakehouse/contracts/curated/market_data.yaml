@@ -117,7 +117,7 @@ tables:
 
   - key: quote_snapshots
     name: quote_snapshots
-    description: One captured quote update or full book version with certified completeness semantics.
+    description: One captured SSI Top-3 quote snapshot with certified completeness semantics.
     primary_key: [stream_session_id, receive_sequence]
     columns:
       - {field_id: 1, name: stream_session_id, data_type: string, required: true, description: Capture-owned SDK session identifier.}
@@ -128,15 +128,15 @@ tables:
       - {field_id: 6, name: received_at, data_type: timestamptz, required: true, description: UTC SDK callback receipt time.}
       - {field_id: 7, name: available_at, data_type: timestamptz, required: true, description: Earliest UTC consumer availability time.}
       - {field_id: 8, name: processed_at, data_type: timestamptz, required: true, description: UTC normalization completion time.}
-      - {field_id: 9, name: update_kind, data_type: string, required: true, description: Certified full-snapshot or delta classification.}
-      - {field_id: 10, name: is_complete, data_type: boolean, required: true, description: Whether this version is safe for order-book features.}
+      - {field_id: 9, name: update_kind, data_type: string, required: true, description: Certified FULL_TOP_3 snapshot classification.}
+      - {field_id: 10, name: is_complete, data_type: boolean, required: true, description: Whether the advertised Top-3 depth is complete and safe for order-book features.}
       - {field_id: 11, name: message_sha256, data_type: string, required: true, description: Immutable lineage and duplicate fingerprint.}
     partitioning:
       - {field_id: 1000, field: trade_date, transform: identity}
 
   - key: quote_levels
     name: quote_levels
-    description: Normalized bid and ask levels belonging to one quote snapshot.
+    description: Normalized non-empty Top-3 bid and ask levels belonging to one quote snapshot.
     primary_key: [stream_session_id, receive_sequence, side, level]
     columns:
       - {field_id: 1, name: stream_session_id, data_type: string, required: true, description: Parent quote session identifier.}

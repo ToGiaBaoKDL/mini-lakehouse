@@ -43,7 +43,7 @@ tables:
       - {field_id: 3, name: disconnected_at, data_type: timestamptz, required: true, description: UTC time the SDK connection ended.}
       - {field_id: 4, name: disconnect_kind, data_type: string, required: true, description: Sanitized expected or unexpected disconnect classification.}
       - {field_id: 5, name: sdk_version, data_type: string, required: true, description: Pinned SSI SDK package version.}
-      - {field_id: 6, name: message_count, data_type: long, required: true, description: Total business callback messages durably captured in the session.}
+      - {field_id: 6, name: message_count, data_type: long, required: true, description: "Total DATA callback messages durably captured in the session, including subscription acknowledgements."}
       - {field_id: 7, name: first_receive_sequence, data_type: long, required: false, description: First captured local sequence when the session emitted a message.}
       - {field_id: 8, name: last_receive_sequence, data_type: long, required: false, description: Last captured local sequence when the session emitted a message.}
       - {field_id: 9, name: manifest_key, data_type: string, required: true, description: Immutable manifest for all published session batches.}

@@ -4,7 +4,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
-from emr_jobs.market_data import manifest
+from emr_jobs.market_data import rest_manifest as manifest
 
 from lakehouse.contracts import load_contracts
 

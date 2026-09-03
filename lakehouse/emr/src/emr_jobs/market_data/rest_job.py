@@ -7,9 +7,9 @@ from loguru import logger
 from emr_jobs.common.contracts import load_contracts
 from emr_jobs.common.iceberg import require_tables
 from emr_jobs.common.spark import configure_logging, session
-from emr_jobs.market_data.curated import publish as publish_curated
-from emr_jobs.market_data.landing import publish as publish_landing
-from emr_jobs.market_data.manifest import load_capture, require_bounded_scope
+from emr_jobs.market_data.rest_curated import publish as publish_curated
+from emr_jobs.market_data.rest_landing import publish as publish_landing
+from emr_jobs.market_data.rest_manifest import load_capture, require_bounded_scope
 
 
 def run(*, source_date: str, capture_manifest_uri: str, contracts_uri: str) -> None:

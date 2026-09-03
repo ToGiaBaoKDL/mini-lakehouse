@@ -3,7 +3,7 @@
 from pyspark.sql import SparkSession
 
 from emr_jobs.common.iceberg import qualified_name
-from emr_jobs.market_data.manifest import CaptureRun
+from emr_jobs.market_data.rest_manifest import CaptureRun
 from lakehouse.contracts.curated import CuratedProductContract
 
 

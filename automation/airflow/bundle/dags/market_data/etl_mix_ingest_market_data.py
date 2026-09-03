@@ -73,7 +73,7 @@ with DAG(
     publish = emr_spark_job(
         task_id="publish_market_data",
         job_name=f"ssi-market-data-{TRADE_DATE}",
-        entry_point="entrypoints/market_data.py",
+        entry_point="entrypoints/market_data_rest.py",
         entry_point_arguments=[
             "--source-date",
             TRADE_DATE,
