@@ -23,7 +23,8 @@ COPY lakehouse/catalog/pyproject.toml ./lakehouse/catalog/pyproject.toml
 COPY lakehouse/catalog/src ./lakehouse/catalog/src
 COPY ocr-engine/pyproject.toml ./ocr-engine/pyproject.toml
 COPY ocr-engine/src ./ocr-engine/src
-COPY lakehouse/contracts ./lakehouse/contracts
+COPY lakehouse/contracts/curated/arxiv.yaml ./lakehouse/contracts/curated/arxiv.yaml
+COPY lakehouse/contracts/sources/arxiv.yaml ./lakehouse/contracts/sources/arxiv.yaml
 COPY infra/runtime/identity/install-aws-signing-helper /tmp/install-aws-signing-helper
 
 RUN --mount=type=cache,target=/root/.cache/uv \

@@ -445,6 +445,20 @@ def test_each_custom_component_has_a_thin_release_caller() -> None:
             assert assertion in source
 
 
+def test_arxiv_lens_release_tracks_only_its_owned_contracts() -> None:
+    caller = _workflow("release-arxiv-lens.yml")
+    dockerfile = Path("arxiv-lens/Dockerfile").read_text(encoding="utf-8")
+
+    for contract in (
+        "lakehouse/contracts/curated/arxiv.yaml",
+        "lakehouse/contracts/sources/arxiv.yaml",
+    ):
+        assert f"- {contract}" in caller
+        assert f"COPY {contract} ./{contract}" in dockerfile
+    assert "lakehouse/contracts/**" not in caller
+    assert "COPY lakehouse/contracts ./lakehouse/contracts" not in dockerfile
+
+
 def test_airflow_deploy_only_changes_reuse_the_runtime_image() -> None:
     caller = _workflow("release-airflow.yml")
     reusable = _workflow("_release-image.yml")

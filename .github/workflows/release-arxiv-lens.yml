@@ -10,7 +10,8 @@ on:
       - ocr-engine/src/**
       - ocr-engine/pyproject.toml
       - lakehouse/catalog/**
-      - lakehouse/contracts/**
+      - lakehouse/contracts/curated/arxiv.yaml
+      - lakehouse/contracts/sources/arxiv.yaml
       - pyproject.toml
       - uv.lock
       - infra/runtime/identity/install-aws-signing-helper
