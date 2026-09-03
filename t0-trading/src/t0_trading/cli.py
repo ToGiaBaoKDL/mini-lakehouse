@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 import boto3
 import typer
@@ -17,6 +18,9 @@ from t0_trading.capture import CaptureOptions, S3CaptureStore, capture_rest
 from t0_trading.certification import CertificationOptions, run_certification
 from t0_trading.credentials import CredentialError, load_credentials
 from t0_trading.provider import authenticated
+from t0_trading.trading_dates import TradingDateError, resolve_completed_trade_date
+
+MARKET_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 
 
 def _safe_error(error: Exception) -> str:
@@ -117,6 +121,10 @@ def capture_rest_command(
         raise typer.BadParameter(
             "must use YYYY-MM-DD format.", param_hint="--trade-date"
         ) from error
+    if parsed_trade_date >= datetime.now(MARKET_TIMEZONE).date():
+        raise typer.BadParameter(
+            "must be earlier than the current market date.", param_hint="--trade-date"
+        )
     environment = os.environ.get("LAKEHOUSE_ENVIRONMENT", "dev")
     effective_secret_id = secret_id or f"lakehouse/{environment}/t0-trading/ssi"
     try:
@@ -143,6 +151,49 @@ def capture_rest_command(
     typer.echo(manifest_uri)
 
 
+def resolve_trade_date_command(
+    before_date: Annotated[
+        str,
+        typer.Option(help="Exclusive market-local date in YYYY-MM-DD format."),
+    ],
+    trade_date: Annotated[
+        str,
+        typer.Option(help="Requested date, or an empty value to discover the latest trading day."),
+    ] = "",
+    secret_id: Annotated[
+        str | None,
+        typer.Option(help="Managed SSI market-data secret; defaults from the environment."),
+    ] = None,
+    region: Annotated[str, typer.Option(help="AWS region containing the managed secret.")] = (
+        "ap-southeast-1"
+    ),
+) -> None:
+    """Resolve and validate one completed SSI trading date."""
+    try:
+        exclusive_date = date.fromisoformat(before_date)
+        requested_date = date.fromisoformat(trade_date) if trade_date.strip() else None
+    except ValueError as error:
+        raise typer.BadParameter("dates must use YYYY-MM-DD format.") from error
+
+    environment = os.environ.get("LAKEHOUSE_ENVIRONMENT", "dev")
+    effective_secret_id = secret_id or f"lakehouse/{environment}/t0-trading/ssi"
+    try:
+        credentials = load_credentials(effective_secret_id, region)
+        with authenticated(credentials) as auth, Data(auth) as data:
+            resolved = resolve_completed_trade_date(
+                data.market_data,
+                before_date=exclusive_date,
+                requested_date=requested_date,
+            )
+    except (CredentialError, TradingDateError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+    except Exception as error:  # SDK/AWS boundary: never print provider payload or credentials.
+        typer.echo(f"SSI trading-date resolution failed: {_safe_error(error)}", err=True)
+        raise typer.Exit(code=1) from None
+    typer.echo(resolved.isoformat())
+
+
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
@@ -157,3 +208,4 @@ def main() -> None:
 
 app.command("certify")(certify)
 app.command("capture-rest")(capture_rest_command)
+app.command("resolve-trade-date")(resolve_trade_date_command)

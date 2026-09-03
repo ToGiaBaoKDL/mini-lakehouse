@@ -5,6 +5,7 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from botocore.exceptions import ClientError
 from t0_trading.capture import (
@@ -212,7 +213,11 @@ def test_capture_options_reject_noncanonical_scope() -> None:
             raise AssertionError("Expected noncanonical symbols to be rejected")
 
 
-def test_cli_help_and_trade_date_validation_do_not_initialize_aws() -> None:
+def test_cli_help_and_trade_date_validation_do_not_initialize_aws(monkeypatch: Any) -> None:
+    def unexpected_aws(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("validation must happen before AWS initialization")
+
+    monkeypatch.setattr("t0_trading.cli.load_credentials", unexpected_aws)
     runner = CliRunner()
     help_result = runner.invoke(app, ["--help"])
     assert help_result.exit_code == 0
@@ -232,6 +237,22 @@ def test_cli_help_and_trade_date_validation_do_not_initialize_aws() -> None:
     )
     assert invalid.exit_code == 2
     assert "YYYY-MM-DD" in invalid.output
+
+    current_date = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date().isoformat()
+    current = runner.invoke(
+        app,
+        [
+            "capture-rest",
+            "--trade-date",
+            current_date,
+            "--job-token",
+            "test-run",
+            "--landing-uri",
+            "s3://landing/root",
+        ],
+    )
+    assert current.exit_code == 2
+    assert "current market" in current.output
 
 
 def test_capture_cli_reports_safe_aws_failure_details(monkeypatch: Any) -> None:

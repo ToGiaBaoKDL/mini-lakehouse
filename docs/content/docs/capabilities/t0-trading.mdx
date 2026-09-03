@@ -15,6 +15,13 @@ subscriptions. Each bounded streaming cycle also sends one SDK-owned heartbeat p
 subscribing. Application code does not reproduce SSI endpoints, WebSocket topics, retry logic, or
 protocol messages. Certification uses only the Data and Stream DATA clients.
 
+In the pinned SDK, `subscribe_board` is a convenience subscription for board-wide trade, quote,
+and foreign-room topics; it is not a market-calendar or session-status API. A successful
+subscription acknowledgement without business messages therefore cannot distinguish an exchange
+holiday from a quiet feed or provider outage. Continuous consumers must fail closed on stale data,
+while completed-date REST publication continues to use the independently observed trading-date
+resolver.
+
 Terraform owns the empty SSI and PostgreSQL secret containers, an immutable ECR repository, and a
 dedicated Roles Anywhere identity. The capture runtime can read only the SSI credential and can
 read or write only the SSI REST raw prefix. It has no Parameter Store, stream, operational-ledger,
@@ -53,7 +60,12 @@ runtime branch, generic repository, or empty application service.
 
 ## Bounded publication
 
-The manual `etl_mix_ingest_market_data` DAG accepts one `trade_date` and has a single writer path:
+The manual `etl_mix_ingest_market_data` DAG accepts one `trade_date` and has a single writer path.
+Before capture, it uses SSI's historical VN30 summaries to validate an explicit completed date or
+resolve the latest observed trading day before the market-local DAG run date. Current and future
+dates fail closed, so an accidental in-session trigger cannot publish partial REST facts as final.
+
+The publication flow is:
 
 1. the `t0-trading` image composes official Data SDK calls and writes content-addressed, gzipped
    records plus checksum manifests below the SSI REST source prefix;

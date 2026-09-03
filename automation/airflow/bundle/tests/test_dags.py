@@ -134,8 +134,10 @@ def test_market_data_dag_keeps_capture_and_publication_bounded() -> None:
     assert dag.schedule is None
     assert dag.max_active_runs == 1
     assert "trade_date" in dag.params
+    resolve = dag.get_task("resolve_trade_date")
     capture = dag.get_task("capture_rest")
     publish = dag.get_task("publish_market_data")
+    assert isinstance(resolve, LoggedDockerOperator)
     assert isinstance(capture, LoggedDockerOperator)
     assert isinstance(publish, LoggedEmrServerlessStartJobOperator)
     assert capture.image == "t0-trading:runtime"
@@ -145,6 +147,10 @@ def test_market_data_dag_keeps_capture_and_publication_bounded() -> None:
     assert capture.command[:2] == ["capture-rest", "--trade-date"]
     assert "--job-token" in capture.command
     assert "--landing-uri" in capture.command
+    assert isinstance(resolve.command, list)
+    assert resolve.command[:2] == ["resolve-trade-date", "--before-date"]
+    assert "--trade-date" in resolve.command
+    assert resolve.downstream_task_ids == {"capture_rest"}
     assert capture.downstream_task_ids == {"publish_market_data"}
     arguments = publish.job_driver["sparkSubmit"]["entryPointArguments"]
     assert "--capture-manifest-uri" in arguments
