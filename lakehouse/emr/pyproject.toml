@@ -8,6 +8,7 @@ dependencies = [
     "lakehouse",
     "loguru==0.7.3",
     "requests>=2.32,<3",
+    "tzdata>=2026.1,<2027",
     "typer==0.27.0",
     "urllib3>=2.6,<3",
 ]

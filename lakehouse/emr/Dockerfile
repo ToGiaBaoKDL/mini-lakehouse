@@ -22,6 +22,8 @@ COPY lakehouse/emr/entrypoints ./lakehouse/emr/entrypoints
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --project lakehouse/emr --frozen --no-dev --group build --no-editable
 RUN mkdir -p /output/entrypoints \
+    && lakehouse/emr/.venv/bin/python -c \
+        "from zoneinfo import ZoneInfo; ZoneInfo('Asia/Ho_Chi_Minh')" \
     && lakehouse/emr/.venv/bin/venv-pack -p lakehouse/emr/.venv -o /output/python.tar.gz \
     && cp lakehouse/emr/entrypoints/*.py /output/entrypoints/ \
     && lakehouse/emr/.venv/bin/python -m lakehouse.contracts.bundle \
