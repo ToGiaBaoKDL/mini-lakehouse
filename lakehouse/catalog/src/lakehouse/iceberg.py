@@ -18,6 +18,11 @@ def load_iceberg_catalog(
         "client.region": region_name,
         "client.access-key-id": frozen.access_key,
         "client.secret-access-key": frozen.secret_key,
+        # Keep control-plane access resilient and avoid per-bucket DNS lookups.
+        "s3.connect-timeout": "30",
+        "s3.endpoint": f"https://s3.{region_name}.amazonaws.com",
+        "s3.force-virtual-addressing": "false",
+        "s3.request-timeout": "60",
     }
     if frozen.token:
         properties["client.session-token"] = frozen.token

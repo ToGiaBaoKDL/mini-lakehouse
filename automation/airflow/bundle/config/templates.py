@@ -19,3 +19,11 @@ def data_interval_start_date(timezone: str = LOCAL_TIMEZONE) -> str:
         "{{ data_interval_start.astimezone("
         f"macros.dateutil.tz.gettz('{timezone}')).strftime('%Y-%m-%d') }}}}"
     )
+
+
+def partition_key_or_run_date(timezone: str = LOCAL_TIMEZONE) -> str:
+    """Use a scheduled partition key or the local trigger date for manual runs."""
+    return (
+        "{{ dag_run.partition_key or dag_run.run_after.astimezone("
+        f"macros.dateutil.tz.gettz('{timezone}')).strftime('%Y-%m-%d') }}}}"
+    )

@@ -6,6 +6,7 @@ from config.templates import (
     DAG_START_DATE,
     LOCAL_TIMEZONE,
     data_interval_start_date,
+    partition_key_or_run_date,
     runtime_value,
 )
 from jinja2 import StrictUndefined
@@ -26,6 +27,38 @@ def _render_source_date() -> str:
 
 def test_data_interval_start_date_accepts_standard_datetime() -> None:
     assert _render_source_date() == "2026-08-04"
+
+
+def test_partition_date_prefers_scheduled_key() -> None:
+    rendered = (
+        SandboxedEnvironment()
+        .from_string(partition_key_or_run_date())
+        .render(
+            dag_run=SimpleNamespace(
+                partition_key="2026-08-01",
+                run_after=datetime(2026, 8, 4, 18, 30, tzinfo=UTC),
+            ),
+            macros=macros,
+        )
+    )
+
+    assert rendered == "2026-08-01"
+
+
+def test_partition_date_defaults_to_local_manual_trigger_date() -> None:
+    rendered = (
+        SandboxedEnvironment()
+        .from_string(partition_key_or_run_date())
+        .render(
+            dag_run=SimpleNamespace(
+                partition_key=None,
+                run_after=datetime(2026, 8, 4, 18, 30, tzinfo=UTC),
+            ),
+            macros=macros,
+        )
+    )
+
+    assert rendered == "2026-08-05"
 
 
 def test_dag_start_date_uses_the_canonical_local_timezone() -> None:

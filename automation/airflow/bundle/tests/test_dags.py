@@ -151,7 +151,7 @@ def test_market_data_rest_dag_keeps_capture_and_publication_bounded() -> None:
     assert capture.command[:2] == ["capture-rest", "--trade-date"]
     assert "--job-token" in capture.command
     assert "--landing-uri" in capture.command
-    assert "{{ dag_run.partition_key }}" in capture.command
+    assert any("dag_run.partition_key or dag_run.run_after" in item for item in capture.command)
     assert capture.skip_on_exit_code == [99]
     assert capture.downstream_task_ids == {"publish_market_data_rest"}
     arguments = publish.job_driver["sparkSubmit"]["entryPointArguments"]
@@ -171,7 +171,8 @@ def test_market_data_stream_replay_discovers_one_date_partition() -> None:
     replay = dag.get_task("replay_stream_session")
     assert isinstance(replay, LoggedEmrServerlessStartJobOperator)
     arguments = replay.job_driver["sparkSubmit"]["entryPointArguments"]
-    assert arguments[:2] == ["--source-date", "{{ dag_run.partition_key }}"]
+    assert arguments[0] == "--source-date"
+    assert "dag_run.partition_key or dag_run.run_after" in arguments[1]
     assert "--landing-uri" in arguments
     assert "--contracts-uri" in arguments
     assert replay.outlets[0].uri == "lakehouse://curated/market-data"

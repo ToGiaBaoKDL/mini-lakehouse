@@ -46,11 +46,12 @@ def test_apply_creates_missing_table_from_contract() -> None:
     identifier, location, contract = _binding(("landing_github_archive", "events_raw"))
     catalog = create_autospec(Catalog, instance=True)
     table = _matching_table(contract, location)
-    catalog.create_table_if_not_exists.return_value = table
+    catalog.table_exists.return_value = False
+    catalog.create_table.return_value = table
 
     apply_table(catalog, identifier, location, contract)
 
-    request = catalog.create_table_if_not_exists.call_args.kwargs
+    request = catalog.create_table.call_args.kwargs
     assert request["identifier"] == ("landing_github_archive", "events_raw")
     assert request["location"].endswith("/api/github_archive/tables/events_raw")
     assert request["properties"] == {"format-version": "2", **TABLE_PROPERTIES}
@@ -62,7 +63,8 @@ def test_apply_never_auto_migrates_partition_drift() -> None:
     catalog = create_autospec(Catalog, instance=True)
     table = _matching_table(contract, location)
     cast(Any, table.spec).return_value = PartitionSpec()
-    catalog.create_table_if_not_exists.return_value = table
+    catalog.table_exists.return_value = True
+    catalog.load_table.return_value = table
 
     with pytest.raises(RuntimeError, match=r"explicit migration.*partition_spec"):
         apply_table(catalog, identifier, location, contract)
@@ -95,7 +97,8 @@ def test_apply_reconciles_backward_compatible_schema_evolution() -> None:
         expected,
         expected,
     ]
-    catalog.create_table_if_not_exists.return_value = table
+    catalog.table_exists.return_value = True
+    catalog.load_table.return_value = table
 
     apply_table(catalog, identifier, location, contract)
 
@@ -122,7 +125,8 @@ def test_apply_rejects_incompatible_schema_before_mutation() -> None:
     catalog = create_autospec(Catalog, instance=True)
     table = _matching_table(contract, location)
     cast(Any, table.schema).side_effect = [incompatible, incompatible, incompatible]
-    catalog.create_table_if_not_exists.return_value = table
+    catalog.table_exists.return_value = True
+    catalog.load_table.return_value = table
 
     with pytest.raises(RuntimeError, match=r"explicit migration: schema"):
         apply_table(catalog, identifier, location, contract)
@@ -148,7 +152,8 @@ def test_apply_never_changes_decimal_scale_implicitly() -> None:
     catalog = create_autospec(Catalog, instance=True)
     table = _matching_table(contract, location)
     cast(Any, table.schema).side_effect = [previous, previous, previous]
-    catalog.create_table_if_not_exists.return_value = table
+    catalog.table_exists.return_value = True
+    catalog.load_table.return_value = table
 
     with pytest.raises(RuntimeError, match=r"explicit migration: schema"):
         apply_table(catalog, identifier, location, contract)

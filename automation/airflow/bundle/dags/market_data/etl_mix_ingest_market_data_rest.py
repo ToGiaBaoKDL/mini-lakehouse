@@ -5,11 +5,16 @@ from datetime import timedelta
 from airflow.sdk import DAG, CronPartitionTimetable
 from callbacks.notifications import dag_failure_callbacks, dag_success_callbacks
 from config.assets import CURATED_MARKET_DATA
-from config.templates import DAG_START_DATE, LOCAL_TIMEZONE, runtime_value
+from config.templates import (
+    DAG_START_DATE,
+    LOCAL_TIMEZONE,
+    partition_key_or_run_date,
+    runtime_value,
+)
 from operators.docker import docker_task
 from operators.emr import emr_spark_job
 
-TRADE_DATE = "{{ dag_run.partition_key }}"
+TRADE_DATE = partition_key_or_run_date()
 CAPTURE_MANIFEST = "{{ ti.xcom_pull(task_ids='capture_rest') }}"
 
 with DAG(

@@ -111,5 +111,9 @@ def test_catalog_shares_resolved_credentials_with_glue_and_s3(monkeypatch: Monke
             "client.access-key-id": "access",
             "client.secret-access-key": "secret",
             "client.session-token": "session",
+            "s3.connect-timeout": "30",
+            "s3.endpoint": "https://s3.ap-southeast-1.amazonaws.com",
+            "s3.force-virtual-addressing": "false",
+            "s3.request-timeout": "60",
         },
     )

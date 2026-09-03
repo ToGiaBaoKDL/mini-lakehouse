@@ -3,10 +3,15 @@
 from airflow.sdk import DAG, CronPartitionTimetable
 from callbacks.notifications import dag_failure_callbacks, dag_success_callbacks
 from config.assets import CURATED_MARKET_DATA
-from config.templates import DAG_START_DATE, LOCAL_TIMEZONE, runtime_value
+from config.templates import (
+    DAG_START_DATE,
+    LOCAL_TIMEZONE,
+    partition_key_or_run_date,
+    runtime_value,
+)
 from operators.emr import emr_spark_job
 
-TRADE_DATE = "{{ dag_run.partition_key }}"
+TRADE_DATE = partition_key_or_run_date()
 
 with DAG(
     dag_id="etl_emr_ingest_market_data_stream",

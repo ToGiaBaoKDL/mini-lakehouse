@@ -111,13 +111,16 @@ def apply_table(
     contract: ManagedIcebergTableContract,
 ) -> None:
     expected_schema = iceberg_schema(contract.columns, contract.primary_key)
-    table = catalog.create_table_if_not_exists(
-        identifier=identifier.iceberg,
-        schema=expected_schema,
-        location=location,
-        partition_spec=partition_spec(contract.columns, contract.partitioning),
-        properties={"format-version": str(FORMAT_VERSION), **TABLE_PROPERTIES},
-    )
+    if catalog.table_exists(identifier.iceberg):
+        table = catalog.load_table(identifier.iceberg)
+    else:
+        table = catalog.create_table(
+            identifier=identifier.iceberg,
+            schema=expected_schema,
+            location=location,
+            partition_spec=partition_spec(contract.columns, contract.partitioning),
+            properties={"format-version": str(FORMAT_VERSION), **TABLE_PROPERTIES},
+        )
     drift = table_drift(table, location, contract)
     unsafe = [item for item in drift if item != "schema" and not item.startswith("properties.")]
     if unsafe:
