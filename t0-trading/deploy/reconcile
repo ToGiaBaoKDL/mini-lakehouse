@@ -1,0 +1,42 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -gt 1 ]; then
+    printf '%s\n' "Usage: t0-trading/deploy/reconcile [image]" >&2
+    exit 2
+fi
+
+image=${1:-t0-trading:local}
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+environment=${LAKEHOUSE_ENVIRONMENT:-dev}
+identity_dir=${AWS_IDENTITY_DIR:-"$HOME/.config/lakehouse/$environment/aws"}
+host_config="$identity_dir/t0-trading/host-config"
+
+test -r "$host_config" || {
+    printf '%s\n' "The t0-trading host identity config is missing." >&2
+    exit 1
+}
+test -r "$identity_dir/t0-trading/config" || {
+    printf '%s\n' "The t0-trading container identity config is missing." >&2
+    exit 1
+}
+
+aws_runtime() {
+    env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+        AWS_SHARED_CREDENTIALS_FILE=/dev/null \
+        AWS_CONFIG_FILE="$host_config" AWS_PROFILE=default aws "$@"
+}
+
+landing_uri=$(aws_runtime ssm get-parameter \
+    --name "/lakehouse/$environment/storage/landing_uri" \
+    --query Parameter.Value --output text)
+
+export LAKEHOUSE_ENVIRONMENT=$environment
+export AWS_IDENTITY_DIR=$identity_dir
+export LOCAL_UID=${LOCAL_UID:-$(id -u)}
+export T0_TRADING_IMAGE=$image
+export T0_LANDING_URI=$landing_uri
+export T0_STREAM_DURATION_SECONDS=${T0_STREAM_DURATION_SECONDS:-600}
+
+docker compose --project-name t0-trading -f "$script_dir/compose.yaml" \
+    up -d --remove-orphans --wait --wait-timeout 120

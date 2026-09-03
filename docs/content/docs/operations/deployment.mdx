@@ -83,8 +83,9 @@ without putting them in Terraform state.
 The T0 handoff is `.secrets/dev/t0-trading/ssi.json`. Its canonical payload contains exactly
 `version`, `client_id`, `api_key`, and `api_secret`. After applying AWS infrastructure, initialize
 the dedicated database with `infra/runtime/postgres/deploy t0_trading`. The bounded REST-to-Iceberg
-DAG remains manual while its reconciliation gate is exercised; continuous streaming, signals, and
-execution remain disabled until their later delivery gates pass.
+DAG runs at 01:30 Tuesday through Saturday in the market timezone. A T0 image release starts one
+non-restarting 10-minute stream capture canary on OCI; continuous scheduling, signals, and execution
+remain disabled until their later delivery gates pass.
 
 ## Release workflows
 

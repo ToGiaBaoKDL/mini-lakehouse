@@ -43,7 +43,7 @@ tables:
       - {field_id: 3, name: disconnected_at, data_type: timestamptz, required: true, description: UTC time the SDK connection ended.}
       - {field_id: 4, name: disconnect_kind, data_type: string, required: true, description: Sanitized expected or unexpected disconnect classification.}
       - {field_id: 5, name: sdk_version, data_type: string, required: true, description: Pinned SSI SDK package version.}
-      - {field_id: 6, name: message_count, data_type: long, required: true, description: Total callback messages observed in the session.}
+      - {field_id: 6, name: message_count, data_type: long, required: true, description: Total business callback messages durably captured in the session.}
       - {field_id: 7, name: first_receive_sequence, data_type: long, required: false, description: First captured local sequence when the session emitted a message.}
       - {field_id: 8, name: last_receive_sequence, data_type: long, required: false, description: Last captured local sequence when the session emitted a message.}
       - {field_id: 9, name: manifest_key, data_type: string, required: true, description: Immutable manifest for all published session batches.}
@@ -51,19 +51,3 @@ tables:
       - {field_id: 11, name: published_at, data_type: timestamptz, required: true, description: UTC time the terminal session summary became durable.}
     partitioning:
       - {field_id: 1000, field: connected_at, transform: day, name: connection_day}
-
-  - key: batch_publications
-    name: batch_publications
-    description: One immutable publication record for every durable stream capture batch.
-    primary_key: [batch_id]
-    columns:
-      - {field_id: 1, name: batch_id, data_type: string, required: true, description: Deterministic capture batch identifier.}
-      - {field_id: 2, name: stream_session_id, data_type: string, required: true, description: SDK connection session that produced the batch.}
-      - {field_id: 3, name: first_receive_sequence, data_type: long, required: true, description: First local sequence included in the batch.}
-      - {field_id: 4, name: last_receive_sequence, data_type: long, required: true, description: Last local sequence included in the batch.}
-      - {field_id: 5, name: message_count, data_type: long, required: true, description: Number of callback messages in the batch.}
-      - {field_id: 6, name: object_key, data_type: string, required: true, description: Immutable S3 object for the batch.}
-      - {field_id: 7, name: object_sha256, data_type: string, required: true, description: SHA-256 of the immutable batch object.}
-      - {field_id: 8, name: published_at, data_type: timestamptz, required: true, description: UTC time the batch publication marker became durable.}
-    partitioning:
-      - {field_id: 1000, field: published_at, transform: day, name: publication_day}

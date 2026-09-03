@@ -171,14 +171,14 @@ def test_ocr_is_local_cli_plus_modal_without_an_oci_runtime() -> None:
 def test_t0_certification_uses_the_official_read_only_sdk_boundary() -> None:
     project = Path("t0-trading/pyproject.toml").read_text(encoding="utf-8")
     certification = Path("t0-trading/src/t0_trading/certification.py").read_text(encoding="utf-8")
-    capture = Path("t0-trading/src/t0_trading/capture.py").read_text(encoding="utf-8")
+    capture = Path("t0-trading/src/t0_trading/rest_capture.py").read_text(encoding="utf-8")
     cli = Path("t0-trading/src/t0_trading/cli.py").read_text(encoding="utf-8")
     credentials = Path("t0-trading/src/t0_trading/credentials.py").read_text(encoding="utf-8")
     provider = Path("t0-trading/src/t0_trading/provider.py").read_text(encoding="utf-8")
 
     assert '"ssi-sdk==3.2.1"' in project
     assert "from ssi_sdk import Data, Stream" in certification
-    assert "from ssi_sdk import Data" in cli
+    assert "from ssi_sdk import Data, Stream" in cli
     assert "from ssi_sdk import Auth, Config" in provider
     assert "market.get_ohlc_1minute_historical" in capture
     assert "market.get_master_data_historical" in capture
@@ -193,6 +193,9 @@ def test_t0_certification_uses_the_official_read_only_sdk_boundary() -> None:
     assert "subscribe_symbol_ohlcv" in certification
     assert "subscribe_index" in certification
     assert "client.ping()" in certification
+    assert "client.ping()" in Path("t0-trading/src/t0_trading/stream_capture.py").read_text(
+        encoding="utf-8"
+    )
     assert "Trading" not in certification
     assert "private_key=" not in certification
     assert 'boto3.client("secretsmanager"' in credentials
@@ -236,7 +239,10 @@ def test_each_component_owns_its_deployment_operation() -> None:
         )
     )
     cloudflare = Path("infra/runtime/cloudflare/deploy").read_text(encoding="utf-8")
-    t0_trading = Path("t0-trading/deploy/deploy").read_text(encoding="utf-8")
+    t0_trading = "\n".join(
+        Path(path).read_text(encoding="utf-8")
+        for path in ("t0-trading/deploy/deploy", "t0-trading/deploy/reconcile")
+    )
 
     assert "docker compose --project-name airflow" in airflow
     assert "--force-recreate" not in airflow
@@ -249,6 +255,9 @@ def test_each_component_owns_its_deployment_operation() -> None:
     assert "docker compose --project-name lightdash" in lightdash
     assert '"$bundle_root/infra/runtime/postgres/deploy" lightdash' in lightdash
     assert "infra/runtime/postgres/deploy" not in t0_trading
+    assert "docker compose --project-name t0-trading" in t0_trading
+    assert "up -d --remove-orphans --wait --wait-timeout 120" in t0_trading
+    assert "storage/landing_uri" in t0_trading
     assert "--force-recreate" not in lightdash
     assert "docker compose --project-name arxiv-lens" in lens
     assert '"$1" dbt:runtime' in dbt

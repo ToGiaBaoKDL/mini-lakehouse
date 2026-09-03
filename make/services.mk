@@ -3,6 +3,7 @@ AIRFLOW_COMPOSE := docker compose --project-name airflow -f automation/airflow/d
 ARXIV_LENS_COMPOSE := docker compose --project-name arxiv-lens -f arxiv-lens/deploy/compose.yaml
 LIGHTDASH_COMPOSE := docker compose --project-name lightdash -f analytics/lightdash/deploy/compose.yaml
 CLOUDFLARE_COMPOSE := docker compose --project-name cloudflare -f infra/runtime/cloudflare/compose.yaml
+T0_TRADING_COMPOSE := docker compose --project-name t0-trading -f t0-trading/deploy/compose.yaml
 CLOUDFLARE_CONNECTOR_IMAGE := $(shell sed -n '1p' infra/runtime/cloudflare/image)
 NETDATA_COMPOSE := docker compose --project-name netdata -f sysops/netdata/compose.yaml
 NETDATA_IMAGE := $(shell sed -n '1p' sysops/netdata/image)
@@ -12,13 +13,14 @@ AIRFLOW_COMPOSE_CONFIG := AIRFLOW_DATABASE_PASSWORD=unused AIRFLOW_FERNET_KEY=un
 LIGHTDASH_COMPOSE_CONFIG := AWS_REGION=ap-southeast-1 LIGHTDASH_DATABASE_PASSWORD=unused LIGHTDASH_IMAGE=lightdash:local LIGHTDASH_S3_BUCKET=validation LIGHTDASH_SECRET=unused-unused-unused-unused-unused-unused LIGHTDASH_SITE_URL=https://analytics.tgblab.io.vn $(LIGHTDASH_COMPOSE)
 CLOUDFLARE_COMPOSE_CONFIG := CLOUDFLARE_IMAGE=$(CLOUDFLARE_CONNECTOR_IMAGE) CLOUDFLARE_TUNNEL_TOKEN_FILE=/dev/null LOCAL_GID=0 $(CLOUDFLARE_COMPOSE)
 NETDATA_COMPOSE_CONFIG := NETDATA_CONFIG_SHA256=validation NETDATA_HOSTNAME=validation-host NETDATA_IMAGE=$(NETDATA_IMAGE) NETDATA_POSTGRES_PGPASS='*:*:*:lakehouse_monitor:validation' $(NETDATA_COMPOSE)
+T0_TRADING_COMPOSE_CONFIG := T0_LANDING_URI=s3://validation/landing $(T0_TRADING_COMPOSE)
 
 .PHONY: metadata-postgres-secrets-init metadata-postgres-up metadata-postgres-down metadata-postgres-logs \
 	metadata-postgres-backup metadata-postgres-restore \
 	airflow-secrets-init airflow-up airflow-down airflow-logs airflow-dags \
 	arxiv-lens-up arxiv-lens-down arxiv-lens-logs \
 	lightdash-secrets-init lightdash-ci-secret-sync \
-	t0-trading-ssi-secret-sync t0-trading-certify \
+	t0-trading-ssi-secret-sync t0-trading-certify t0-trading-down t0-trading-logs \
 	t0-trading-secrets-init \
 	lightdash-up lightdash-down lightdash-logs \
 	signoz-secrets-init \
@@ -49,6 +51,12 @@ t0-trading-secrets-init: ## Initialize the T0 trading PostgreSQL credential exac
 
 t0-trading-certify: ## Capture sanitized SSI Data REST and Stream DATA evidence.
 	uv run t0-trading certify
+
+t0-trading-down: ## Stop the bounded stream capture canary.
+	$(T0_TRADING_COMPOSE_CONFIG) down --remove-orphans
+
+t0-trading-logs: ## Follow bounded stream capture logs.
+	$(T0_TRADING_COMPOSE_CONFIG) logs --follow --tail=200
 
 metadata-postgres-up: preflight ## Start shared metadata PostgreSQL without changing application databases.
 	infra/runtime/postgres/deploy
@@ -111,3 +119,4 @@ services-ps: ## Show self-hosted service state.
 	$(AIRFLOW_COMPOSE_CONFIG) ps
 	$(LIGHTDASH_COMPOSE_CONFIG) ps
 	$(ARXIV_LENS_COMPOSE) ps
+	$(T0_TRADING_COMPOSE_CONFIG) ps

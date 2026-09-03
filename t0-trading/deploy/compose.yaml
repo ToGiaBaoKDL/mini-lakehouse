@@ -1,0 +1,31 @@
+# Bounded SSI stream capture canary. Continuous scheduling remains intentionally disabled.
+
+services:
+  stream-capture:
+    image: "${T0_TRADING_IMAGE:-t0-trading:local}"
+    user: "${LOCAL_UID}:0"
+    init: true
+    command:
+      - capture-stream
+      - --landing-uri
+      - ${T0_LANDING_URI}
+      - --duration-seconds
+      - ${T0_STREAM_DURATION_SECONDS:-600}
+      - --ready-file
+      - /tmp/t0-stream-ready
+    environment:
+      LAKEHOUSE_ENVIRONMENT: ${LAKEHOUSE_ENVIRONMENT}
+      AWS_CONFIG_FILE: /run/aws/config
+      AWS_EC2_METADATA_DISABLED: "true"
+    volumes:
+      - ${AWS_IDENTITY_DIR}/t0-trading:/run/aws:ro
+    cpus: 0.5
+    mem_limit: 512m
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/t0-stream-ready"]
+      interval: 2s
+      timeout: 1s
+      retries: 50
+      start_period: 5s
+    restart: "no"

@@ -9,6 +9,7 @@ ARXIV_LENS_COMPOSE = "arxiv-lens/deploy/compose.yaml"
 LIGHTDASH_COMPOSE = "analytics/lightdash/deploy/compose.yaml"
 POSTGRES_COMPOSE = "infra/runtime/postgres/compose.yaml"
 CLOUDFLARE_COMPOSE = "infra/runtime/cloudflare/compose.yaml"
+T0_TRADING_COMPOSE = "t0-trading/deploy/compose.yaml"
 AIRFLOW_PROJECT = Path("automation/airflow")
 AIRFLOW_RUNTIME = AIRFLOW_PROJECT / "runtime"
 
@@ -37,6 +38,7 @@ def test_compose_owns_only_self_hosted_application_services() -> None:
         "metadata-postgres-bootstrap",
     }
     assert set(_compose(CLOUDFLARE_COMPOSE)["services"]) == {"cloudflare-tunnel"}
+    assert set(_compose(T0_TRADING_COMPOSE)["services"]) == {"stream-capture"}
 
 
 def test_airflow_uses_local_executor_and_required_runtime_components() -> None:
@@ -482,14 +484,40 @@ def test_arxiv_lens_receives_only_its_explicit_environment() -> None:
     assert service["volumes"] == ["${AWS_IDENTITY_DIR}/arxiv-lens:/run/aws:ro"]
 
 
+def test_t0_stream_capture_is_bounded_and_uses_its_workload_identity() -> None:
+    service = _compose(T0_TRADING_COMPOSE)["services"]["stream-capture"]
+
+    assert service["image"] == "${T0_TRADING_IMAGE:-t0-trading:local}"
+    assert service["user"] == "${LOCAL_UID}:0"
+    assert service["restart"] == "no"
+    assert service["init"] is True
+    assert service["command"] == [
+        "capture-stream",
+        "--landing-uri",
+        "${T0_LANDING_URI}",
+        "--duration-seconds",
+        "${T0_STREAM_DURATION_SECONDS:-600}",
+        "--ready-file",
+        "/tmp/t0-stream-ready",
+    ]
+    assert service["healthcheck"]["test"] == ["CMD", "test", "-f", "/tmp/t0-stream-ready"]
+    assert service["volumes"] == ["${AWS_IDENTITY_DIR}/t0-trading:/run/aws:ro"]
+    assert set(service["environment"]) == {
+        "LAKEHOUSE_ENVIRONMENT",
+        "AWS_CONFIG_FILE",
+        "AWS_EC2_METADATA_DISABLED",
+    }
+
+
 def test_all_container_images_are_immutable() -> None:
     airflow_dockerfile = (AIRFLOW_RUNTIME / "Dockerfile").read_text(encoding="utf-8")
     dbt_dockerfile = Path("analytics/dbt-project/Dockerfile").read_text(encoding="utf-8")
     lens_dockerfile = Path("arxiv-lens/Dockerfile").read_text(encoding="utf-8")
     emr_dockerfile = Path("lakehouse/emr/Dockerfile").read_text(encoding="utf-8")
+    t0_dockerfile = Path("t0-trading/Dockerfile").read_text(encoding="utf-8")
     compose = "\n".join(
         Path(path).read_text(encoding="utf-8")
-        for path in (AIRFLOW_COMPOSE, POSTGRES_COMPOSE, CLOUDFLARE_COMPOSE)
+        for path in (AIRFLOW_COMPOSE, POSTGRES_COMPOSE, CLOUDFLARE_COMPOSE, T0_TRADING_COMPOSE)
     )
 
     assert not Path("Dockerfile").exists()
@@ -505,6 +533,7 @@ def test_all_container_images_are_immutable() -> None:
     assert "dbt deps" in dbt_dockerfile
     assert "USER dbt" in dbt_dockerfile
     assert "USER lens" in lens_dockerfile
+    assert "USER t0" in t0_dockerfile
     assert "HEALTHCHECK" in lens_dockerfile
     assert "PYTHONPATH=/app/arxiv-lens/src" in lens_dockerfile
     dockerignore = Path(".dockerignore").read_text(encoding="utf-8")
@@ -515,8 +544,10 @@ def test_all_container_images_are_immutable() -> None:
     assert "postgres:17.10@sha256:" in compose
     assert "public.ecr.aws/amazonlinux/amazonlinux:2023-minimal@sha256:" in emr_dockerfile
     assert "ghcr.io/astral-sh/uv:0.11.30@sha256:" in emr_dockerfile
-    dockerfiles = "\n".join((airflow_dockerfile, dbt_dockerfile, lens_dockerfile, emr_dockerfile))
-    assert dockerfiles.count("ghcr.io/astral-sh/uv:0.11.30@sha256:") == 4
+    dockerfiles = "\n".join(
+        (airflow_dockerfile, dbt_dockerfile, lens_dockerfile, emr_dockerfile, t0_dockerfile)
+    )
+    assert dockerfiles.count("ghcr.io/astral-sh/uv:0.11.30@sha256:") == 5
     assert ":latest" not in f"{dockerfiles}\n{compose}"
 
 

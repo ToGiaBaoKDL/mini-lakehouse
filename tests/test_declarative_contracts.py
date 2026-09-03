@@ -28,6 +28,10 @@ def test_repository_contracts_form_one_glue_registry() -> None:
     assert contracts.source("ssi_fastconnect_stream").raw_object_prefix == (
         "stream/ssi_fastconnect_stream/raw"
     )
+    assert {table.name for table in contracts.source("ssi_fastconnect_stream").tables} == {
+        "messages",
+        "sessions",
+    }
 
 
 def test_primary_keys_compile_to_iceberg_identifier_fields() -> None:

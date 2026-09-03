@@ -10,6 +10,8 @@ from ssi_sdk import Auth, Config
 
 from t0_trading.credentials import Credentials
 
+SSI_API_VERSION = "v3"
+
 
 @contextmanager
 def authenticated(credentials: Credentials) -> Generator[Any, None, None]:

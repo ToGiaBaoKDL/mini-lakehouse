@@ -1,4 +1,4 @@
-"""Manual bounded SSI REST capture and lakehouse publication."""
+"""Scheduled bounded SSI REST capture and lakehouse publication."""
 
 from datetime import timedelta
 
@@ -20,7 +20,7 @@ CAPTURE_MANIFEST = "{{ ti.xcom_pull(task_ids='capture_rest') }}"
 with DAG(
     dag_id="etl_mix_ingest_market_data",
     description="Capture one SSI trade date and publish reconciled market-data Iceberg tables.",
-    schedule=None,
+    schedule="30 1 * * 2-6",
     start_date=DAG_START_DATE,
     catchup=False,
     max_active_runs=1,

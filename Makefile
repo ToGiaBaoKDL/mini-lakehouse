@@ -88,6 +88,7 @@ lint: ## Run formatting, linting, and static type checks.
 		analytics/lightdash/deploy/reconcile \
 		analytics/lightdash/deploy/sync-ci-secret \
 		t0-trading/deploy/deploy \
+		t0-trading/deploy/reconcile \
 		t0-trading/deploy/sync-ssi-secret \
 		docs/deploy/sync-ci-secret \
 		analytics/dbt-project/deploy/deploy
@@ -109,6 +110,7 @@ compose-validate: ## Validate self-hosted service Compose files.
 	$(LIGHTDASH_COMPOSE_CONFIG) config --quiet
 	$(CLOUDFLARE_COMPOSE_CONFIG) config --quiet
 	$(NETDATA_COMPOSE_CONFIG) config --quiet
+	$(T0_TRADING_COMPOSE_CONFIG) config --quiet
 	COLLECTOR_IMAGE=validation:local COLLECTOR_CONFIG_SHA256=validation \
 		COLLECTOR_HOSTNAME=validation-host PG_MONITOR_PASSWORD=validation docker compose \
 		--project-name signoz-collection-agent \

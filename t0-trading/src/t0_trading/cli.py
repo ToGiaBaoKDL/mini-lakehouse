@@ -4,20 +4,24 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 from datetime import date, datetime
 from pathlib import Path
+from threading import Event
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
 import boto3
 import typer
 from botocore.exceptions import ClientError
-from ssi_sdk import Data
+from ssi_sdk import Data, Stream
 
-from t0_trading.capture import CaptureOptions, S3CaptureStore, capture_rest
+from t0_trading.capture_store import S3CaptureStore
 from t0_trading.certification import CertificationOptions, run_certification
 from t0_trading.credentials import CredentialError, load_credentials
 from t0_trading.provider import authenticated
+from t0_trading.rest_capture import RestCaptureOptions, capture_rest
+from t0_trading.stream_capture import StreamCaptureOptions, capture_stream
 from t0_trading.trading_dates import TradingDateError, resolve_completed_trade_date
 
 MARKET_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
@@ -134,7 +138,7 @@ def capture_rest_command(
             manifest_uri = capture_rest(
                 data.market_data,
                 store,
-                CaptureOptions(
+                RestCaptureOptions(
                     trade_date=parsed_trade_date,
                     job_token=job_token,
                     symbols=_values(symbols, "symbols"),
@@ -194,6 +198,70 @@ def resolve_trade_date_command(
     typer.echo(resolved.isoformat())
 
 
+def capture_stream_command(
+    landing_uri: Annotated[str, typer.Option(help="Landing S3 root URI.")],
+    secret_id: Annotated[
+        str | None,
+        typer.Option(help="Managed SSI market-data secret; defaults from the environment."),
+    ] = None,
+    region: Annotated[str, typer.Option(help="AWS region for the secret and landing bucket.")] = (
+        "ap-southeast-1"
+    ),
+    symbols: Annotated[str, typer.Option(help="Comma-separated stock symbols.")] = "VIC,VHM",
+    duration_seconds: Annotated[float, typer.Option(min=1, max=86_400)] = 600,
+    heartbeat_seconds: Annotated[float, typer.Option(min=5, max=300)] = 30,
+    stale_after_seconds: Annotated[float, typer.Option(min=10, max=900)] = 90,
+    flush_seconds: Annotated[float, typer.Option(min=1, max=60)] = 5,
+    batch_size: Annotated[int, typer.Option(min=1, max=10_000)] = 500,
+    ready_file: Annotated[
+        Path | None,
+        typer.Option(help="Optional runtime readiness marker written after the first heartbeat."),
+    ] = None,
+) -> None:
+    """Capture one bounded SSI stream session as immutable S3 micro-batches."""
+    environment = os.environ.get("LAKEHOUSE_ENVIRONMENT", "dev")
+    effective_secret_id = secret_id or f"lakehouse/{environment}/t0-trading/ssi"
+    try:
+        options = StreamCaptureOptions(
+            symbols=_values(symbols, "symbols"),
+            duration_seconds=duration_seconds,
+            heartbeat_seconds=heartbeat_seconds,
+            stale_after_seconds=stale_after_seconds,
+            flush_seconds=flush_seconds,
+            batch_size=batch_size,
+        )
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from error
+    if ready_file is not None:
+        ready_file.unlink(missing_ok=True)
+    stop = Event()
+    previous_handlers = {
+        signum: signal.signal(signum, lambda _signum, _frame: stop.set())
+        for signum in (signal.SIGINT, signal.SIGTERM)
+    }
+    try:
+        credentials = load_credentials(effective_secret_id, region)
+        store = S3CaptureStore(boto3.client("s3", region_name=region), landing_uri)
+        with authenticated(credentials) as auth, Stream(auth) as stream:
+            manifest_uri = capture_stream(
+                stream.streaming,
+                store,
+                options,
+                stop=stop,
+                on_ready=(lambda: ready_file.touch()) if ready_file is not None else None,
+            )
+    except CredentialError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+    except Exception as error:  # SDK/AWS boundary: never print provider payload or credentials.
+        typer.echo(f"SSI stream capture failed: {_safe_error(error)}", err=True)
+        raise typer.Exit(code=1) from None
+    finally:
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
+    typer.echo(manifest_uri)
+
+
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
@@ -208,4 +276,5 @@ def main() -> None:
 
 app.command("certify")(certify)
 app.command("capture-rest")(capture_rest_command)
+app.command("capture-stream")(capture_stream_command)
 app.command("resolve-trade-date")(resolve_trade_date_command)

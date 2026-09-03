@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import cast
 
 import yaml
-from t0_trading.capture import SSI_REST_RAW_PREFIX
+from t0_trading.rest_capture import SSI_REST_RAW_PREFIX
 
 from lakehouse.contracts import load_contracts
 

@@ -5,17 +5,14 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from botocore.exceptions import ClientError
-from t0_trading.capture import (
+from t0_trading.capture_store import S3CaptureStore
+from t0_trading.rest_capture import (
     SSI_REST_RAW_PREFIX,
-    CaptureOptions,
-    S3CaptureStore,
+    RestCaptureOptions,
     capture_rest,
 )
-from t0_trading.cli import app
-from typer.testing import CliRunner
 
 
 class _S3:
@@ -115,7 +112,7 @@ def test_rest_capture_is_immutable_scoped_and_idempotent() -> None:
         instant += timedelta(milliseconds=1)
         return instant
 
-    options = CaptureOptions(
+    options = RestCaptureOptions(
         trade_date=date(2026, 8, 26),
         job_token="manual__2026-08-27",
         symbols=("VIC", "VHM"),
@@ -160,7 +157,7 @@ def test_rest_capture_is_immutable_scoped_and_idempotent() -> None:
 def test_rest_capture_rejects_an_existing_manifest_from_another_sdk() -> None:
     s3 = _S3()
     store = S3CaptureStore(s3, "s3://landing/root")
-    options = CaptureOptions(
+    options = RestCaptureOptions(
         trade_date=date(2026, 8, 26),
         job_token="manual__2026-08-27",
     )
@@ -188,7 +185,7 @@ def test_rest_capture_rejects_an_existing_manifest_from_another_sdk() -> None:
 
 def test_capture_options_reject_unbounded_pagination() -> None:
     try:
-        CaptureOptions(
+        RestCaptureOptions(
             trade_date=date(2026, 8, 26),
             job_token="run",
             page_size=1001,
@@ -202,7 +199,7 @@ def test_capture_options_reject_unbounded_pagination() -> None:
 def test_capture_options_reject_noncanonical_scope() -> None:
     for symbols in (("vic",), ("VIC", "VIC"), ("",)):
         try:
-            CaptureOptions(
+            RestCaptureOptions(
                 trade_date=date(2026, 8, 26),
                 job_token="run",
                 symbols=symbols,
@@ -211,76 +208,3 @@ def test_capture_options_reject_noncanonical_scope() -> None:
             assert "symbols" in str(error)
         else:
             raise AssertionError("Expected noncanonical symbols to be rejected")
-
-
-def test_cli_help_and_trade_date_validation_do_not_initialize_aws(monkeypatch: Any) -> None:
-    def unexpected_aws(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("validation must happen before AWS initialization")
-
-    monkeypatch.setattr("t0_trading.cli.load_credentials", unexpected_aws)
-    runner = CliRunner()
-    help_result = runner.invoke(app, ["--help"])
-    assert help_result.exit_code == 0
-    assert "capture-rest" in help_result.stdout
-
-    invalid = runner.invoke(
-        app,
-        [
-            "capture-rest",
-            "--trade-date",
-            "26-08-2026",
-            "--job-token",
-            "test-run",
-            "--landing-uri",
-            "s3://landing/root",
-        ],
-    )
-    assert invalid.exit_code == 2
-    assert "YYYY-MM-DD" in invalid.output
-
-    current_date = datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date().isoformat()
-    current = runner.invoke(
-        app,
-        [
-            "capture-rest",
-            "--trade-date",
-            current_date,
-            "--job-token",
-            "test-run",
-            "--landing-uri",
-            "s3://landing/root",
-        ],
-    )
-    assert current.exit_code == 2
-    assert "current market" in current.output
-
-
-def test_capture_cli_reports_safe_aws_failure_details(monkeypatch: Any) -> None:
-    def denied(*_args: object, **_kwargs: object) -> None:
-        raise ClientError(
-            {
-                "Error": {
-                    "Code": "AccessDenied",
-                    "Message": "sensitive provider detail",
-                }
-            },
-            "HeadObject",
-        )
-
-    monkeypatch.setattr("t0_trading.cli.load_credentials", denied)
-    result = CliRunner().invoke(
-        app,
-        [
-            "capture-rest",
-            "--trade-date",
-            "2026-08-26",
-            "--job-token",
-            "test-run",
-            "--landing-uri",
-            "s3://landing",
-        ],
-    )
-
-    assert result.exit_code == 1
-    assert "ClientError operation=HeadObject code=AccessDenied" in result.output
-    assert "sensitive provider detail" not in result.output

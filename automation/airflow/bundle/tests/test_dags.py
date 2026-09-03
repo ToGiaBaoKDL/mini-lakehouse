@@ -131,7 +131,7 @@ def test_source_dags_are_bounded_parameterized_emr_jobs() -> None:
 def test_market_data_dag_keeps_capture_and_publication_bounded() -> None:
     dag = _dag(_bag(), "etl_mix_ingest_market_data")
 
-    assert dag.schedule is None
+    assert str(dag.schedule) == "30 1 * * 2-6"
     assert dag.max_active_runs == 1
     assert "trade_date" in dag.params
     resolve = dag.get_task("resolve_trade_date")
