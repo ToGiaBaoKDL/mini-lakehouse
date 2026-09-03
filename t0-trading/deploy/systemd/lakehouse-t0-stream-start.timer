@@ -1,0 +1,11 @@
+[Unit]
+Description=Start SSI FastConnect capture on weekday mornings
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 08:00:00 Asia/Ho_Chi_Minh
+Persistent=true
+AccuracySec=1min
+Unit=lakehouse-t0-stream-capture.service
+
+[Install]
+WantedBy=timers.target

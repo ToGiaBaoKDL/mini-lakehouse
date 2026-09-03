@@ -1,0 +1,18 @@
+[Unit]
+Description=SSI FastConnect live market-data capture
+Requires=docker.service
+After=docker.service network-online.target
+StartLimitIntervalSec=5min
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=ubuntu
+ExecCondition=/usr/local/sbin/lakehouse-t0-stream-window
+ExecCondition=/usr/bin/docker container inspect --format={{.State.Status}} lakehouse-t0-stream-capture
+ExecStart=/usr/bin/docker start --attach lakehouse-t0-stream-capture
+ExecStop=-/usr/bin/docker stop --time 30 lakehouse-t0-stream-capture
+Restart=on-failure
+RestartSec=15s
+TimeoutStartSec=2min
+TimeoutStopSec=45s

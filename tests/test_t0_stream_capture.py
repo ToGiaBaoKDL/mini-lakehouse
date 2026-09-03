@@ -15,6 +15,10 @@ from t0_trading.stream_capture import (
 )
 
 
+def test_stream_capture_defaults_bound_flush_latency_to_thirty_seconds() -> None:
+    assert StreamCaptureOptions().flush_seconds == 30
+
+
 class _Store:
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}

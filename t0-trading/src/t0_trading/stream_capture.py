@@ -36,7 +36,7 @@ class StreamCaptureOptions:
     duration_seconds: float = 600
     heartbeat_seconds: float = 30
     stale_after_seconds: float = 90
-    flush_seconds: float = 5
+    flush_seconds: float = 30
     batch_size: int = 500
     queue_size: int = 10_000
 

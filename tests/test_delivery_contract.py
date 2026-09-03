@@ -256,7 +256,10 @@ def test_each_component_owns_its_deployment_operation() -> None:
     assert '"$bundle_root/infra/runtime/postgres/deploy" lightdash' in lightdash
     assert "infra/runtime/postgres/deploy" not in t0_trading
     assert "docker compose --project-name t0-trading" in t0_trading
-    assert "up -d --remove-orphans --wait --wait-timeout 120" in t0_trading
+    assert "create --force-recreate --remove-orphans" in t0_trading
+    assert 'sudo "$script_dir/reconcile-schedule"' in t0_trading
+    assert 'if "$script_dir/stream-window"; then' in t0_trading
+    assert "did not become healthy within 120 seconds" in t0_trading
     assert "storage/landing_uri" in t0_trading
     assert "--force-recreate" not in lightdash
     assert "docker compose --project-name arxiv-lens" in lens
@@ -267,6 +270,31 @@ def test_each_component_owns_its_deployment_operation() -> None:
         encoding="utf-8"
     )
     assert "git " not in airflow + lens + lightdash + dbt + postgres + cloudflare + t0_trading
+
+
+def test_t0_stream_schedule_is_component_owned_and_fail_safe() -> None:
+    deploy = Path("t0-trading/deploy")
+    reconcile = (deploy / "reconcile-schedule").read_text(encoding="utf-8")
+    window = (deploy / "stream-window").read_text(encoding="utf-8")
+    systemd = deploy / "systemd"
+    capture = (systemd / "lakehouse-t0-stream-capture.service").read_text(encoding="utf-8")
+    start = (systemd / "lakehouse-t0-stream-start.timer").read_text(encoding="utf-8")
+    stop = (systemd / "lakehouse-t0-stream-stop.timer").read_text(encoding="utf-8")
+    stop_service = (systemd / "lakehouse-t0-stream-stop.service").read_text(encoding="utf-8")
+
+    assert "flock 9" in reconcile
+    assert "systemctl daemon-reload" in reconcile
+    assert "systemctl enable --now" in reconcile
+    assert "/usr/local/sbin/lakehouse-t0-stream-window" in reconcile + capture
+    assert "TZ=Asia/Ho_Chi_Minh date +%u:%H" in window
+    assert "ExecStart=/usr/bin/docker start --attach lakehouse-t0-stream-capture" in capture
+    assert "ExecStop=-/usr/bin/docker stop --time 30 lakehouse-t0-stream-capture" in capture
+    assert "Restart=on-failure" in capture
+    assert "WantedBy=multi-user.target" not in capture
+    assert "OnCalendar=Mon..Fri *-*-* 08:00:00 Asia/Ho_Chi_Minh" in start
+    assert "OnCalendar=Mon..Fri *-*-* 16:00:00 Asia/Ho_Chi_Minh" in stop
+    assert "Persistent=true" in start + stop
+    assert "Conflicts=lakehouse-t0-stream-capture.service" in stop_service
 
 
 def test_top_level_arxiv_lens_resolves_the_release_bundle_root() -> None:

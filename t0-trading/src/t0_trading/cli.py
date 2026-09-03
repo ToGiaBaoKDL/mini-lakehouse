@@ -175,7 +175,7 @@ def capture_stream_command(
     duration_seconds: Annotated[float, typer.Option(min=1, max=86_400)] = 600,
     heartbeat_seconds: Annotated[float, typer.Option(min=5, max=300)] = 30,
     stale_after_seconds: Annotated[float, typer.Option(min=10, max=900)] = 90,
-    flush_seconds: Annotated[float, typer.Option(min=1, max=60)] = 5,
+    flush_seconds: Annotated[float, typer.Option(min=1, max=60)] = 30,
     batch_size: Annotated[int, typer.Option(min=1, max=10_000)] = 500,
     ready_file: Annotated[
         Path | None,

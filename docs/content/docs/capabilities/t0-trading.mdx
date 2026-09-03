@@ -3,10 +3,9 @@ title: T0 Trading
 description: An evidence-gated SSI market-data and assisted-decision capability.
 ---
 
-T0 Trading has a catalog foundation, a scheduled bounded REST publication path, and bounded stream
-capture plus manifest-scoped replay. Continuous streaming remains disabled while full-session
-behavior is certified. The capability does not emit signals, initialize an SSI trading client, or
-place broker orders.
+T0 Trading has a catalog foundation, a scheduled bounded REST publication path, weekday live stream
+capture, and manifest-scoped replay. The capability does not emit signals, initialize an SSI
+trading client, or place broker orders.
 
 ## Provider boundary
 
@@ -60,7 +59,8 @@ contracts do not add a runtime branch, generic repository, or empty application 
 
 The bounded stream command subscribes to aggregate symbol data and one-minute intervals for
 `VIC,VHM`. SDK callbacks only serialize into a bounded in-memory queue; the main process writes
-content-addressed gzip micro-batches, so S3 latency cannot block the WebSocket receive thread. Each
+content-addressed gzip micro-batches every 30 seconds or 500 messages, whichever comes first, so S3
+latency cannot block the WebSocket receive thread. Each
 terminal session manifest owns batch/object checksums, sequence bounds, heartbeat health, and the
 disconnect classification. Replay enriches landing messages with that manifest lineage; a separate
 batch-publication table would repeat the same fact and is intentionally absent.
@@ -120,6 +120,18 @@ table locations.
 
 ## Stream replay
 
+The OCI services host runs the capture container from 08:00 until 16:00, Monday through Friday, in
+`Asia/Ho_Chi_Minh`. Component-owned systemd timers own this lifecycle; a persistent start timer can
+recover a host reboot during the window, while a local-time guard prevents a missed start from
+running after 16:00. The stop timer sends a graceful termination so the capture flushes its final
+micro-batch and terminal manifest. Image deployment recreates the container and converges it to the
+schedule's desired state: healthy and active inside the window, stopped outside it.
+
+The timer excludes weekends but does not pretend to know ad-hoc HOSE holidays. Until a structured
+exchange-calendar source is certified, a weekday holiday is captured conservatively: SDK
+heartbeats and acknowledgements can be retained in landing, while the replay produces no synthetic
+trade or quote facts. This costs a small empty session but cannot silently discard a real session.
+
 At 21:00 Monday through Friday, `etl_emr_ingest_market_data_stream` passes only its Airflow partition
 date and landing root to EMR. The data-plane job uses the AWS SDK paginator to discover every direct
 terminal session manifest under that date's source-owned raw prefix; Airflow never lists lakehouse
@@ -161,10 +173,10 @@ built from captured trades remain a later delivery gate.
 ## Delivery gates
 
 1. Keep the scheduled REST capture bounded to one SSI-observed completed trading date.
-2. Replay the deployed canary and reconcile its landing and curated counts.
-3. Run capture and replay over a full market session to observe disconnect, reconnect, resubscribe,
+2. Reconcile each full-session capture against its landing and curated counts.
+3. Observe disconnect, reconnect, resubscribe,
    ordering, duplicate payloads, and Top-3 completeness behavior.
-4. Enable continuous scheduling only after durable capture and stale-data gates pass.
+4. Keep signal generation and order execution disabled until their independent evidence gates pass.
 
 The canonical implementation checklist remains the repository plan during development; this page
 documents only behavior that already exists.

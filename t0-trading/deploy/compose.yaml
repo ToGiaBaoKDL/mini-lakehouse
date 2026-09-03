@@ -1,7 +1,8 @@
-# Bounded SSI stream capture canary. Continuous scheduling remains intentionally disabled.
+# SSI stream capture runtime. systemd owns its weekday start/stop schedule.
 
 services:
   stream-capture:
+    container_name: lakehouse-t0-stream-capture
     image: "${T0_TRADING_IMAGE:-t0-trading:local}"
     user: "${LOCAL_UID}:0"
     init: true
@@ -10,7 +11,9 @@ services:
       - --landing-uri
       - ${T0_LANDING_URI}
       - --duration-seconds
-      - ${T0_STREAM_DURATION_SECONDS:-600}
+      - ${T0_STREAM_DURATION_SECONDS:-86400}
+      - --flush-seconds
+      - ${T0_STREAM_FLUSH_SECONDS:-30}
       - --ready-file
       - /tmp/t0-stream-ready
     environment:

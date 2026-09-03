@@ -1,0 +1,7 @@
+[Unit]
+Description=Stop SSI FastConnect capture after the market-data window
+Conflicts=lakehouse-t0-stream-capture.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/true

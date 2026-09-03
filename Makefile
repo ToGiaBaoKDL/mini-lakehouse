@@ -89,6 +89,8 @@ lint: ## Run formatting, linting, and static type checks.
 		analytics/lightdash/deploy/sync-ci-secret \
 		t0-trading/deploy/deploy \
 		t0-trading/deploy/reconcile \
+		t0-trading/deploy/reconcile-schedule \
+		t0-trading/deploy/stream-window \
 		t0-trading/deploy/sync-ssi-secret \
 		docs/deploy/sync-ci-secret \
 		analytics/dbt-project/deploy/deploy

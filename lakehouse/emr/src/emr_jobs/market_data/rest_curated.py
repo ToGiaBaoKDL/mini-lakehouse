@@ -27,7 +27,7 @@ def _capture_view(
     )
 
 
-def _validate_scope(spark: SparkSession, capture: CaptureRun) -> bool:
+def _validate_scope(spark: SparkSession, capture: CaptureRun) -> None:
     expected_symbols = set(capture.symbols)
     expected_indices = set(capture.indices)
     scopes = {
@@ -42,20 +42,22 @@ def _validate_scope(spark: SparkSession, capture: CaptureRun) -> bool:
         ).collect()
     }
     info = scopes.get("get_securities_info", set())
+    summary = scopes.get("get_securities_summary_historical", set())
     daily = scopes.get("get_ohlc_1day_historical", set())
     minute = scopes.get("get_ohlc_1minute_historical", set())
     master = scopes.get("get_master_data_historical", set())
     indices = scopes.get("get_index_summary_historical", set())
     if info != expected_symbols:
         raise RuntimeError(f"SSI security scope mismatch: expected={len(expected_symbols)}")
-    has_market_data = bool(daily or minute or master or indices)
-    if not has_market_data:
-        return False
-    if daily != expected_symbols or minute != expected_symbols or master != expected_symbols:
+    if (
+        summary != expected_symbols
+        or daily != expected_symbols
+        or minute != expected_symbols
+        or master != expected_symbols
+    ):
         raise RuntimeError("SSI completed-day stock scope is incomplete")
     if indices != expected_indices:
         raise RuntimeError("SSI completed-day index scope is incomplete")
-    return True
 
 
 def _publish_securities(
@@ -679,14 +681,12 @@ def publish(
     product: CuratedProductContract,
     capture: CaptureRun,
     source_date: str,
-) -> bool:
-    """Publish current REST-supported tables; return whether market facts were present."""
+) -> None:
+    """Publish one complete, reconciled REST trade-date capture."""
     _capture_view(spark, landing_table=landing_table, capture=capture)
-    has_market_data = _validate_scope(spark, capture)
+    _validate_scope(spark, capture)
     securities = qualified_name(product.table_identifier("securities"))
     _publish_securities(spark, target=securities)
-    if not has_market_data:
-        return False
 
     _market_views(spark, source_date)
     _validate_market_data(spark, capture)
@@ -704,4 +704,3 @@ def publish(
         source_date,
         len(capture.indices),
     )
-    return True

@@ -1,0 +1,51 @@
+#!/bin/sh
+set -eu
+
+test "$(id -u)" -eq 0 || {
+    printf '%s\n' "reconcile-schedule must run as root." >&2
+    exit 1
+}
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+source_systemd="$script_dir/systemd"
+target_systemd=/etc/systemd/system
+window_source="$script_dir/stream-window"
+window_target=/usr/local/sbin/lakehouse-t0-stream-window
+units="
+lakehouse-t0-stream-capture.service
+lakehouse-t0-stream-start.timer
+lakehouse-t0-stream-stop.service
+lakehouse-t0-stream-stop.timer
+"
+
+exec 9>/run/lock/lakehouse-t0-stream-schedule.lock
+flock 9
+
+test -r "$window_source" || {
+    printf '%s\n' "The stream schedule guard is missing." >&2
+    exit 1
+}
+
+install -m 0755 "$window_source" "$window_target"
+units_changed=0
+for unit in $units; do
+    source_unit="$source_systemd/$unit"
+    target_unit="$target_systemd/$unit"
+    test -r "$source_unit" || {
+        printf '%s\n' "The stream schedule unit $unit is missing." >&2
+        exit 1
+    }
+    if [ ! -f "$target_unit" ] || ! cmp -s "$source_unit" "$target_unit"; then
+        install -m 0644 "$source_unit" "$target_unit"
+        units_changed=1
+    fi
+done
+
+if [ "$units_changed" -eq 1 ]; then
+    systemctl daemon-reload
+fi
+systemctl enable --now \
+    lakehouse-t0-stream-start.timer \
+    lakehouse-t0-stream-stop.timer >/dev/null
+
+printf '%s\n' "T0 stream scheduling is current."

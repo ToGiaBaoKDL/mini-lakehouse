@@ -36,7 +36,40 @@ export AWS_IDENTITY_DIR=$identity_dir
 export LOCAL_UID=${LOCAL_UID:-$(id -u)}
 export T0_TRADING_IMAGE=$image
 export T0_LANDING_URI=$landing_uri
-export T0_STREAM_DURATION_SECONDS=${T0_STREAM_DURATION_SECONDS:-600}
+export T0_STREAM_DURATION_SECONDS=${T0_STREAM_DURATION_SECONDS:-86400}
+
+service=lakehouse-t0-stream-capture.service
+if systemctl is-active --quiet "$service"; then
+    sudo systemctl stop "$service"
+fi
 
 docker compose --project-name t0-trading -f "$script_dir/compose.yaml" \
-    up -d --remove-orphans --wait --wait-timeout 120
+    create --force-recreate --remove-orphans
+
+sudo "$script_dir/reconcile-schedule"
+
+if "$script_dir/stream-window"; then
+    sudo systemctl start "$service"
+    systemctl is-active --quiet "$service"
+
+    attempts=0
+    while [ "$attempts" -lt 60 ]; do
+        health=$(docker inspect --format '{{.State.Health.Status}}' \
+            lakehouse-t0-stream-capture 2>/dev/null || true)
+        case "$health" in
+            healthy) break ;;
+            unhealthy)
+                printf '%s\n' "T0 stream capture became unhealthy." >&2
+                docker logs --tail 100 lakehouse-t0-stream-capture >&2 || true
+                exit 1
+                ;;
+        esac
+        attempts=$((attempts + 1))
+        sleep 2
+    done
+    test "$health" = healthy || {
+        printf '%s\n' "T0 stream capture did not become healthy within 120 seconds." >&2
+        docker logs --tail 100 lakehouse-t0-stream-capture >&2 || true
+        exit 1
+    }
+fi

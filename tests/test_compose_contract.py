@@ -484,9 +484,10 @@ def test_arxiv_lens_receives_only_its_explicit_environment() -> None:
     assert service["volumes"] == ["${AWS_IDENTITY_DIR}/arxiv-lens:/run/aws:ro"]
 
 
-def test_t0_stream_capture_is_bounded_and_uses_its_workload_identity() -> None:
+def test_t0_stream_capture_is_scheduled_externally_and_uses_its_workload_identity() -> None:
     service = _compose(T0_TRADING_COMPOSE)["services"]["stream-capture"]
 
+    assert service["container_name"] == "lakehouse-t0-stream-capture"
     assert service["image"] == "${T0_TRADING_IMAGE:-t0-trading:local}"
     assert service["user"] == "${LOCAL_UID}:0"
     assert service["restart"] == "no"
@@ -496,7 +497,9 @@ def test_t0_stream_capture_is_bounded_and_uses_its_workload_identity() -> None:
         "--landing-uri",
         "${T0_LANDING_URI}",
         "--duration-seconds",
-        "${T0_STREAM_DURATION_SECONDS:-600}",
+        "${T0_STREAM_DURATION_SECONDS:-86400}",
+        "--flush-seconds",
+        "${T0_STREAM_FLUSH_SECONDS:-30}",
         "--ready-file",
         "/tmp/t0-stream-ready",
     ]

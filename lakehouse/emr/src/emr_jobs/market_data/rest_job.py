@@ -37,16 +37,13 @@ def run(*, source_date: str, capture_manifest_uri: str, contracts_uri: str) -> N
     try:
         require_tables(spark, required_identifiers)
         landing_table = publish_landing(spark, source=source, capture=capture)
-        has_market_data = publish_curated(
+        publish_curated(
             spark,
             landing_table=landing_table,
             product=product,
             capture=capture,
             source_date=source_date,
         )
-        if has_market_data:
-            logger.info("Published reconciled SSI market data for {}", source_date)
-        else:
-            logger.info("Published SSI reference data; no market facts existed for {}", source_date)
+        logger.info("Published reconciled SSI market data for {}", source_date)
     finally:
         spark.stop()

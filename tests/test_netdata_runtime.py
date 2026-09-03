@@ -164,6 +164,9 @@ def test_netdata_container_and_systemd_scope_is_bounded() -> None:
                 "systemd-timesyncd.service",
                 "lakehouse-metadata-backup.service",
                 "lakehouse-metadata-backup.timer",
+                "lakehouse-t0-stream-capture.service",
+                "lakehouse-t0-stream-start.timer",
+                "lakehouse-t0-stream-stop.timer",
             ],
         }
     ]

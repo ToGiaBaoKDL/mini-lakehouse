@@ -101,6 +101,8 @@ def test_market_data_publication_uses_sdk_summary_fields() -> None:
 
     assert "CAST(NULL AS bigint) AS foreign_buy_volume" not in source
     assert "CAST(NULL AS bigint) AS deal_volume" not in source
+    assert 'scopes.get("get_securities_summary_historical", set())' in source
+    assert "return False" not in source
 
 
 def test_market_data_manifest_uses_the_source_owned_raw_prefix() -> None:
