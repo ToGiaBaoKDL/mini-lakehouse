@@ -312,7 +312,10 @@ def test_lakehouse_ingest_is_bound_to_its_raw_source_prefix() -> None:
     assert '"s3:GetObject"' in identity
     assert '"s3:PutObject"' in identity
     assert '"s3:DeleteObject"' not in identity
-    assert '"s3:ListBucket"' not in identity
+    assert 'sid       = "ListOwnedCaptures"' in identity
+    assert 'actions   = ["s3:ListBucket"]' in identity
+    assert 'variable = "s3:prefix"' in identity
+    assert '[prefix, "${prefix}/*"]' in identity
     assert "ssm:" not in identity
     assert "secretsmanager:" not in identity
     assert "glue:" not in identity
