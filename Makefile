@@ -6,6 +6,7 @@ LAKEHOUSE_ENVIRONMENT ?= dev
 LOCAL_UID ?= $(shell id -u)
 DOCKER_GID ?= $(shell stat -c '%g' /var/run/docker.sock 2>/dev/null || printf '0')
 AWS_IDENTITY_DIR ?= $(HOME)/.config/lakehouse/$(LAKEHOUSE_ENVIRONMENT)/aws
+T0_STREAM_SPOOL_DIR ?= $(HOME)/.local/state/lakehouse/$(LAKEHOUSE_ENVIRONMENT)/t0-trading/spool
 HOST_BIND_ADDRESS ?= 127.0.0.1
 AIRFLOW_BASE_URL ?= http://$(HOST_BIND_ADDRESS):8080
 RUNTIME_PARAMETER_PREFIX := /lakehouse/$(LAKEHOUSE_ENVIRONMENT)
@@ -16,6 +17,7 @@ export LAKEHOUSE_ENVIRONMENT
 export LOCAL_UID
 export DOCKER_GID
 export AWS_IDENTITY_DIR
+export T0_STREAM_SPOOL_DIR
 export HOST_BIND_ADDRESS
 export AIRFLOW_BASE_URL
 

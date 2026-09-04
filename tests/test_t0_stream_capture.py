@@ -4,9 +4,12 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
+import pytest
 from t0_trading.capture_store import canonical_json, sha256
+from t0_trading.spool import CaptureSpool
 from t0_trading.stream_capture import (
     SSI_STREAM_RAW_PREFIX,
     StreamCaptureError,
@@ -22,6 +25,7 @@ def test_stream_capture_defaults_bound_flush_latency_to_thirty_seconds() -> None
 class _Store:
     def __init__(self) -> None:
         self.objects: dict[str, bytes] = {}
+        self.available = True
 
     def uri(self, key: str) -> str:
         return f"s3://landing/root/{key}"
@@ -38,6 +42,8 @@ class _Store:
         return self.put_capture(key, canonical_json(value))
 
     def put_capture(self, key: str, body: bytes) -> tuple[str, str]:
+        if not self.available:
+            raise ConnectionError("S3 unavailable")
         if key in self.objects:
             raise RuntimeError(f"Duplicate capture key: {key}")
         self.objects[key] = body
@@ -99,7 +105,7 @@ class _Stream:
             self.on_heartbeat({"message": "pong"})
 
 
-def test_stream_capture_publishes_batches_and_one_terminal_manifest() -> None:
+def test_stream_capture_publishes_batches_and_one_terminal_manifest(tmp_path: Path) -> None:
     store = _Store()
     timer = _Timer()
     stream = _Stream(timer)
@@ -120,12 +126,14 @@ def test_stream_capture_publishes_batches_and_one_terminal_manifest() -> None:
         timer=timer.tick,
         session_id="session-1",
         on_ready=lambda: ready.append(True),
+        spool=CaptureSpool(tmp_path, max_bytes=1024 * 1024),
     )
 
     assert manifest_uri.startswith(f"s3://landing/root/{SSI_STREAM_RAW_PREFIX}/")
     assert stream.is_connected is False
     assert stream.pings >= 2
     assert ready == [True]
+    assert not any(tmp_path.rglob("*"))
     manifest_key = manifest_uri.removeprefix("s3://landing/root/")
     manifest = json.loads(store.objects[manifest_key])
     assert manifest["disconnect_kind"] == "completed"
@@ -172,3 +180,40 @@ def test_stream_capture_fails_closed_when_heartbeats_are_stale() -> None:
     ]
     assert manifest_objects[0]["disconnect_kind"] == "stale"
     assert manifest_objects[0]["error_type"] == "HeartbeatTimeout"
+
+
+def test_stream_capture_spools_batch_and_terminal_manifest_during_s3_outage(
+    tmp_path: Path,
+) -> None:
+    store = _Store()
+    store.available = False
+    timer = _Timer()
+    spool = CaptureSpool(tmp_path, max_bytes=1024 * 1024)
+
+    with pytest.raises(ConnectionError, match="S3 unavailable"):
+        capture_stream(
+            _Stream(timer),
+            store,
+            StreamCaptureOptions(
+                duration_seconds=1,
+                heartbeat_seconds=0.25,
+                stale_after_seconds=0.75,
+                flush_seconds=0.5,
+                batch_size=2,
+                queue_size=10,
+            ),
+            clock=timer.clock,
+            timer=timer.tick,
+            session_id="outage-session",
+            spool=spool,
+        )
+
+    assert spool.pending_bytes > 0
+    store.available = True
+    restarted = CaptureSpool(tmp_path, max_bytes=1024 * 1024)
+    assert restarted.drain(store) == 2
+    manifest_key = next(key for key in store.objects if key.endswith("/manifest.json"))
+    manifest = json.loads(store.objects[manifest_key])
+    assert manifest["disconnect_kind"] == "capture_error"
+    assert manifest["error_type"] == "ConnectionError"
+    assert manifest["message_count"] == 2

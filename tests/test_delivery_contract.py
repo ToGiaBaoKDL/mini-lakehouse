@@ -261,6 +261,8 @@ def test_each_component_owns_its_deployment_operation() -> None:
     assert 'if "$script_dir/stream-window"; then' in t0_trading
     assert "did not become healthy within 120 seconds" in t0_trading
     assert "storage/landing_uri" in t0_trading
+    assert "T0_STREAM_SPOOL_DIR" in t0_trading
+    assert "install -d -m 0700" in t0_trading
     assert "--force-recreate" not in lightdash
     assert "docker compose --project-name arxiv-lens" in lens
     assert '"$1" dbt:runtime' in dbt

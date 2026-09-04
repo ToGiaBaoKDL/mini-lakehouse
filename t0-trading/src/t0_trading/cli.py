@@ -21,6 +21,7 @@ from t0_trading.certification import CertificationOptions, run_certification
 from t0_trading.credentials import CredentialError, load_credentials
 from t0_trading.provider import authenticated
 from t0_trading.rest_capture import RestCaptureOptions, capture_rest
+from t0_trading.spool import CaptureSpool
 from t0_trading.stream_capture import StreamCaptureOptions, capture_stream
 from t0_trading.trading_dates import TradingDateError, require_observed_trade_date
 
@@ -177,6 +178,11 @@ def capture_stream_command(
     stale_after_seconds: Annotated[float, typer.Option(min=10, max=900)] = 90,
     flush_seconds: Annotated[float, typer.Option(min=1, max=60)] = 30,
     batch_size: Annotated[int, typer.Option(min=1, max=10_000)] = 500,
+    spool_dir: Annotated[
+        Path | None,
+        typer.Option(help="Optional persistent directory for pending stream objects."),
+    ] = None,
+    spool_max_bytes: Annotated[int, typer.Option(min=1)] = 268_435_456,
     ready_file: Annotated[
         Path | None,
         typer.Option(help="Optional runtime readiness marker written after the first heartbeat."),
@@ -206,6 +212,7 @@ def capture_stream_command(
     try:
         credentials = load_credentials(effective_secret_id, region)
         store = S3CaptureStore(boto3.client("s3", region_name=region), landing_uri)
+        spool = CaptureSpool(spool_dir, max_bytes=spool_max_bytes) if spool_dir else None
         with authenticated(credentials) as auth, Stream(auth) as stream:
             manifest_uri = capture_stream(
                 stream.streaming,
@@ -213,6 +220,7 @@ def capture_stream_command(
                 options,
                 stop=stop,
                 on_ready=(lambda: ready_file.touch()) if ready_file is not None else None,
+                spool=spool,
             )
     except CredentialError as error:
         typer.echo(str(error), err=True)

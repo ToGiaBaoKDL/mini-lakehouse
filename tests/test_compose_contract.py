@@ -500,11 +500,18 @@ def test_t0_stream_capture_is_scheduled_externally_and_uses_its_workload_identit
         "${T0_STREAM_DURATION_SECONDS:-86400}",
         "--flush-seconds",
         "${T0_STREAM_FLUSH_SECONDS:-30}",
+        "--spool-dir",
+        "/var/lib/t0-trading/spool",
+        "--spool-max-bytes",
+        "${T0_STREAM_SPOOL_MAX_BYTES:-268435456}",
         "--ready-file",
         "/tmp/t0-stream-ready",
     ]
     assert service["healthcheck"]["test"] == ["CMD", "test", "-f", "/tmp/t0-stream-ready"]
-    assert service["volumes"] == ["${AWS_IDENTITY_DIR}/t0-trading:/run/aws:ro"]
+    assert service["volumes"] == [
+        "${AWS_IDENTITY_DIR}/t0-trading:/run/aws:ro",
+        "${T0_STREAM_SPOOL_DIR}:/var/lib/t0-trading/spool",
+    ]
     assert set(service["environment"]) == {
         "LAKEHOUSE_ENVIRONMENT",
         "AWS_CONFIG_FILE",
