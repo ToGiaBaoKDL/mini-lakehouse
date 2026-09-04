@@ -67,13 +67,13 @@ batch-publication table would repeat the same fact and is intentionally absent.
 
 The deployed canary established the concrete callback shapes used by replay:
 
-| SDK callback         | Certified shape                                                     | Replay destination                        |
-| -------------------- | ------------------------------------------------------------------- | ----------------------------------------- |
-| `TradeMessage`       | Symbol, provider time, price, quantity, side, and cumulative volume | `trade_ticks`                             |
-| `QuoteMessage`       | Ten price/quantity slots with the advertised Top 3 populated        | `quote_snapshots` and `quote_levels`      |
-| `IntervalMessage`    | Provider one-minute OHLCV observation                               | Landing evidence for later reconciliation |
-| `ForeignRoomMessage` | Cumulative foreign flow and room observation                        | Landing evidence; not a final daily fact  |
-| `dict`               | DATA-channel subscription acknowledgement                           | Landing evidence only                     |
+| SDK callback         | Certified shape                                                     | Replay destination                                                                   |
+| -------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `TradeMessage`       | Symbol, provider time, price, quantity, side, and cumulative volume | Executable matches go to `trade_ticks`; auction-state observations remain in landing |
+| `QuoteMessage`       | Ten price/quantity slots with the advertised Top 3 populated        | `quote_snapshots` and `quote_levels`                                                 |
+| `IntervalMessage`    | Provider one-minute OHLCV observation                               | Landing evidence for later reconciliation                                            |
+| `ForeignRoomMessage` | Cumulative foreign flow and room observation                        | Landing evidence; not a final daily fact                                             |
+| `dict`               | DATA-channel subscription acknowledgement                           | Landing evidence only                                                                |
 
 Replay does not turn interval observations into authoritative bars or partial foreign-room updates
 into final daily summaries. Completed-day REST bars remain the current authoritative path;
@@ -140,9 +140,12 @@ disconnect, heartbeat, SDK/API version, contiguous sequence, batch identity, obj
 record-count, message-hash, timestamp, and duplicate-key validation before any write.
 
 Landing publication merges `messages` by `(stream_session_id, receive_sequence)` and writes the
-terminal `sessions` row last. Curated publication then maps only certified `TradeMessage` and
-`QuoteMessage` records. Retries reuse the same manifest and insert no duplicates; a conflicting
-manifest, message, tick, snapshot, or level fails closed.
+terminal `sessions` row last. Curated publication maps positive-price, positive-quantity
+`TradeMessage` records with a buy or sell side into `trade_ticks`. SSI auction-state observations
+with zero price, zero quantity, and unknown side remain available in landing without becoming
+synthetic trades. Any other malformed combination fails closed. Certified `QuoteMessage` records
+populate snapshots and levels. Retries reuse the same manifest and insert no duplicates; a
+conflicting manifest, message, tick, snapshot, or level fails closed.
 
 ## Synchronize and certify
 

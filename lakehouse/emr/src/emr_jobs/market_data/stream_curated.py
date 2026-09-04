@@ -46,10 +46,7 @@ def _trade_view(spark: SparkSession, capture: StreamCapture) -> None:
             current_timestamp() AS processed_at,
             try_cast(get_json_object(message_json, '$.price') AS decimal(18, 0)) AS price,
             try_cast(get_json_object(message_json, '$.quantity') AS bigint) AS quantity,
-            CASE upper(get_json_object(message_json, '$.side'))
-                WHEN 'B' THEN 'BUY'
-                WHEN 'S' THEN 'SELL'
-            END AS aggressor_side,
+            upper(get_json_object(message_json, '$.side')) AS raw_side,
             try_cast(get_json_object(message_json, '$.total_volume') AS bigint)
                 AS cumulative_volume,
             CAST(NULL AS decimal(24, 0)) AS cumulative_value,
@@ -59,14 +56,25 @@ def _trade_view(spark: SparkSession, capture: StreamCapture) -> None:
         WHERE message_type = 'TradeMessage'
         """
     )
+    spark.sql(
+        """
+        CREATE OR REPLACE TEMP VIEW ssi_stream_trade_classified AS
+        SELECT candidates.*,
+            CASE
+                WHEN price > 0 AND quantity > 0 AND raw_side IN ('B', 'S')
+                     AND cumulative_volume >= quantity THEN 'EXECUTABLE'
+                WHEN price = 0 AND quantity = 0 AND raw_side = 'U' THEN 'AUCTION_STATE'
+            END AS record_kind
+        FROM ssi_stream_trade_candidates candidates
+        """
+    )
     invalid = spark.sql(
         f"""
-        SELECT 1 FROM ssi_stream_trade_candidates
+        SELECT 1 FROM ssi_stream_trade_classified
         WHERE symbol IS NULL OR trade_date IS NULL OR trade_date != DATE '{capture.trade_date}'
            OR event_time IS NULL OR received_at IS NULL OR received_at < event_time
-           OR price IS NULL OR price <= 0 OR quantity IS NULL OR quantity <= 0
-           OR aggressor_side IS NULL OR cumulative_volume IS NULL
-           OR cumulative_volume < quantity
+           OR price IS NULL OR quantity IS NULL OR raw_side IS NULL
+           OR cumulative_volume IS NULL OR record_kind IS NULL
            OR provider_type IS NULL OR provider_type != 'trade' OR message_sha256 IS NULL
         LIMIT 1
         """
@@ -77,9 +85,11 @@ def _trade_view(spark: SparkSession, capture: StreamCapture) -> None:
         """
         CREATE OR REPLACE TEMP VIEW ssi_stream_trade_rows AS
         SELECT stream_session_id, receive_sequence, symbol, trade_date, event_time,
-            received_at, available_at, processed_at, price, quantity, aggressor_side,
+            received_at, available_at, processed_at, price, quantity,
+            CASE raw_side WHEN 'B' THEN 'BUY' ELSE 'SELL' END AS aggressor_side,
             cumulative_volume, cumulative_value, message_sha256
-        FROM ssi_stream_trade_candidates
+        FROM ssi_stream_trade_classified
+        WHERE record_kind = 'EXECUTABLE'
         """
     )
 

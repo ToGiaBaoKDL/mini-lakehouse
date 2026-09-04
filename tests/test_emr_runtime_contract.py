@@ -137,3 +137,14 @@ def test_market_data_stream_replay_uses_verified_sdk_models_and_top_three_quotes
     assert "IntervalMessage" not in curated
     assert "ForeignRoomMessage" not in curated
     assert "WHEN NOT MATCHED THEN INSERT *" in curated
+
+
+def test_market_data_stream_replay_separates_auction_state_from_executable_trades() -> None:
+    curated = Path("lakehouse/emr/src/emr_jobs/market_data/stream_curated.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "price > 0 AND quantity > 0 AND raw_side IN ('B', 'S')" in curated
+    assert "WHEN price = 0 AND quantity = 0 AND raw_side = 'U' THEN 'AUCTION_STATE'" in curated
+    assert "OR cumulative_volume IS NULL OR record_kind IS NULL" in curated
+    assert "WHERE record_kind = 'EXECUTABLE'" in curated
