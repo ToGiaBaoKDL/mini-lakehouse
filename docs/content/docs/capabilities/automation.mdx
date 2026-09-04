@@ -17,8 +17,8 @@ Airflow image.
 
 | DAG                                 | Execution                 | Trigger                               |
 | ----------------------------------- | ------------------------- | ------------------------------------- |
-| `etl_emr_ingest_github_archive`     | EMR Serverless            | `30 7 * * *`                          |
-| `etl_emr_ingest_arxiv_metadata`     | EMR Serverless            | `0 11 * * *`                          |
+| `etl_emr_ingest_github_archive`     | Docker + EMR Serverless   | `30 7 * * *`                          |
+| `etl_emr_ingest_arxiv_metadata`     | Docker + EMR Serverless   | `0 11 * * *`                          |
 | `etl_mix_ingest_market_data_rest`   | Docker + EMR Serverless   | 21:00 Monday-Friday, Asia/Ho_Chi_Minh |
 | `etl_emr_ingest_market_data_stream` | EMR Serverless            | 21:00 Monday-Friday, Asia/Ho_Chi_Minh |
 | `tl_docker_build_analytics`         | Isolated dbt Docker tasks | Curated GitHub or ArXiv asset update  |
@@ -32,13 +32,17 @@ There is no OCR DAG. OCR is an explicit local CLI action backed by Modal.
 <job_type>_<worker_type>_<verb>_<scope>
 ```
 
-The bounded vocabulary and examples are in [Conventions](/docs/reference/conventions). Runtime
-technology belongs in `worker_type`, while `scope` describes stable business or data ownership.
+The bounded vocabulary and examples are in [Conventions](/docs/reference/conventions). The primary
+publication runtime belongs in `worker_type`; supporting runtimes are explicit task boundaries and
+DAG tags. `scope` describes stable business or data ownership. Existing DAG IDs stay stable so
+deployments preserve run history.
 
 ## Execution boundaries
 
-- EMR tasks use the official deferrable operator, deterministic client tokens, and remote
-  cancellation on kill.
+- External-source capture tasks use the shared immutable `lakehouse-ingest` image and its
+  raw-prefix-only workload identity.
+- EMR tasks consume terminal S3 manifests, use deterministic client tokens, and cancel remotely on
+  kill.
 - dbt tasks use the shared immutable image but mount a domain-specific Roles Anywhere identity.
 - Airflow records logical asset success only after the producer succeeds.
 - Slack and SMTP notifications use Airflow connections loaded from Secrets Manager.
@@ -46,16 +50,18 @@ technology belongs in `worker_type`, while `scope` describes stable business or 
 
 ## Historical runs
 
-GitHub Archive, ArXiv metadata, and SSI REST derive their bounded source date from Airflow's
-time-based run context. Use Airflow 3's Backfill action for a date range instead of passing a custom
-date Param or maintaining a second DAG. Keep `catchup=False`: the scheduler processes only the
-latest interval automatically, while an explicit backfill controls historical creation with
-`none`, `failed`, or `completed` reprocessing behavior and its own concurrency limit.
+GitHub Archive and ArXiv metadata use explicit T-1 partition timetables; SSI REST uses its same-day
+trade-date partition. Manual source runs default to the latest completed UTC day. Use Airflow 3's
+Backfill action for a date range instead of passing a custom date Param or maintaining a second DAG.
+Keep `catchup=False`: the scheduler processes only the latest partition automatically, while an
+explicit backfill controls historical creation with `none`, `failed`, or `completed` reprocessing
+behavior and its own concurrency limit.
 
 Use `none` to fill missing dates, `failed` after repairing a failed workflow, and `completed` only
-when intentionally taking and publishing a new source observation. Preview the range with the
-Backfill dry-run before a large request and keep source backfills at one active run unless the
-upstream API has been capacity-tested.
+when intentionally replaying an already completed partition. GitHub Archive and ArXiv capture
+manifests are first-writer-wins: a successful rerun reuses the committed raw capture rather than
+silently observing the source again. Preview the range with the Backfill dry-run before a large
+request and keep source backfills at one active run unless the upstream API has been capacity-tested.
 
 The stream replay DAG discovers existing immutable terminal manifests for each partition date.
 Native backfill can therefore repair or republish captured raw sessions, but it cannot reconstruct a

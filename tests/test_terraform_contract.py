@@ -33,7 +33,6 @@ def test_each_child_module_declares_its_provider_contract() -> None:
     expected_providers = {
         "container_registry": ('source  = "hashicorp/aws"',),
         "storage": ('source  = "hashicorp/aws"',),
-        "emr_network": ('source  = "hashicorp/aws"',),
         "emr_serverless": ('source  = "hashicorp/aws"',),
         "identity": ('source  = "hashicorp/aws"',),
     }
@@ -171,38 +170,31 @@ def test_dev_resources_and_workload_roles_have_explicit_boundaries() -> None:
 
 
 def test_environment_uses_only_domain_modules() -> None:
-    modules = {path.name for path in Path("infra/terraform/aws/modules").iterdir() if path.is_dir()}
+    modules = {
+        path.name
+        for path in Path("infra/terraform/aws/modules").iterdir()
+        if path.is_dir() and any(path.glob("*.tf"))
+    }
 
     assert modules == {
         "container_registry",
-        "emr_network",
         "emr_serverless",
         "identity",
         "storage",
     }
 
 
-def test_emr_network_allows_bounded_external_egress() -> None:
-    network = _terraform_sources(Path("infra/terraform/aws/modules/emr_network"))
+def test_emr_uses_the_managed_aws_data_plane_without_vpc_connectivity() -> None:
     application = _terraform_sources(Path("infra/terraform/aws/modules/emr_serverless"))
     environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
 
-    assert 'resource "aws_vpc" "this"' in network
-    assert 'resource "aws_internet_gateway" "this"' in network
-    assert 'resource "aws_vpc_endpoint" "s3"' in network
-    assert 'vpc_endpoint_type = "Gateway"' in network
-    assert "map_public_ip_on_launch = true" in network
-    assert 'destination_cidr_block = "0.0.0.0/0"' in network
-    assert 'resource "aws_nat_gateway"' not in network
-    assert 'resource "aws_vpc_security_group_ingress_rule"' not in network
-    assert 'resource "aws_vpc_security_group_egress_rule" "https"' in network
-    assert "from_port         = 443" in network
-    assert "to_port           = 443" in network
-    assert "network_configuration" in application
+    assert not any(Path("infra/terraform/aws/modules/emr_network").glob("*.tf"))
+    assert "network_configuration" not in application
     assert "managed_persistence_monitoring_configuration" in application
     assert "enabled = true" in application
-    assert "subnet_ids         = module.emr_network.public_subnet_ids" in environment
-    assert "module.emr_network.security_group_id" in environment
+    assert 'module "emr_network"' not in environment
+    assert "subnet_ids" not in environment
+    assert "security_group_ids" not in environment
 
 
 def test_runtime_parameters_and_trust_are_bounded_by_workload() -> None:
@@ -251,13 +243,16 @@ def test_service_images_are_immutable_bounded_and_published_by_one_role() -> Non
     registry = _terraform_sources(Path("infra/terraform/aws/modules/container_registry"))
     identity = _terraform_sources(Path("infra/terraform/aws/modules/identity"))
     repositories = environment[
-        environment.index('module "container_registry"') : environment.index('module "emr_network"')
+        environment.index('module "container_registry"') : environment.index(
+            'module "emr_serverless"'
+        )
     ]
 
     for repository in (
         "analytics-dbt",
         "analytics-lightdash",
         "automation-airflow",
+        "lakehouse-ingest",
         "t0-trading",
         # ArXiv Lens is already capability-scoped and does not need a rename.
         "arxiv-lens",
@@ -301,6 +296,27 @@ def test_services_deployer_reads_only_the_connector_secret() -> None:
     assert 'actions   = ["secretsmanager:GetSecretValue"]' in services
     assert "airflow_secret_arns" not in services
     assert "ocr_secret_arns" not in services
+
+
+def test_lakehouse_ingest_is_bound_to_its_raw_source_prefix() -> None:
+    environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
+    identity = Path("infra/terraform/aws/modules/identity/lakehouse_ingest.tf").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"lakehouse-ingest"' in environment
+    assert "lakehouse_ingest  =" in environment
+    assert '"api/github_archive/raw"' in environment
+    assert '"api/arxiv/raw/oai"' in environment
+    assert "var.lakehouse_ingest_prefixes" in identity
+    assert '"s3:GetObject"' in identity
+    assert '"s3:PutObject"' in identity
+    assert '"s3:DeleteObject"' not in identity
+    assert '"s3:ListBucket"' not in identity
+    assert "ssm:" not in identity
+    assert "secretsmanager:" not in identity
+    assert "glue:" not in identity
+    assert "var.bucket_arns.curated" not in identity
 
 
 def test_t0_trading_runtime_is_bound_to_owned_raw_prefixes_and_secrets() -> None:

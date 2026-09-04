@@ -30,6 +30,9 @@ case "$component" in
         export LIGHTDASH_SITE_URL=${LIGHTDASH_SITE_URL:-https://analytics.tgblab.io.vn}
         deploy="$bundle_root/analytics/lightdash/deploy/deploy"
         ;;
+    lakehouse-ingest)
+        deploy="$bundle_root/lakehouse/ingest/deploy/deploy"
+        ;;
     netdata)
         deploy="$bundle_root/sysops/netdata/deploy"
         ;;

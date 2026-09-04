@@ -89,6 +89,7 @@ lint: ## Run formatting, linting, and static type checks.
 		analytics/lightdash/deploy/initialize-secrets \
 		analytics/lightdash/deploy/reconcile \
 		analytics/lightdash/deploy/sync-ci-secret \
+		lakehouse/ingest/deploy/deploy \
 		t0-trading/deploy/deploy \
 		t0-trading/deploy/reconcile \
 		t0-trading/deploy/reconcile-schedule \

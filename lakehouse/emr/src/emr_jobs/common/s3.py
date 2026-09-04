@@ -47,37 +47,3 @@ def list_keys(*, bucket: str, prefix: str) -> tuple[str, ...]:
         for page in paginator.paginate(Bucket=bucket, Prefix=prefix)
         for item in page.get("Contents", [])
     )
-
-
-def put_if_changed(
-    *,
-    bucket: str,
-    key: str,
-    body: bytes,
-    sha256: str,
-    content_type: str,
-    content_encoding: str | None = None,
-) -> None:
-    current = head_object(bucket, key)
-    if current and current.get("Metadata", {}).get("sha256") == sha256:
-        return
-    arguments = {
-        "Bucket": bucket,
-        "Key": key,
-        "Body": body,
-        "ContentType": content_type,
-        "Metadata": {"sha256": sha256},
-    }
-    if content_encoding:
-        arguments["ContentEncoding"] = content_encoding
-    client().put_object(**arguments)
-
-
-def delete_unlisted(*, bucket: str, prefix: str, retained_keys: set[str]) -> None:
-    """Delete stale objects below one authoritative prefix in bounded batches."""
-    stale = [key for key in list_keys(bucket=bucket, prefix=prefix) if key not in retained_keys]
-    for offset in range(0, len(stale), 1000):
-        client().delete_objects(
-            Bucket=bucket,
-            Delete={"Objects": [{"Key": key} for key in stale[offset : offset + 1000]]},
-        )

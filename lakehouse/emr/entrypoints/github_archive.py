@@ -8,18 +8,16 @@ from emr_jobs.github_archive.job import run
 
 def main(
     source_date: Annotated[str, typer.Option(help="UTC source day in YYYY-MM-DD format.")],
-    landing_uri: Annotated[str, typer.Option(help="Landing S3 root URI.")],
+    capture_manifest_uri: Annotated[
+        str,
+        typer.Option(help="Terminal GitHub Archive capture manifest URI."),
+    ],
     contracts_uri: Annotated[str, typer.Option(help="Versioned contract bundle URI.")],
-    capture_workers: Annotated[
-        int,
-        typer.Option(min=1, max=24, help="Concurrent archive downloads."),
-    ] = 8,
 ) -> None:
     run(
         source_date=source_date,
-        landing_uri=landing_uri,
+        capture_manifest_uri=capture_manifest_uri,
         contracts_uri=contracts_uri,
-        capture_workers=capture_workers,
     )
 
 

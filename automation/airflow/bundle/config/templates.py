@@ -13,11 +13,12 @@ def runtime_value(path: str) -> str:
     return f"{{{{ var.value[{json.dumps(path)}] }}}}"
 
 
-def data_interval_start_date(timezone: str = LOCAL_TIMEZONE) -> str:
-    """Render the local calendar date at the start of a scheduled data interval."""
+def partition_key_or_previous_date(timezone: str = "UTC") -> str:
+    """Use a scheduled partition key or the last completed day for manual runs."""
     return (
-        "{{ data_interval_start.astimezone("
-        f"macros.dateutil.tz.gettz('{timezone}')).strftime('%Y-%m-%d') }}}}"
+        "{{ dag_run.partition_key or ((dag_run.run_after.astimezone("
+        f"macros.dateutil.tz.gettz('{timezone}'))) - "
+        "macros.timedelta(days=1)).strftime('%Y-%m-%d') }}"
     )
 
 

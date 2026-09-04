@@ -1,15 +1,10 @@
-"""OAI-PMH harvesting and record parsing."""
+"""Parse captured OAI-PMH records into the landing contract."""
 
 import hashlib
 import json
 import re
 from datetime import date, datetime
-from urllib.parse import urlencode
 from xml.etree import ElementTree
-
-from loguru import logger
-
-from emr_jobs.common.http import http_session
 
 OAI_NAMESPACE = "http://www.openarchives.org/OAI/2.0/"
 ARXIV_NAMESPACE = "http://arxiv.org/OAI/arXiv/"
@@ -45,48 +40,6 @@ def authors_json(metadata: ElementTree.Element | None) -> str:
         for author in (parent.findall(f"{{{ARXIV_NAMESPACE}}}author") if parent is not None else ())
     ]
     return json.dumps(authors, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-
-
-def harvest(source_date: str, max_pages: int) -> list[bytes]:
-    pages: list[bytes] = []
-    token = None
-    seen_tokens: set[str] = set()
-    with http_session() as http:
-        for _ in range(max_pages):
-            parameters = (
-                {
-                    "verb": "ListRecords",
-                    "metadataPrefix": "arXiv",
-                    "from": source_date,
-                    "until": source_date,
-                }
-                if token is None
-                else {"verb": "ListRecords", "resumptionToken": token}
-            )
-            response = http.get(
-                f"https://oaipmh.arxiv.org/oai?{urlencode(parameters)}",
-                timeout=(10, 180),
-            )
-            response.raise_for_status()
-            payload = response.content
-            root = ElementTree.fromstring(payload)
-            errors = root.findall(f"{{{OAI_NAMESPACE}}}error")
-            if errors and errors[0].attrib.get("code") != "noRecordsMatch":
-                raise RuntimeError(
-                    f"ArXiv OAI error {errors[0].attrib.get('code', 'unknown')}: "
-                    f"{text(errors[0]) or ''}"
-                )
-            pages.append(payload)
-            logger.info("Harvested OAI page {}", len(pages))
-            token = text(
-                root.find(f"{{{OAI_NAMESPACE}}}ListRecords/{{{OAI_NAMESPACE}}}resumptionToken")
-            )
-            if not token:
-                return pages
-            if token in seen_tokens:
-                raise RuntimeError("ArXiv returned a repeated OAI resumption token")
-            seen_tokens.add(token)
-    raise RuntimeError(f"ArXiv exceeded the {max_pages}-page daily safety limit")
 
 
 def parse_records(

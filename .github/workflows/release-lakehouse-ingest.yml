@@ -1,0 +1,25 @@
+name: Release lakehouse ingest
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/release-lakehouse-ingest.yml
+      - .python-version
+      - pyproject.toml
+      - uv.lock
+      - lakehouse/catalog/**
+      - lakehouse/ingest/**
+      - infra/runtime/identity/install-aws-signing-helper
+  workflow_dispatch:
+
+jobs:
+  release:
+    uses: ./.github/workflows/_release-image.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      component: lakehouse-ingest
+      dockerfile: lakehouse/ingest/Dockerfile
+      repository: tgbao-dev-lakehouse-ingest

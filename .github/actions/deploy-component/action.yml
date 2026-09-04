@@ -40,6 +40,9 @@ runs:
           lightdash)
             bundle+=(infra/runtime/postgres analytics/lightdash/deploy)
             ;;
+          lakehouse-ingest)
+            bundle+=(lakehouse/ingest/deploy)
+            ;;
           netdata)
             bundle+=(infra/runtime/postgres sysops/netdata)
             ;;

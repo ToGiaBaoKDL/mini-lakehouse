@@ -1,13 +1,13 @@
 """Orchestrate one ArXiv OAI source-to-curated job."""
 
-from datetime import UTC, date, datetime
+from datetime import date
 
 from loguru import logger
 
 from emr_jobs.arxiv.curated import publish as publish_curated
-from emr_jobs.arxiv.landing import archive_pages
 from emr_jobs.arxiv.landing import publish as publish_landing
-from emr_jobs.arxiv.oai import harvest, parse_records
+from emr_jobs.arxiv.manifest import load_capture
+from emr_jobs.arxiv.oai import parse_records
 from emr_jobs.common.contracts import load_contracts
 from emr_jobs.common.iceberg import require_tables
 from emr_jobs.common.spark import configure_logging, session
@@ -16,9 +16,8 @@ from emr_jobs.common.spark import configure_logging, session
 def run(
     *,
     source_date: str,
-    landing_uri: str,
+    capture_manifest_uri: str,
     contracts_uri: str,
-    max_pages: int,
 ) -> None:
     source_day = date.fromisoformat(source_date)
     configure_logging("arxiv_metadata", source_date)
@@ -31,35 +30,36 @@ def run(
         *(product.table_identifier(key) for key in ("papers", "paper_authors", "paper_categories")),
     )
 
+    capture = load_capture(
+        capture_manifest_uri,
+        expected_source_date=source_day,
+        raw_object_prefix=source.raw_object_prefix,
+    )
+    records = parse_records(
+        capture.pages,
+        source_day=source_day,
+        page_objects=capture.page_objects,
+        ingested_at=capture.published_at,
+    )
     spark = session(f"arxiv-metadata-{source_date}")
     try:
         require_tables(spark, required_identifiers)
-        pages = harvest(source_date, max_pages)
-        page_objects, manifest_key, manifest_sha256 = archive_pages(
-            pages,
-            source_date=source_date,
-            landing_uri=landing_uri,
-            raw_object_prefix=source.raw_object_prefix,
-        )
-        published_at = datetime.now(UTC)
-        records = parse_records(
-            pages,
-            source_day=source_day,
-            page_objects=page_objects,
-            ingested_at=published_at,
-        )
         records_table, changed = publish_landing(
             spark,
             source=source,
             source_day=source_day,
             records=records,
-            manifest_key=manifest_key,
-            manifest_sha256=manifest_sha256,
-            page_count=len(pages),
-            published_at=published_at,
+            manifest_key=capture.manifest_key,
+            manifest_sha256=capture.manifest_sha256,
+            page_count=len(capture.pages),
+            published_at=capture.published_at,
         )
         if changed:
-            logger.info("Published {} OAI records from {} pages", len(records), len(pages))
+            logger.info(
+                "Published {} OAI records from {} pages",
+                len(records),
+                len(capture.pages),
+            )
         else:
             logger.info("Landing publication already matches the OAI manifest")
         publish_curated(

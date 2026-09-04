@@ -101,18 +101,12 @@ module "container_registry" {
     "analytics-lightdash",
     "arxiv-lens",
     "automation-airflow",
+    "lakehouse-ingest",
     "t0-trading",
   ])
   retained_image_count = 20
   force_delete         = true
   tags                 = local.tags
-}
-
-module "emr_network" {
-  source      = "../../modules/emr_network"
-  name_prefix = "${local.name_prefix}-emr"
-  vpc_cidr    = "10.20.0.0/16"
-  tags        = local.tags
 }
 
 module "emr_serverless" {
@@ -128,9 +122,7 @@ module "emr_serverless" {
     max_concurrent_runs   = 2
     queue_timeout_minutes = 60
   }
-  subnet_ids         = module.emr_network.public_subnet_ids
-  security_group_ids = toset([module.emr_network.security_group_id])
-  tags               = local.tags
+  tags = local.tags
 }
 
 module "identity" {
@@ -170,7 +162,11 @@ module "identity" {
     aws_secretsmanager_secret.lightdash.arn,
     aws_secretsmanager_secret.metadata_postgres["lightdash"].arn,
   ])
-  t0_trading_secret_arn         = aws_secretsmanager_secret.t0_trading_ssi.arn
+  t0_trading_secret_arn = aws_secretsmanager_secret.t0_trading_ssi.arn
+  lakehouse_ingest_prefixes = toset([
+    "api/arxiv/raw/oai",
+    "api/github_archive/raw",
+  ])
   cloudflare_docs_ci_secret_arn = aws_secretsmanager_secret.cloudflare_docs_ci.arn
   lightdash_ci_secret_arn       = aws_secretsmanager_secret.lightdash_ci.arn
   signoz_ci_secret_arn          = aws_secretsmanager_secret.signoz_ci.arn

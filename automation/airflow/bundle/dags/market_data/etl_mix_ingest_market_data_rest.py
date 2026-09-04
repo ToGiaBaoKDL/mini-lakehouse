@@ -49,6 +49,9 @@ with DAG(
         execution_timeout=timedelta(minutes=30),
         cpus=1,
         mem_limit="1g",
+        retries=1,
+        retry_delay=timedelta(minutes=10),
+        do_xcom_push=True,
         skip_on_exit_code=99,
     )
     publish = emr_spark_job(

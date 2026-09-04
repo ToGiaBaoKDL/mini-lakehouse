@@ -9,16 +9,15 @@ from emr_jobs.common.contracts import load_contracts
 from emr_jobs.common.iceberg import qualified_name, require_tables
 from emr_jobs.common.spark import configure_logging, session
 from emr_jobs.github_archive.curated import publish
-from emr_jobs.github_archive.extract import capture_day
 from emr_jobs.github_archive.landing import build_frame
+from emr_jobs.github_archive.manifest import load_capture
 
 
 def run(
     *,
     source_date: str,
-    landing_uri: str,
+    capture_manifest_uri: str,
     contracts_uri: str,
-    capture_workers: int,
 ) -> None:
     source_day = date.fromisoformat(source_date)
     configure_logging("github_archive", source_date)
@@ -33,16 +32,14 @@ def run(
     )
     landing_table = qualified_name(landing_identifier)
 
+    captures = load_capture(
+        capture_manifest_uri,
+        expected_source_date=source_day,
+        raw_object_prefix=source.raw_object_prefix,
+    )
     spark = session(f"github-archive-{source_date}")
     try:
         require_tables(spark, required_identifiers)
-        captures = capture_day(
-            source_date=source_date,
-            landing_uri=landing_uri,
-            raw_object_prefix=source.raw_object_prefix,
-            workers=capture_workers,
-        )
-        logger.info("Captured all {} GitHub Archive hours", len(captures))
         landing = build_frame(spark, captures)
         logger.info("Validated the GitHub Archive landing partition")
         day_start = datetime.combine(source_day, time.min)

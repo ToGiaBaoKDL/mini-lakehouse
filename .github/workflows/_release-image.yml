@@ -88,7 +88,7 @@ jobs:
         run: |
           set -euo pipefail
           case "$COMPONENT" in
-            airflow|arxiv-lens|dbt|lightdash|t0-trading) ;;
+            airflow|arxiv-lens|dbt|lakehouse-ingest|lightdash|t0-trading) ;;
             *) exit 2 ;;
           esac
           expected_repository=$(infra/runtime/delivery/image-repository "$COMPONENT")

@@ -19,6 +19,7 @@ locals {
     "airflow",
     "arxiv_lens",
     "lightdash",
+    "lakehouse_ingest",
     "metadata_postgres",
     "services_deployer",
     "t0_trading",

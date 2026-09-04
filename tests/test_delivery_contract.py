@@ -68,7 +68,7 @@ def test_component_release_publishes_before_protected_digest_deployment() -> Non
     assert "automation/airflow/runtime" in release
     assert "source-$revision" in release
     assert "cancel-in-progress: false" in release
-    assert "airflow|arxiv-lens|dbt|lightdash|t0-trading" in release
+    assert "airflow|arxiv-lens|dbt|lakehouse-ingest|lightdash|t0-trading" in release
     assert '[[ -z "$BUILD_ARGS" ]]' in release
     assert "^[0-9]{12}\\.dkr\\.ecr\\." in action
     assert "uses: ./.github/actions/reconcile-services-host" in action
@@ -113,6 +113,7 @@ def test_image_repositories_follow_capability_ownership() -> None:
         "arxiv-lens) capability=arxiv-lens",
         "dbt) capability=analytics-dbt",
         "lightdash) capability=analytics-lightdash",
+        "lakehouse-ingest) capability=lakehouse-ingest",
         "t0-trading) capability=t0-trading",
     ):
         assert mapping in repository
@@ -454,6 +455,13 @@ def test_each_custom_component_has_a_thin_release_caller() -> None:
             "platforms: linux/arm64",
             "repository: tgbao-dev-analytics-lightdash",
             "runner: ubuntu-24.04-arm",
+        ),
+        "release-lakehouse-ingest.yml": (
+            "component: lakehouse-ingest",
+            "dockerfile: lakehouse/ingest/Dockerfile",
+            "repository: tgbao-dev-lakehouse-ingest",
+            "- pyproject.toml",
+            "- uv.lock",
         ),
         "release-t0-trading.yml": (
             "component: t0-trading",

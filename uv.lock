@@ -12,6 +12,7 @@ members = [
     "arxiv-lens",
     "document-ocr",
     "lakehouse",
+    "lakehouse-ingest",
     "t0-trading",
 ]
 
@@ -664,6 +665,29 @@ requires-dist = [
     { name = "typer", marker = "extra == 'cli'", specifier = "==0.25.1" },
 ]
 provides-extras = ["cli", "catalog"]
+
+[[package]]
+name = "lakehouse-ingest"
+version = "0.1.0"
+source = { editable = "lakehouse/ingest" }
+dependencies = [
+    { name = "boto3" },
+    { name = "lakehouse" },
+    { name = "loguru" },
+    { name = "requests" },
+    { name = "typer" },
+    { name = "urllib3" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "boto3", specifier = ">=1.42,<2" },
+    { name = "lakehouse", editable = "lakehouse/catalog" },
+    { name = "loguru", specifier = "==0.7.3" },
+    { name = "requests", specifier = ">=2.32,<3" },
+    { name = "typer", specifier = "==0.25.1" },
+    { name = "urllib3", specifier = ">=2.6,<3" },
+]
 
 [[package]]
 name = "loguru"

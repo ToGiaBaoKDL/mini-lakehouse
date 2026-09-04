@@ -168,6 +168,19 @@ variable "t0_trading_secret_arn" {
   }
 }
 
+variable "lakehouse_ingest_prefixes" {
+  type        = set(string)
+  description = "Normalized raw object prefixes writable by bounded source-capture tasks."
+
+  validation {
+    condition = length(var.lakehouse_ingest_prefixes) > 0 && alltrue([
+      for prefix in var.lakehouse_ingest_prefixes :
+      length(prefix) > 0 && trim(prefix, "/") == prefix
+    ])
+    error_message = "Lakehouse ingest prefixes must be non-empty normalized paths."
+  }
+}
+
 variable "lightdash_ci_secret_arn" {
   type        = string
   description = "Exact Secrets Manager resource readable by protected Lightdash deployment jobs."

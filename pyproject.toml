@@ -1,5 +1,5 @@
 [tool.uv.workspace]
-members = ["arxiv-lens", "lakehouse/catalog", "ocr-engine", "t0-trading"]
+members = ["arxiv-lens", "lakehouse/catalog", "lakehouse/ingest", "ocr-engine", "t0-trading"]
 exclude = ["analytics/dbt-project/runtime", "automation/airflow", "lakehouse/emr", "ocr-engine/modal"]
 
 [dependency-groups]
@@ -33,12 +33,20 @@ quote-style = "double"
 [tool.pyright]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
-include = ["arxiv-lens/src", "lakehouse/catalog/src", "ocr-engine/src", "t0-trading/src", "tests"]
+include = [
+    "arxiv-lens/src",
+    "lakehouse/catalog/src",
+    "lakehouse/ingest/src",
+    "ocr-engine/src",
+    "t0-trading/src",
+    "tests",
+]
 exclude = ["analytics/dbt-project", ".venv"]
 extraPaths = [
     "arxiv-lens/src",
     "lakehouse/catalog/src",
     "lakehouse/emr/src",
+    "lakehouse/ingest/src",
     "ocr-engine/src",
     "t0-trading/src",
 ]

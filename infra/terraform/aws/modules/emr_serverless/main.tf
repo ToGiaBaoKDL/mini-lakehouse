@@ -23,11 +23,6 @@ resource "aws_emrserverless_application" "spark" {
     queue_timeout_minutes = var.scheduler.queue_timeout_minutes
   }
 
-  network_configuration {
-    security_group_ids = var.security_group_ids
-    subnet_ids         = var.subnet_ids
-  }
-
   monitoring_configuration {
     managed_persistence_monitoring_configuration {
       enabled = true

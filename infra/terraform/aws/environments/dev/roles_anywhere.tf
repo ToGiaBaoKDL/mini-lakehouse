@@ -3,6 +3,7 @@ locals {
     airflow           = module.identity.airflow_role_arn
     arxiv_lens        = module.identity.arxiv_lens_role_arn
     lightdash         = module.identity.lightdash_role_arn
+    lakehouse_ingest  = module.identity.lakehouse_ingest_role_arn
     metadata_postgres = module.identity.metadata_postgres_role_arn
     services_deployer = module.identity.services_deployer_role_arn
     t0_trading        = module.identity.t0_trading_role_arn

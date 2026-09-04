@@ -5,28 +5,12 @@ from airflow.sdk.execution_time import macros
 from config.templates import (
     DAG_START_DATE,
     LOCAL_TIMEZONE,
-    data_interval_start_date,
+    partition_key_or_previous_date,
     partition_key_or_run_date,
     runtime_value,
 )
 from jinja2 import StrictUndefined
 from jinja2.sandbox import SandboxedEnvironment
-
-
-def _render_source_date() -> str:
-    interval_start = datetime(2026, 8, 4, 0, 30, tzinfo=UTC)
-    return (
-        SandboxedEnvironment()
-        .from_string(data_interval_start_date())
-        .render(
-            data_interval_start=interval_start,
-            macros=macros,
-        )
-    )
-
-
-def test_data_interval_start_date_accepts_standard_datetime() -> None:
-    assert _render_source_date() == "2026-08-04"
 
 
 def test_partition_date_prefers_scheduled_key() -> None:
@@ -43,6 +27,22 @@ def test_partition_date_prefers_scheduled_key() -> None:
     )
 
     assert rendered == "2026-08-01"
+
+
+def test_previous_partition_date_defaults_to_last_completed_utc_day() -> None:
+    rendered = (
+        SandboxedEnvironment()
+        .from_string(partition_key_or_previous_date())
+        .render(
+            dag_run=SimpleNamespace(
+                partition_key=None,
+                run_after=datetime(2026, 8, 4, 18, 30, tzinfo=UTC),
+            ),
+            macros=macros,
+        )
+    )
+
+    assert rendered == "2026-08-03"
 
 
 def test_partition_date_defaults_to_local_manual_trigger_date() -> None:

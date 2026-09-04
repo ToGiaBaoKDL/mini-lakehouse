@@ -30,8 +30,10 @@ deployable capability has an explicit owner, identity, and release path.
 
 ```mermaid
 flowchart LR
-  sources[GitHub Archive and ArXiv] --> airflow[Airflow]
-  airflow --> emr[EMR Serverless]
+  sources[GitHub Archive and ArXiv] --> ingest[OCI capture tasks]
+  airflow[Airflow] --> ingest
+  ingest --> raw[(Immutable S3 raw)]
+  raw --> emr[EMR Serverless]
   emr --> lake[(S3 and Iceberg)]
   lake --> athena[Athena]
   athena --> dbt[dbt]

@@ -13,6 +13,7 @@ Glue databases or tables.
 lakehouse/
 ├── catalog/       # contract loading and PyIceberg catalog control
 ├── contracts/     # sources, curated products, and analytics domains
+├── ingest/        # bounded OCI source capture and terminal manifests
 └── emr/           # Spark jobs, entry points, and immutable release packaging
 ```
 
@@ -20,17 +21,23 @@ lakehouse/
 
 ```mermaid
 flowchart LR
-  source[External source] --> capture[Deterministic raw capture]
-  capture --> landing[Landing Iceberg table]
+  source[External source] --> capture[OCI capture task]
+  capture --> raw[Immutable raw snapshot and manifest]
+  raw --> transform[EMR transform]
+  transform --> landing[Landing Iceberg table]
   landing --> curate[Bounded normalization and merge]
   curate --> curated[Curated Iceberg product]
   curated --> consumers[dbt and read-only apps]
 ```
 
-A source job owns one bounded source window. Retries converge because raw object keys, landing
-partitions, merge keys, and publication markers are deterministic. Source protocol parsing stays in
-the source package; shared code is limited to proven storage, Spark, HTTP, contract, and Iceberg
-mechanics.
+A source DAG owns one bounded source window. Its OCI task handles the external protocol and publishes
+a terminal manifest only after the raw capture is complete. EMR then reads only S3, validates that
+manifest and its checksums, and publishes landing and curated tables. Retries converge because raw
+snapshots, manifests, landing partitions, merge keys, and publication markers are deterministic.
+
+EMR Serverless has no customer VPC connectivity. This intentionally permits its managed same-Region
+AWS endpoints, including S3, Glue, KMS, STS, and managed logs, while leaving external-source access
+to the `lakehouse-ingest` task image on OCI.
 
 ## Catalog operations
 

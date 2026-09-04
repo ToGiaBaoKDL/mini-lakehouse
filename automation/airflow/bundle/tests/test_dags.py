@@ -87,7 +87,7 @@ def test_dag_files_are_domain_scoped_and_follow_worker_aware_naming() -> None:
     assert "Asset(" not in sources
 
 
-def test_source_dags_are_bounded_interval_scoped_emr_jobs() -> None:
+def test_source_dags_use_previous_date_partitions() -> None:
     bag = _bag()
     schedules = {
         "etl_emr_ingest_github_archive": "30 7 * * *",
@@ -95,10 +95,22 @@ def test_source_dags_are_bounded_interval_scoped_emr_jobs() -> None:
     }
     for dag_id, schedule in schedules.items():
         dag = _dag(bag, dag_id)
-        assert dag.schedule == schedule
+        assert isinstance(dag.timetable, CronPartitionTimetable)
+        assert dag.timetable.expression == schedule
+        assert dag.timetable.run_offset == -1
+        assert dag.timetable.key_format == "%Y-%m-%d"
         assert dag.max_active_runs == 1
         assert not dag.params
-        task = dag.tasks[0]
+
+
+def test_source_publication_uses_bounded_emr_jobs() -> None:
+    bag = _bag()
+    tasks = {
+        "etl_emr_ingest_github_archive": "process_github_archive_day",
+        "etl_emr_ingest_arxiv_metadata": "process_arxiv_metadata_day",
+    }
+    for dag_id, task_id in tasks.items():
+        task = _dag(bag, dag_id).get_task(task_id)
         assert isinstance(task, LoggedEmrServerlessStartJobOperator)
         assert task.wait_for_completion is True
         assert task.deferrable is False
@@ -108,10 +120,9 @@ def test_source_dags_are_bounded_interval_scoped_emr_jobs() -> None:
         assert task.retry_delay == timedelta(minutes=10)
         assert re.fullmatch(r"[A-Za-z0-9._-]{1,64}", task.client_request_token)
         arguments = task.job_driver["sparkSubmit"]["entryPointArguments"]
-        assert arguments[arguments.index("--source-date") + 1].startswith(
-            "{{ data_interval_start.astimezone("
-        )
-        assert "--landing-uri" in arguments
+        assert "dag_run.partition_key or" in arguments[arguments.index("--source-date") + 1]
+        assert "--capture-manifest-uri" in arguments
+        assert "--landing-uri" not in arguments
         assert "--contracts-uri" in arguments
         assert "--catalog-name" not in arguments
         submit_parameters = task.job_driver["sparkSubmit"]["sparkSubmitParameters"]
@@ -128,8 +139,54 @@ def test_source_dags_are_bounded_interval_scoped_emr_jobs() -> None:
         assert "spark.dynamicAllocation.minExecutors=0" in submit_parameters
         assert "spark.dynamicAllocation.initialExecutors=1" in submit_parameters
 
-    arxiv = _dag(bag, "etl_emr_ingest_arxiv_metadata").tasks[0]
+    arxiv = _dag(bag, "etl_emr_ingest_arxiv_metadata").get_task("process_arxiv_metadata_day")
     assert arxiv.outlets[0].uri == "lakehouse://curated/arxiv/metadata"
+
+
+def test_github_archive_captures_on_oci_before_emr_publication() -> None:
+    dag = _dag(_bag(), "etl_emr_ingest_github_archive")
+    capture = dag.get_task("capture_github_archive")
+    publish = dag.get_task("process_github_archive_day")
+
+    assert isinstance(capture, LoggedDockerOperator)
+    assert isinstance(publish, LoggedEmrServerlessStartJobOperator)
+    assert capture.image == "lakehouse-ingest:runtime"
+    assert capture.mounts is not None
+    assert capture.mounts[0]["Source"] == "/tmp/lakehouse-ingest"
+    assert isinstance(capture.command, list)
+    assert capture.command[:2] == ["github-archive", "--source-date"]
+    assert "--landing-uri" in capture.command
+    assert capture.retries == 1
+    assert capture.retry_delay == timedelta(minutes=10)
+    assert capture.do_xcom_push is True
+    assert capture.downstream_task_ids == {"process_github_archive_day"}
+    arguments = publish.job_driver["sparkSubmit"]["entryPointArguments"]
+    assert "--capture-manifest-uri" in arguments
+    assert "{{ ti.xcom_pull(task_ids='capture_github_archive') }}" in arguments
+    assert "--landing-uri" not in arguments
+    assert publish.outlets[0].uri == "lakehouse://curated/github"
+
+
+def test_arxiv_oai_captures_on_oci_before_emr_publication() -> None:
+    dag = _dag(_bag(), "etl_emr_ingest_arxiv_metadata")
+    capture = dag.get_task("capture_arxiv_oai")
+    publish = dag.get_task("process_arxiv_metadata_day")
+
+    assert isinstance(capture, LoggedDockerOperator)
+    assert isinstance(publish, LoggedEmrServerlessStartJobOperator)
+    assert capture.image == "lakehouse-ingest:runtime"
+    assert capture.mounts is not None
+    assert capture.mounts[0]["Source"] == "/tmp/lakehouse-ingest"
+    assert isinstance(capture.command, list)
+    assert capture.command[:2] == ["arxiv-oai", "--source-date"]
+    assert "--landing-uri" in capture.command
+    assert capture.retries == 1
+    assert capture.retry_delay == timedelta(minutes=10)
+    assert capture.do_xcom_push is True
+    assert capture.downstream_task_ids == {"process_arxiv_metadata_day"}
+    arguments = publish.job_driver["sparkSubmit"]["entryPointArguments"]
+    assert "{{ ti.xcom_pull(task_ids='capture_arxiv_oai') }}" in arguments
+    assert publish.outlets[0].uri == "lakehouse://curated/arxiv/metadata"
 
 
 def test_market_data_rest_dag_keeps_capture_and_publication_bounded() -> None:
@@ -151,6 +208,9 @@ def test_market_data_rest_dag_keeps_capture_and_publication_bounded() -> None:
     assert capture.command[:2] == ["capture-rest", "--trade-date"]
     assert "--job-token" in capture.command
     assert "--landing-uri" in capture.command
+    assert capture.retries == 1
+    assert capture.retry_delay == timedelta(minutes=10)
+    assert capture.do_xcom_push is True
     assert any("dag_run.partition_key or dag_run.run_after" in item for item in capture.command)
     assert capture.skip_on_exit_code == [99]
     assert capture.downstream_task_ids == {"publish_market_data_rest"}
@@ -184,8 +244,8 @@ def test_curated_assets_schedule_one_domain_aware_analytics_dag() -> None:
     arxiv_producer = _dag(bag, "etl_emr_ingest_arxiv_metadata")
     analytics = _dag(bag, "tl_docker_build_analytics")
 
-    github_asset = github_producer.tasks[0].outlets[0]
-    arxiv_asset = arxiv_producer.tasks[0].outlets[0]
+    github_asset = github_producer.get_task("process_github_archive_day").outlets[0]
+    arxiv_asset = arxiv_producer.get_task("process_arxiv_metadata_day").outlets[0]
     assert github_asset.uri == "lakehouse://curated/github"
     assert arxiv_asset.uri == "lakehouse://curated/arxiv/metadata"
     assert analytics.schedule == github_asset | arxiv_asset
@@ -239,7 +299,9 @@ def test_analytics_domain_gates_run_both_manually_and_only_affected_assets() -> 
     analytics = _dag(bag, "tl_docker_build_analytics")
     engineering = analytics.get_task("engineering.should_run")
     research = analytics.get_task("research.should_run")
-    github_asset = _dag(bag, "etl_emr_ingest_github_archive").tasks[0].outlets[0]
+    github_asset = (
+        _dag(bag, "etl_emr_ingest_github_archive").get_task("process_github_archive_day").outlets[0]
+    )
 
     assert isinstance(engineering, ShortCircuitOperator)
     assert isinstance(research, ShortCircuitOperator)

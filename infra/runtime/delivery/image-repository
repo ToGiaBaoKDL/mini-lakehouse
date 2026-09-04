@@ -17,6 +17,7 @@ case "$1" in
     arxiv-lens) capability=arxiv-lens ;;
     dbt) capability=analytics-dbt ;;
     lightdash) capability=analytics-lightdash ;;
+    lakehouse-ingest) capability=lakehouse-ingest ;;
     t0-trading) capability=t0-trading ;;
     *)
         printf '%s\n' "Unknown image component: $1" >&2
