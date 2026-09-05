@@ -20,6 +20,7 @@ from ssi_sdk.enums import Timeframe
 
 from t0_trading.capture_store import CaptureStore, canonical_json, sha256
 from t0_trading.evidence import public_value
+from t0_trading.market.events import StreamEnvelope
 from t0_trading.provider import SSI_API_VERSION
 from t0_trading.spool import CaptureSpool
 
@@ -58,17 +59,6 @@ class StreamCaptureOptions:
             raise ValueError("stream buffer limits are invalid")
 
 
-@dataclass(frozen=True, slots=True)
-class _ReceivedMessage:
-    sequence: int
-    received_at: str
-    message_type: str
-    symbol: str | None
-    source_time_text: str | None
-    message_json: str
-    message_sha256: str
-
-
 def _field(value: object, name: str) -> object | None:
     if isinstance(value, Mapping):
         return value.get(name)
@@ -86,12 +76,14 @@ def _text_field(value: object, *names: str) -> str | None:
 class _Receiver:
     def __init__(
         self,
-        messages: Queue[_ReceivedMessage],
+        messages: Queue[StreamEnvelope],
         *,
+        session_id: str,
         clock: Callable[[], datetime],
         timer: Callable[[], float],
     ) -> None:
         self._messages = messages
+        self._session_id = session_id
         self._clock = clock
         self._timer = timer
         self._lock = Lock()
@@ -104,14 +96,15 @@ class _Receiver:
 
     def record(self, message: Any) -> None:
         try:
-            received_at = self._clock().astimezone(UTC).isoformat()
+            received_at = self._clock().astimezone(UTC)
             public = public_value(message)
             message_json = canonical_json(public).decode("utf-8")
             with self._lock:
                 sequence = self._next_sequence
                 self._messages.put_nowait(
-                    _ReceivedMessage(
-                        sequence=sequence,
+                    StreamEnvelope(
+                        stream_session_id=self._session_id,
+                        receive_sequence=sequence,
                         received_at=received_at,
                         message_type=type(message).__name__,
                         symbol=_text_field(message, "symbol"),
@@ -123,7 +116,7 @@ class _Receiver:
                     )
                 )
                 self._next_sequence += 1
-                self.last_business_message_at = received_at
+                self.last_business_message_at = received_at.isoformat()
         except Full:
             with self._lock:
                 self._error_type = "QueueFull"
@@ -148,16 +141,16 @@ class _Receiver:
             return self._error_type, self.last_heartbeat_tick, self.heartbeat_count
 
 
-def _row(session_id: str, message: _ReceivedMessage) -> dict[str, object]:
+def _row(message: StreamEnvelope) -> dict[str, object]:
     return {
-        "stream_session_id": session_id,
-        "receive_sequence": message.sequence,
+        "stream_session_id": message.stream_session_id,
+        "receive_sequence": message.receive_sequence,
         "message_type": message.message_type,
         "subscription_context": "symbols",
         "provider_topic": None,
         "symbol": message.symbol,
         "source_time_text": message.source_time_text,
-        "received_at": message.received_at,
+        "received_at": message.received_at.isoformat(),
         "message_json": message.message_json,
         "message_sha256": message.message_sha256,
         "api_version": SSI_API_VERSION,
@@ -169,19 +162,19 @@ def _publish_batch(
     store: CaptureStore,
     session_prefix: str,
     session_id: str,
-    messages: list[_ReceivedMessage],
+    messages: list[StreamEnvelope],
     clock: Callable[[], datetime],
     spool: CaptureSpool | None,
 ) -> dict[str, object]:
-    rows = [_row(session_id, message) for message in messages]
+    rows = [_row(message) for message in messages]
     body = gzip.compress(
         b"".join(canonical_json(row) + b"\n" for row in rows),
         compresslevel=6,
         mtime=0,
     )
     object_sha256 = sha256(body)
-    first_sequence = messages[0].sequence
-    last_sequence = messages[-1].sequence
+    first_sequence = messages[0].receive_sequence
+    last_sequence = messages[-1].receive_sequence
     object_key = (
         f"{session_prefix}/batches/"
         f"{first_sequence:012d}-{last_sequence:012d}-{object_sha256}.json.gz"
@@ -231,8 +224,8 @@ def capture_stream(
     session_id = session_id or str(uuid4())
     if spool is not None:
         spool.drain(store)
-    queue: Queue[_ReceivedMessage] = Queue(maxsize=options.queue_size)
-    receiver = _Receiver(queue, clock=clock, timer=timer)
+    queue: Queue[StreamEnvelope] = Queue(maxsize=options.queue_size)
+    receiver = _Receiver(queue, session_id=session_id, clock=clock, timer=timer)
     client.on_data = receiver.record
     client.on_heartbeat = receiver.heartbeat
     client.connect()
@@ -247,7 +240,7 @@ def capture_stream(
     next_ping_tick = started_tick + options.heartbeat_seconds
     last_flush_tick = started_tick
     batches: list[dict[str, object]] = []
-    buffered: list[_ReceivedMessage] = []
+    buffered: list[StreamEnvelope] = []
     disconnect_kind = "completed"
     failure_type: str | None = None
     ready = False
@@ -255,9 +248,10 @@ def capture_stream(
     def drain() -> None:
         while True:
             try:
-                buffered.append(queue.get_nowait())
+                message = queue.get_nowait()
             except Empty:
                 return
+            buffered.append(message)
 
     def flush(*, force: bool = False) -> None:
         nonlocal last_flush_tick

@@ -19,6 +19,7 @@ COPY arxiv-lens/pyproject.toml ./arxiv-lens/pyproject.toml
 COPY lakehouse/catalog/pyproject.toml ./lakehouse/catalog/pyproject.toml
 COPY ocr-engine/pyproject.toml ./ocr-engine/pyproject.toml
 COPY t0-trading/pyproject.toml ./t0-trading/pyproject.toml
+COPY t0-trading/config ./t0-trading/config
 COPY t0-trading/src ./t0-trading/src
 COPY infra/runtime/identity/install-aws-signing-helper /tmp/install-aws-signing-helper
 

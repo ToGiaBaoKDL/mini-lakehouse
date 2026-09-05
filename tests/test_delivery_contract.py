@@ -201,7 +201,7 @@ def test_t0_certification_uses_the_official_read_only_sdk_boundary() -> None:
     assert "private_key=" not in certification
     assert 'boto3.client("secretsmanager"' in credentials
     capability = "\n".join(
-        path.read_text(encoding="utf-8") for path in Path("t0-trading/src/t0_trading").glob("*.py")
+        path.read_text(encoding="utf-8") for path in Path("t0-trading/src/t0_trading").rglob("*.py")
     )
     for direct_client in ("import httpx", "import requests", "import websockets"):
         assert direct_client not in capability
@@ -213,6 +213,16 @@ def test_t0_certification_uses_the_official_read_only_sdk_boundary() -> None:
         "MI:ALL",
     ):
         assert protocol_literal not in capability
+
+
+def test_t0_market_core_is_side_effect_free() -> None:
+    market = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in Path("t0-trading/src/t0_trading/market").glob("*.py")
+    )
+
+    for dependency in ("boto3", "botocore", "sqlalchemy", "psycopg"):
+        assert dependency not in market
 
 
 def test_each_component_owns_its_deployment_operation() -> None:

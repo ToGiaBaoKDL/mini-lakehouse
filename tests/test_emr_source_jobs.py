@@ -299,6 +299,23 @@ def test_arxiv_capture_reuses_the_terminal_manifest_without_harvesting() -> None
     store.put_manifest.assert_not_called()
 
 
+def test_arxiv_capture_rejects_a_legacy_terminal_manifest_without_fallback() -> None:
+    store = Mock()
+    store.read_manifest.return_value = (
+        b'{"schema_version":1,"source_date":"2026-09-04","pages":'
+        b'[{"key":"api/arxiv/raw/oai/datestamp=2026-09-04/page-000001.xml.gz",'
+        b'"size_bytes":42,"sha256":"' + hashlib.sha256(b"legacy").hexdigest().encode() + b'"}]}'
+    )
+
+    with (
+        patch("lakehouse_ingest.arxiv._harvest") as harvest,
+        pytest.raises(ValidationError, match="snapshot"),
+    ):
+        capture_arxiv_day(store, date(2026, 9, 4))
+
+    harvest.assert_not_called()
+
+
 def test_arxiv_emr_consumer_validates_the_stable_terminal_manifest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

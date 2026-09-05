@@ -57,6 +57,36 @@ The physical tables intentionally use one table per durable grain, not one table
 Each bounded EMR job requires only the landing and curated tables that it writes. Deferred
 contracts do not add a runtime branch, generic repository, or empty application service.
 
+## Deterministic market state
+
+`t0-trading/config/trading.yaml` is the single non-secret configuration document. Strict Pydantic
+models reject unknown fields, invalid effective intervals, duplicate identifiers, and unsupported
+market-state settings. The canonical document and selected effective version each have a stable
+SHA-256 identity. Signal generation is not present yet; unverified fee, tax, risk, and strategy
+thresholds are not represented by placeholder values.
+
+The side-effect-free `t0_trading.market` package owns three boundaries: decoding persisted SDK
+messages into the certified event subset, deterministic market-state transitions, and ordered
+replay through those same transitions. It maintains bounded latest trade/Top-3 quote state and
+trade-built one-minute bars using exact decimal arithmetic. Sequence gaps, receipt/event-time
+regressions, late trades, incomplete quotes, stale data, and values unavailable at the evaluation
+time fail closed. Auction observations remain distinct from executable trades and do not create
+synthetic bars.
+
+Configuration can be validated without AWS or SSI access:
+
+```bash
+uv run t0-trading check-config \
+  --config t0-trading/config/trading.yaml \
+  --effective-date 2026-09-05
+```
+
+This core has no S3, database, notification, or broker side effects. Replay invokes it explicitly;
+the capture service remains responsible only for lossless raw evidence and SDK callbacks perform
+only a non-blocking queue write. A future decision runtime will invoke the same core without adding
+a generic capture callback. dbt remains the downstream analytics owner and does not reimplement
+these state transitions.
+
 The bounded stream command subscribes to aggregate symbol data and one-minute intervals for
 `VIC,VHM`. SDK callbacks only serialize into a bounded in-memory queue; the main process writes
 content-addressed gzip micro-batches every 30 seconds or 500 messages, whichever comes first, so S3

@@ -16,6 +16,7 @@ def test_cli_help_and_validation_do_not_initialize_aws(monkeypatch: Any) -> None
     assert help_result.exit_code == 0
     assert "capture-rest" in help_result.stdout
     assert "capture-stream" in help_result.stdout
+    assert "check-config" in help_result.stdout
 
     invalid_rest = runner.invoke(
         app,

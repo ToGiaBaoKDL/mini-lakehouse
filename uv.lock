@@ -1626,6 +1626,7 @@ source = { editable = "t0-trading" }
 dependencies = [
     { name = "boto3" },
     { name = "pydantic" },
+    { name = "pyyaml" },
     { name = "ssi-sdk" },
     { name = "typer" },
 ]
@@ -1634,6 +1635,7 @@ dependencies = [
 requires-dist = [
     { name = "boto3", specifier = ">=1.42,<2" },
     { name = "pydantic", specifier = ">=2.12,<3" },
+    { name = "pyyaml", specifier = ">=6.0.3,<7" },
     { name = "ssi-sdk", specifier = "==3.2.1" },
     { name = "typer", specifier = "==0.25.1" },
 ]

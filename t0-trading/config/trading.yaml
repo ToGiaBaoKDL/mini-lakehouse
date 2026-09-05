@@ -1,0 +1,14 @@
+schema_version: 1
+versions:
+  - version: market-state-v1
+    effective_from: 2026-08-27
+    effective_to: null
+    market:
+      timezone: Asia/Ho_Chi_Minh
+      symbols: [VIC, VHM]
+      indices: [VNINDEX, VN30]
+      quote_depth: 3
+      bar_interval_seconds: 60
+    data_quality:
+      trade_stale_after_seconds: 90
+      quote_stale_after_seconds: 30

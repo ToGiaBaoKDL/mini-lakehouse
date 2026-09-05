@@ -18,6 +18,7 @@ from ssi_sdk import Data, Stream
 
 from t0_trading.capture_store import S3CaptureStore
 from t0_trading.certification import CertificationOptions, run_certification
+from t0_trading.configuration import TradingConfigurationError, load_configuration
 from t0_trading.credentials import CredentialError, load_credentials
 from t0_trading.provider import authenticated
 from t0_trading.rest_capture import RestCaptureOptions, capture_rest
@@ -26,6 +27,7 @@ from t0_trading.stream_capture import StreamCaptureOptions, capture_stream
 from t0_trading.trading_dates import TradingDateError, require_observed_trade_date
 
 MARKET_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
+DEFAULT_TRADING_CONFIG = Path("t0-trading/config/trading.yaml")
 
 
 def _safe_error(error: Exception) -> str:
@@ -40,6 +42,46 @@ def _values(value: str, label: str) -> tuple[str, ...]:
     if not items:
         raise typer.BadParameter(f"{label} cannot be empty.")
     return items
+
+
+def check_config(
+    config: Annotated[Path, typer.Option(help="Versioned non-secret trading YAML.")] = (
+        DEFAULT_TRADING_CONFIG
+    ),
+    effective_date: Annotated[
+        str | None,
+        typer.Option(help="Configuration date in YYYY-MM-DD; defaults to the local market date."),
+    ] = None,
+) -> None:
+    """Validate trading configuration and print only its immutable identity."""
+    try:
+        selected_date = (
+            date.fromisoformat(effective_date)
+            if effective_date is not None
+            else datetime.now(MARKET_TIMEZONE).date()
+        )
+    except ValueError as error:
+        raise typer.BadParameter(
+            "must use YYYY-MM-DD format.", param_hint="--effective-date"
+        ) from error
+    try:
+        configuration = load_configuration(config)
+        version = configuration.resolve(selected_date)
+    except TradingConfigurationError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+    typer.echo(
+        json.dumps(
+            {
+                "configuration_sha256": configuration.sha256,
+                "effective_date": selected_date.isoformat(),
+                "version": version.version,
+                "version_sha256": version.sha256,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    )
 
 
 def certify(
@@ -115,8 +157,9 @@ def capture_rest_command(
     region: Annotated[str, typer.Option(help="AWS region for the secret and landing bucket.")] = (
         "ap-southeast-1"
     ),
-    symbols: Annotated[str, typer.Option(help="Comma-separated stock symbols.")] = "VIC,VHM",
-    indices: Annotated[str, typer.Option(help="Comma-separated market indices.")] = "VNINDEX,VN30",
+    config: Annotated[Path, typer.Option(help="Versioned non-secret trading YAML.")] = (
+        DEFAULT_TRADING_CONFIG
+    ),
     page_size: Annotated[int, typer.Option(min=1, max=1000)] = 1000,
 ) -> None:
     """Capture one bounded SSI REST trade date as immutable S3 evidence."""
@@ -133,6 +176,9 @@ def capture_rest_command(
     environment = os.environ.get("LAKEHOUSE_ENVIRONMENT", "dev")
     effective_secret_id = secret_id or f"lakehouse/{environment}/t0-trading/ssi"
     try:
+        # Capture scope follows the deployed configuration. The requested trade date is
+        # source lineage, not a request to apply historical strategy policy.
+        version = load_configuration(config).resolve(datetime.now(MARKET_TIMEZONE).date())
         credentials = load_credentials(effective_secret_id, region)
         store = S3CaptureStore(boto3.client("s3", region_name=region), landing_uri)
         with authenticated(credentials) as auth, Data(auth) as data:
@@ -146,12 +192,12 @@ def capture_rest_command(
                 RestCaptureOptions(
                     trade_date=parsed_trade_date,
                     job_token=job_token,
-                    symbols=_values(symbols, "symbols"),
-                    indices=_values(indices, "indices"),
+                    symbols=version.market.symbols,
+                    indices=version.market.indices,
                     page_size=page_size,
                 ),
             )
-    except CredentialError as error:
+    except (CredentialError, TradingConfigurationError) as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error
     except TradingDateError as error:
@@ -172,7 +218,9 @@ def capture_stream_command(
     region: Annotated[str, typer.Option(help="AWS region for the secret and landing bucket.")] = (
         "ap-southeast-1"
     ),
-    symbols: Annotated[str, typer.Option(help="Comma-separated stock symbols.")] = "VIC,VHM",
+    config: Annotated[Path, typer.Option(help="Versioned non-secret trading YAML.")] = (
+        DEFAULT_TRADING_CONFIG
+    ),
     duration_seconds: Annotated[float, typer.Option(min=1, max=86_400)] = 600,
     heartbeat_seconds: Annotated[float, typer.Option(min=5, max=300)] = 30,
     stale_after_seconds: Annotated[float, typer.Option(min=10, max=900)] = 90,
@@ -192,14 +240,18 @@ def capture_stream_command(
     environment = os.environ.get("LAKEHOUSE_ENVIRONMENT", "dev")
     effective_secret_id = secret_id or f"lakehouse/{environment}/t0-trading/ssi"
     try:
+        version = load_configuration(config).resolve(datetime.now(MARKET_TIMEZONE).date())
         options = StreamCaptureOptions(
-            symbols=_values(symbols, "symbols"),
+            symbols=version.market.symbols,
             duration_seconds=duration_seconds,
             heartbeat_seconds=heartbeat_seconds,
             stale_after_seconds=stale_after_seconds,
             flush_seconds=flush_seconds,
             batch_size=batch_size,
         )
+    except TradingConfigurationError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
     except ValueError as error:
         raise typer.BadParameter(str(error)) from error
     if ready_file is not None:
@@ -247,5 +299,6 @@ def main() -> None:
 
 
 app.command("certify")(certify)
+app.command("check-config")(check_config)
 app.command("capture-rest")(capture_rest_command)
 app.command("capture-stream")(capture_stream_command)
