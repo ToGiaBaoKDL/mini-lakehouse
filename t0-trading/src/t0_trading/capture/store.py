@@ -1,4 +1,4 @@
-"""Immutable object storage shared by SSI REST and Stream capture."""
+"""Immutable object storage shared by SSI REST and stream capture."""
 
 from __future__ import annotations
 

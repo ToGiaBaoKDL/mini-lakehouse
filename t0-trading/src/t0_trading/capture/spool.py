@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 from uuid import uuid4
 
-from t0_trading.capture_store import CaptureStore, canonical_json, sha256
+from t0_trading.capture.store import CaptureStore, canonical_json, sha256
 
 
 class SpoolFullError(RuntimeError):

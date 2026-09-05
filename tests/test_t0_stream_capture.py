@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from t0_trading.capture_store import canonical_json, sha256
-from t0_trading.spool import CaptureSpool
-from t0_trading.stream_capture import (
+from t0_trading.capture.spool import CaptureSpool
+from t0_trading.capture.store import canonical_json, sha256
+from t0_trading.capture.stream import (
     SSI_STREAM_RAW_PREFIX,
     StreamCaptureError,
     StreamCaptureOptions,

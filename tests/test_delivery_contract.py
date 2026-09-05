@@ -172,7 +172,7 @@ def test_ocr_is_local_cli_plus_modal_without_an_oci_runtime() -> None:
 def test_t0_certification_uses_the_official_read_only_sdk_boundary() -> None:
     project = Path("t0-trading/pyproject.toml").read_text(encoding="utf-8")
     certification = Path("t0-trading/src/t0_trading/certification.py").read_text(encoding="utf-8")
-    capture = Path("t0-trading/src/t0_trading/rest_capture.py").read_text(encoding="utf-8")
+    capture = Path("t0-trading/src/t0_trading/capture/rest.py").read_text(encoding="utf-8")
     cli = Path("t0-trading/src/t0_trading/cli.py").read_text(encoding="utf-8")
     credentials = Path("t0-trading/src/t0_trading/credentials.py").read_text(encoding="utf-8")
     provider = Path("t0-trading/src/t0_trading/provider.py").read_text(encoding="utf-8")
@@ -194,7 +194,7 @@ def test_t0_certification_uses_the_official_read_only_sdk_boundary() -> None:
     assert "subscribe_symbol_ohlcv" in certification
     assert "subscribe_index" in certification
     assert "client.ping()" in certification
-    assert "client.ping()" in Path("t0-trading/src/t0_trading/stream_capture.py").read_text(
+    assert "client.ping()" in Path("t0-trading/src/t0_trading/capture/stream.py").read_text(
         encoding="utf-8"
     )
     assert "Trading" not in certification

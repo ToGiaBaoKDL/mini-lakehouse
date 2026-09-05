@@ -3,8 +3,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from t0_trading.capture_store import canonical_json, sha256
-from t0_trading.spool import CaptureSpool, SpoolFullError
+from t0_trading.capture.spool import CaptureSpool, SpoolFullError
+from t0_trading.capture.store import canonical_json, sha256
 
 
 class _Store:

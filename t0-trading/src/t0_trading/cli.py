@@ -16,14 +16,14 @@ import typer
 from botocore.exceptions import ClientError
 from ssi_sdk import Data, Stream
 
-from t0_trading.capture_store import S3CaptureStore
+from t0_trading.capture.rest import RestCaptureOptions, capture_rest
+from t0_trading.capture.spool import CaptureSpool
+from t0_trading.capture.store import S3CaptureStore
+from t0_trading.capture.stream import StreamCaptureOptions, capture_stream
 from t0_trading.certification import CertificationOptions, run_certification
 from t0_trading.configuration import TradingConfigurationError, load_configuration
 from t0_trading.credentials import CredentialError, load_credentials
 from t0_trading.provider import authenticated
-from t0_trading.rest_capture import RestCaptureOptions, capture_rest
-from t0_trading.spool import CaptureSpool
-from t0_trading.stream_capture import StreamCaptureOptions, capture_stream
 from t0_trading.trading_dates import TradingDateError, require_observed_trade_date
 
 MARKET_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
