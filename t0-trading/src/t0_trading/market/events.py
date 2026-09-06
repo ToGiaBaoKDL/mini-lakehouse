@@ -59,7 +59,7 @@ class Trade:
     price: Decimal
     quantity: int
     side: Literal["BUY", "SELL"]
-    cumulative_volume: int | None
+    cumulative_volume: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,18 +91,22 @@ class QuoteSnapshot:
 MarketEvent = Trade | AuctionObservation | QuoteSnapshot
 
 
-def _event_time(value: str, received_at: datetime, timezone: ZoneInfo) -> datetime:
+def provider_timestamp(value: str, timezone: ZoneInfo) -> datetime:
     try:
         parsed = datetime.strptime(value, "%Y/%m/%d %H:%M:%S").replace(tzinfo=timezone)
     except ValueError as error:
-        raise MarketEventError("unsupported SSI trading_time") from error
-    normalized = parsed.astimezone(UTC)
+        raise MarketEventError("unsupported SSI timestamp") from error
+    return parsed.astimezone(UTC)
+
+
+def _event_time(value: str, received_at: datetime, timezone: ZoneInfo) -> datetime:
+    normalized = provider_timestamp(value, timezone)
     if normalized > received_at:
         raise MarketEventError("provider event time follows capture receipt time")
     return normalized
 
 
-def _price(value: int | float) -> Decimal:
+def provider_price(value: int | float) -> Decimal:
     price = Decimal(str(value))
     if not price.is_finite() or price != price.to_integral_value():
         raise MarketEventError("SSI price must be a finite whole VND amount")
@@ -158,7 +162,7 @@ def decode_event(
             event_time = _event_time(payload.trading_time, envelope.received_at, timezone)
             if payload.type.value != "trade":
                 raise MarketEventError("TradeMessage has an unexpected provider type")
-            price = _price(payload.price)
+            price = provider_price(payload.price)
             if price == 0 and payload.quantity == 0 and payload.side.upper() == "U":
                 return AuctionObservation(
                     position=position,
@@ -206,13 +210,13 @@ def decode_event(
             if any(len(values) != 10 for values in arrays):
                 raise MarketEventError("SSI quote arrays must contain ten positions")
             bids = _levels(
-                tuple(_price(value) for value in payload.bid_prices),
+                tuple(provider_price(value) for value in payload.bid_prices),
                 tuple(payload.bid_volumes),
                 depth=quote_depth,
                 descending=True,
             )
             asks = _levels(
-                tuple(_price(value) for value in payload.ask_prices),
+                tuple(provider_price(value) for value in payload.ask_prices),
                 tuple(payload.ask_volumes),
                 depth=quote_depth,
                 descending=False,

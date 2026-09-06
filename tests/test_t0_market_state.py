@@ -8,7 +8,13 @@ import pytest
 from t0_trading.configuration import load_configuration
 from t0_trading.market import MarketState, StreamEnvelope, replay
 from t0_trading.market.events import AuctionObservation, MarketEventError, QuoteSnapshot
-from t0_trading.market.state import LATE_TRADE, SEQUENCE_GAP, TRADE_TIME_REGRESSION
+from t0_trading.market.state import (
+    LATE_TRADE,
+    SEQUENCE_GAP,
+    TRADE_TIME_REGRESSION,
+    TRADE_VOLUME_DUPLICATE,
+    TRADE_VOLUME_GAP,
+)
 
 
 def _configuration():
@@ -44,6 +50,8 @@ def _trade(
     price: int | float,
     quantity: int,
     side: str,
+    *,
+    total_volume: int | None = None,
 ) -> StreamEnvelope:
     return _envelope(
         sequence,
@@ -55,7 +63,7 @@ def _trade(
             "price": price,
             "quantity": quantity,
             "side": side,
-            "total_volume": 1_000 + quantity,
+            "total_volume": quantity if total_volume is None else total_volume,
         },
         received_at=datetime(2026, 9, 4, 2, 2, sequence, tzinfo=UTC),
     )
@@ -85,8 +93,8 @@ def _quote(sequence: int, *, complete: bool = True) -> StreamEnvelope:
 def test_market_state_builds_exact_trade_bar() -> None:
     state = MarketState(_configuration())
     state.apply(_trade(1, "2026/09/04 09:00:05", 100, 10, "B"))
-    state.apply(_trade(2, "2026/09/04 09:00:40", 102, 20, "S"))
-    update = state.apply(_trade(3, "2026/09/04 09:01:01", 101, 5, "B"))
+    state.apply(_trade(2, "2026/09/04 09:00:40", 102, 20, "S", total_volume=30))
+    update = state.apply(_trade(3, "2026/09/04 09:01:01", 101, 5, "B", total_volume=35))
 
     assert len(update.finalized_bars) == 1
     bar = update.finalized_bars[0]
@@ -128,7 +136,7 @@ def test_trade_for_a_finalized_interval_is_rejected_as_late() -> None:
         available_at=datetime(2026, 9, 4, 2, 1, 1, tzinfo=UTC),
     )
 
-    update = state.apply(_trade(2, "2026/09/04 09:00:50", 101, 5, "S"))
+    update = state.apply(_trade(2, "2026/09/04 09:00:50", 101, 5, "S", total_volume=15))
 
     assert update.event is None
     assert update.issues == (LATE_TRADE,)
@@ -191,10 +199,26 @@ def test_complete_current_trade_and_quote_state_is_ready() -> None:
 def test_sequence_gap_and_event_time_regression_are_preserved_as_integrity_issues() -> None:
     state = MarketState(_configuration())
     state.apply(_trade(1, "2026/09/04 09:01:00", 100, 10, "B"))
-    update = state.apply(_trade(3, "2026/09/04 09:00:00", 101, 10, "B"))
+    update = state.apply(_trade(3, "2026/09/04 09:00:00", 101, 10, "B", total_volume=20))
 
     assert update.issues == (SEQUENCE_GAP, TRADE_TIME_REGRESSION)
     assert state.integrity_issues == (SEQUENCE_GAP, TRADE_TIME_REGRESSION)
+
+
+def test_duplicate_and_missing_trade_volume_fail_closed() -> None:
+    duplicate_state = MarketState(_configuration())
+    duplicate_state.apply(_trade(1, "2026/09/04 09:01:00", 100, 10, "B"))
+    duplicate = duplicate_state.apply(
+        _trade(2, "2026/09/04 09:01:01", 100, 10, "B", total_volume=10)
+    )
+    assert duplicate.event is None
+    assert duplicate.issues == (TRADE_VOLUME_DUPLICATE,)
+
+    gap_state = MarketState(_configuration())
+    gap_state.apply(_trade(1, "2026/09/04 09:01:00", 100, 10, "B"))
+    gap = gap_state.apply(_trade(2, "2026/09/04 09:01:01", 101, 5, "B", total_volume=20))
+    assert gap.event is None
+    assert gap.issues == (TRADE_VOLUME_GAP,)
 
 
 def test_replay_and_incremental_processing_use_identical_state_transitions() -> None:
@@ -202,7 +226,7 @@ def test_replay_and_incremental_processing_use_identical_state_transitions() -> 
     envelopes = (
         _trade(1, "2026/09/04 09:00:05", 100, 10, "B"),
         _quote(2),
-        _trade(3, "2026/09/04 09:01:05", 101, 20, "S"),
+        _trade(3, "2026/09/04 09:01:05", 101, 20, "S", total_volume=30),
     )
     finish_at = datetime(2026, 9, 4, 2, 2, 10, tzinfo=UTC)
 

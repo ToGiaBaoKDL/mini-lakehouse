@@ -10,6 +10,7 @@ from t0_trading.market.events import (
     decode_event,
 )
 from t0_trading.market.replay import ReplayResult, replay
+from t0_trading.market.session import MarketSession, session_at, trading_window
 from t0_trading.market.state import Bar, MarketHealth, MarketState, MarketUpdate
 
 __all__ = [
@@ -17,6 +18,7 @@ __all__ = [
     "Bar",
     "MarketEvent",
     "MarketHealth",
+    "MarketSession",
     "MarketState",
     "MarketUpdate",
     "QuoteLevel",
@@ -26,4 +28,6 @@ __all__ = [
     "Trade",
     "decode_event",
     "replay",
+    "session_at",
+    "trading_window",
 ]

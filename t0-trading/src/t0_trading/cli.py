@@ -16,6 +16,8 @@ import typer
 from botocore.exceptions import ClientError
 from ssi_sdk import Data, Stream
 
+from t0_trading.capture import MAX_STREAM_BATCH_MESSAGES
+from t0_trading.capture.reader import StreamCaptureReadError, StreamSessionReader
 from t0_trading.capture.rest import RestCaptureOptions, capture_rest
 from t0_trading.capture.spool import CaptureSpool
 from t0_trading.capture.store import S3CaptureStore
@@ -23,6 +25,7 @@ from t0_trading.capture.stream import StreamCaptureOptions, capture_stream
 from t0_trading.certification import CertificationOptions, run_certification
 from t0_trading.configuration import TradingConfigurationError, load_configuration
 from t0_trading.credentials import CredentialError, load_credentials
+from t0_trading.market.reconciliation import reconcile_session
 from t0_trading.provider import authenticated
 from t0_trading.trading_dates import TradingDateError, require_observed_trade_date
 
@@ -225,7 +228,7 @@ def capture_stream_command(
     heartbeat_seconds: Annotated[float, typer.Option(min=5, max=300)] = 30,
     stale_after_seconds: Annotated[float, typer.Option(min=10, max=900)] = 90,
     flush_seconds: Annotated[float, typer.Option(min=1, max=60)] = 30,
-    batch_size: Annotated[int, typer.Option(min=1, max=10_000)] = 500,
+    batch_size: Annotated[int, typer.Option(min=1, max=MAX_STREAM_BATCH_MESSAGES)] = 500,
     spool_dir: Annotated[
         Path | None,
         typer.Option(help="Optional persistent directory for pending stream objects."),
@@ -286,6 +289,45 @@ def capture_stream_command(
     typer.echo(manifest_uri)
 
 
+def reconcile_stream_command(
+    manifest_uri: Annotated[
+        str,
+        typer.Option(help="Terminal SSI Stream manifest S3 URI."),
+    ],
+    region: Annotated[str, typer.Option(help="AWS region containing the landing bucket.")] = (
+        "ap-southeast-1"
+    ),
+    config: Annotated[Path, typer.Option(help="Versioned non-secret trading YAML.")] = (
+        DEFAULT_TRADING_CONFIG
+    ),
+    output: Annotated[
+        Path | None,
+        typer.Option(help="Optional path for the JSON report; stdout is always emitted."),
+    ] = None,
+) -> None:
+    """Verify and replay one full SSI stream session, then reconcile its minute bars."""
+    try:
+        reader = StreamSessionReader.from_uri(
+            boto3.client("s3", region_name=region),
+            manifest_uri,
+        )
+        version = load_configuration(config).resolve(reader.trade_date)
+        report = reconcile_session(reader, version)
+    except (StreamCaptureReadError, TradingConfigurationError, ValueError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+    except ClientError as error:
+        typer.echo(f"SSI stream reconciliation failed: {_safe_error(error)}", err=True)
+        raise typer.Exit(code=1) from None
+    rendered = report.model_dump_json(indent=2)
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(f"{rendered}\n", encoding="utf-8")
+    typer.echo(rendered)
+    if report.status != "passed":
+        raise typer.Exit(code=1)
+
+
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
@@ -302,3 +344,4 @@ app.command("certify")(certify)
 app.command("check-config")(check_config)
 app.command("capture-rest")(capture_rest_command)
 app.command("capture-stream")(capture_stream_command)
+app.command("reconcile-stream")(reconcile_stream_command)

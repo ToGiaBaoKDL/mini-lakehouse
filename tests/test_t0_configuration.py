@@ -20,6 +20,8 @@ def test_trading_configuration_is_strict_effective_dated_and_stable() -> None:
     assert version.market.indices == ("VNINDEX", "VN30")
     assert version.market.quote_depth == 3
     assert version.market.bar_interval_seconds == 60
+    assert version.market.sessions.opening_auction[0].isoformat() == "09:00:00"
+    assert version.market.sessions.closing_auction[1].isoformat() == "14:45:00"
     assert len(configuration.sha256) == 64
     assert len(version.sha256) == 64
     assert version.sha256 != configuration.sha256

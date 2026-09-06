@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 from ssi_sdk import __version__ as SSI_SDK_VERSION
 from ssi_sdk.enums import Timeframe
 
+from t0_trading.capture import MAX_STREAM_BATCH_MESSAGES, SSI_STREAM_RAW_PREFIX
 from t0_trading.capture.spool import CaptureSpool
 from t0_trading.capture.store import CaptureStore, canonical_json, sha256
 from t0_trading.evidence import public_value
@@ -25,7 +26,6 @@ from t0_trading.market.events import StreamEnvelope
 from t0_trading.provider import SSI_API_VERSION
 
 MARKET_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
-SSI_STREAM_RAW_PREFIX = "stream/ssi_fastconnect_stream/raw"
 
 
 class StreamCaptureError(RuntimeError):
@@ -55,7 +55,11 @@ class StreamCaptureOptions:
             raise ValueError("heartbeat_seconds must be positive")
         if self.stale_after_seconds <= self.heartbeat_seconds:
             raise ValueError("stale_after_seconds must exceed heartbeat_seconds")
-        if self.flush_seconds <= 0 or self.batch_size < 1 or self.queue_size < self.batch_size:
+        if (
+            self.flush_seconds <= 0
+            or not 1 <= self.batch_size <= MAX_STREAM_BATCH_MESSAGES
+            or self.queue_size < self.batch_size
+        ):
             raise ValueError("stream buffer limits are invalid")
 
 
@@ -292,18 +296,22 @@ def capture_stream(
                     disconnect_kind = "capture_error"
                     failure_type = receiver_error
                     break
+                if now - last_heartbeat_tick > options.stale_after_seconds:
+                    disconnect_kind = "stale"
+                    failure_type = "HeartbeatTimeout"
+                    break
                 if not ready and heartbeat_count > 0:
                     if on_ready is not None:
                         on_ready()
                     ready = True
-                if stop.is_set():
-                    disconnect_kind = "shutdown"
-                    break
-                if now - started_tick >= options.duration_seconds:
-                    break
-                if now - last_heartbeat_tick > options.stale_after_seconds:
+                stopping = stop.is_set()
+                completed = now - started_tick >= options.duration_seconds
+                if (stopping or completed) and heartbeat_count == 0:
                     disconnect_kind = "stale"
-                    failure_type = "HeartbeatTimeout"
+                    failure_type = "MissingHeartbeat"
+                    break
+                if stopping or completed:
+                    disconnect_kind = "shutdown" if stopping else "completed"
                     break
                 if now >= next_ping_tick:
                     client.ping()

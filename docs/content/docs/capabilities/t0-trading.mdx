@@ -106,8 +106,9 @@ The deployed canary established the concrete callback shapes used by replay:
 | `dict`               | DATA-channel subscription acknowledgement                           | Landing evidence only                                                                |
 
 Replay does not turn interval observations into authoritative bars or partial foreign-room updates
-into final daily summaries. Completed-day REST bars remain the current authoritative path;
-deterministic trade-built bars are deferred until full-session replay is certified.
+into final daily summaries. Completed-day REST bars remain the published authoritative path. A
+streaming reader now verifies and rebuilds deterministic trade bars for full-session certification;
+promotion of those bars into curated storage remains a separate delivery gate.
 
 An image release reconciles one 10-minute OCI canary with `restart: no` and waits for the first
 provider heartbeat before declaring the deployment healthy. The process handles
@@ -157,6 +158,13 @@ running after 16:00. The stop timer sends a graceful termination so the capture 
 micro-batch and terminal manifest. Image deployment recreates the container and converges it to the
 schedule's desired state: healthy and active inside the window, stopped outside it.
 
+That 08:00–16:00 lifecycle is intentionally a conservative evidence-capture window, not a trading
+or signal window. The effective-dated session clock in `trading.yaml` is the semantic source of
+truth: it classifies ATO, continuous trading, lunch, ATC, and closed periods independently of the
+container lifecycle. SSI stamps closing-auction executions at exactly 14:45:00, so that boundary is
+included in ATC; later timestamps are closed. The outer capture window can be narrowed after several
+certified sessions without changing historical replay or weakening future decision gates.
+
 The timer excludes weekends but does not pretend to know ad-hoc HOSE holidays. Until a structured
 exchange-calendar source is certified, a weekday holiday is captured conservatively: SDK
 heartbeats and acknowledgements can be retained in landing, while the replay produces no synthetic
@@ -176,6 +184,36 @@ with zero price, zero quantity, and unknown side remain available in landing wit
 synthetic trades. Any other malformed combination fails closed. Certified `QuoteMessage` records
 populate snapshots and levels. Retries reuse the same manifest and insert no duplicates; a
 conflicting manifest, message, tick, snapshot, or level fails closed.
+
+The same terminal manifest can be audited independently of Spark. The reader verifies checksum
+metadata, manifest and batch lineage, SDK/API versions, contiguous receipt sequence, row schema,
+payload hashes, publication order, publication-after-receipt causality, terminal receipt time, and
+the shared 10,000-message batch ceiling while yielding one gzip batch at a time. A bounded
+eight-object prefetch window reduces S3 latency without changing receipt order or loading the full
+session into memory. The reconciliation command then runs the production market-state transitions,
+classifies events using the effective-dated session clock in `trading.yaml`, and compares trade-built
+minute bars with SSI's rolling interval observations:
+
+```bash
+AWS_PROFILE=tgbao-dev uv run --project t0-trading t0-trading reconcile-stream \
+  --manifest-uri 's3://<landing-bucket>/stream/ssi_fastconnect_stream/raw/trade_date=<date>/session=<uuid>/manifest.json' \
+  --output /tmp/t0-stream-reconciliation.json
+```
+
+An interval can legitimately precede the final trade callback in its minute. Every provider update
+must therefore match an exact OHLCV prefix that existed no later than the provider observation time;
+simple range containment and future-prefix matches are not accepted. Rolling snapshots must also
+progress monotonically in provider time, volume, open, high, and low. The report exposes how many
+final interval snapshots equal the completed replay bar and reconciles all message, event, session,
+and interval counts.
+
+A passed full-session report additionally requires the manifest scope plus both executable trades
+and valid quotes to cover every configured symbol, the first executable trade's cumulative volume
+to start from the captured quantity, and every executable trade to fall inside an exchange trading
+session. Missing minute keys or per-symbol data, non-causal or regressing intervals, volume gaps or
+duplicates, incomplete session coverage, or any replay integrity issue returns a failed report and
+a non-zero exit code. Quotes and acknowledgements outside the decision sessions remain raw evidence
+and are never mistaken for permission to trade.
 
 ## Synchronize and certify
 
@@ -200,8 +238,9 @@ The REST scope includes one completed trading date of SDK-auto-paginated master 
 floor, and ceiling prices; current and historical one-minute bars; security summaries; and index
 context. Bounded capture uses the SDK aggregate symbol subscription for trades, quotes, and
 foreign-room updates plus the SDK one-minute interval subscription. Certification separately probes
-the index subscription. Provider interval bars are reconciliation evidence; deterministic bars
-built from captured trades remain a later delivery gate.
+the index subscription. Provider interval bars remain reconciliation evidence; deterministic bars
+built from captured trades are now certified by the explicit full-session report before any future
+curated promotion.
 
 ## Delivery gates
 

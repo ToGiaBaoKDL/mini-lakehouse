@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date
+from datetime import date, time
 from itertools import pairwise
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -21,12 +21,40 @@ class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+class SessionScheduleConfiguration(_StrictModel):
+    opening_auction: tuple[time, time]
+    continuous_am: tuple[time, time]
+    continuous_pm: tuple[time, time]
+    closing_auction: tuple[time, time]
+
+    @model_validator(mode="after")
+    def validate_windows(self) -> SessionScheduleConfiguration:
+        windows = (
+            self.opening_auction,
+            self.continuous_am,
+            self.continuous_pm,
+            self.closing_auction,
+        )
+        if any(value.tzinfo is not None for window in windows for value in window):
+            raise ValueError("market session times must be timezone-naive")
+        if any(start >= end for start, end in windows):
+            raise ValueError("market session windows must have positive duration")
+        if (
+            self.opening_auction[1] != self.continuous_am[0]
+            or self.continuous_am[1] >= self.continuous_pm[0]
+            or self.continuous_pm[1] != self.closing_auction[0]
+        ):
+            raise ValueError("market session windows must be ordered and non-overlapping")
+        return self
+
+
 class MarketConfiguration(_StrictModel):
     timezone: str
     symbols: tuple[str, ...]
     indices: tuple[str, ...]
     quote_depth: int = Field(ge=1, le=10)
     bar_interval_seconds: int = Field(ge=1)
+    sessions: SessionScheduleConfiguration
 
     @model_validator(mode="after")
     def validate_market(self) -> MarketConfiguration:
@@ -43,6 +71,21 @@ class MarketConfiguration(_StrictModel):
                 raise ValueError(f"{name} must contain unique uppercase identifiers")
         if 60 % self.bar_interval_seconds != 0 and self.bar_interval_seconds % 60 != 0:
             raise ValueError("bar_interval_seconds must align to a minute boundary")
+        session_times = (
+            value
+            for window in (
+                self.sessions.opening_auction,
+                self.sessions.continuous_am,
+                self.sessions.continuous_pm,
+                self.sessions.closing_auction,
+            )
+            for value in window
+        )
+        if any(
+            (value.hour * 3600 + value.minute * 60 + value.second) % self.bar_interval_seconds
+            for value in session_times
+        ):
+            raise ValueError("market session boundaries must align to bar_interval_seconds")
         return self
 
 

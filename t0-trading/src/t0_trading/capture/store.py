@@ -104,6 +104,21 @@ class S3CaptureStore:
             raise RuntimeError(f"Capture manifest must be an object: {key}")
         return cast(dict[str, Any], value)
 
+    def read_capture(self, key: str) -> bytes | None:
+        """Read one object and verify its capture-owned checksum metadata."""
+        try:
+            response = self._client.get_object(Bucket=self._bucket, Key=self._physical_key(key))
+        except ClientError as error:
+            code = error.response.get("Error", {}).get("Code")
+            if code in {"404", "NoSuchKey", "NotFound"}:
+                return None
+            raise
+        body = cast(bytes, response["Body"].read())
+        expected = response.get("Metadata", {}).get("sha256")
+        if expected != sha256(body):
+            raise RuntimeError(f"Capture object checksum mismatch: {key}")
+        return body
+
     def put_json(self, key: str, value: Mapping[str, Any]) -> tuple[str, str]:
         return self._put(key, canonical_json(value), content_type="application/json")
 

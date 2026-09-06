@@ -9,6 +9,11 @@ versions:
       indices: [VNINDEX, VN30]
       quote_depth: 3
       bar_interval_seconds: 60
+      sessions:
+        opening_auction: ["09:00:00", "09:15:00"]
+        continuous_am: ["09:15:00", "11:30:00"]
+        continuous_pm: ["13:00:00", "14:30:00"]
+        closing_auction: ["14:30:00", "14:45:00"]
     data_quality:
       trade_stale_after_seconds: 90
       quote_stale_after_seconds: 30

@@ -22,6 +22,9 @@ RECEIPT_TIME_REGRESSION = "RECEIPT_TIME_REGRESSION"
 TRADE_TIME_REGRESSION = "TRADE_TIME_REGRESSION"
 QUOTE_TIME_REGRESSION = "QUOTE_TIME_REGRESSION"
 LATE_TRADE = "LATE_TRADE"
+TRADE_VOLUME_DUPLICATE = "TRADE_VOLUME_DUPLICATE"
+TRADE_VOLUME_GAP = "TRADE_VOLUME_GAP"
+TRADE_VOLUME_REGRESSION = "TRADE_VOLUME_REGRESSION"
 VWAP_QUANTUM = Decimal("0.00000001")
 
 
@@ -60,7 +63,7 @@ class _OpenBar:
 
     @classmethod
     def from_trade(cls, trade: Trade, interval: timedelta) -> _OpenBar:
-        start = _floor_time(trade.event_time, int(interval.total_seconds()))
+        start = bar_start(trade.event_time, int(interval.total_seconds()))
         value = trade.price * trade.quantity
         return cls(
             symbol=trade.symbol,
@@ -129,22 +132,26 @@ class _SymbolState:
     latest_quote: QuoteSnapshot | None = None
     last_trade_time: datetime | None = None
     last_quote_time: datetime | None = None
+    cumulative_volume: int | None = None
     open_bar: _OpenBar | None = None
     closed_through: datetime | None = None
-
-
-def _floor_time(value: datetime, interval_seconds: int) -> datetime:
-    epoch_seconds = int(value.timestamp())
-    return datetime.fromtimestamp(
-        epoch_seconds - epoch_seconds % interval_seconds,
-        tz=UTC,
-    )
 
 
 def _aware_utc(value: datetime, name: str) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{name} must be timezone-aware")
     return value.astimezone(UTC)
+
+
+def bar_start(value: datetime, interval_seconds: int) -> datetime:
+    """Return the UTC start of the deterministic interval containing an aware timestamp."""
+    if interval_seconds < 1:
+        raise ValueError("interval_seconds must be positive")
+    epoch_seconds = int(_aware_utc(value, "value").timestamp())
+    return datetime.fromtimestamp(
+        epoch_seconds - epoch_seconds % interval_seconds,
+        tz=UTC,
+    )
 
 
 class MarketState:
@@ -218,8 +225,19 @@ class MarketState:
                 event_issues.append(TRADE_TIME_REGRESSION)
             else:
                 if isinstance(event, Trade):
+                    previous_volume = symbol_state.cumulative_volume
+                    volume_issue: str | None = None
+                    if previous_volume is not None:
+                        if event.cumulative_volume < previous_volume:
+                            volume_issue = TRADE_VOLUME_REGRESSION
+                        elif event.cumulative_volume == previous_volume:
+                            volume_issue = TRADE_VOLUME_DUPLICATE
+                        elif event.cumulative_volume != previous_volume + event.quantity:
+                            volume_issue = TRADE_VOLUME_GAP
+                    if volume_issue is not None:
+                        event_issues.append(volume_issue)
                     bar_end = (
-                        _floor_time(event.event_time, int(self._interval.total_seconds()))
+                        bar_start(event.event_time, int(self._interval.total_seconds()))
                         + self._interval
                     )
                     if (
@@ -227,15 +245,24 @@ class MarketState:
                         and bar_end <= symbol_state.closed_through
                     ):
                         event_issues.append(LATE_TRADE)
-                    else:
+                    elif volume_issue is None:
                         finalized = self._apply_trade(symbol_state, event)
                         symbol_state.latest_trade = event
                         symbol_state.last_trade_time = event.event_time
+                        symbol_state.cumulative_volume = event.cumulative_volume
                 else:
                     symbol_state.last_trade_time = event.event_time
         self._integrity_issues.update(event_issues)
         applied = not any(
-            issue in {LATE_TRADE, QUOTE_TIME_REGRESSION, TRADE_TIME_REGRESSION}
+            issue
+            in {
+                LATE_TRADE,
+                QUOTE_TIME_REGRESSION,
+                TRADE_TIME_REGRESSION,
+                TRADE_VOLUME_DUPLICATE,
+                TRADE_VOLUME_GAP,
+                TRADE_VOLUME_REGRESSION,
+            }
             for issue in event_issues
         )
         return MarketUpdate(
@@ -245,7 +272,7 @@ class MarketState:
         )
 
     def _apply_trade(self, state: _SymbolState, trade: Trade) -> tuple[Bar, ...]:
-        start = _floor_time(trade.event_time, int(self._interval.total_seconds()))
+        start = bar_start(trade.event_time, int(self._interval.total_seconds()))
         if state.open_bar is None:
             state.open_bar = _OpenBar.from_trade(trade, self._interval)
             return ()
@@ -267,7 +294,7 @@ class MarketState:
         if available_at < event_time:
             raise ValueError("available_at must not precede event_time")
         finalized: list[Bar] = []
-        boundary = _floor_time(event_time, int(self._interval.total_seconds()))
+        boundary = bar_start(event_time, int(self._interval.total_seconds()))
         for state in self._symbols.values():
             if state.open_bar is not None and state.open_bar.end <= event_time:
                 finalized.append(state.open_bar.close(available_at))

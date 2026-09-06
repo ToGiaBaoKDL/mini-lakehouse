@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Event
 from typing import Any
 
 import pytest
@@ -20,6 +21,11 @@ from t0_trading.capture.stream import (
 
 def test_stream_capture_defaults_bound_flush_latency_to_thirty_seconds() -> None:
     assert StreamCaptureOptions().flush_seconds == 30
+
+
+def test_stream_capture_rejects_unreadable_batch_sizes() -> None:
+    with pytest.raises(ValueError, match="buffer limits"):
+        StreamCaptureOptions(batch_size=10_001, queue_size=10_001)
 
 
 class _Store:
@@ -180,6 +186,37 @@ def test_stream_capture_fails_closed_when_heartbeats_are_stale() -> None:
     ]
     assert manifest_objects[0]["disconnect_kind"] == "stale"
     assert manifest_objects[0]["error_type"] == "HeartbeatTimeout"
+
+
+def test_stream_capture_cannot_report_clean_shutdown_before_a_heartbeat() -> None:
+    store = _Store()
+    timer = _Timer()
+    stop = Event()
+    stop.set()
+
+    with pytest.raises(StreamCaptureError, match="stale"):
+        capture_stream(
+            _Stream(timer, heartbeat=False),
+            store,
+            StreamCaptureOptions(
+                duration_seconds=2,
+                heartbeat_seconds=0.2,
+                stale_after_seconds=0.5,
+                flush_seconds=0.5,
+                batch_size=10,
+                queue_size=10,
+            ),
+            stop=stop,
+            clock=timer.clock,
+            timer=timer.tick,
+            session_id="stopped-before-heartbeat",
+        )
+
+    manifest = next(
+        json.loads(body) for key, body in store.objects.items() if key.endswith("/manifest.json")
+    )
+    assert manifest["disconnect_kind"] == "stale"
+    assert manifest["error_type"] == "MissingHeartbeat"
 
 
 def test_stream_capture_spools_batch_and_terminal_manifest_during_s3_outage(
