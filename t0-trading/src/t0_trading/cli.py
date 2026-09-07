@@ -17,7 +17,11 @@ from botocore.exceptions import ClientError
 from ssi_sdk import Data, Stream
 
 from t0_trading.capture import MAX_STREAM_BATCH_MESSAGES
-from t0_trading.capture.reader import StreamCaptureReadError, StreamSessionReader
+from t0_trading.capture.reader import (
+    StreamCaptureReadError,
+    StreamSessionReader,
+    stream_manifest_uris,
+)
 from t0_trading.capture.rest import RestCaptureOptions, capture_rest
 from t0_trading.capture.spool import CaptureSpool
 from t0_trading.capture.store import S3CaptureStore
@@ -25,7 +29,11 @@ from t0_trading.capture.stream import StreamCaptureOptions, capture_stream
 from t0_trading.certification import CertificationOptions, run_certification
 from t0_trading.configuration import TradingConfigurationError, load_configuration
 from t0_trading.credentials import CredentialError, load_credentials
-from t0_trading.market.reconciliation import reconcile_session
+from t0_trading.market.reconciliation import (
+    ReconciliationReport,
+    reconcile_session,
+    reconcile_trade_date,
+)
 from t0_trading.provider import authenticated
 from t0_trading.trading_dates import TradingDateError, require_observed_trade_date
 
@@ -45,6 +53,30 @@ def _values(value: str, label: str) -> tuple[str, ...]:
     if not items:
         raise typer.BadParameter(f"{label} cannot be empty.")
     return items
+
+
+def _parse_trade_date(value: str) -> date:
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError as error:
+        raise typer.BadParameter(
+            "must use YYYY-MM-DD format.", param_hint="--trade-date"
+        ) from error
+    if parsed > datetime.now(MARKET_TIMEZONE).date():
+        raise typer.BadParameter(
+            "must not be later than the current market date.", param_hint="--trade-date"
+        )
+    return parsed
+
+
+def _emit_reconciliation(report: ReconciliationReport, output: Path | None = None) -> None:
+    rendered = report.model_dump_json(indent=2)
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(f"{rendered}\n", encoding="utf-8")
+    typer.echo(rendered)
+    if report.status != "passed":
+        raise typer.Exit(code=1)
 
 
 def check_config(
@@ -166,16 +198,7 @@ def capture_rest_command(
     page_size: Annotated[int, typer.Option(min=1, max=1000)] = 1000,
 ) -> None:
     """Capture one bounded SSI REST trade date as immutable S3 evidence."""
-    try:
-        parsed_trade_date = date.fromisoformat(trade_date)
-    except ValueError as error:
-        raise typer.BadParameter(
-            "must use YYYY-MM-DD format.", param_hint="--trade-date"
-        ) from error
-    if parsed_trade_date > datetime.now(MARKET_TIMEZONE).date():
-        raise typer.BadParameter(
-            "must not be later than the current market date.", param_hint="--trade-date"
-        )
+    parsed_trade_date = _parse_trade_date(trade_date)
     environment = os.environ.get("LAKEHOUSE_ENVIRONMENT", "dev")
     effective_secret_id = secret_id or f"lakehouse/{environment}/t0-trading/ssi"
     try:
@@ -319,13 +342,56 @@ def reconcile_stream_command(
     except ClientError as error:
         typer.echo(f"SSI stream reconciliation failed: {_safe_error(error)}", err=True)
         raise typer.Exit(code=1) from None
-    rendered = report.model_dump_json(indent=2)
-    if output is not None:
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(f"{rendered}\n", encoding="utf-8")
-    typer.echo(rendered)
-    if report.status != "passed":
-        raise typer.Exit(code=1)
+    _emit_reconciliation(report, output)
+
+
+def certify_stream_day_command(
+    trade_date: Annotated[
+        str,
+        typer.Option(help="Exchange-local trade date in YYYY-MM-DD format."),
+    ],
+    landing_uri: Annotated[str, typer.Option(help="Landing S3 root URI.")],
+    secret_id: Annotated[
+        str | None,
+        typer.Option(help="Managed SSI market-data secret; defaults from the environment."),
+    ] = None,
+    region: Annotated[str, typer.Option(help="AWS region for SSI credentials and S3.")] = (
+        "ap-southeast-1"
+    ),
+    config: Annotated[Path, typer.Option(help="Versioned non-secret trading YAML.")] = (
+        DEFAULT_TRADING_CONFIG
+    ),
+) -> None:
+    """Certify one scheduled SSI Stream trade date before lakehouse publication."""
+    parsed_trade_date = _parse_trade_date(trade_date)
+    environment = os.environ.get("LAKEHOUSE_ENVIRONMENT", "dev")
+    effective_secret_id = secret_id or f"lakehouse/{environment}/t0-trading/ssi"
+    try:
+        version = load_configuration(config).resolve(parsed_trade_date)
+        credentials = load_credentials(effective_secret_id, region)
+        with authenticated(credentials) as auth, Data(auth) as data:
+            require_observed_trade_date(data.market_data, trade_date=parsed_trade_date)
+        client = boto3.client("s3", region_name=region)
+        readers = tuple(
+            StreamSessionReader.from_uri(client, uri)
+            for uri in stream_manifest_uris(client, landing_uri, parsed_trade_date)
+        )
+        report = reconcile_trade_date(readers, version, trade_date=parsed_trade_date)
+    except TradingDateError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=99) from error
+    except (
+        CredentialError,
+        StreamCaptureReadError,
+        TradingConfigurationError,
+        ValueError,
+    ) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+    except Exception as error:  # SDK/AWS boundary: never print provider payload or credentials.
+        typer.echo(f"SSI stream certification failed: {_safe_error(error)}", err=True)
+        raise typer.Exit(code=1) from None
+    _emit_reconciliation(report)
 
 
 app = typer.Typer(
@@ -345,3 +411,4 @@ app.command("check-config")(check_config)
 app.command("capture-rest")(capture_rest_command)
 app.command("capture-stream")(capture_stream_command)
 app.command("reconcile-stream")(reconcile_stream_command)
+app.command("certify-stream-day")(certify_stream_day_command)

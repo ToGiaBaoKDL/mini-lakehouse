@@ -27,6 +27,32 @@ class StreamCaptureReadError(RuntimeError):
     """A terminal stream capture violates its immutable storage contract."""
 
 
+def stream_manifest_uris(client: Any, landing_uri: str, trade_date: date) -> tuple[str, ...]:
+    """Discover direct terminal manifests under one source-owned trade-date prefix."""
+    parsed = urlparse(landing_uri.rstrip("/"))
+    if parsed.scheme != "s3" or not parsed.netloc:
+        raise StreamCaptureReadError("landing_uri must be an S3 URI")
+    logical_prefix = f"{SSI_STREAM_RAW_PREFIX}/trade_date={trade_date.isoformat()}/"
+    physical_prefix = "/".join(part for part in (parsed.path.strip("/"), logical_prefix) if part)
+    manifests: set[str] = set()
+    paginator = client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=parsed.netloc, Prefix=physical_prefix):
+        for item in page.get("Contents", ()):
+            key = item.get("Key") if isinstance(item, dict) else None
+            if not isinstance(key, str) or not key.startswith(physical_prefix):
+                continue
+            relative = key.removeprefix(physical_prefix)
+            if (
+                not relative.startswith("session=")
+                or relative.count("/") != 1
+                or not relative.endswith("/manifest.json")
+            ):
+                continue
+            _manifest_location(f"{logical_prefix}{relative}")
+            manifests.add(f"s3://{parsed.netloc}/{key}")
+    return tuple(sorted(manifests))
+
+
 class _ReaderStore(Protocol):
     def uri(self, key: str) -> str: ...
 

@@ -12,10 +12,11 @@ from t0_trading.capture.reader import (
     StreamBatch,
     StreamCaptureReadError,
     StreamSessionReader,
+    stream_manifest_uris,
 )
 from t0_trading.capture.store import canonical_json, sha256
 from t0_trading.configuration import load_configuration
-from t0_trading.market.reconciliation import reconcile_session
+from t0_trading.market.reconciliation import reconcile_session, reconcile_trade_date
 from t0_trading.market.session import MarketSession, session_at, trading_window
 from t0_trading.provider import SSI_API_VERSION
 
@@ -41,6 +42,27 @@ class _Store:
 
     def read_capture(self, key: str) -> bytes | None:
         return self.objects.get(key)
+
+
+class _Paginator:
+    def __init__(self, pages: list[dict[str, object]]) -> None:
+        self.pages = pages
+
+    def paginate(self, **kwargs: str) -> list[dict[str, object]]:
+        assert kwargs == {
+            "Bucket": "landing",
+            "Prefix": ("root/stream/ssi_fastconnect_stream/raw/trade_date=2026-09-04/"),
+        }
+        return self.pages
+
+
+class _S3:
+    def __init__(self, pages: list[dict[str, object]]) -> None:
+        self.paginator = _Paginator(pages)
+
+    def get_paginator(self, name: str) -> _Paginator:
+        assert name == "list_objects_v2"
+        return self.paginator
 
 
 def _captured_row(
@@ -336,6 +358,38 @@ def test_market_sessions_use_configured_exchange_local_boundaries() -> None:
         )
         == MarketSession.CLOSED
     )
+
+
+def test_manifest_discovery_returns_only_direct_terminal_manifests() -> None:
+    prefix = "root/stream/ssi_fastconnect_stream/raw/trade_date=2026-09-04/"
+    manifest = f"{prefix}session={SESSION_ID}/manifest.json"
+    client = _S3(
+        [
+            {
+                "Contents": [
+                    {"Key": manifest},
+                    {"Key": f"{prefix}session={SESSION_ID}/batches/part.json.gz"},
+                    {"Key": f"{prefix}session={SESSION_ID}/nested/manifest.json"},
+                ]
+            },
+            {"Contents": [{"Key": manifest}]},
+        ]
+    )
+
+    assert stream_manifest_uris(client, "s3://landing/root", TRADE_DATE) == (
+        f"s3://landing/{manifest}",
+    )
+
+
+def test_trade_date_reconciliation_requires_one_market_window_session() -> None:
+    reader = _reader()
+    version = load_configuration(Path("t0-trading/config/trading.yaml")).resolve(TRADE_DATE)
+
+    assert reconcile_trade_date((reader,), version, trade_date=TRADE_DATE).status == "passed"
+    with pytest.raises(ValueError, match="no terminal"):
+        reconcile_trade_date((), version, trade_date=TRADE_DATE)
+    with pytest.raises(ValueError, match="found 2"):
+        reconcile_trade_date((reader, reader), version, trade_date=TRADE_DATE)
 
 
 def test_reader_streams_verified_rows_and_reconciliation_matches_ohlcv() -> None:

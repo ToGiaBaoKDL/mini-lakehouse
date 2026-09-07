@@ -1,4 +1,6 @@
-"""Scheduled replay of terminal SSI Stream sessions on EMR Serverless."""
+"""Certify and publish one terminal SSI Stream trading day."""
+
+from datetime import timedelta
 
 from airflow.sdk import DAG, CronPartitionTimetable
 from callbacks.notifications import dag_failure_callbacks, dag_success_callbacks
@@ -9,13 +11,14 @@ from config.templates import (
     partition_key_or_run_date,
     runtime_value,
 )
+from operators.docker import docker_task
 from operators.emr import emr_spark_job
 
 TRADE_DATE = partition_key_or_run_date()
 
 with DAG(
     dag_id="etl_emr_ingest_market_data_stream",
-    description="Replay one SSI Stream trade-date partition into Iceberg tables.",
+    description="Certify and publish one SSI Stream trade-date partition.",
     schedule=CronPartitionTimetable(
         "0 21 * * 1-5",
         timezone=LOCAL_TIMEZONE,
@@ -29,8 +32,26 @@ with DAG(
     on_success_callback=dag_success_callbacks(),
     tags=["market-data", "etl", "emr", "ssi", "stream", "iceberg"],
 ) as dag:
-    emr_spark_job(
-        task_id="replay_stream_session",
+    certify = docker_task(
+        task_id="certify_market_data_stream",
+        image="t0-trading:runtime",
+        command=[
+            "certify-stream-day",
+            "--trade-date",
+            TRADE_DATE,
+            "--landing-uri",
+            runtime_value("storage/landing_uri"),
+        ],
+        workload="t0-trading",
+        execution_timeout=timedelta(minutes=30),
+        cpus=1,
+        mem_limit="1g",
+        retries=1,
+        retry_delay=timedelta(minutes=10),
+        skip_on_exit_code=99,
+    )
+    publish = emr_spark_job(
+        task_id="publish_market_data_stream",
         job_name=f"ssi-market-data-stream-{TRADE_DATE}",
         entry_point="entrypoints/market_data_stream.py",
         entry_point_arguments=[
@@ -48,3 +69,4 @@ with DAG(
             "spark.dynamicAllocation.maxExecutors": "2",
         },
     )
+    certify.set_downstream(publish)

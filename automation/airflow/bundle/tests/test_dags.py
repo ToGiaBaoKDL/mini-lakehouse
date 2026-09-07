@@ -220,7 +220,7 @@ def test_market_data_rest_dag_keeps_capture_and_publication_bounded() -> None:
     assert publish.outlets[0].uri == "lakehouse://curated/market-data"
 
 
-def test_market_data_stream_replay_discovers_one_date_partition() -> None:
+def test_market_data_stream_dag_certifies_before_publication() -> None:
     dag = _dag(_bag(), "etl_emr_ingest_market_data_stream")
 
     assert isinstance(dag.timetable, CronPartitionTimetable)
@@ -228,14 +228,27 @@ def test_market_data_stream_replay_discovers_one_date_partition() -> None:
     assert dag.timetable.key_format == "%Y-%m-%d"
     assert dag.max_active_runs == 1
     assert not dag.params
-    replay = dag.get_task("replay_stream_session")
-    assert isinstance(replay, LoggedEmrServerlessStartJobOperator)
-    arguments = replay.job_driver["sparkSubmit"]["entryPointArguments"]
+    certify = dag.get_task("certify_market_data_stream")
+    publish = dag.get_task("publish_market_data_stream")
+    assert isinstance(certify, LoggedDockerOperator)
+    assert isinstance(publish, LoggedEmrServerlessStartJobOperator)
+    assert certify.image == "t0-trading:runtime"
+    assert certify.mounts is not None
+    assert certify.mounts[0]["Source"] == "/tmp/t0-trading"
+    assert isinstance(certify.command, list)
+    assert certify.command[:2] == ["certify-stream-day", "--trade-date"]
+    assert "dag_run.partition_key or dag_run.run_after" in certify.command[2]
+    assert "--landing-uri" in certify.command
+    assert certify.retries == 1
+    assert certify.retry_delay == timedelta(minutes=10)
+    assert certify.skip_on_exit_code == [99]
+    assert certify.downstream_task_ids == {"publish_market_data_stream"}
+    arguments = publish.job_driver["sparkSubmit"]["entryPointArguments"]
     assert arguments[0] == "--source-date"
     assert "dag_run.partition_key or dag_run.run_after" in arguments[1]
     assert "--landing-uri" in arguments
     assert "--contracts-uri" in arguments
-    assert replay.outlets[0].uri == "lakehouse://curated/market-data"
+    assert publish.outlets[0].uri == "lakehouse://curated/market-data"
 
 
 def test_curated_assets_schedule_one_domain_aware_analytics_dag() -> None:

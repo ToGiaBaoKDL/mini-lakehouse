@@ -167,15 +167,23 @@ certified sessions without changing historical replay or weakening future decisi
 
 The timer excludes weekends but does not pretend to know ad-hoc HOSE holidays. Until a structured
 exchange-calendar source is certified, a weekday holiday is captured conservatively: SDK
-heartbeats and acknowledgements can be retained in landing, while the replay produces no synthetic
-trade or quote facts. This costs a small empty session but cannot silently discard a real session.
+heartbeats and acknowledgements remain as immutable raw evidence. The 21:00 certification uses SSI's
+exact-date history and skips lakehouse publication, so it cannot create synthetic landing or curated
+facts for that date.
 
-At 21:00 Monday through Friday, `etl_emr_ingest_market_data_stream` passes only its Airflow partition
-date and landing root to EMR. The data-plane job uses the AWS SDK paginator to discover every direct
-terminal session manifest under that date's source-owned raw prefix; Airflow never lists lakehouse
-objects. An empty day is a clean no-op. Each discovered session must pass manifest checksum, clean
-disconnect, heartbeat, SDK/API version, contiguous sequence, batch identity, object location,
-record-count, message-hash, timestamp, and duplicate-key validation before any write.
+At 21:00 Monday through Friday, `etl_emr_ingest_market_data_stream` first runs one bounded
+`certify_market_data_stream` Docker task. The task uses SSI's exact-date history through the official
+SDK as the trading-day gate; an unobserved date exits with the shared Airflow skip code. For an
+observed trading date, it uses the AWS SDK paginator to discover direct terminal manifests under the
+date's source-owned raw prefix and requires exactly one session to intersect the configured market
+window. Sessions entirely outside that window are irrelevant; no intersecting session, a reconnect
+during the window, partial coverage, or any failed reconciliation blocks publication. The JSON
+report remains in the Airflow remote task log rather than creating another S3 artifact or table.
+
+Only after certification passes does `publish_market_data_stream` submit EMR. The data-plane job
+rediscovers and independently validates the immutable inputs before writing. Each session must pass
+manifest checksum, clean disconnect, heartbeat, SDK/API version, contiguous sequence, batch
+identity, object location, record-count, message-hash, timestamp, and duplicate-key validation.
 
 Landing publication merges `messages` by `(stream_session_id, receive_sequence)` and writes the
 terminal `sessions` row last. Curated publication maps positive-price, positive-quantity

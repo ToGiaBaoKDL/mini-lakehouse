@@ -20,7 +20,7 @@ Airflow image.
 | `etl_emr_ingest_github_archive`     | Docker + EMR Serverless   | `30 7 * * *`                          |
 | `etl_emr_ingest_arxiv_metadata`     | Docker + EMR Serverless   | `0 11 * * *`                          |
 | `etl_mix_ingest_market_data_rest`   | Docker + EMR Serverless   | 21:00 Monday-Friday, Asia/Ho_Chi_Minh |
-| `etl_emr_ingest_market_data_stream` | EMR Serverless            | 21:00 Monday-Friday, Asia/Ho_Chi_Minh |
+| `etl_emr_ingest_market_data_stream` | Docker + EMR Serverless   | 21:00 Monday-Friday, Asia/Ho_Chi_Minh |
 | `tl_docker_build_analytics`         | Isolated dbt Docker tasks | Curated GitHub or ArXiv asset update  |
 | `gov_emr_maintain_iceberg`          | EMR Serverless            | `0 3 * * 0`                           |
 
@@ -63,11 +63,11 @@ manifests are first-writer-wins: a successful rerun reuses the committed raw cap
 silently observing the source again. Preview the range with the Backfill dry-run before a large
 request and keep source backfills at one active run unless the upstream API has been capacity-tested.
 
-The stream replay DAG discovers existing immutable terminal manifests for each partition date.
-Native backfill can therefore repair or republish captured raw sessions, but it cannot reconstruct a
-market session that the OCI capture service never recorded. Iceberg maintenance operates on current
-table state, and analytics is asset-triggered; both are rerun directly rather than historically
-backfilled.
+The stream replay DAG certifies existing immutable terminal manifests for each partition date before
+submitting EMR. Native backfill can therefore repair or republish a complete captured raw session,
+but it cannot reconstruct a market session that the OCI capture service never recorded. Iceberg
+maintenance operates on current table state, and analytics is asset-triggered; both are rerun
+directly rather than historically backfilled.
 
 ## Operations
 

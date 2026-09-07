@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -225,6 +225,37 @@ def _interval_progression_issue(previous: _ProviderBar, current: _ProviderBar) -
     ):
         return "ohlc_regression"
     return None
+
+
+def reconcile_trade_date(
+    readers: Sequence[StreamSessionReader],
+    configuration: TradingVersion,
+    *,
+    trade_date: date,
+) -> ReconciliationReport:
+    """Select exactly one capture intersecting the market window and certify it."""
+    if not readers:
+        raise ValueError("no terminal SSI Stream session exists for the trading date")
+    if any(reader.trade_date != trade_date for reader in readers):
+        raise ValueError("SSI Stream session escaped the requested trading date")
+    timezone = ZoneInfo(configuration.market.timezone)
+    market_open, market_close = trading_window(
+        trade_date,
+        timezone=timezone,
+        schedule=configuration.market.sessions,
+    )
+    intersecting = tuple(
+        reader
+        for reader in readers
+        if reader.manifest.disconnected_at >= market_open
+        and reader.manifest.connected_at <= market_close
+    )
+    if len(intersecting) != 1:
+        raise ValueError(
+            "expected exactly one SSI Stream session intersecting the market window, "
+            f"found {len(intersecting)}"
+        )
+    return reconcile_session(intersecting[0], configuration)
 
 
 def reconcile_session(
