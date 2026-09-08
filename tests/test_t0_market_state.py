@@ -286,6 +286,26 @@ def test_health_rejects_state_that_was_not_available_at_evaluation_time() -> Non
     assert set(health.reasons) == {"FUTURE_TRADE", "FUTURE_QUOTE"}
 
 
+def test_health_does_not_reuse_observations_before_a_required_session() -> None:
+    state = MarketState(_configuration())
+    delayed_receipt = datetime(2026, 9, 4, 6, 0, 1, tzinfo=UTC)
+    state.apply(
+        _trade(1, "2026/09/04 09:02:00", 100, 10, "B").model_copy(
+            update={"received_at": delayed_receipt}
+        )
+    )
+    state.apply(_quote(2).model_copy(update={"received_at": delayed_receipt}))
+
+    health = state.health(
+        "VIC",
+        evaluated_at=datetime(2026, 9, 4, 6, 0, 5, tzinfo=UTC),
+        required_since=datetime(2026, 9, 4, 6, 0, tzinfo=UTC),
+    )
+
+    assert health.ready is False
+    assert health.reasons == ("MISSING_TRADE", "MISSING_QUOTE")
+
+
 def test_replay_rejects_finish_time_before_captured_input() -> None:
     envelope = _trade(1, "2026/09/04 09:02:00", 100, 10, "B")
 

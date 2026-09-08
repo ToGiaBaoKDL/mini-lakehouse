@@ -81,11 +81,44 @@ uv run t0-trading check-config \
   --effective-date 2026-09-05
 ```
 
+The side-effect-free `t0_trading.features` package builds on that state boundary. Its effective
+configuration owns a five-second cadence, 30/60/300-second trailing windows, a 300-second warm-up,
+and the continuous sessions in which a snapshot may become eligible. It emits one immutable,
+versioned `FeatureSnapshot` per configured symbol and decision instant. Every snapshot carries its
+configuration hash, raw stream watermark, observation ages, and explicit fail-closed reasons.
+
+Feature calculations are deliberately limited to facts supported by the certified SSI feed:
+
+- Top-3 depth, spread, midpoint, weighted microprice, and depth imbalance;
+- Level-1 quote-transition order-flow imbalance without inventing order IDs or cancellations;
+- signed trade flow, VWAP, return, and realized volatility over each configured window; and
+- receipt-time freshness, session-local warm-up, and minimum-observation gates.
+
+The incremental live clock and full-session replay call the same `FeatureEngine`. Golden tests
+compare their complete snapshot contracts and prove that an observation received after a decision
+instant cannot alter that decision's features. The engine retains only the largest configured
+window per symbol; it does not introduce a dataframe runtime or generic feature-store abstraction
+for this two-symbol hot path.
+
+A terminal session can be audited locally without publishing snapshots or creating another S3
+artifact. The stable JSON report reconciles every configured decision key exactly once and
+summarizes eligible coverage, fail-closed reasons, full-clock null rates, and numeric distributions
+from eligible snapshots by symbol, session, and window:
+
+```bash
+AWS_PROFILE=tgbao-dev uv run --project t0-trading t0-trading audit-features \
+  --manifest-uri 's3://<landing-bucket>/stream/ssi_fastconnect_stream/raw/trade_date=<date>/session=<uuid>/manifest.json' \
+  --output /tmp/t0-feature-audit.json
+```
+
+The audit exhausts the lazy session reader, so the end of the continuous feature clock cannot skip
+terminal batch, checksum, or sequence validation for closing-auction messages.
+
 This core has no S3, database, notification, or broker side effects. Replay invokes it explicitly;
 the capture service remains responsible only for lossless raw evidence and SDK callbacks perform
-only a non-blocking queue write. A future decision runtime will invoke the same core without adding
-a generic capture callback. dbt remains the downstream analytics owner and does not reimplement
-these state transitions.
+only a non-blocking queue write. A future decision runtime will consume the same snapshots without
+adding a generic capture callback. dbt remains the downstream analytics owner and does not
+reimplement market-state or point-in-time feature transitions.
 
 The bounded stream command subscribes to aggregate symbol data and one-minute intervals for
 `VIC,VHM`. SDK callbacks only serialize into a bounded in-memory queue; the main process writes

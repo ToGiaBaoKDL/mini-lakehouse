@@ -17,6 +17,7 @@ def test_cli_help_and_validation_do_not_initialize_aws(monkeypatch: Any) -> None
     assert help_result.exit_code == 0
     assert "capture-rest" in help_result.stdout
     assert "capture-stream" in help_result.stdout
+    assert "audit-features" in help_result.stdout
     assert "certify-stream-day" in help_result.stdout
     assert "check-config" in help_result.stdout
 
@@ -144,3 +145,34 @@ def test_cli_reports_safe_aws_failure_details(monkeypatch: Any) -> None:
     assert result.exit_code == 1
     assert "ClientError operation=HeadObject code=AccessDenied" in result.output
     assert "sensitive provider detail" not in result.output
+
+
+def test_feature_audit_reports_safe_aws_failure_details(monkeypatch: Any) -> None:
+    def denied(*_args: object, **_kwargs: object) -> None:
+        raise ClientError(
+            {
+                "Error": {
+                    "Code": "AccessDenied",
+                    "Message": "sensitive object detail",
+                }
+            },
+            "GetObject",
+        )
+
+    def client(*_args: object, **_kwargs: object) -> object:
+        return object()
+
+    monkeypatch.setattr("t0_trading.cli.boto3.client", client)
+    monkeypatch.setattr("t0_trading.cli.StreamSessionReader.from_uri", denied)
+    result = CliRunner().invoke(
+        app,
+        [
+            "audit-features",
+            "--manifest-uri",
+            "s3://landing/stream/manifest.json",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "ClientError operation=GetObject code=AccessDenied" in result.output
+    assert "sensitive object detail" not in result.output

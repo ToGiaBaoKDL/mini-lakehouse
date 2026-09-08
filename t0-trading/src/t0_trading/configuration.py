@@ -7,6 +7,7 @@ import json
 from datetime import date, time
 from itertools import pairwise
 from pathlib import Path
+from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
@@ -94,12 +95,65 @@ class DataQualityConfiguration(_StrictModel):
     quote_stale_after_seconds: int = Field(ge=1)
 
 
+DecisionSessionName = Literal[
+    "opening_auction",
+    "continuous_am",
+    "continuous_pm",
+    "closing_auction",
+]
+
+_SESSION_ORDER: tuple[DecisionSessionName, ...] = (
+    "opening_auction",
+    "continuous_am",
+    "continuous_pm",
+    "closing_auction",
+)
+
+
+class FeatureConfiguration(_StrictModel):
+    version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    cadence_seconds: int = Field(ge=1, le=60)
+    windows_seconds: tuple[int, ...]
+    warmup_seconds: int = Field(ge=1, le=86_400)
+    decision_sessions: tuple[DecisionSessionName, ...]
+
+    @model_validator(mode="after")
+    def validate_features(self) -> FeatureConfiguration:
+        if 60 % self.cadence_seconds:
+            raise ValueError("feature cadence must divide one minute")
+        if (
+            not self.windows_seconds
+            or tuple(sorted(set(self.windows_seconds))) != self.windows_seconds
+            or any(
+                window < self.cadence_seconds or window > 86_400 or window % self.cadence_seconds
+                for window in self.windows_seconds
+            )
+        ):
+            raise ValueError("feature windows must be unique ascending cadence multiples")
+        if (
+            self.warmup_seconds < self.windows_seconds[-1]
+            or self.warmup_seconds % self.cadence_seconds
+        ):
+            raise ValueError("feature warmup must cover every window and align to cadence")
+        if not self.decision_sessions or len(set(self.decision_sessions)) != len(
+            self.decision_sessions
+        ):
+            raise ValueError("feature decision sessions must be unique and non-empty")
+        if (
+            tuple(sorted(self.decision_sessions, key=_SESSION_ORDER.index))
+            != self.decision_sessions
+        ):
+            raise ValueError("feature decision sessions must follow market-session order")
+        return self
+
+
 class TradingVersion(_StrictModel):
     version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
     effective_from: date
     effective_to: date | None
     market: MarketConfiguration
     data_quality: DataQualityConfiguration
+    features: FeatureConfiguration
 
     @model_validator(mode="after")
     def validate_interval(self) -> TradingVersion:

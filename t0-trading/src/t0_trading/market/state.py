@@ -303,13 +303,29 @@ class MarketState:
                 state.closed_through = boundary
         return tuple(sorted(finalized, key=lambda bar: (bar.end, bar.symbol)))
 
-    def health(self, symbol: str, *, evaluated_at: datetime) -> MarketHealth:
+    def health(
+        self,
+        symbol: str,
+        *,
+        evaluated_at: datetime,
+        required_since: datetime | None = None,
+    ) -> MarketHealth:
         evaluated_at = _aware_utc(evaluated_at, "evaluated_at")
+        if required_since is not None:
+            required_since = _aware_utc(required_since, "required_since")
+            if required_since > evaluated_at:
+                raise ValueError("required_since must not follow evaluated_at")
         state = self._symbols.get(symbol)
         if state is None:
             raise ValueError(f"symbol is outside the configured universe: {symbol}")
         reasons = list(self.integrity_issues)
-        if state.latest_trade is None:
+        if state.latest_trade is None or (
+            required_since is not None
+            and (
+                state.latest_trade.event_time < required_since
+                or state.latest_trade.received_at < required_since
+            )
+        ):
             reasons.append("MISSING_TRADE")
         elif state.latest_trade.received_at > evaluated_at:
             reasons.append("FUTURE_TRADE")
@@ -317,7 +333,13 @@ class MarketState:
             seconds=self.configuration.data_quality.trade_stale_after_seconds
         ):
             reasons.append("STALE_TRADE")
-        if state.latest_quote is None:
+        if state.latest_quote is None or (
+            required_since is not None
+            and (
+                state.latest_quote.event_time < required_since
+                or state.latest_quote.received_at < required_since
+            )
+        ):
             reasons.append("MISSING_QUOTE")
         else:
             if state.latest_quote.received_at > evaluated_at:

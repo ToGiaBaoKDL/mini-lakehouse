@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 import boto3
 import typer
 from botocore.exceptions import ClientError
+from pydantic import BaseModel
 from ssi_sdk import Data, Stream
 
 from t0_trading.capture import MAX_STREAM_BATCH_MESSAGES
@@ -29,6 +30,7 @@ from t0_trading.capture.stream import StreamCaptureOptions, capture_stream
 from t0_trading.certification import CertificationOptions, run_certification
 from t0_trading.configuration import TradingConfigurationError, load_configuration
 from t0_trading.credentials import CredentialError, load_credentials
+from t0_trading.features import build_feature_audit, replay_features
 from t0_trading.market.reconciliation import (
     ReconciliationReport,
     reconcile_session,
@@ -69,12 +71,16 @@ def _parse_trade_date(value: str) -> date:
     return parsed
 
 
-def _emit_reconciliation(report: ReconciliationReport, output: Path | None = None) -> None:
+def _emit_model(report: BaseModel, output: Path | None = None) -> None:
     rendered = report.model_dump_json(indent=2)
     if output is not None:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(f"{rendered}\n", encoding="utf-8")
     typer.echo(rendered)
+
+
+def _emit_reconciliation(report: ReconciliationReport, output: Path | None = None) -> None:
+    _emit_model(report, output)
     if report.status != "passed":
         raise typer.Exit(code=1)
 
@@ -345,6 +351,47 @@ def reconcile_stream_command(
     _emit_reconciliation(report, output)
 
 
+def audit_features_command(
+    manifest_uri: Annotated[
+        str,
+        typer.Option(help="Terminal SSI Stream manifest S3 URI."),
+    ],
+    region: Annotated[str, typer.Option(help="AWS region containing the landing bucket.")] = (
+        "ap-southeast-1"
+    ),
+    config: Annotated[Path, typer.Option(help="Versioned non-secret trading YAML.")] = (
+        DEFAULT_TRADING_CONFIG
+    ),
+    output: Annotated[
+        Path | None,
+        typer.Option(help="Optional local JSON path; stdout is always emitted."),
+    ] = None,
+) -> None:
+    """Replay and summarize one terminal session without publishing feature data."""
+    try:
+        reader = StreamSessionReader.from_uri(
+            boto3.client("s3", region_name=region),
+            manifest_uri,
+        )
+        version = load_configuration(config).resolve(reader.trade_date)
+        snapshots = replay_features(reader.envelopes(), version, trade_date=reader.trade_date)
+        report = build_feature_audit(
+            snapshots,
+            version,
+            trade_date=reader.trade_date,
+            manifest_uri=reader.uri,
+            stream_session_id=reader.manifest.stream_session_id,
+            input_message_count=reader.manifest.message_count,
+        )
+    except (StreamCaptureReadError, TradingConfigurationError, ValueError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+    except ClientError as error:
+        typer.echo(f"SSI feature audit failed: {_safe_error(error)}", err=True)
+        raise typer.Exit(code=1) from None
+    _emit_model(report, output)
+
+
 def certify_stream_day_command(
     trade_date: Annotated[
         str,
@@ -411,4 +458,5 @@ app.command("check-config")(check_config)
 app.command("capture-rest")(capture_rest_command)
 app.command("capture-stream")(capture_stream_command)
 app.command("reconcile-stream")(reconcile_stream_command)
+app.command("audit-features")(audit_features_command)
 app.command("certify-stream-day")(certify_stream_day_command)

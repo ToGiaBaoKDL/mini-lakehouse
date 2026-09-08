@@ -52,6 +52,27 @@ def trading_window(
     )
 
 
+def session_window(
+    trade_date: date,
+    session: MarketSession,
+    *,
+    timezone: ZoneInfo,
+    schedule: SessionScheduleConfiguration,
+) -> tuple[datetime, datetime]:
+    """Return one configured exchange session in UTC."""
+    windows = {
+        MarketSession.OPENING_AUCTION: schedule.opening_auction,
+        MarketSession.CONTINUOUS_AM: schedule.continuous_am,
+        MarketSession.CONTINUOUS_PM: schedule.continuous_pm,
+        MarketSession.CLOSING_AUCTION: schedule.closing_auction,
+    }
+    try:
+        start, end = windows[session]
+    except KeyError as error:
+        raise ValueError(f"market session has no trading window: {session}") from error
+    return _instant(trade_date, start, timezone), _instant(trade_date, end, timezone)
+
+
 def session_at(
     timestamp: datetime,
     *,

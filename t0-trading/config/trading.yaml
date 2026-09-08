@@ -17,3 +17,9 @@ versions:
     data_quality:
       trade_stale_after_seconds: 90
       quote_stale_after_seconds: 30
+    features:
+      version: microstructure-v1
+      cadence_seconds: 5
+      windows_seconds: [30, 60, 300]
+      warmup_seconds: 300
+      decision_sessions: [continuous_am, continuous_pm]
