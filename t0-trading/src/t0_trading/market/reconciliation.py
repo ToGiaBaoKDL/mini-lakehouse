@@ -24,7 +24,12 @@ from t0_trading.market.events import (
     provider_timestamp,
 )
 from t0_trading.market.replay import replay
-from t0_trading.market.session import TRADE_SESSIONS, session_at, trading_window
+from t0_trading.market.session import (
+    TRADE_SESSIONS,
+    covers_trading_window,
+    session_at,
+    trading_window,
+)
 from t0_trading.market.state import Bar, bar_start
 
 _INTERVAL_ADAPTER = TypeAdapter(IntervalMessage)
@@ -370,14 +375,12 @@ def reconcile_session(
                 f"observed_at={interval.observed_at.isoformat()}]"
             )
 
-    market_open, market_close = trading_window(
-        reader.trade_date,
+    full_session_coverage = covers_trading_window(
+        reader.manifest.connected_at,
+        reader.manifest.disconnected_at,
+        trade_date=reader.trade_date,
         timezone=timezone,
         schedule=configuration.market.sessions,
-    )
-    full_session_coverage = (
-        reader.manifest.connected_at <= market_open
-        and reader.manifest.disconnected_at >= market_close
     )
     configured_symbols = set(configuration.market.symbols)
     capture_scope_matches_configuration = set(reader.manifest.symbols) == configured_symbols

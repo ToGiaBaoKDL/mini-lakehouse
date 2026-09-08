@@ -3,10 +3,10 @@
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import LongType, StringType, StructField, StructType
+from t0_trading.capture.reader import StreamSessionReader
 
 from emr_jobs.common.contracts import spark_schema
 from emr_jobs.common.iceberg import qualified_name
-from emr_jobs.market_data.stream_manifest import StreamCapture
 from lakehouse.contracts.sources import SourceContract
 
 RAW_SCHEMA = StructType(
@@ -27,13 +27,14 @@ RAW_SCHEMA = StructType(
 )
 
 
-def _messages_frame(spark: SparkSession, capture: StreamCapture) -> DataFrame | None:
-    if not capture.batches:
+def _messages_frame(spark: SparkSession, capture: StreamSessionReader) -> DataFrame | None:
+    manifest = capture.manifest
+    if not manifest.batches:
         return None
     metadata = spark.createDataFrame(
         [
             (
-                batch.uri.rsplit("/", 1)[-1],
+                batch.object_key.rsplit("/", 1)[-1],
                 batch.batch_id,
                 batch.object_key,
                 batch.object_sha256,
@@ -42,7 +43,7 @@ def _messages_frame(spark: SparkSession, capture: StreamCapture) -> DataFrame | 
                 batch.message_count,
                 batch.published_at,
             )
-            for batch in capture.batches
+            for batch in manifest.batches
         ],
         """source_file string, batch_id string, object_key string, object_sha256 string,
         expected_first_sequence bigint, expected_last_sequence bigint,
@@ -50,7 +51,7 @@ def _messages_frame(spark: SparkSession, capture: StreamCapture) -> DataFrame | 
     )
     messages = (
         spark.read.schema(RAW_SCHEMA)
-        .json([batch.uri for batch in capture.batches])
+        .json([capture.batch_uri(batch) for batch in manifest.batches])
         .withColumn("source_file", F.regexp_extract(F.input_file_name(), r"([^/]+)$", 1))
         .join(F.broadcast(metadata), "source_file")
         .select(
@@ -97,18 +98,18 @@ def _messages_frame(spark: SparkSession, capture: StreamCapture) -> DataFrame | 
         F.expr(" OR ".join(f"{column} IS NULL" for column in required_columns))
         | (F.trim("message_type") == F.lit(""))
         | (F.col("subscription_context") != F.lit("symbols"))
-        | (F.col("stream_session_id") != F.lit(capture.stream_session_id))
+        | (F.col("stream_session_id") != F.lit(manifest.stream_session_id))
         | (F.col("receive_sequence") < F.col("expected_first_sequence"))
         | (F.col("receive_sequence") > F.col("expected_last_sequence"))
-        | (F.col("api_version") != F.lit(capture.api_version))
-        | (F.col("sdk_version") != F.lit(capture.sdk_version))
+        | (F.col("api_version") != F.lit(manifest.api_version))
+        | (F.col("sdk_version") != F.lit(manifest.sdk_version))
         | (F.sha2("message_json", 256) != F.col("message_sha256"))
         | (~F.trim("message_json").startswith("{"))
         | (F.get_json_object("message_json", "$").isNull())
-        | (F.col("received_at") < F.lit(capture.connected_at))
-        | (F.col("received_at") > F.lit(capture.disconnected_at))
+        | (F.col("received_at") < F.lit(manifest.connected_at))
+        | (F.col("received_at") > F.lit(manifest.disconnected_at))
         | (F.col("received_at") > F.col("published_at"))
-        | (F.col("symbol").isNotNull() & ~F.col("symbol").isin(*capture.symbols))
+        | (F.col("symbol").isNotNull() & ~F.col("symbol").isin(*manifest.symbols))
         | (
             F.coalesce(F.col("symbol"), F.lit("__NULL__"))
             != F.coalesce(payload_symbol, F.lit("__NULL__"))
@@ -147,9 +148,9 @@ def _messages_frame(spark: SparkSession, capture: StreamCapture) -> DataFrame | 
     ).first()
     sequence_mismatch = (
         coverage is None
-        or coverage["actual_count"] != capture.message_count
-        or coverage["first_sequence"] != capture.first_receive_sequence
-        or coverage["last_sequence"] != capture.last_receive_sequence
+        or coverage["actual_count"] != manifest.message_count
+        or coverage["first_sequence"] != manifest.first_receive_sequence
+        or coverage["last_sequence"] != manifest.last_receive_sequence
     )
     if invalid or duplicate_keys or batch_count_mismatches or sequence_mismatch:
         messages.unpersist()
@@ -172,8 +173,9 @@ def publish(
     spark: SparkSession,
     *,
     source: SourceContract,
-    capture: StreamCapture,
+    capture: StreamSessionReader,
 ) -> str:
+    manifest = capture.manifest
     messages_table = qualified_name(source.table_identifier("messages"))
     sessions_table = qualified_name(source.table_identifier("sessions"))
     messages = _messages_frame(spark, capture)
@@ -209,17 +211,17 @@ def publish(
     session = spark.createDataFrame(
         [
             {
-                "stream_session_id": capture.stream_session_id,
-                "connected_at": capture.connected_at,
-                "disconnected_at": capture.disconnected_at,
-                "disconnect_kind": capture.disconnect_kind,
-                "sdk_version": capture.sdk_version,
-                "message_count": capture.message_count,
-                "first_receive_sequence": capture.first_receive_sequence,
-                "last_receive_sequence": capture.last_receive_sequence,
+                "stream_session_id": manifest.stream_session_id,
+                "connected_at": manifest.connected_at,
+                "disconnected_at": manifest.disconnected_at,
+                "disconnect_kind": manifest.disconnect_kind,
+                "sdk_version": manifest.sdk_version,
+                "message_count": manifest.message_count,
+                "first_receive_sequence": manifest.first_receive_sequence,
+                "last_receive_sequence": manifest.last_receive_sequence,
                 "manifest_key": capture.manifest_key,
                 "manifest_sha256": capture.manifest_sha256,
-                "published_at": capture.published_at,
+                "published_at": manifest.published_at,
             }
         ],
         spark_schema(source.table("sessions")),

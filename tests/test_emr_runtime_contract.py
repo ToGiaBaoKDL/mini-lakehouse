@@ -71,6 +71,12 @@ def test_emr_uses_one_shared_iceberg_catalog_boundary() -> None:
     assert 'default     = "glue"' in terraform
 
 
+def test_emr_uses_utc_for_timestamp_transport() -> None:
+    spark = Path("lakehouse/emr/src/emr_jobs/common/spark.py").read_text(encoding="utf-8")
+
+    assert '.config("spark.sql.session.timeZone", "UTC")' in spark
+
+
 def test_spark_contract_adapter_supports_every_declared_numeric_type() -> None:
     adapter = Path("lakehouse/emr/src/emr_jobs/common/contracts.py").read_text(encoding="utf-8")
 
@@ -117,6 +123,9 @@ def test_market_data_manifest_uses_the_source_owned_raw_prefix() -> None:
 
 def test_market_data_stream_replay_uses_verified_sdk_models_and_top_three_quotes() -> None:
     job = Path("lakehouse/emr/src/emr_jobs/market_data/stream_job.py").read_text(encoding="utf-8")
+    capture = Path("lakehouse/emr/src/emr_jobs/market_data/stream_capture.py").read_text(
+        encoding="utf-8"
+    )
     landing = Path("lakehouse/emr/src/emr_jobs/market_data/stream_landing.py").read_text(
         encoding="utf-8"
     )
@@ -125,6 +134,9 @@ def test_market_data_stream_replay_uses_verified_sdk_models_and_top_three_quotes
     )
 
     assert "source.raw_object_prefix" in job
+    assert "StreamSessionReader.from_uri" in capture
+    assert "stream_manifest_uris" in capture
+    assert not Path("lakehouse/emr/src/emr_jobs/market_data/stream_manifest.py").exists()
     assert '"trade_ticks", "quote_snapshots", "quote_levels"' in job
     assert 'F.sha2("message_json", 256)' in landing
     assert "duplicate_keys" in landing
@@ -137,6 +149,37 @@ def test_market_data_stream_replay_uses_verified_sdk_models_and_top_three_quotes
     assert "IntervalMessage" not in curated
     assert "ForeignRoomMessage" not in curated
     assert "WHEN NOT MATCHED THEN INSERT *" in curated
+
+
+def test_market_data_stream_materializes_features_with_the_shared_t0_core() -> None:
+    job = Path("lakehouse/emr/src/emr_jobs/market_data/stream_job.py").read_text(encoding="utf-8")
+    features = Path("lakehouse/emr/src/emr_jobs/t0_trading/features.py").read_text(encoding="utf-8")
+    image = Path("lakehouse/emr/Dockerfile").read_text(encoding="utf-8")
+
+    assert 'curated_product("t0_trading")' in job
+    assert "parse_configuration" in job
+    assert "trading_config_uri" in job
+    assert "replay_features" in features
+    assert "build_feature_audit" in features
+    assert 'orderBy("receive_sequence")' in features
+    assert "snapshot.sha256" in features
+    assert "WHEN NOT MATCHED THEN INSERT *" in features
+    publication = features.split("def publish(", maxsplit=1)[1]
+    assert publication.count("_require_compatible(") == 2
+    assert publication.count("_insert_missing(") == 2
+    assert publication.rfind("_require_compatible(") < publication.find("_insert_missing(")
+    assert publication.find("view=window_view", publication.find("_insert_missing(")) < (
+        publication.find("view=snapshot_view", publication.find("_insert_missing("))
+    )
+    assert "t0-trading/config/trading.yaml /output/trading.yaml" in image
+
+
+def test_emr_release_tracks_its_t0_feature_inputs() -> None:
+    workflow = Path(".github/workflows/release-emr-jobs.yml").read_text(encoding="utf-8")
+
+    assert "- t0-trading/config/trading.yaml" in workflow
+    assert "- t0-trading/pyproject.toml" in workflow
+    assert "- t0-trading/src/**" in workflow
 
 
 def test_market_data_stream_replay_separates_auction_state_from_executable_trades() -> None:

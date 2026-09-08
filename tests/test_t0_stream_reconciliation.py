@@ -17,7 +17,12 @@ from t0_trading.capture.reader import (
 from t0_trading.capture.store import canonical_json, sha256
 from t0_trading.configuration import load_configuration
 from t0_trading.market.reconciliation import reconcile_session, reconcile_trade_date
-from t0_trading.market.session import MarketSession, session_at, trading_window
+from t0_trading.market.session import (
+    MarketSession,
+    covers_trading_window,
+    session_at,
+    trading_window,
+)
 from t0_trading.provider import SSI_API_VERSION
 
 SESSION_ID = "39daeb94-73ad-4f3f-a40c-7f045697dce2"
@@ -331,6 +336,20 @@ def test_market_sessions_use_configured_exchange_local_boundaries() -> None:
 
     assert market_open == datetime(2026, 9, 4, 2, 0, tzinfo=UTC)
     assert market_close == datetime(2026, 9, 4, 7, 45, tzinfo=UTC)
+    assert covers_trading_window(
+        datetime(2026, 9, 4, 1, 0, tzinfo=UTC),
+        datetime(2026, 9, 4, 9, 0, tzinfo=UTC),
+        trade_date=TRADE_DATE,
+        timezone=timezone,
+        schedule=version.market.sessions,
+    )
+    assert not covers_trading_window(
+        datetime(2026, 9, 4, 2, 1, tzinfo=UTC),
+        datetime(2026, 9, 4, 9, 0, tzinfo=UTC),
+        trade_date=TRADE_DATE,
+        timezone=timezone,
+        schedule=version.market.sessions,
+    )
     assert (
         session_at(
             datetime(2026, 9, 4, 4, 30, tzinfo=UTC),

@@ -2,9 +2,9 @@
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
+from t0_trading.capture.reader import StreamSessionReader
 
 from emr_jobs.common.iceberg import qualified_name
-from emr_jobs.market_data.stream_manifest import StreamCapture
 from lakehouse.contracts.curated import CuratedProductContract
 
 
@@ -12,9 +12,11 @@ def _capture_view(
     spark: SparkSession,
     *,
     landing_table: str,
-    capture: StreamCapture,
+    capture: StreamSessionReader,
 ) -> None:
-    sessions = spark.createDataFrame([(capture.stream_session_id,)], "stream_session_id string")
+    sessions = spark.createDataFrame(
+        [(capture.manifest.stream_session_id,)], "stream_session_id string"
+    )
     sessions.createOrReplaceTempView("ssi_stream_session_ids")
     spark.sql(
         f"""
@@ -26,7 +28,7 @@ def _capture_view(
     )
 
 
-def _trade_view(spark: SparkSession, capture: StreamCapture) -> None:
+def _trade_view(spark: SparkSession, capture: StreamSessionReader) -> None:
     spark.sql(
         """
         CREATE OR REPLACE TEMP VIEW ssi_stream_trade_candidates AS
@@ -94,7 +96,7 @@ def _trade_view(spark: SparkSession, capture: StreamCapture) -> None:
     )
 
 
-def _quote_views(spark: SparkSession, capture: StreamCapture) -> DataFrame:
+def _quote_views(spark: SparkSession, capture: StreamSessionReader) -> DataFrame:
     quotes = spark.sql(
         """
         SELECT
@@ -315,7 +317,7 @@ def publish(
     *,
     landing_table: str,
     product: CuratedProductContract,
-    capture: StreamCapture,
+    capture: StreamSessionReader,
 ) -> None:
     _capture_view(spark, landing_table=landing_table, capture=capture)
     _trade_view(spark, capture)

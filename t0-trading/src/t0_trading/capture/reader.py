@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gzip
+import json
 from collections import deque
 from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -55,8 +56,6 @@ def stream_manifest_uris(client: Any, landing_uri: str, trade_date: date) -> tup
 
 class _ReaderStore(Protocol):
     def uri(self, key: str) -> str: ...
-
-    def read_json(self, key: str) -> dict[str, Any] | None: ...
 
     def read_capture(self, key: str) -> bytes | None: ...
 
@@ -195,13 +194,15 @@ class StreamSessionReader:
         self._prefetch = prefetch
         self.manifest_key = manifest_key.strip("/")
         self.trade_date, session_id = _manifest_location(self.manifest_key)
-        payload = store.read_json(self.manifest_key)
-        if payload is None:
+        body = store.read_capture(self.manifest_key)
+        if body is None:
             raise StreamCaptureReadError("SSI Stream manifest does not exist")
         try:
+            payload = json.loads(body)
             self.manifest = StreamManifest.model_validate(payload)
-        except ValueError as error:
+        except (json.JSONDecodeError, ValueError) as error:
             raise StreamCaptureReadError("invalid SSI Stream manifest") from error
+        self.manifest_sha256 = sha256(body)
         if (
             self.manifest.stream_session_id != session_id
             or self.manifest.connected_at.astimezone(_MARKET_TIMEZONE).date() != self.trade_date
@@ -223,6 +224,10 @@ class StreamSessionReader:
     @property
     def uri(self) -> str:
         return self._store.uri(self.manifest_key)
+
+    def batch_uri(self, batch: StreamBatch) -> str:
+        """Resolve one validated manifest batch through the reader-owned store."""
+        return self._store.uri(batch.object_key)
 
     def _validate_batches(self) -> None:
         expected_sequence = 1

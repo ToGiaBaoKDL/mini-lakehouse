@@ -52,6 +52,27 @@ def trading_window(
     )
 
 
+def covers_trading_window(
+    connected_at: datetime,
+    disconnected_at: datetime,
+    *,
+    trade_date: date,
+    timezone: ZoneInfo,
+    schedule: SessionScheduleConfiguration,
+) -> bool:
+    """Return whether one ordered connection covers the complete configured session."""
+    connected_at = _aware(connected_at).astimezone(UTC)
+    disconnected_at = _aware(disconnected_at).astimezone(UTC)
+    if disconnected_at < connected_at:
+        raise ValueError("connection timestamps are not ordered")
+    market_open, market_close = trading_window(
+        trade_date,
+        timezone=timezone,
+        schedule=schedule,
+    )
+    return connected_at <= market_open and disconnected_at >= market_close
+
+
 def session_window(
     trade_date: date,
     session: MarketSession,

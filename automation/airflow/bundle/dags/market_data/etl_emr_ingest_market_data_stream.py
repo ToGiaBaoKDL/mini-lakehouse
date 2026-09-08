@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from airflow.sdk import DAG, CronPartitionTimetable
 from callbacks.notifications import dag_failure_callbacks, dag_success_callbacks
-from config.assets import CURATED_MARKET_DATA
+from config.assets import CURATED_MARKET_DATA, CURATED_T0_TRADING
 from config.templates import (
     DAG_START_DATE,
     LOCAL_TIMEZONE,
@@ -59,8 +59,10 @@ with DAG(
             TRADE_DATE,
             "--landing-uri",
             runtime_value("storage/landing_uri"),
+            "--trading-config-uri",
+            f"{runtime_value('emr/code_uri')}/trading.yaml",
         ],
-        outlets=[CURATED_MARKET_DATA],
+        outlets=[CURATED_MARKET_DATA, CURATED_T0_TRADING],
         spark_conf={
             "spark.driver.cores": "2",
             "spark.driver.memory": "4g",

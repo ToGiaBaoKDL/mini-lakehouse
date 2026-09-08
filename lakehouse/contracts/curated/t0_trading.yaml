@@ -1,0 +1,71 @@
+version: 1
+name: t0_trading
+database: curated_t0_trading
+owner: t0-trading
+contact:
+  name: T0 Trading
+  email: baokdl2226@gmail.com
+description: Deterministic point-in-time T0 research facts reproduced from certified market captures.
+upstream_sources: [ssi_fastconnect_stream]
+
+tables:
+  - key: feature_snapshots
+    name: feature_snapshots
+    description: One versioned feature vector for a symbol at an exact decision instant.
+    primary_key: [feature_version, configuration_sha256, symbol, decision_at]
+    columns:
+      - {field_id: 1, name: schema_version, data_type: long, required: true, description: Feature snapshot contract version.}
+      - {field_id: 2, name: feature_version, data_type: string, required: true, description: Version of the deterministic feature formulas and policies.}
+      - {field_id: 3, name: configuration_version, data_type: string, required: true, description: Human-readable effective trading configuration version.}
+      - {field_id: 4, name: configuration_sha256, data_type: string, required: true, description: SHA-256 of the exact effective configuration.}
+      - {field_id: 5, name: symbol, data_type: string, required: true, description: Normalized security symbol.}
+      - {field_id: 6, name: trade_date, data_type: date, required: true, description: Exchange-local trading date.}
+      - {field_id: 7, name: decision_at, data_type: timestamptz, required: true, description: UTC point-in-time evaluation boundary.}
+      - {field_id: 8, name: market_session, data_type: string, required: true, description: Configured exchange session containing the decision instant.}
+      - {field_id: 9, name: stream_session_id, data_type: string, required: true, description: Certified SSI capture session used by this replay.}
+      - {field_id: 10, name: last_receive_sequence, data_type: long, required: true, description: Last callback sequence available at the decision instant.}
+      - {field_id: 11, name: trade_age_seconds, data_type: decimal, precision: 18, scale: 6, required: false, description: Receipt-time age of the latest trade.}
+      - {field_id: 12, name: quote_age_seconds, data_type: decimal, precision: 18, scale: 6, required: false, description: Receipt-time age of the latest complete quote.}
+      - {field_id: 13, name: mid_price, data_type: decimal, precision: 24, scale: 8, required: false, description: Best-bid and best-ask midpoint in VND.}
+      - {field_id: 14, name: microprice, data_type: decimal, precision: 24, scale: 8, required: false, description: Opposite-depth-weighted level-one microprice in VND.}
+      - {field_id: 15, name: microprice_deviation_bps, data_type: decimal, precision: 18, scale: 4, required: false, description: Microprice deviation from midpoint in basis points.}
+      - {field_id: 16, name: spread, data_type: decimal, precision: 18, scale: 0, required: false, description: Best ask minus best bid in VND.}
+      - {field_id: 17, name: spread_bps, data_type: decimal, precision: 18, scale: 4, required: false, description: Quoted spread relative to midpoint in basis points.}
+      - {field_id: 18, name: bid_depth, data_type: long, required: false, description: Total visible bid quantity across configured quote levels.}
+      - {field_id: 19, name: ask_depth, data_type: long, required: false, description: Total visible ask quantity across configured quote levels.}
+      - {field_id: 20, name: level_one_imbalance, data_type: decimal, precision: 10, scale: 8, required: false, description: Normalized best-level bid versus ask depth imbalance.}
+      - {field_id: 21, name: depth_imbalance, data_type: decimal, precision: 10, scale: 8, required: false, description: Normalized configured-depth bid versus ask imbalance.}
+      - {field_id: 22, name: is_eligible, data_type: boolean, required: true, description: Whether all configured data-quality and warm-up gates allow this snapshot.}
+      - {field_id: 23, name: eligibility_reasons_json, data_type: string, required: true, description: Canonical JSON array of structured abstention reasons.}
+      - {field_id: 24, name: available_at, data_type: timestamptz, required: true, description: Earliest UTC instant at which the feature vector was available.}
+      - {field_id: 25, name: processed_at, data_type: timestamptz, required: true, description: UTC time of durable replay materialization.}
+      - {field_id: 26, name: manifest_sha256, data_type: string, required: true, description: SHA-256 of the terminal source manifest.}
+      - {field_id: 27, name: snapshot_sha256, data_type: string, required: true, description: SHA-256 of the canonical complete FeatureSnapshot.}
+    partitioning:
+      - {field_id: 1000, field: trade_date, transform: identity}
+
+  - key: feature_windows
+    name: feature_windows
+    description: One trailing-window component belonging to a deterministic feature snapshot.
+    primary_key: [feature_version, configuration_sha256, symbol, decision_at, window_seconds]
+    columns:
+      - {field_id: 1, name: feature_version, data_type: string, required: true, description: Parent feature formula and policy version.}
+      - {field_id: 2, name: configuration_sha256, data_type: string, required: true, description: SHA-256 of the exact effective configuration.}
+      - {field_id: 3, name: symbol, data_type: string, required: true, description: Normalized security symbol.}
+      - {field_id: 4, name: trade_date, data_type: date, required: true, description: Exchange-local trading date.}
+      - {field_id: 5, name: decision_at, data_type: timestamptz, required: true, description: UTC point-in-time evaluation boundary.}
+      - {field_id: 6, name: window_seconds, data_type: long, required: true, description: Trailing receipt-time window length in seconds.}
+      - {field_id: 7, name: trade_count, data_type: long, required: true, description: Executable trade observations in the window.}
+      - {field_id: 8, name: quote_change_count, data_type: long, required: true, description: Complete quote transitions in the window.}
+      - {field_id: 9, name: trade_volume, data_type: long, required: true, description: Matched share quantity in the window.}
+      - {field_id: 10, name: signed_trade_volume, data_type: long, required: true, description: Buyer-aggressed minus seller-aggressed quantity.}
+      - {field_id: 11, name: trade_volume_per_second, data_type: decimal, precision: 24, scale: 8, required: false, description: Matched share quantity normalized by configured window duration.}
+      - {field_id: 12, name: trade_volume_imbalance, data_type: decimal, precision: 10, scale: 8, required: false, description: Signed volume divided by total matched volume.}
+      - {field_id: 13, name: level_one_order_flow_imbalance, data_type: long, required: true, description: Cont-style best-level order-flow imbalance across quote transitions.}
+      - {field_id: 14, name: price_return_bps, data_type: decimal, precision: 18, scale: 4, required: false, description: First-to-last matched-price return in basis points.}
+      - {field_id: 15, name: realized_volatility_bps, data_type: decimal, precision: 18, scale: 4, required: false, description: Root sum of squared adjacent trade returns in basis points.}
+      - {field_id: 16, name: vwap, data_type: decimal, precision: 24, scale: 8, required: false, description: Volume-weighted matched price in VND.}
+      - {field_id: 17, name: last_price_to_vwap_bps, data_type: decimal, precision: 18, scale: 4, required: false, description: Last matched price deviation from window VWAP in basis points.}
+      - {field_id: 18, name: snapshot_sha256, data_type: string, required: true, description: Immutable parent snapshot fingerprint.}
+    partitioning:
+      - {field_id: 1000, field: trade_date, transform: identity}

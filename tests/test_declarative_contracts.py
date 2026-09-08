@@ -149,6 +149,33 @@ def test_market_data_contracts_are_ssi_only_replayable_and_conformed() -> None:
     assert "historical_1m" not in market_contracts
 
 
+def test_t0_feature_contract_preserves_snapshot_and_window_grains() -> None:
+    product = load_contracts().curated_product("t0_trading")
+    snapshots = product.table("feature_snapshots")
+    windows = product.table("feature_windows")
+
+    assert product.database == "curated_t0_trading"
+    assert product.owner == "t0-trading"
+    assert product.upstream_sources == ("ssi_fastconnect_stream",)
+    assert snapshots.primary_key == (
+        "feature_version",
+        "configuration_sha256",
+        "symbol",
+        "decision_at",
+    )
+    assert windows.primary_key == (*snapshots.primary_key, "window_seconds")
+    assert {column.name for column in snapshots.columns} >= {
+        "stream_session_id",
+        "last_receive_sequence",
+        "is_eligible",
+        "eligibility_reasons_json",
+        "available_at",
+        "manifest_sha256",
+        "snapshot_sha256",
+    }
+    assert all(column.data_type != "double" for table in product.tables for column in table.columns)
+
+
 def test_contract_layout_excludes_cloud_identity_and_maintenance_policy() -> None:
     root = Path("lakehouse/contracts")
     files = {path.relative_to(root).as_posix() for path in root.rglob("*.yaml")}
@@ -159,6 +186,7 @@ def test_contract_layout_excludes_cloud_identity_and_maintenance_policy() -> Non
         "curated/arxiv.yaml",
         "curated/github.yaml",
         "curated/market_data.yaml",
+        "curated/t0_trading.yaml",
         "domains/engineering.yaml",
         "domains/research.yaml",
         "sources/arxiv.yaml",

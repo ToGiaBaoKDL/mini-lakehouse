@@ -6,6 +6,7 @@ import pytest
 from t0_trading.configuration import (
     TradingConfigurationError,
     load_configuration,
+    parse_configuration,
 )
 
 CONFIGURATION = Path("t0-trading/config/trading.yaml")
@@ -31,6 +32,7 @@ def test_trading_configuration_is_strict_effective_dated_and_stable() -> None:
     assert len(version.sha256) == 64
     assert version.sha256 != configuration.sha256
     assert configuration.canonical_bytes() == configuration.canonical_bytes()
+    assert parse_configuration(CONFIGURATION.read_text(encoding="utf-8")) == configuration
 
 
 def test_trading_configuration_rejects_unknown_fields(tmp_path: Path) -> None:

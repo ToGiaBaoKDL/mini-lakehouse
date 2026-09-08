@@ -1,33 +1,73 @@
 """Orchestrate terminal SSI Stream capture replay for one trade date."""
 
+from datetime import date
+from zoneinfo import ZoneInfo
+
 from loguru import logger
+from t0_trading.configuration import parse_configuration
+from t0_trading.market.session import covers_trading_window
 
 from emr_jobs.common.contracts import load_contracts
-from emr_jobs.common.iceberg import require_tables
+from emr_jobs.common.iceberg import qualified_name, require_tables
+from emr_jobs.common.s3 import client, read_bytes
 from emr_jobs.common.spark import configure_logging, session
+from emr_jobs.market_data.stream_capture import discover_captures, load_capture
 from emr_jobs.market_data.stream_curated import publish as publish_curated
 from emr_jobs.market_data.stream_landing import publish as publish_landing
-from emr_jobs.market_data.stream_manifest import capture_manifest_uris, load_capture
+from emr_jobs.t0_trading.features import publish as publish_features
 
 
-def run(*, source_date: str, landing_uri: str, contracts_uri: str) -> None:
+def run(
+    *,
+    source_date: str,
+    landing_uri: str,
+    contracts_uri: str,
+    trading_config_uri: str,
+) -> None:
     contracts = load_contracts(contracts_uri)
     source = contracts.source("ssi_fastconnect_stream")
-    product = contracts.curated_product("market_data")
+    market_data = contracts.curated_product("market_data")
+    t0_trading = contracts.curated_product("t0_trading")
+    trade_date = date.fromisoformat(source_date)
+    configuration = parse_configuration(read_bytes(trading_config_uri).decode()).resolve(trade_date)
     configure_logging("ssi_market_data_stream", source_date)
-    manifest_uris = capture_manifest_uris(landing_uri, source_date, source.raw_object_prefix)
+    s3 = client()
+    manifest_uris = discover_captures(
+        s3,
+        landing_uri=landing_uri,
+        trade_date=trade_date,
+        raw_object_prefix=source.raw_object_prefix,
+    )
     if not manifest_uris:
         logger.info("No terminal SSI Stream sessions found for {}", source_date)
         return
-    captures = tuple(load_capture(uri, source.raw_object_prefix) for uri in manifest_uris)
-    if any(capture.trade_date != source_date for capture in captures):
+    captures = tuple(load_capture(s3, uri) for uri in manifest_uris)
+    if any(capture.trade_date != trade_date for capture in captures):
         raise RuntimeError("SSI Stream capture escaped the requested trade date")
+    timezone = ZoneInfo(configuration.market.timezone)
+    feature_captures = tuple(
+        capture
+        for capture in captures
+        if covers_trading_window(
+            capture.manifest.connected_at,
+            capture.manifest.disconnected_at,
+            trade_date=trade_date,
+            timezone=timezone,
+            schedule=configuration.market.sessions,
+        )
+        and frozenset(capture.manifest.symbols) == frozenset(configuration.market.symbols)
+    )
+    if len(feature_captures) != 1:
+        raise RuntimeError(
+            "Expected exactly one full-session capture matching the feature configuration"
+        )
     required_identifiers = (
         *(source.table_identifier(table.key) for table in source.tables),
         *(
-            product.table_identifier(key)
+            market_data.table_identifier(key)
             for key in ("trade_ticks", "quote_snapshots", "quote_levels")
         ),
+        *(t0_trading.table_identifier(table.key) for table in t0_trading.tables),
     )
 
     spark = session(f"ssi-market-data-stream-{source_date}")
@@ -38,13 +78,26 @@ def run(*, source_date: str, landing_uri: str, contracts_uri: str) -> None:
             publish_curated(
                 spark,
                 landing_table=landing_table,
-                product=product,
+                product=market_data,
                 capture=capture,
             )
             logger.info(
                 "Replayed SSI Stream session {} with {} messages",
-                capture.stream_session_id,
-                capture.message_count,
+                capture.manifest.stream_session_id,
+                capture.manifest.message_count,
             )
+        capture = feature_captures[0]
+        audit = publish_features(
+            spark,
+            landing_table=qualified_name(source.table_identifier("messages")),
+            product=t0_trading,
+            capture=capture,
+            configuration=configuration,
+        )
+        logger.info(
+            "Published {} deterministic feature snapshots for SSI Stream session {}",
+            audit.snapshot_count,
+            capture.manifest.stream_session_id,
+        )
     finally:
         spark.stop()

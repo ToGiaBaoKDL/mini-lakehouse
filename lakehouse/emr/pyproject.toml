@@ -7,8 +7,9 @@ dependencies = [
     "botocore>=1.42,<2",
     "lakehouse",
     "loguru==0.7.3",
+    "t0-trading",
     "tzdata>=2026.1,<2027",
-    "typer==0.27.0",
+    "typer==0.25.1",
 ]
 
 [build-system]
@@ -17,6 +18,7 @@ build-backend = "uv_build"
 
 [tool.uv.sources]
 lakehouse = { path = "../catalog", editable = false }
+t0-trading = { path = "../../t0-trading", editable = false }
 
 [tool.uv.build-backend]
 module-name = "emr_jobs"
@@ -28,7 +30,7 @@ build = ["venv-pack==0.2.0"]
 pythonVersion = "3.11"
 typeCheckingMode = "strict"
 include = ["src", "entrypoints"]
-extraPaths = ["src", "../catalog/src"]
+extraPaths = ["src", "../catalog/src", "../../t0-trading/src"]
 reportMissingImports = false
 reportMissingModuleSource = false
 reportMissingTypeStubs = false

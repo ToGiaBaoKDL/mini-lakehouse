@@ -15,6 +15,9 @@ COPY --from=uv /uv /usr/local/bin/uv
 COPY lakehouse/catalog/pyproject.toml ./lakehouse/catalog/pyproject.toml
 COPY lakehouse/catalog/src ./lakehouse/catalog/src
 COPY lakehouse/contracts ./lakehouse/contracts
+COPY t0-trading/pyproject.toml ./t0-trading/pyproject.toml
+COPY t0-trading/src ./t0-trading/src
+COPY t0-trading/config/trading.yaml ./t0-trading/config/trading.yaml
 COPY lakehouse/emr/pyproject.toml lakehouse/emr/uv.lock ./lakehouse/emr/
 COPY lakehouse/emr/src ./lakehouse/emr/src
 COPY lakehouse/emr/entrypoints ./lakehouse/emr/entrypoints
@@ -26,6 +29,7 @@ RUN mkdir -p /output/entrypoints \
         "from zoneinfo import ZoneInfo; ZoneInfo('Asia/Ho_Chi_Minh')" \
     && lakehouse/emr/.venv/bin/venv-pack -p lakehouse/emr/.venv -o /output/python.tar.gz \
     && cp lakehouse/emr/entrypoints/*.py /output/entrypoints/ \
+    && cp t0-trading/config/trading.yaml /output/trading.yaml \
     && lakehouse/emr/.venv/bin/python -m lakehouse.contracts.bundle \
         --output /output/contracts.json
 

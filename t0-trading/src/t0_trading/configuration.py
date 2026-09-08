@@ -218,12 +218,21 @@ class TradingConfiguration(_StrictModel):
         return hashlib.sha256(self.canonical_bytes()).hexdigest()
 
 
-def load_configuration(path: Path) -> TradingConfiguration:
+def parse_configuration(content: str) -> TradingConfiguration:
+    """Validate one complete YAML document without owning its transport."""
     try:
-        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as error:
-        raise TradingConfigurationError(f"cannot read trading configuration: {path}") from error
+        payload = yaml.safe_load(content)
+    except yaml.YAMLError as error:
+        raise TradingConfigurationError("cannot parse trading configuration") from error
     try:
         return TradingConfiguration.model_validate(payload)
     except ValueError as error:
-        raise TradingConfigurationError(f"invalid trading configuration: {path}") from error
+        raise TradingConfigurationError("invalid trading configuration") from error
+
+
+def load_configuration(path: Path) -> TradingConfiguration:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise TradingConfigurationError(f"cannot read trading configuration: {path}") from error
+    return parse_configuration(content)

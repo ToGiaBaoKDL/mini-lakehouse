@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Literal
@@ -125,3 +127,16 @@ class FeatureSnapshot(_StrictModel):
     @property
     def is_eligible(self) -> bool:
         return not self.reasons
+
+    def canonical_bytes(self) -> bytes:
+        """Return the stable feature payload used for immutable publication checks."""
+        return json.dumps(
+            self.model_dump(mode="json"),
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+
+    @property
+    def sha256(self) -> str:
+        return hashlib.sha256(self.canonical_bytes()).hexdigest()

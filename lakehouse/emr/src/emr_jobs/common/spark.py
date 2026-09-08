@@ -21,4 +21,6 @@ def configure_logging(job: str, source_date: str) -> None:
 
 
 def session(name: str) -> SparkSession:
-    return SparkSession.builder.appName(name).getOrCreate()
+    return (
+        SparkSession.builder.appName(name).config("spark.sql.session.timeZone", "UTC").getOrCreate()
+    )

@@ -262,6 +262,8 @@ def test_feature_snapshot_has_exact_book_flow_momentum_and_liquidity_values() ->
     assert window.realized_volatility_bps == Decimal("98.0392")
     assert window.vwap == Decimal("102.62500000")
     assert window.last_price_to_vwap_bps == Decimal("36.5408")
+    assert len(snapshot.sha256) == 64
+    assert snapshot.sha256 == hashlib.sha256(snapshot.canonical_bytes()).hexdigest()
 
 
 def test_live_clock_and_full_replay_emit_identical_point_in_time_snapshots() -> None:

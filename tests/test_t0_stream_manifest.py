@@ -1,56 +1,73 @@
 import hashlib
-import json
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from typing import Any
 
 import pytest
-from emr_jobs.market_data import stream_manifest
-from emr_jobs.market_data.capture_manifest import canonical_json
+from emr_jobs.market_data.stream_capture import discover_captures, load_capture
+from t0_trading.capture.reader import StreamCaptureReadError
+from t0_trading.capture.store import canonical_json
 
 from lakehouse.contracts import load_contracts
 
 RAW_PREFIX = load_contracts().source("ssi_fastconnect_stream").raw_object_prefix
 SESSION_ID = "6b710ea5-f0eb-457e-bb58-73961428670a"
-TRADE_DATE = "2026-09-03"
+TRADE_DATE = date(2026, 9, 3)
 
 
-def test_stream_manifest_discovery_is_date_scoped_and_terminal_only(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    day_prefix = f"root/{RAW_PREFIX}/trade_date={TRADE_DATE}/"
+class _Body:
+    def __init__(self, body: bytes) -> None:
+        self._body = body
 
-    def list_keys(*, bucket: str, prefix: str) -> tuple[str, ...]:
-        assert bucket == "landing"
-        assert prefix == day_prefix
-        return (
-            f"{day_prefix}session=bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/manifest.json",
-            f"{day_prefix}session=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/batches/one.json.gz",
-            f"{day_prefix}session=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/manifest.json",
-            f"{day_prefix}nested/session=ignored/manifest.json",
-        )
+    def read(self) -> bytes:
+        return self._body
 
-    monkeypatch.setattr(
-        stream_manifest,
-        "list_keys",
-        list_keys,
-    )
 
-    assert stream_manifest.capture_manifest_uris(
-        "s3://landing/root",
-        TRADE_DATE,
-        RAW_PREFIX,
-    ) == (
-        f"s3://landing/{day_prefix}session=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/manifest.json",
-        f"s3://landing/{day_prefix}session=bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/manifest.json",
-    )
+class _Paginator:
+    def __init__(self, pages: tuple[dict[str, object], ...]) -> None:
+        self._pages = pages
+
+    def paginate(self, **_kwargs: str) -> tuple[dict[str, object], ...]:
+        return self._pages
+
+
+class _S3:
+    def __init__(
+        self,
+        objects: dict[str, bytes],
+        metadata: dict[str, str],
+        *,
+        pages: tuple[dict[str, object], ...] = (),
+    ) -> None:
+        self._objects = objects
+        self._metadata = metadata
+        self._pages = pages
+
+    def get_object(self, *, Bucket: str, Key: str) -> dict[str, object]:
+        assert Bucket == "landing"
+        return {
+            "Body": _Body(self._objects[Key]),
+            "Metadata": {"sha256": self._metadata[Key]},
+        }
+
+    def head_object(self, *, Bucket: str, Key: str) -> dict[str, object]:
+        assert Bucket == "landing"
+        return {
+            "ContentLength": len(self._objects[Key]),
+            "Metadata": {"sha256": self._metadata[Key]},
+        }
+
+    def get_paginator(self, name: str) -> _Paginator:
+        assert name == "list_objects_v2"
+        return _Paginator(self._pages)
 
 
 def _capture(
-    monkeypatch: pytest.MonkeyPatch,
     *,
     mutate: Callable[[dict[str, object]], None] | None = None,
-    manifest_metadata_sha256: str | None = None,
-) -> str:
+    manifest_checksum: str | None = None,
+    batch_checksum: str | None = None,
+) -> tuple[_S3, str, str]:
     connected_at = datetime(2026, 9, 3, 6, 32, tzinfo=UTC).isoformat()
     disconnected_at = datetime(2026, 9, 3, 6, 42, tzinfo=UTC).isoformat()
     batch_body = b"batch"
@@ -99,78 +116,94 @@ def _capture(
     }
     if mutate is not None:
         mutate(manifest)
-    body = json.dumps(manifest, separators=(",", ":"), sort_keys=True).encode()
+    manifest_body = canonical_json(manifest)
     manifest_key = f"{session_prefix}/manifest.json"
-    uri = f"s3://landing/root/{manifest_key}"
-
-    def read_bytes(_uri: str) -> bytes:
-        return body
-
-    monkeypatch.setattr(stream_manifest, "read_bytes", read_bytes)
-
-    def head_object(bucket: str, key: str) -> dict[str, object] | None:
-        if bucket != "landing":
-            return None
-        if key == f"root/{manifest_key}":
-            return {
-                "ContentLength": len(body),
-                "Metadata": {
-                    "sha256": manifest_metadata_sha256 or hashlib.sha256(body).hexdigest()
-                },
-            }
-        if key == f"root/{batch_key}":
-            return {
-                "ContentLength": len(batch_body),
-                "Metadata": {"sha256": batch_sha256},
-            }
-        return None
-
-    monkeypatch.setattr(stream_manifest, "head_object", head_object)
-    return uri
+    physical_manifest_key = f"root/{manifest_key}"
+    physical_batch_key = f"root/{batch_key}"
+    expected_manifest_sha256 = hashlib.sha256(manifest_body).hexdigest()
+    client = _S3(
+        {
+            physical_manifest_key: manifest_body,
+            physical_batch_key: batch_body,
+        },
+        {
+            physical_manifest_key: manifest_checksum or expected_manifest_sha256,
+            physical_batch_key: batch_checksum or batch_sha256,
+        },
+    )
+    return client, f"s3://landing/{physical_manifest_key}", expected_manifest_sha256
 
 
-def test_stream_manifest_resolves_verified_terminal_batches(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    capture = stream_manifest.load_capture(_capture(monkeypatch), RAW_PREFIX)
+def test_stream_capture_discovery_delegates_to_the_canonical_reader() -> None:
+    day_prefix = f"root/{RAW_PREFIX}/trade_date={TRADE_DATE}/"
+    first = f"{day_prefix}session=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/manifest.json"
+    second = f"{day_prefix}session=bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/manifest.json"
+    client = _S3(
+        {},
+        {},
+        pages=(
+            {
+                "Contents": [
+                    {"Key": second},
+                    {"Key": f"{day_prefix}session=ignored/batches/one.json.gz"},
+                    {"Key": first},
+                ]
+            },
+        ),
+    )
 
-    assert capture.trade_date == TRADE_DATE
-    assert capture.stream_session_id == SESSION_ID
-    assert capture.symbols == ("VIC", "VHM")
-    assert capture.message_count == 2
-    assert capture.batches[0].first_receive_sequence == 1
-    assert capture.batches[0].uri.endswith(".json.gz")
-
-
-def test_stream_manifest_rejects_its_own_checksum_drift(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    with pytest.raises(RuntimeError, match="manifest is missing or has checksum drift"):
-        stream_manifest.load_capture(
-            _capture(monkeypatch, manifest_metadata_sha256="0" * 64), RAW_PREFIX
+    assert discover_captures(
+        client,
+        landing_uri="s3://landing/root",
+        trade_date=TRADE_DATE,
+        raw_object_prefix=RAW_PREFIX,
+    ) == (f"s3://landing/{first}", f"s3://landing/{second}")
+    with pytest.raises(RuntimeError, match="raw prefixes disagree"):
+        discover_captures(
+            client,
+            landing_uri="s3://landing/root",
+            trade_date=TRADE_DATE,
+            raw_object_prefix="wrong/prefix",
         )
 
 
-def test_stream_manifest_rejects_unclean_sessions(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def mutate(manifest: dict[str, object]) -> None:
+def test_stream_capture_uses_one_manifest_model_and_preserves_lineage() -> None:
+    client, uri, expected_manifest_sha256 = _capture()
+
+    capture = load_capture(client, uri)
+
+    assert capture.trade_date == TRADE_DATE
+    assert capture.uri == uri
+    assert capture.manifest.stream_session_id == SESSION_ID
+    assert capture.manifest.symbols == ("VIC", "VHM")
+    assert capture.manifest_sha256 == expected_manifest_sha256
+    assert capture.batch_uri(capture.manifest.batches[0]).endswith(".json.gz")
+
+
+@pytest.mark.parametrize("target", ["manifest", "batch"])
+def test_stream_capture_rejects_s3_checksum_drift(target: str) -> None:
+    arguments: dict[str, Any] = {f"{target}_checksum": "0" * 64}
+    client, uri, _ = _capture(**arguments)
+
+    with pytest.raises(RuntimeError, match=r"checksum mismatch|checksum drift"):
+        load_capture(client, uri)
+
+
+def test_stream_capture_rejects_unclean_or_inconsistent_manifests() -> None:
+    def unclean(manifest: dict[str, object]) -> None:
         manifest["disconnect_kind"] = "stale"
         manifest["error_type"] = "HeartbeatTimeout"
 
-    with pytest.raises(RuntimeError, match="did not terminate cleanly"):
-        stream_manifest.load_capture(_capture(monkeypatch, mutate=mutate), RAW_PREFIX)
+    client, uri, _ = _capture(mutate=unclean)
+    with pytest.raises(StreamCaptureReadError, match="invalid SSI Stream manifest"):
+        load_capture(client, uri)
 
-
-def test_stream_manifest_rejects_sequence_gaps(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def mutate(manifest: dict[str, object]) -> None:
+    def gap(manifest: dict[str, object]) -> None:
         batches = manifest["batches"]
         assert isinstance(batches, list)
-        batch = batches[0]
-        assert isinstance(batch, dict)
-        batch["first_receive_sequence"] = 2
+        assert isinstance(batches[0], dict)
+        batches[0]["first_receive_sequence"] = 2
 
-    with pytest.raises(RuntimeError, match="batch lineage is inconsistent"):
-        stream_manifest.load_capture(_capture(monkeypatch, mutate=mutate), RAW_PREFIX)
+    client, uri, _ = _capture(mutate=gap)
+    with pytest.raises(StreamCaptureReadError, match="invalid SSI Stream manifest"):
+        load_capture(client, uri)

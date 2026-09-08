@@ -13,11 +13,16 @@ def main(
     ],
     landing_uri: Annotated[str, typer.Option(help="Landing S3 root URI.")],
     contracts_uri: Annotated[str, typer.Option(help="Versioned contract bundle URI.")],
+    trading_config_uri: Annotated[
+        str,
+        typer.Option(help="Versioned non-secret T0 trading configuration URI."),
+    ],
 ) -> None:
     run(
         source_date=source_date,
         landing_uri=landing_uri,
         contracts_uri=contracts_uri,
+        trading_config_uri=trading_config_uri,
     )
 
 

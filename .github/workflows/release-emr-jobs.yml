@@ -9,6 +9,9 @@ on:
       - lakehouse/catalog/**
       - lakehouse/contracts/**
       - lakehouse/emr/**
+      - t0-trading/config/trading.yaml
+      - t0-trading/pyproject.toml
+      - t0-trading/src/**
   workflow_dispatch:
 
 jobs:

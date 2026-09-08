@@ -248,7 +248,12 @@ def test_market_data_stream_dag_certifies_before_publication() -> None:
     assert "dag_run.partition_key or dag_run.run_after" in arguments[1]
     assert "--landing-uri" in arguments
     assert "--contracts-uri" in arguments
+    assert "--trading-config-uri" in arguments
+    assert any(
+        "emr/code_uri" in argument and argument.endswith("/trading.yaml") for argument in arguments
+    )
     assert publish.outlets[0].uri == "lakehouse://curated/market-data"
+    assert publish.outlets[1].uri == "lakehouse://curated/t0-trading"
 
 
 def test_curated_assets_schedule_one_domain_aware_analytics_dag() -> None:
