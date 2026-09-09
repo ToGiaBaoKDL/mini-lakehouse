@@ -15,6 +15,7 @@ from t0_trading.market.events import (
     Trade,
     decode_event,
 )
+from t0_trading.numeric import PRICE_QUANTUM
 
 SEQUENCE_GAP = "SEQUENCE_GAP"
 SEQUENCE_REGRESSION = "SEQUENCE_REGRESSION"
@@ -25,7 +26,6 @@ LATE_TRADE = "LATE_TRADE"
 TRADE_VOLUME_DUPLICATE = "TRADE_VOLUME_DUPLICATE"
 TRADE_VOLUME_GAP = "TRADE_VOLUME_GAP"
 TRADE_VOLUME_REGRESSION = "TRADE_VOLUME_REGRESSION"
-VWAP_QUANTUM = Decimal("0.00000001")
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,7 +106,7 @@ class _OpenBar:
             trade_count=self.trade_count,
             buy_volume=self.buy_volume,
             sell_volume=self.sell_volume,
-            vwap=(self.value / self.volume).quantize(VWAP_QUANTUM, rounding=ROUND_HALF_UP),
+            vwap=(self.value / self.volume).quantize(PRICE_QUANTUM, rounding=ROUND_HALF_UP),
             available_at=available_at,
         )
 

@@ -28,6 +28,12 @@ def test_trading_configuration_is_strict_effective_dated_and_stable() -> None:
     assert version.features.windows_seconds == (30, 60, 300)
     assert version.features.warmup_seconds == 300
     assert version.features.decision_sessions == ("continuous_am", "continuous_pm")
+    outcomes = configuration.resolve_outcomes(date(2026, 9, 5))
+    assert outcomes.version == "top3-taker-markout-v1"
+    assert outcomes.horizons_seconds == (30, 60, 300)
+    assert outcomes.order_quantity == 100
+    assert outcomes.execution_latency_milliseconds == 500
+    assert len(outcomes.sha256) == 64
     assert len(configuration.sha256) == 64
     assert len(version.sha256) == 64
     assert version.sha256 != configuration.sha256
@@ -45,6 +51,23 @@ def test_trading_configuration_rejects_unknown_fields(tmp_path: Path) -> None:
 
     with pytest.raises(TradingConfigurationError, match="invalid trading configuration"):
         load_configuration(path)
+
+
+def test_outcome_assumptions_do_not_change_feature_configuration_identity() -> None:
+    original = load_configuration(CONFIGURATION)
+    changed = parse_configuration(
+        CONFIGURATION.read_text(encoding="utf-8").replace(
+            "order_quantity: 100",
+            "order_quantity: 200",
+        )
+    )
+    effective_date = date(2026, 9, 5)
+
+    assert changed.resolve(effective_date).sha256 == original.resolve(effective_date).sha256
+    assert (
+        changed.resolve_outcomes(effective_date).sha256
+        != original.resolve_outcomes(effective_date).sha256
+    )
 
 
 @pytest.mark.parametrize(
@@ -89,7 +112,11 @@ def test_trading_configuration_rejects_overlapping_versions(tmp_path: Path) -> N
                 "effective_to": effective_to,
             }
         )
-    payload = {"schema_version": 1, "versions": versions}
+    payload = {
+        "schema_version": 1,
+        "versions": versions,
+        "outcomes": load_configuration(CONFIGURATION).model_dump(mode="json")["outcomes"],
+    }
     path = tmp_path / "trading.yaml"
     path.write_text(json.dumps(payload), encoding="utf-8")
 
@@ -102,3 +129,28 @@ def test_trading_configuration_fails_closed_for_unconfigured_date() -> None:
 
     with pytest.raises(TradingConfigurationError, match="found 0"):
         configuration.resolve(date(2026, 8, 26))
+    with pytest.raises(TradingConfigurationError, match="found 0"):
+        configuration.resolve_outcomes(date(2026, 8, 26))
+
+
+@pytest.mark.parametrize(
+    ("original", "invalid"),
+    (
+        ("horizons_seconds: [30, 60, 300]", "horizons_seconds: [60, 30]"),
+        ("order_quantity: 100", "order_quantity: 0"),
+        ("execution_latency_milliseconds: 500", "execution_latency_milliseconds: 30000"),
+    ),
+)
+def test_trading_configuration_rejects_invalid_outcome_policy(
+    tmp_path: Path,
+    original: str,
+    invalid: str,
+) -> None:
+    path = tmp_path / "trading.yaml"
+    path.write_text(
+        CONFIGURATION.read_text(encoding="utf-8").replace(original, invalid),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TradingConfigurationError, match="invalid trading configuration"):
+        load_configuration(path)

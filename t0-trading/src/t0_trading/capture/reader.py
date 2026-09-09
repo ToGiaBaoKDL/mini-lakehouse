@@ -17,7 +17,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from ssi_sdk import __version__ as SSI_SDK_VERSION
 
 from t0_trading.capture import MAX_STREAM_BATCH_MESSAGES, SSI_STREAM_RAW_PREFIX
-from t0_trading.capture.store import S3CaptureStore, canonical_json, sha256
+from t0_trading.capture.store import S3CaptureStore
+from t0_trading.identity import canonical_json, sha256
 from t0_trading.market.events import StreamEnvelope
 from t0_trading.provider import SSI_API_VERSION
 
@@ -289,6 +290,7 @@ class StreamSessionReader:
                     or not self.manifest.connected_at
                     <= row.received_at
                     <= self.manifest.disconnected_at
+                    or (last_received_at is not None and row.received_at < last_received_at)
                     or row.received_at > batch.published_at
                     or sha256(row.message_json.encode()) != row.message_sha256
                 ):

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -12,6 +11,8 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from ssi_sdk.models import QuoteMessage, TradeMessage
+
+from t0_trading.identity import sha256
 
 MARKET_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 _TRADE_ADAPTER = TypeAdapter(TradeMessage)
@@ -148,7 +149,7 @@ def decode_event(
     timezone: ZoneInfo = MARKET_TIMEZONE,
 ) -> MarketEvent | None:
     """Decode only certified business messages; acknowledgements remain raw evidence."""
-    if hashlib.sha256(envelope.message_json.encode()).hexdigest() != envelope.message_sha256:
+    if sha256(envelope.message_json.encode()) != envelope.message_sha256:
         raise MarketEventError("message_json checksum does not match its capture envelope")
     position = EventPosition(envelope.stream_session_id, envelope.receive_sequence)
     try:

@@ -8,7 +8,8 @@ from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 from uuid import uuid4
 
-from t0_trading.capture.store import CaptureStore, canonical_json, sha256
+from t0_trading.capture.store import CaptureStore, CaptureStoreUnavailable
+from t0_trading.identity import canonical_json, sha256
 
 
 class SpoolFullError(RuntimeError):
@@ -79,20 +80,25 @@ class CaptureSpool:
     def stage_json(self, key: str, value: Mapping[str, object]) -> str:
         return self._stage(key, canonical_json(value))
 
-    def drain(self, store: CaptureStore) -> int:
+    def drain(self, store: CaptureStore, *, defer_unavailable: bool = False) -> int:
         """Publish every complete pending object in deterministic key order."""
         published = 0
         for path in self._entries():
             key = path.relative_to(self._root).as_posix()
             body = path.read_bytes()
             digest = sha256(body)
-            if key.endswith(".json.gz"):
-                _, stored_digest = store.put_capture(key, body)
-            else:
-                value = json.loads(body)
-                if not isinstance(value, dict):
-                    raise RuntimeError(f"Spool manifest must be an object: {key}")
-                _, stored_digest = store.put_json(key, value)
+            try:
+                if key.endswith(".json.gz"):
+                    _, stored_digest = store.put_capture(key, body)
+                else:
+                    value = json.loads(body)
+                    if not isinstance(value, dict):
+                        raise RuntimeError(f"Spool manifest must be an object: {key}")
+                    _, stored_digest = store.put_json(key, value)
+            except CaptureStoreUnavailable:
+                if defer_unavailable:
+                    break
+                raise
             if stored_digest != digest:
                 raise RuntimeError("Capture store returned an unexpected spool checksum")
             path.unlink()

@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import dataclasses
-import hashlib
-import json
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Any
+
+from t0_trading.identity import canonical_json, sha256
 
 SENSITIVE_FIELDS = frozenset(
     {
@@ -49,10 +49,7 @@ def public_value(value: Any) -> Any:
 
 
 def fingerprint(value: Any) -> str:
-    encoded = json.dumps(
-        public_value(value), ensure_ascii=False, separators=(",", ":"), sort_keys=True
-    )
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    return sha256(canonical_json(public_value(value)))
 
 
 def observation(value: Any, *, sample_limit: int = 2) -> dict[str, Any]:

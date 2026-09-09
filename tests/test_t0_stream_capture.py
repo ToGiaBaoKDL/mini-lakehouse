@@ -10,13 +10,14 @@ from typing import Any
 
 import pytest
 from t0_trading.capture.spool import CaptureSpool
-from t0_trading.capture.store import canonical_json, sha256
+from t0_trading.capture.store import CaptureStoreUnavailable
 from t0_trading.capture.stream import (
     SSI_STREAM_RAW_PREFIX,
     StreamCaptureError,
     StreamCaptureOptions,
     capture_stream,
 )
+from t0_trading.identity import canonical_json, sha256
 
 
 def test_stream_capture_defaults_bound_flush_latency_to_thirty_seconds() -> None:
@@ -29,9 +30,10 @@ def test_stream_capture_rejects_unreadable_batch_sizes() -> None:
 
 
 class _Store:
-    def __init__(self) -> None:
+    def __init__(self, *, unavailable_writes: int = 0) -> None:
         self.objects: dict[str, bytes] = {}
         self.available = True
+        self.unavailable_writes = unavailable_writes
 
     def uri(self, key: str) -> str:
         return f"s3://landing/root/{key}"
@@ -48,8 +50,9 @@ class _Store:
         return self.put_capture(key, canonical_json(value))
 
     def put_capture(self, key: str, body: bytes) -> tuple[str, str]:
-        if not self.available:
-            raise ConnectionError("S3 unavailable")
+        if not self.available or self.unavailable_writes > 0:
+            self.unavailable_writes = max(0, self.unavailable_writes - 1)
+            raise CaptureStoreUnavailable("S3 unavailable")
         if key in self.objects:
             raise RuntimeError(f"Duplicate capture key: {key}")
         self.objects[key] = body
@@ -227,7 +230,7 @@ def test_stream_capture_spools_batch_and_terminal_manifest_during_s3_outage(
     timer = _Timer()
     spool = CaptureSpool(tmp_path, max_bytes=1024 * 1024)
 
-    with pytest.raises(ConnectionError, match="S3 unavailable"):
+    with pytest.raises(CaptureStoreUnavailable, match="S3 unavailable"):
         capture_stream(
             _Stream(timer),
             store,
@@ -251,6 +254,34 @@ def test_stream_capture_spools_batch_and_terminal_manifest_during_s3_outage(
     assert restarted.drain(store) == 2
     manifest_key = next(key for key in store.objects if key.endswith("/manifest.json"))
     manifest = json.loads(store.objects[manifest_key])
-    assert manifest["disconnect_kind"] == "capture_error"
-    assert manifest["error_type"] == "ConnectionError"
+    assert manifest["disconnect_kind"] == "completed"
+    assert manifest["error_type"] is None
     assert manifest["message_count"] == 2
+
+
+def test_stream_capture_continues_after_a_transient_s3_outage(tmp_path: Path) -> None:
+    store = _Store(unavailable_writes=1)
+    timer = _Timer()
+    spool = CaptureSpool(tmp_path, max_bytes=1024 * 1024)
+
+    manifest_uri = capture_stream(
+        _Stream(timer),
+        store,
+        StreamCaptureOptions(
+            duration_seconds=1,
+            heartbeat_seconds=0.25,
+            stale_after_seconds=0.75,
+            flush_seconds=0.5,
+            batch_size=2,
+            queue_size=10,
+        ),
+        clock=timer.clock,
+        timer=timer.tick,
+        session_id="transient-outage-session",
+        spool=spool,
+    )
+
+    manifest = json.loads(store.objects[manifest_uri.removeprefix("s3://landing/root/")])
+    assert manifest["disconnect_kind"] == "completed"
+    assert manifest["message_count"] == 2
+    assert spool.pending_bytes == 0

@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 from emr_jobs.market_data.stream_capture import discover_captures, load_capture
 from t0_trading.capture.reader import StreamCaptureReadError
-from t0_trading.capture.store import canonical_json
+from t0_trading.identity import canonical_json
 
 from lakehouse.contracts import load_contracts
 

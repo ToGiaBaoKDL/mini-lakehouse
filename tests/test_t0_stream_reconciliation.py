@@ -14,8 +14,8 @@ from t0_trading.capture.reader import (
     StreamSessionReader,
     stream_manifest_uris,
 )
-from t0_trading.capture.store import canonical_json, sha256
 from t0_trading.configuration import load_configuration
+from t0_trading.identity import canonical_json, sha256
 from t0_trading.market.reconciliation import reconcile_session, reconcile_trade_date
 from t0_trading.market.session import (
     MarketSession,
@@ -660,6 +660,34 @@ def test_reader_rejects_a_row_published_before_it_was_received() -> None:
 
     with pytest.raises(StreamCaptureReadError, match="row lineage"):
         tuple(reader.envelopes())
+
+
+def test_reader_rejects_receipt_time_regression() -> None:
+    rows = [
+        _trade_row(
+            1,
+            symbol="VIC",
+            trading_time="2026/09/04 09:15:05",
+            price=100,
+            quantity=10,
+            side="B",
+            total_volume=10,
+            received_at=datetime(2026, 9, 4, 2, 15, 7, tzinfo=UTC),
+        ),
+        _trade_row(
+            2,
+            symbol="VIC",
+            trading_time="2026/09/04 09:15:04",
+            price=101,
+            quantity=10,
+            side="B",
+            total_volume=20,
+            received_at=datetime(2026, 9, 4, 2, 15, 6, tzinfo=UTC),
+        ),
+    ]
+
+    with pytest.raises(StreamCaptureReadError, match="row lineage"):
+        tuple(_reader_from_rows(rows, symbols=("VIC",)).envelopes())
 
 
 def test_reader_rejects_batch_checksum_drift() -> None:

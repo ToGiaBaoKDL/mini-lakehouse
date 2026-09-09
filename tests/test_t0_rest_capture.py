@@ -6,13 +6,14 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+import pytest
 from botocore.exceptions import ClientError
 from t0_trading.capture.rest import (
     SSI_REST_RAW_PREFIX,
     RestCaptureOptions,
     capture_rest,
 )
-from t0_trading.capture.store import S3CaptureStore
+from t0_trading.capture.store import CaptureStoreUnavailable, S3CaptureStore
 
 
 class _S3:
@@ -208,3 +209,27 @@ def test_capture_options_reject_noncanonical_scope() -> None:
             assert "symbols" in str(error)
         else:
             raise AssertionError("Expected noncanonical symbols to be rejected")
+
+
+def test_s3_store_defers_only_retryable_sdk_failures() -> None:
+    class _FailingS3:
+        def __init__(self, code: str, status: int) -> None:
+            self.code = code
+            self.status = status
+
+        def put_object(self, **_values: object) -> None:
+            raise ClientError(
+                {
+                    "Error": {"Code": self.code},
+                    "ResponseMetadata": {"HTTPStatusCode": self.status},
+                },
+                "PutObject",
+            )
+
+    unavailable = S3CaptureStore(_FailingS3("SlowDown", 503), "s3://landing")
+    with pytest.raises(CaptureStoreUnavailable, match="temporarily unavailable"):
+        unavailable.put_capture("batch.json.gz", b"capture")
+
+    denied = S3CaptureStore(_FailingS3("AccessDenied", 403), "s3://landing")
+    with pytest.raises(ClientError, match="AccessDenied"):
+        denied.put_capture("batch.json.gz", b"capture")

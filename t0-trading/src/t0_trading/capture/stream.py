@@ -20,8 +20,9 @@ from ssi_sdk.enums import Timeframe
 
 from t0_trading.capture import MAX_STREAM_BATCH_MESSAGES, SSI_STREAM_RAW_PREFIX
 from t0_trading.capture.spool import CaptureSpool
-from t0_trading.capture.store import CaptureStore, canonical_json, sha256
+from t0_trading.capture.store import CaptureStore
 from t0_trading.evidence import public_value
+from t0_trading.identity import canonical_json, sha256
 from t0_trading.market.events import StreamEnvelope
 from t0_trading.provider import SSI_API_VERSION
 
@@ -227,7 +228,7 @@ def capture_stream(
     stop = stop or Event()
     session_id = session_id or str(uuid4())
     if spool is not None:
-        spool.drain(store)
+        spool.drain(store, defer_unavailable=True)
     queue: Queue[StreamEnvelope] = Queue(maxsize=options.queue_size)
     receiver = _Receiver(queue, session_id=session_id, clock=clock, timer=timer)
     client.on_data = receiver.record
@@ -273,7 +274,7 @@ def capture_stream(
             )
             del buffered[:count]
         if spool is not None:
-            spool.drain(store)
+            spool.drain(store, defer_unavailable=True)
         last_flush_tick = timer()
 
     try:

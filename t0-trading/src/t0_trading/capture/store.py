@@ -2,27 +2,53 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Mapping
 from typing import Any, Protocol, cast
 from urllib.parse import urlparse
 
-from botocore.exceptions import ClientError
+from botocore.exceptions import (
+    ClientError,
+    ConnectionClosedError,
+    ConnectTimeoutError,
+    EndpointConnectionError,
+    ReadTimeoutError,
+)
+
+from t0_trading.identity import canonical_json, sha256
 
 
-def canonical_json(value: object) -> bytes:
-    return json.dumps(
-        value,
-        allow_nan=False,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("utf-8")
+class CaptureStoreUnavailable(RuntimeError):
+    """The capture store cannot be reached after its SDK-owned retries."""
 
 
-def sha256(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
+_TRANSPORT_ERRORS = (
+    ConnectionClosedError,
+    ConnectTimeoutError,
+    EndpointConnectionError,
+    ReadTimeoutError,
+)
+_RETRYABLE_ERROR_CODES = frozenset(
+    {
+        "InternalError",
+        "RequestTimeout",
+        "RequestTimeoutException",
+        "ServiceUnavailable",
+        "SlowDown",
+        "Throttling",
+        "ThrottlingException",
+    }
+)
+
+
+def _raise_if_unavailable(error: ClientError) -> None:
+    metadata = error.response.get("ResponseMetadata", {})
+    status = metadata.get("HTTPStatusCode")
+    code = error.response.get("Error", {}).get("Code")
+    if (
+        isinstance(status, int) and (status == 408 or status == 429 or status >= 500)
+    ) or code in _RETRYABLE_ERROR_CODES:
+        raise CaptureStoreUnavailable("capture store is temporarily unavailable") from error
 
 
 class CaptureStore(Protocol):
@@ -62,7 +88,10 @@ class S3CaptureStore:
             code = error.response.get("Error", {}).get("Code")
             if code in {"404", "NoSuchKey", "NotFound"}:
                 return None
+            _raise_if_unavailable(error)
             raise
+        except _TRANSPORT_ERRORS as error:
+            raise CaptureStoreUnavailable("capture store is temporarily unavailable") from error
 
     def _put(
         self, key: str, body: bytes, *, content_type: str, content_encoding: str | None = None
@@ -83,18 +112,27 @@ class S3CaptureStore:
         except ClientError as error:
             code = error.response.get("Error", {}).get("Code")
             if code not in {"412", "PreconditionFailed"}:
+                _raise_if_unavailable(error)
                 raise
             current = self._head(key)
             current_digest = (current or {}).get("Metadata", {}).get("sha256")
             if current_digest != digest:
                 raise RuntimeError(f"Immutable capture object conflict: {key}") from error
+        except _TRANSPORT_ERRORS as error:
+            raise CaptureStoreUnavailable("capture store is temporarily unavailable") from error
         return key, digest
 
     def read_json(self, key: str) -> dict[str, Any] | None:
         current = self._head(key)
         if current is None:
             return None
-        response = self._client.get_object(Bucket=self._bucket, Key=self._physical_key(key))
+        try:
+            response = self._client.get_object(Bucket=self._bucket, Key=self._physical_key(key))
+        except ClientError as error:
+            _raise_if_unavailable(error)
+            raise
+        except _TRANSPORT_ERRORS as error:
+            raise CaptureStoreUnavailable("capture store is temporarily unavailable") from error
         body = cast(bytes, response["Body"].read())
         expected = current.get("Metadata", {}).get("sha256")
         if expected != sha256(body):
@@ -112,7 +150,10 @@ class S3CaptureStore:
             code = error.response.get("Error", {}).get("Code")
             if code in {"404", "NoSuchKey", "NotFound"}:
                 return None
+            _raise_if_unavailable(error)
             raise
+        except _TRANSPORT_ERRORS as error:
+            raise CaptureStoreUnavailable("capture store is temporarily unavailable") from error
         body = cast(bytes, response["Body"].read())
         expected = response.get("Metadata", {}).get("sha256")
         if expected != sha256(body):

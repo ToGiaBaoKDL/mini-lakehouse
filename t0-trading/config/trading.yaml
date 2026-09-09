@@ -1,4 +1,12 @@
 schema_version: 1
+outcomes:
+  - version: top3-taker-markout-v1
+    effective_from: 2026-08-27
+    effective_to: null
+    horizons_seconds: [30, 60, 300]
+    order_quantity: 100
+    # Explicit research assumption, not measured SSI order-routing latency.
+    execution_latency_milliseconds: 500
 versions:
   - version: market-state-v1
     effective_from: 2026-08-27

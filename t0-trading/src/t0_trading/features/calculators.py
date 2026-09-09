@@ -9,10 +9,7 @@ from typing import TypedDict
 
 from t0_trading.features.model import WindowFeatures
 from t0_trading.market.events import QuoteSnapshot, Trade
-
-RATIO_QUANTUM = Decimal("0.00000001")
-BPS_QUANTUM = Decimal("0.0001")
-PRICE_QUANTUM = Decimal("0.00000001")
+from t0_trading.numeric import BPS_QUANTUM, PRICE_QUANTUM, basis_points, ratio
 
 
 class BookValues(TypedDict):
@@ -25,22 +22,6 @@ class BookValues(TypedDict):
     ask_depth: int | None
     level_one_imbalance: Decimal | None
     depth_imbalance: Decimal | None
-
-
-def _ratio(numerator: Decimal | int, denominator: Decimal | int) -> Decimal:
-    if denominator == 0:
-        raise ValueError("feature ratio denominator must be non-zero")
-    return (Decimal(numerator) / Decimal(denominator)).quantize(
-        RATIO_QUANTUM,
-        rounding=ROUND_HALF_UP,
-    )
-
-
-def _bps(numerator: Decimal, denominator: Decimal) -> Decimal:
-    return (numerator / denominator * Decimal(10_000)).quantize(
-        BPS_QUANTUM,
-        rounding=ROUND_HALF_UP,
-    )
 
 
 def book_values(quote: QuoteSnapshot) -> BookValues:
@@ -65,16 +46,16 @@ def book_values(quote: QuoteSnapshot) -> BookValues:
     return {
         "mid_price": midpoint,
         "microprice": microprice,
-        "microprice_deviation_bps": _bps(microprice - midpoint, midpoint),
+        "microprice_deviation_bps": basis_points(microprice - midpoint, midpoint),
         "spread": spread,
-        "spread_bps": _bps(spread, midpoint),
+        "spread_bps": basis_points(spread, midpoint),
         "bid_depth": bid_depth,
         "ask_depth": ask_depth,
-        "level_one_imbalance": _ratio(
+        "level_one_imbalance": ratio(
             best_bid.quantity - best_ask.quantity,
             level_one_depth,
         ),
-        "depth_imbalance": _ratio(bid_depth - ask_depth, bid_depth + ask_depth),
+        "depth_imbalance": ratio(bid_depth - ask_depth, bid_depth + ask_depth),
     }
 
 
@@ -126,7 +107,10 @@ def window_values(
     price_return_bps: Decimal | None = None
     realized_volatility_bps: Decimal | None = None
     if trade_count >= 2:
-        price_return_bps = _bps(trades[-1].price - trades[0].price, trades[0].price)
+        price_return_bps = basis_points(
+            trades[-1].price - trades[0].price,
+            trades[0].price,
+        )
         with localcontext() as context:
             context.prec = 34
             squared_returns = sum(
@@ -145,11 +129,11 @@ def window_values(
         quote_change_count=len(book_flows),
         trade_volume=volume,
         signed_trade_volume=signed_volume,
-        trade_volume_per_second=_ratio(volume, window_seconds),
-        trade_volume_imbalance=_ratio(signed_volume, volume),
+        trade_volume_per_second=ratio(volume, window_seconds),
+        trade_volume_imbalance=ratio(signed_volume, volume),
         level_one_order_flow_imbalance=sum(book_flows),
         price_return_bps=price_return_bps,
         realized_volatility_bps=realized_volatility_bps,
         vwap=vwap,
-        last_price_to_vwap_bps=_bps(trades[-1].price - vwap, vwap),
+        last_price_to_vwap_bps=basis_points(trades[-1].price - vwap, vwap),
     )

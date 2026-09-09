@@ -215,14 +215,15 @@ def test_t0_certification_uses_the_official_read_only_sdk_boundary() -> None:
         assert protocol_literal not in capability
 
 
-def test_t0_market_core_is_side_effect_free() -> None:
-    market = "\n".join(
+def test_t0_deterministic_core_is_side_effect_free() -> None:
+    core = "\n".join(
         path.read_text(encoding="utf-8")
-        for path in Path("t0-trading/src/t0_trading/market").glob("*.py")
+        for root in ("market", "features", "outcomes")
+        for path in Path(f"t0-trading/src/t0_trading/{root}").glob("*.py")
     )
 
     for dependency in ("boto3", "botocore", "sqlalchemy", "psycopg"):
-        assert dependency not in market
+        assert dependency not in core
 
 
 def test_each_component_owns_its_deployment_operation() -> None:
@@ -270,7 +271,11 @@ def test_each_component_owns_its_deployment_operation() -> None:
     assert "create --force-recreate --remove-orphans" in t0_trading
     assert 'sudo "$script_dir/reconcile-schedule"' in t0_trading
     assert 'if "$script_dir/stream-window"; then' in t0_trading
-    assert "did not become healthy within 120 seconds" in t0_trading
+    assert "rerun outside the market-data window to preserve one full session" in t0_trading
+    assert t0_trading.index('if "$script_dir/stream-window"; then') < t0_trading.index(
+        "sudo systemctl stop"
+    )
+    assert "sudo systemctl start" not in t0_trading
     assert "storage/landing_uri" in t0_trading
     assert "T0_STREAM_SPOOL_DIR" in t0_trading
     assert "install -d -m 0700" in t0_trading

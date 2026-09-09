@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from datetime import date, time
 from itertools import pairwise
 from pathlib import Path
@@ -13,6 +11,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from t0_trading.identity import canonical_json, sha256
+
 
 class TradingConfigurationError(ValueError):
     """The trading configuration is invalid or has no effective version."""
@@ -20,6 +20,54 @@ class TradingConfigurationError(ValueError):
 
 class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class _EffectiveVersion(_StrictModel):
+    version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    effective_from: date
+    effective_to: date | None
+
+    @model_validator(mode="after")
+    def validate_interval(self) -> _EffectiveVersion:
+        if self.effective_to is not None and self.effective_to < self.effective_from:
+            raise ValueError("effective_to must not precede effective_from")
+        return self
+
+    def contains(self, value: date) -> bool:
+        return self.effective_from <= value and (
+            self.effective_to is None or value <= self.effective_to
+        )
+
+    def canonical_bytes(self) -> bytes:
+        return canonical_json(self.model_dump(mode="json"))
+
+    @property
+    def sha256(self) -> str:
+        return sha256(self.canonical_bytes())
+
+
+def _validate_effective_versions(values: tuple[_EffectiveVersion, ...], label: str) -> None:
+    ordered = sorted(values, key=lambda item: item.effective_from)
+    if not ordered or tuple(ordered) != values:
+        raise ValueError(f"{label} versions must be non-empty and ordered by effective_from")
+    if len({item.version for item in ordered}) != len(ordered):
+        raise ValueError(f"{label} version names must be unique")
+    if any(
+        previous.effective_to is None or previous.effective_to >= current.effective_from
+        for previous, current in pairwise(ordered)
+    ):
+        raise ValueError(f"{label} effective intervals must not overlap")
+
+
+def _resolve_effective[Version: _EffectiveVersion](
+    values: tuple[Version, ...], value: date, label: str
+) -> Version:
+    matches = tuple(version for version in values if version.contains(value))
+    if len(matches) != 1:
+        raise TradingConfigurationError(
+            f"expected one {label} version for {value.isoformat()}, found {len(matches)}"
+        )
+    return matches[0]
 
 
 class SessionScheduleConfiguration(_StrictModel):
@@ -147,75 +195,55 @@ class FeatureConfiguration(_StrictModel):
         return self
 
 
-class TradingVersion(_StrictModel):
-    version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
-    effective_from: date
-    effective_to: date | None
+class OutcomeVersion(_EffectiveVersion):
+    """Effective research assumptions for conditional Top-3 execution markouts."""
+
+    horizons_seconds: tuple[int, ...]
+    order_quantity: int = Field(ge=1)
+    execution_latency_milliseconds: int = Field(ge=0, le=60_000)
+
+    @model_validator(mode="after")
+    def validate_outcomes(self) -> OutcomeVersion:
+        if (
+            not self.horizons_seconds
+            or tuple(sorted(set(self.horizons_seconds))) != self.horizons_seconds
+            or any(horizon < 1 or horizon > 86_400 for horizon in self.horizons_seconds)
+        ):
+            raise ValueError("outcome horizons must be unique ascending positive seconds")
+        if self.execution_latency_milliseconds >= self.horizons_seconds[0] * 1_000:
+            raise ValueError("execution latency must precede every outcome horizon")
+        return self
+
+
+class TradingVersion(_EffectiveVersion):
     market: MarketConfiguration
     data_quality: DataQualityConfiguration
     features: FeatureConfiguration
-
-    @model_validator(mode="after")
-    def validate_interval(self) -> TradingVersion:
-        if self.effective_to is not None and self.effective_to < self.effective_from:
-            raise ValueError("effective_to must not precede effective_from")
-        return self
-
-    def contains(self, value: date) -> bool:
-        return self.effective_from <= value and (
-            self.effective_to is None or value <= self.effective_to
-        )
-
-    def canonical_bytes(self) -> bytes:
-        return json.dumps(
-            self.model_dump(mode="json"),
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode()
-
-    @property
-    def sha256(self) -> str:
-        return hashlib.sha256(self.canonical_bytes()).hexdigest()
 
 
 class TradingConfiguration(_StrictModel):
     schema_version: int = Field(ge=1)
     versions: tuple[TradingVersion, ...]
+    outcomes: tuple[OutcomeVersion, ...]
 
     @model_validator(mode="after")
     def validate_versions(self) -> TradingConfiguration:
-        if not self.versions:
-            raise ValueError("at least one configuration version is required")
-        ordered = sorted(self.versions, key=lambda item: item.effective_from)
-        if tuple(ordered) != self.versions:
-            raise ValueError("configuration versions must be ordered by effective_from")
-        if len({item.version for item in ordered}) != len(ordered):
-            raise ValueError("configuration version names must be unique")
-        for previous, current in pairwise(ordered):
-            if previous.effective_to is None or previous.effective_to >= current.effective_from:
-                raise ValueError("configuration effective intervals must not overlap")
+        _validate_effective_versions(self.versions, "configuration")
+        _validate_effective_versions(self.outcomes, "outcome")
         return self
 
     def resolve(self, value: date) -> TradingVersion:
-        matches = tuple(version for version in self.versions if version.contains(value))
-        if len(matches) != 1:
-            raise TradingConfigurationError(
-                f"expected one configuration version for {value.isoformat()}, found {len(matches)}"
-            )
-        return matches[0]
+        return _resolve_effective(self.versions, value, "configuration")
+
+    def resolve_outcomes(self, value: date) -> OutcomeVersion:
+        return _resolve_effective(self.outcomes, value, "outcome")
 
     def canonical_bytes(self) -> bytes:
-        return json.dumps(
-            self.model_dump(mode="json"),
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode()
+        return canonical_json(self.model_dump(mode="json"))
 
     @property
     def sha256(self) -> str:
-        return hashlib.sha256(self.canonical_bytes()).hexdigest()
+        return sha256(self.canonical_bytes())
 
 
 def parse_configuration(content: str) -> TradingConfiguration:

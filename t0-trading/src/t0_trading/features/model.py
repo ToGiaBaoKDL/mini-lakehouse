@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
+from t0_trading.identity import canonical_json, sha256
 from t0_trading.market.session import MarketSession
 
 
@@ -130,13 +129,8 @@ class FeatureSnapshot(_StrictModel):
 
     def canonical_bytes(self) -> bytes:
         """Return the stable feature payload used for immutable publication checks."""
-        return json.dumps(
-            self.model_dump(mode="json"),
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode()
+        return canonical_json(self.model_dump(mode="json"))
 
     @property
     def sha256(self) -> str:
-        return hashlib.sha256(self.canonical_bytes()).hexdigest()
+        return sha256(self.canonical_bytes())

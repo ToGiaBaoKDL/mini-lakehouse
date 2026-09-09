@@ -25,7 +25,7 @@ from t0_trading.capture.reader import (
 )
 from t0_trading.capture.rest import RestCaptureOptions, capture_rest
 from t0_trading.capture.spool import CaptureSpool
-from t0_trading.capture.store import S3CaptureStore
+from t0_trading.capture.store import CaptureStoreUnavailable, S3CaptureStore
 from t0_trading.capture.stream import StreamCaptureOptions, capture_stream
 from t0_trading.certification import CertificationOptions, run_certification
 from t0_trading.configuration import TradingConfigurationError, load_configuration
@@ -108,6 +108,7 @@ def check_config(
     try:
         configuration = load_configuration(config)
         version = configuration.resolve(selected_date)
+        outcomes = configuration.resolve_outcomes(selected_date)
     except TradingConfigurationError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error
@@ -116,6 +117,8 @@ def check_config(
             {
                 "configuration_sha256": configuration.sha256,
                 "effective_date": selected_date.isoformat(),
+                "outcome_version": outcomes.version,
+                "outcome_version_sha256": outcomes.sha256,
                 "version": version.version,
                 "version_sha256": version.sha256,
             },
@@ -345,7 +348,7 @@ def reconcile_stream_command(
     except (StreamCaptureReadError, TradingConfigurationError, ValueError) as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error
-    except ClientError as error:
+    except (CaptureStoreUnavailable, ClientError) as error:
         typer.echo(f"SSI stream reconciliation failed: {_safe_error(error)}", err=True)
         raise typer.Exit(code=1) from None
     _emit_reconciliation(report, output)
@@ -386,7 +389,7 @@ def audit_features_command(
     except (StreamCaptureReadError, TradingConfigurationError, ValueError) as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error
-    except ClientError as error:
+    except (CaptureStoreUnavailable, ClientError) as error:
         typer.echo(f"SSI feature audit failed: {_safe_error(error)}", err=True)
         raise typer.Exit(code=1) from None
     _emit_model(report, output)

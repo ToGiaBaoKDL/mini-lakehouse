@@ -4,7 +4,8 @@ from typing import Any
 
 import pytest
 from t0_trading.capture.spool import CaptureSpool, SpoolFullError
-from t0_trading.capture.store import canonical_json, sha256
+from t0_trading.capture.store import CaptureStoreUnavailable
+from t0_trading.identity import canonical_json, sha256
 
 
 class _Store:
@@ -21,7 +22,7 @@ class _Store:
 
     def _put(self, key: str, body: bytes) -> tuple[str, str]:
         if not self.available:
-            raise ConnectionError("S3 unavailable")
+            raise CaptureStoreUnavailable("S3 unavailable")
         current = self.objects.get(key)
         if current is not None and current != body:
             raise RuntimeError("immutable object conflict")
@@ -43,7 +44,7 @@ def test_spool_retains_failed_object_and_replays_it_after_restart(tmp_path: Path
     spool = CaptureSpool(tmp_path, max_bytes=1024)
     spool.stage_capture(key, body)
 
-    with pytest.raises(ConnectionError, match="S3 unavailable"):
+    with pytest.raises(CaptureStoreUnavailable, match="S3 unavailable"):
         spool.drain(store)
 
     assert spool.pending_bytes == len(body)
@@ -52,6 +53,16 @@ def test_spool_retains_failed_object_and_replays_it_after_restart(tmp_path: Path
     assert restarted.drain(store) == 1
     assert restarted.pending_bytes == 0
     assert store.objects[key] == body
+
+
+def test_spool_can_defer_a_transient_delivery_failure(tmp_path: Path) -> None:
+    key = "stream/source/raw/trade_date=2026-09-04/session=one/batches/one.json.gz"
+    store = _Store(available=False)
+    spool = CaptureSpool(tmp_path, max_bytes=1024)
+    spool.stage_capture(key, b"capture")
+
+    assert spool.drain(store, defer_unavailable=True) == 0
+    assert spool.pending_bytes == len(b"capture")
 
 
 def test_spool_publishes_batches_before_their_terminal_manifest(tmp_path: Path) -> None:
