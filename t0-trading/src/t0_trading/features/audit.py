@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Sequence
 from datetime import date, datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -13,8 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from t0_trading.configuration import TradingVersion
 from t0_trading.features.engine import decision_times
 from t0_trading.features.model import FeatureSnapshot
+from t0_trading.numeric import quantiles, rate
 
-RATE_QUANTUM = Decimal("0.000001")
 _SNAPSHOT_FIELDS = (
     "trade_age_seconds",
     "quote_age_seconds",
@@ -43,15 +43,6 @@ _WINDOW_FIELDS = (
 )
 
 
-def _rate(numerator: int, denominator: int) -> Decimal:
-    if denominator == 0:
-        return Decimal(0)
-    return (Decimal(numerator) / Decimal(denominator)).quantize(
-        RATE_QUANTUM,
-        rounding=ROUND_HALF_UP,
-    )
-
-
 class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -77,7 +68,7 @@ class Coverage(_StrictModel):
 
     @model_validator(mode="after")
     def validate_counts(self) -> Coverage:
-        if self.eligible_count > self.snapshot_count or self.eligible_rate != _rate(
+        if self.eligible_count > self.snapshot_count or self.eligible_rate != rate(
             self.eligible_count, self.snapshot_count
         ):
             raise ValueError("feature coverage counts are inconsistent")
@@ -144,27 +135,23 @@ def _number(value: object) -> Decimal | None:
 
 
 def _distribution(values: Sequence[Decimal]) -> Distribution:
-    ordered = sorted(values)
-
-    def quantile(fraction: Decimal) -> Decimal:
-        position = Decimal(len(ordered) - 1) * fraction
-        lower = int(position)
-        upper = min(lower + 1, len(ordered) - 1)
-        weight = position - lower
-        return ordered[lower] + (ordered[upper] - ordered[lower]) * weight
+    minimum, p50, p95, maximum = quantiles(
+        values,
+        (Decimal(0), Decimal("0.50"), Decimal("0.95"), Decimal(1)),
+    )
 
     return Distribution(
-        count=len(ordered),
-        minimum=ordered[0],
-        p50=quantile(Decimal("0.50")),
-        p95=quantile(Decimal("0.95")),
-        maximum=ordered[-1],
+        count=len(values),
+        minimum=minimum,
+        p50=p50,
+        p95=p95,
+        maximum=maximum,
     )
 
 
 def _null_rate(values: Sequence[object]) -> Decimal:
     present_count = sum(_number(value) is not None for value in values)
-    return _rate(len(values) - present_count, len(values))
+    return rate(len(values) - present_count, len(values))
 
 
 def _summary(values: Sequence[object]) -> Distribution | None:
@@ -233,7 +220,7 @@ def build_feature_audit(
             session_coverage[session] = Coverage(
                 snapshot_count=len(in_session),
                 eligible_count=eligible_count,
-                eligible_rate=_rate(eligible_count, len(in_session)),
+                eligible_rate=rate(eligible_count, len(in_session)),
             )
 
         null_rates: dict[str, Decimal] = {}
@@ -263,7 +250,7 @@ def build_feature_audit(
         symbol_reports[symbol] = SymbolFeatureAudit(
             snapshot_count=len(selected),
             eligible_count=eligible_count,
-            eligible_rate=_rate(eligible_count, len(selected)),
+            eligible_rate=rate(eligible_count, len(selected)),
             sessions=session_coverage,
             reason_counts=dict(
                 sorted(

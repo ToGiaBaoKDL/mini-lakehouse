@@ -10,7 +10,7 @@ from t0_trading.configuration import load_configuration
 from t0_trading.features import FeatureSnapshot
 from t0_trading.market import StreamEnvelope
 from t0_trading.market.session import MarketSession
-from t0_trading.outcomes import label_outcomes
+from t0_trading.outcomes import OutcomeLabel, build_outcome_audit, label_outcomes
 
 CONFIGURATION = Path("t0-trading/config/trading.yaml")
 TRADE_DATE = date(2026, 9, 4)
@@ -275,3 +275,89 @@ def test_outcomes_reuse_market_integrity_and_source_time_freshness() -> None:
     )
 
     assert label.reasons == ("STALE_ENTRY_QUOTE", "STALE_HORIZON_QUOTE")
+
+
+def test_outcome_audit_reconciles_coverage_returns_and_directionality() -> None:
+    configuration, configured_policy = _configuration()
+    policy = configured_policy.model_copy(update={"horizons_seconds": (30,)})
+    snapshots = (
+        _snapshot(_received(9, 20, 0)),
+        _snapshot(_received(9, 20, 0), symbol="VHM"),
+    )
+    labels = label_outcomes(snapshots, _base_quotes(), configuration, policy)
+
+    report = build_outcome_audit(
+        snapshots,
+        labels,
+        configuration,
+        policy,
+        trade_date=TRADE_DATE,
+        manifest_uri="s3://landing/stream/manifest.json",
+        stream_session_id="session-1",
+        input_message_count=2,
+    )
+    repeated = build_outcome_audit(
+        snapshots,
+        labels,
+        configuration,
+        policy,
+        trade_date=TRADE_DATE,
+        manifest_uri="s3://landing/stream/manifest.json",
+        stream_session_id="session-1",
+        input_message_count=2,
+    )
+
+    assert report.model_dump_json() == repeated.model_dump_json()
+    assert report.snapshot_count == 2
+    assert report.label_count == 4
+    assert report.eligible_count == 2
+    assert report.eligible_rate == Decimal("0.500000")
+
+    vic = report.symbols["VIC"]
+    buy = vic.actions["BUY"]
+    buy_horizon = buy.horizons[0]
+    assert buy.fully_eligible_path_count == 1
+    assert buy.worst_observed_markout_bps is not None
+    assert buy.worst_observed_markout_bps.minimum == Decimal("157.7909")
+    assert buy_horizon.entry_fill_rate == Decimal("1.000000")
+    assert buy_horizon.horizon_fill_rate == Decimal("1.000000")
+    assert buy_horizon.positive_return_rate == Decimal("1.000000")
+    assert vic.actions["SELL"].horizons[0].negative_return_rate == Decimal("1.000000")
+    pairing = vic.directional_pairs[0]
+    assert pairing.jointly_eligible_rate == Decimal("1.000000")
+    assert pairing.paired_directional_sum_bps is not None
+    assert pairing.paired_directional_sum_bps.p50 == Decimal("-283.9762")
+
+    vhm = report.symbols["VHM"].actions["BUY"].horizons[0]
+    assert vhm.eligible_count == 0
+    assert vhm.eligible_gross_return_bps is None
+    assert vhm.reason_counts == {"MISSING_ENTRY_QUOTE": 1, "MISSING_HORIZON_QUOTE": 1}
+
+
+def test_outcome_audit_rejects_incomplete_or_drifted_label_matrices() -> None:
+    configuration, configured_policy = _configuration()
+    policy = configured_policy.model_copy(update={"horizons_seconds": (30,)})
+    snapshots = (
+        _snapshot(_received(9, 20, 0)),
+        _snapshot(_received(9, 20, 0), symbol="VHM"),
+    )
+    labels = label_outcomes(snapshots, _base_quotes(), configuration, policy)
+
+    def build(selected: tuple[OutcomeLabel, ...]) -> object:
+        return build_outcome_audit(
+            snapshots,
+            selected,
+            configuration,
+            policy,
+            trade_date=TRADE_DATE,
+            manifest_uri="s3://landing/stream/manifest.json",
+            stream_session_id="session-1",
+            input_message_count=2,
+        )
+
+    with pytest.raises(ValueError, match="every snapshot/action/horizon exactly once"):
+        build(labels[:-1])
+
+    drifted = labels[0].model_copy(update={"order_quantity": policy.order_quantity + 1})
+    with pytest.raises(ValueError, match="lineage is inconsistent"):
+        build((drifted, *labels[1:]))

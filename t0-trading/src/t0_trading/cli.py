@@ -28,14 +28,24 @@ from t0_trading.capture.spool import CaptureSpool
 from t0_trading.capture.store import CaptureStoreUnavailable, S3CaptureStore
 from t0_trading.capture.stream import StreamCaptureOptions, capture_stream
 from t0_trading.certification import CertificationOptions, run_certification
-from t0_trading.configuration import TradingConfigurationError, load_configuration
+from t0_trading.configuration import (
+    TradingConfiguration,
+    TradingConfigurationError,
+    load_configuration,
+)
 from t0_trading.credentials import CredentialError, load_credentials
-from t0_trading.features import build_feature_audit, replay_features
+from t0_trading.features import (
+    FeatureAuditReport,
+    FeatureSnapshot,
+    build_feature_audit,
+    replay_features,
+)
 from t0_trading.market.reconciliation import (
     ReconciliationReport,
     reconcile_session,
     reconcile_trade_date,
 )
+from t0_trading.outcomes import build_outcome_audit, label_outcomes
 from t0_trading.provider import authenticated
 from t0_trading.trading_dates import TradingDateError, require_observed_trade_date
 
@@ -83,6 +93,35 @@ def _emit_reconciliation(report: ReconciliationReport, output: Path | None = Non
     _emit_model(report, output)
     if report.status != "passed":
         raise typer.Exit(code=1)
+
+
+def _replay_feature_session(
+    manifest_uri: str,
+    region: str,
+    config: Path,
+) -> tuple[
+    StreamSessionReader,
+    TradingConfiguration,
+    tuple[FeatureSnapshot, ...],
+    FeatureAuditReport,
+]:
+    """Read, replay, and validate one complete feature session without retaining raw input."""
+    reader = StreamSessionReader.from_uri(
+        boto3.client("s3", region_name=region),
+        manifest_uri,
+    )
+    configuration = load_configuration(config)
+    version = configuration.resolve(reader.trade_date)
+    snapshots = replay_features(reader.envelopes(), version, trade_date=reader.trade_date)
+    report = build_feature_audit(
+        snapshots,
+        version,
+        trade_date=reader.trade_date,
+        manifest_uri=reader.uri,
+        stream_session_id=reader.manifest.stream_session_id,
+        input_message_count=reader.manifest.message_count,
+    )
+    return reader, configuration, snapshots, report
 
 
 def check_config(
@@ -372,15 +411,43 @@ def audit_features_command(
 ) -> None:
     """Replay and summarize one terminal session without publishing feature data."""
     try:
-        reader = StreamSessionReader.from_uri(
-            boto3.client("s3", region_name=region),
-            manifest_uri,
-        )
-        version = load_configuration(config).resolve(reader.trade_date)
-        snapshots = replay_features(reader.envelopes(), version, trade_date=reader.trade_date)
-        report = build_feature_audit(
+        _, _, _, report = _replay_feature_session(manifest_uri, region, config)
+    except (StreamCaptureReadError, TradingConfigurationError, ValueError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+    except (CaptureStoreUnavailable, ClientError) as error:
+        typer.echo(f"SSI feature audit failed: {_safe_error(error)}", err=True)
+        raise typer.Exit(code=1) from None
+    _emit_model(report, output)
+
+
+def audit_outcomes_command(
+    manifest_uri: Annotated[
+        str,
+        typer.Option(help="Terminal SSI Stream manifest S3 URI."),
+    ],
+    region: Annotated[str, typer.Option(help="AWS region containing the landing bucket.")] = (
+        "ap-southeast-1"
+    ),
+    config: Annotated[Path, typer.Option(help="Versioned non-secret trading YAML.")] = (
+        DEFAULT_TRADING_CONFIG
+    ),
+    output: Annotated[
+        Path | None,
+        typer.Option(help="Optional local JSON path; stdout is always emitted."),
+    ] = None,
+) -> None:
+    """Replay, label, and summarize one terminal session without publishing outcomes."""
+    try:
+        reader, configuration, snapshots, _ = _replay_feature_session(manifest_uri, region, config)
+        version = configuration.resolve(reader.trade_date)
+        policy = configuration.resolve_outcomes(reader.trade_date)
+        labels = label_outcomes(snapshots, reader.envelopes(), version, policy)
+        report = build_outcome_audit(
             snapshots,
+            labels,
             version,
+            policy,
             trade_date=reader.trade_date,
             manifest_uri=reader.uri,
             stream_session_id=reader.manifest.stream_session_id,
@@ -390,7 +457,7 @@ def audit_features_command(
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error
     except (CaptureStoreUnavailable, ClientError) as error:
-        typer.echo(f"SSI feature audit failed: {_safe_error(error)}", err=True)
+        typer.echo(f"SSI outcome audit failed: {_safe_error(error)}", err=True)
         raise typer.Exit(code=1) from None
     _emit_model(report, output)
 
@@ -462,4 +529,5 @@ app.command("capture-rest")(capture_rest_command)
 app.command("capture-stream")(capture_stream_command)
 app.command("reconcile-stream")(reconcile_stream_command)
 app.command("audit-features")(audit_features_command)
+app.command("audit-outcomes")(audit_outcomes_command)
 app.command("certify-stream-day")(certify_stream_day_command)

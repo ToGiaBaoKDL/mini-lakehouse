@@ -153,6 +153,22 @@ receipt age and provider event age must satisfy the configured quote-freshness p
 that reaches lunch, an auction, or the end of its continuous session is excluded. Golden tests
 prove that a quote received after the horizon cannot change the earlier label.
 
+The offline audit runs the same verified session through feature replay and outcome labeling without
+publishing either dataset:
+
+```bash
+AWS_PROFILE=tgbao-dev uv run --project t0-trading t0-trading audit-outcomes \
+  --manifest-uri s3://<landing-bucket>/market/ssi/stream/trade_date=YYYY-MM-DD/session=<uuid>/manifest.json \
+  --output /tmp/t0-outcome-audit.json
+```
+
+It validates the complete snapshot/action/horizon matrix and reports eligibility, entry and horizon
+fill rates, reason counts, positive/negative gross-markout rates, and p05/p50/p95 distributions per
+symbol, direction, and horizon. `worst_observed_markout_bps` is the worst configured-horizon return
+for paths eligible at every horizon; it is intentionally not named maximum adverse excursion because
+the simulator does not observe a continuous execution path. The paired BUY+SELL summary makes
+directional asymmetry and visible-book crossing cost explicit without inventing fees or fills.
+
 `BUY` measures a marketable buy followed by a conditional bid-side markout; `SELL` measures a sale
 of already-settled inventory followed by a conditional ask-side repurchase. These are gross
 research markouts, not claimed broker fills or executable round trips. They neither bypass Vietnam
