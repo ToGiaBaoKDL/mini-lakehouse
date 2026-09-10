@@ -141,6 +141,7 @@ def test_market_data_stream_replay_uses_verified_sdk_models_and_top_three_quotes
     assert 'F.sha2("message_json", 256)' in landing
     assert "duplicate_keys" in landing
     assert "batch_count_mismatches" in landing
+    assert '"error_type": manifest.error_type' in landing
     assert "TradeMessage" in curated
     assert "QuoteMessage" in curated
     assert "FULL_TOP_3" in curated
@@ -159,6 +160,8 @@ def test_market_data_stream_materializes_features_with_the_shared_t0_core() -> N
     assert 'curated_product("t0_trading")' in job
     assert "parse_configuration" in job
     assert "trading_config_uri" in job
+    assert "select_feature_capture" in job
+    assert "covers_trading_window" not in job
     assert "replay_features" in features
     assert "build_feature_audit" in features
     assert 'orderBy("receive_sequence")' in features

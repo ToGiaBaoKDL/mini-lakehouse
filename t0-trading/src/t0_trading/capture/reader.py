@@ -23,6 +23,7 @@ from t0_trading.market.events import StreamEnvelope
 from t0_trading.provider import SSI_API_VERSION
 
 _MARKET_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
+StreamDisconnectKind = Literal["completed", "shutdown", "stale", "capture_error"]
 
 
 class StreamCaptureReadError(RuntimeError):
@@ -94,7 +95,7 @@ class StreamManifest(_StrictModel):
     symbols: tuple[str, ...]
     connected_at: datetime
     disconnected_at: datetime
-    disconnect_kind: Literal["completed", "shutdown"]
+    disconnect_kind: StreamDisconnectKind
     message_count: int = Field(ge=0)
     first_receive_sequence: int | None
     last_receive_sequence: int | None
@@ -105,7 +106,7 @@ class StreamManifest(_StrictModel):
     batches: tuple[StreamBatch, ...]
     api_version: str
     sdk_version: str
-    error_type: None
+    error_type: str | None = Field(default=None, min_length=1, max_length=128)
     published_at: datetime
 
     @field_validator(
@@ -155,6 +156,9 @@ class StreamManifest(_StrictModel):
             or self.last_business_message_at is None
         ):
             raise ValueError("message summary does not cover the terminal sequence")
+        clean_terminal = self.disconnect_kind in {"completed", "shutdown"}
+        if clean_terminal != (self.error_type is None):
+            raise ValueError("terminal kind and error_type are inconsistent")
         return self
 
 

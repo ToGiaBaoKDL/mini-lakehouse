@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, TypeAdapter, computed_field, model_validator
 from ssi_sdk.models import IntervalMessage
 
-from t0_trading.capture.reader import StreamSessionReader
+from t0_trading.capture.reader import StreamDisconnectKind, StreamSessionReader
 from t0_trading.configuration import TradingVersion
 from t0_trading.market.events import (
     MarketEvent,
@@ -28,7 +28,6 @@ from t0_trading.market.session import (
     TRADE_SESSIONS,
     covers_trading_window,
     session_at,
-    trading_window,
 )
 from t0_trading.market.state import Bar, bar_start
 
@@ -100,6 +99,8 @@ class ReconciliationReport(BaseModel):
     configuration_sha256: str
     connected_at: datetime
     disconnected_at: datetime
+    disconnect_kind: StreamDisconnectKind
+    error_type: str | None
     full_session_coverage: bool
     capture_scope_matches_configuration: bool
     trade_symbols: tuple[str, ...]
@@ -238,29 +239,43 @@ def reconcile_trade_date(
     *,
     trade_date: date,
 ) -> ReconciliationReport:
-    """Select exactly one capture intersecting the market window and certify it."""
+    """Select and certify the sole capture covering the configured market window."""
+    return reconcile_session(
+        select_feature_capture(readers, configuration, trade_date=trade_date),
+        configuration,
+    )
+
+
+def select_feature_capture(
+    readers: Sequence[StreamSessionReader],
+    configuration: TradingVersion,
+    *,
+    trade_date: date,
+) -> StreamSessionReader:
+    """Select exactly one capture covering the feature market window and symbol scope."""
     if not readers:
         raise ValueError("no terminal SSI Stream session exists for the trading date")
     if any(reader.trade_date != trade_date for reader in readers):
         raise ValueError("SSI Stream session escaped the requested trading date")
     timezone = ZoneInfo(configuration.market.timezone)
-    market_open, market_close = trading_window(
-        trade_date,
-        timezone=timezone,
-        schedule=configuration.market.sessions,
-    )
-    intersecting = tuple(
+    covering = tuple(
         reader
         for reader in readers
-        if reader.manifest.disconnected_at >= market_open
-        and reader.manifest.connected_at <= market_close
-    )
-    if len(intersecting) != 1:
-        raise ValueError(
-            "expected exactly one SSI Stream session intersecting the market window, "
-            f"found {len(intersecting)}"
+        if covers_trading_window(
+            reader.manifest.connected_at,
+            reader.manifest.disconnected_at,
+            trade_date=trade_date,
+            timezone=timezone,
+            schedule=configuration.market.sessions,
         )
-    return reconcile_session(intersecting[0], configuration)
+        and set(reader.manifest.symbols) == set(configuration.market.symbols)
+    )
+    if len(covering) != 1:
+        raise ValueError(
+            "expected exactly one SSI Stream session covering the market window and symbol scope, "
+            f"found {len(covering)}"
+        )
+    return covering[0]
 
 
 def reconcile_session(
@@ -405,6 +420,8 @@ def reconcile_session(
         configuration_sha256=configuration.sha256,
         connected_at=reader.manifest.connected_at,
         disconnected_at=reader.manifest.disconnected_at,
+        disconnect_kind=reader.manifest.disconnect_kind,
+        error_type=reader.manifest.error_type,
         full_session_coverage=full_session_coverage,
         capture_scope_matches_configuration=capture_scope_matches_configuration,
         trade_symbols=tuple(sorted(trade_symbols)),

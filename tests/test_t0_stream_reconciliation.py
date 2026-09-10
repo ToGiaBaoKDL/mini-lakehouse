@@ -184,6 +184,10 @@ def _reader(
     interval_observed_time: str = "2026/09/04 09:15:57",
     first_total_volume: int = 10,
     corrupt: bool = False,
+    connected_at: str = "2026-09-04T01:00:00+00:00",
+    disconnected_at: str = "2026-09-04T09:00:00+00:00",
+    disconnect_kind: str = "shutdown",
+    error_type: str | None = None,
 ) -> StreamSessionReader:
     rows = [
         _quote_row(
@@ -262,7 +266,15 @@ def _reader(
             received_at=datetime(2026, 9, 4, 2, 15, 58, tzinfo=UTC),
         )
     )
-    return _reader_from_rows(rows, symbols=symbols, corrupt=corrupt)
+    return _reader_from_rows(
+        rows,
+        symbols=symbols,
+        corrupt=corrupt,
+        connected_at=connected_at,
+        disconnected_at=disconnected_at,
+        disconnect_kind=disconnect_kind,
+        error_type=error_type,
+    )
 
 
 def _reader_from_rows(
@@ -271,6 +283,10 @@ def _reader_from_rows(
     symbols: tuple[str, ...] = ("VIC", "VHM"),
     batch_published_at: str = "2026-09-04T09:00:00+00:00",
     corrupt: bool = False,
+    connected_at: str = "2026-09-04T01:00:00+00:00",
+    disconnected_at: str = "2026-09-04T09:00:00+00:00",
+    disconnect_kind: str = "shutdown",
+    error_type: str | None = None,
 ) -> StreamSessionReader:
     body = gzip.compress(
         b"".join(canonical_json(row) + b"\n" for row in rows),
@@ -302,9 +318,9 @@ def _reader_from_rows(
         "schema_version": 1,
         "stream_session_id": SESSION_ID,
         "symbols": list(symbols),
-        "connected_at": "2026-09-04T01:00:00+00:00",
-        "disconnected_at": "2026-09-04T09:00:00+00:00",
-        "disconnect_kind": "shutdown",
+        "connected_at": connected_at,
+        "disconnected_at": disconnected_at,
+        "disconnect_kind": disconnect_kind,
         "message_count": message_count,
         "first_receive_sequence": 1,
         "last_receive_sequence": message_count,
@@ -315,7 +331,7 @@ def _reader_from_rows(
         "batches": [batch],
         "api_version": SSI_API_VERSION,
         "sdk_version": SSI_SDK_VERSION,
-        "error_type": None,
+        "error_type": error_type,
         "published_at": "2026-09-04T09:00:01+00:00",
     }
     objects = {object_key: body, manifest_key: canonical_json(manifest)}
@@ -409,6 +425,19 @@ def test_trade_date_reconciliation_requires_one_market_window_session() -> None:
         reconcile_trade_date((), version, trade_date=TRADE_DATE)
     with pytest.raises(ValueError, match="found 2"):
         reconcile_trade_date((reader, reader), version, trade_date=TRADE_DATE)
+
+
+def test_trade_date_reconciliation_ignores_partial_recovery_sessions() -> None:
+    version = load_configuration(Path("t0-trading/config/trading.yaml")).resolve(TRADE_DATE)
+    full = _reader(disconnect_kind="capture_error", error_type="WebSocketError")
+    partial = _reader(connected_at="2026-09-04T02:10:00+00:00")
+
+    report = reconcile_trade_date((full, partial), version, trade_date=TRADE_DATE)
+
+    assert report.status == "passed"
+    assert report.stream_session_id == full.manifest.stream_session_id
+    assert report.disconnect_kind == "capture_error"
+    assert report.error_type == "WebSocketError"
 
 
 def test_reader_streams_verified_rows_and_reconciliation_matches_ohlcv() -> None:

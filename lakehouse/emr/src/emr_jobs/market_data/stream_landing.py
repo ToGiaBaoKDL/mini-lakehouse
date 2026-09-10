@@ -222,6 +222,7 @@ def publish(
                 "manifest_key": capture.manifest_key,
                 "manifest_sha256": capture.manifest_sha256,
                 "published_at": manifest.published_at,
+                "error_type": manifest.error_type,
             }
         ],
         spark_schema(source.table("sessions")),

@@ -207,7 +207,7 @@ and a full spool still fail immediately. The terminal manifest is delivered only
 
 The weekday capture is intentionally immutable for the whole market-data window. A deployment
 during that window is refused before stopping or replacing the active container; it must be rerun
-before 08:00 or after 16:00 local time. This prevents a release from splitting the day into multiple
+before 08:30 or after 15:40 local time. This prevents a release from splitting the day into multiple
 partial sessions that cannot pass full-session certification.
 
 ## Bounded publication
@@ -246,20 +246,21 @@ table locations.
 
 ## Stream replay
 
-The OCI services host runs the capture container from 08:00 until 16:00, Monday through Friday, in
+The OCI services host runs the capture container from 08:30 until 15:40, Monday through Friday, in
 `Asia/Ho_Chi_Minh`. Component-owned systemd timers own this lifecycle; a persistent start timer can
 recover a host reboot during the window, while a local-time guard prevents a missed start from
-running after 16:00. The stop timer sends a graceful termination so the capture flushes its final
+running after 15:40. The stop timer sends a graceful termination so the capture flushes its final
 micro-batch and terminal manifest. Image deployment recreates the container and converges it to the
 schedule's desired state outside the capture window. Deployment inside the window is refused before
 the running container is touched, preserving the single full-session invariant.
 
-That 08:00–16:00 lifecycle is intentionally a conservative evidence-capture window, not a trading
+That 08:30–15:40 lifecycle is intentionally a conservative evidence-capture window, not a trading
 or signal window. The effective-dated session clock in `trading.yaml` is the semantic source of
 truth: it classifies ATO, continuous trading, lunch, ATC, and closed periods independently of the
 container lifecycle. SSI stamps closing-auction executions at exactly 14:45:00, so that boundary is
-included in ATC; later timestamps are closed. The outer capture window can be narrowed after several
-certified sessions without changing historical replay or weakening future decision gates.
+included in ATC; later timestamps are closed. The 15:40 stop retains the provider activity observed
+through roughly 15:32 in certified sessions; stopping at 15:30 would discard that evidence for no
+meaningful resource saving.
 
 The timer excludes weekends but does not pretend to know ad-hoc HOSE holidays. Until a structured
 exchange-calendar source is certified, a weekday holiday is captured conservatively: SDK
@@ -271,18 +272,24 @@ At 21:00 Monday through Friday, `etl_emr_ingest_market_data_stream` first runs o
 `certify_market_data_stream` Docker task. The task uses SSI's exact-date history through the official
 SDK as the trading-day gate; an unobserved date exits with the shared Airflow skip code. For an
 observed trading date, it uses the AWS SDK paginator to discover direct terminal manifests under the
-date's source-owned raw prefix and requires exactly one session to intersect the configured market
-window. Sessions entirely outside that window are irrelevant; no intersecting session, a reconnect
-during the window, partial coverage, or any failed reconciliation blocks publication. The JSON
-report remains in the Airflow remote task log rather than creating another S3 artifact or table.
+date's source-owned raw prefix and requires exactly one session to cover the complete configured
+market window with the configured symbol scope. Sessions entirely outside that window are retained
+as evidence but are irrelevant to feature selection. No covering session, multiple covering
+sessions, a reconnect during the market window, partial coverage, or any failed reconciliation
+blocks publication. The JSON report remains in the Airflow remote task log rather than creating
+another S3 artifact or table.
 
 Only after certification passes does `publish_market_data_stream` submit EMR. The data-plane job
 rediscovers and independently validates the immutable inputs before writing. Each session must pass
-manifest checksum, clean disconnect, heartbeat, SDK/API version, contiguous sequence, batch
-identity, object location, record-count, message-hash, timestamp, and duplicate-key validation.
+manifest checksum, terminal-kind/error consistency, heartbeat, SDK/API version, contiguous
+sequence, batch identity, object location, record-count, message-hash, timestamp, and duplicate-key
+validation. A transport failure after a session has already covered market close remains explicit
+evidence and does not invalidate the completed market window; the same failure before market close
+cannot satisfy coverage and fails certification.
 
 Landing publication merges `messages` by `(stream_session_id, receive_sequence)` and writes the
-terminal `sessions` row last. Curated publication maps positive-price, positive-quantity
+terminal `sessions` row last, including its sanitized `error_type` when present. Curated publication
+maps positive-price, positive-quantity
 `TradeMessage` records with a buy or sell side into `trade_ticks`. SSI auction-state observations
 with zero price, zero quantity, and unknown side remain available in landing without becoming
 synthetic trades. Any other malformed combination fails closed. Certified `QuoteMessage` records

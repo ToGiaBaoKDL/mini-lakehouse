@@ -304,13 +304,15 @@ def test_t0_stream_schedule_is_component_owned_and_fail_safe() -> None:
     assert "systemctl daemon-reload" in reconcile
     assert "systemctl enable --now" in reconcile
     assert "/usr/local/sbin/lakehouse-t0-stream-window" in reconcile + capture
-    assert "TZ=Asia/Ho_Chi_Minh date +%u:%H" in window
+    assert "TZ=Asia/Ho_Chi_Minh date +%u:%H:%M" in window
     assert "ExecStart=/usr/bin/docker start --attach lakehouse-t0-stream-capture" in capture
     assert "ExecStop=-/usr/bin/docker stop --time 30 lakehouse-t0-stream-capture" in capture
     assert "Restart=on-failure" in capture
     assert "WantedBy=multi-user.target" not in capture
-    assert "OnCalendar=Mon..Fri *-*-* 08:00:00 Asia/Ho_Chi_Minh" in start
-    assert "OnCalendar=Mon..Fri *-*-* 16:00:00 Asia/Ho_Chi_Minh" in stop
+    assert "OnCalendar=Mon..Fri *-*-* 08:30:00 Asia/Ho_Chi_Minh" in start
+    assert "OnCalendar=Mon..Fri *-*-* 15:40:00 Asia/Ho_Chi_Minh" in stop
+    assert '"$minute_of_day" -ge 510' in window
+    assert '"$minute_of_day" -lt 940' in window
     assert "Persistent=true" in start + stop
     assert "Conflicts=lakehouse-t0-stream-capture.service" in stop_service
 

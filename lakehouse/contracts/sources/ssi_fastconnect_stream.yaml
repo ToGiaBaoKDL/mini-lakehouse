@@ -49,5 +49,6 @@ tables:
       - {field_id: 9, name: manifest_key, data_type: string, required: true, description: Immutable manifest for all published session batches.}
       - {field_id: 10, name: manifest_sha256, data_type: string, required: true, description: SHA-256 of the immutable session manifest.}
       - {field_id: 11, name: published_at, data_type: timestamptz, required: true, description: UTC time the terminal session summary became durable.}
+      - {field_id: 12, name: error_type, data_type: string, required: false, description: Sanitized terminal failure class; null for completed or graceful shutdown sessions.}
     partitioning:
       - {field_id: 1000, field: connected_at, transform: day, name: connection_day}

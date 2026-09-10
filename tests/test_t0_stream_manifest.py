@@ -189,12 +189,21 @@ def test_stream_capture_rejects_s3_checksum_drift(target: str) -> None:
         load_capture(client, uri)
 
 
-def test_stream_capture_rejects_unclean_or_inconsistent_manifests() -> None:
+def test_stream_capture_preserves_failed_terminals_but_rejects_inconsistent_manifests() -> None:
     def unclean(manifest: dict[str, object]) -> None:
         manifest["disconnect_kind"] = "stale"
         manifest["error_type"] = "HeartbeatTimeout"
 
     client, uri, _ = _capture(mutate=unclean)
+    capture = load_capture(client, uri)
+    assert capture.manifest.disconnect_kind == "stale"
+    assert capture.manifest.error_type == "HeartbeatTimeout"
+
+    def inconsistent_terminal(manifest: dict[str, object]) -> None:
+        manifest["disconnect_kind"] = "capture_error"
+        manifest["error_type"] = None
+
+    client, uri, _ = _capture(mutate=inconsistent_terminal)
     with pytest.raises(StreamCaptureReadError, match="invalid SSI Stream manifest"):
         load_capture(client, uri)
 

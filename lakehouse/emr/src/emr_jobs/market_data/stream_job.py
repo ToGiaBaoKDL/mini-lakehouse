@@ -1,11 +1,10 @@
 """Orchestrate terminal SSI Stream capture replay for one trade date."""
 
 from datetime import date
-from zoneinfo import ZoneInfo
 
 from loguru import logger
 from t0_trading.configuration import parse_configuration
-from t0_trading.market.session import covers_trading_window
+from t0_trading.market.reconciliation import select_feature_capture
 
 from emr_jobs.common.contracts import load_contracts
 from emr_jobs.common.iceberg import qualified_name, require_tables
@@ -44,23 +43,11 @@ def run(
     captures = tuple(load_capture(s3, uri) for uri in manifest_uris)
     if any(capture.trade_date != trade_date for capture in captures):
         raise RuntimeError("SSI Stream capture escaped the requested trade date")
-    timezone = ZoneInfo(configuration.market.timezone)
-    feature_captures = tuple(
-        capture
-        for capture in captures
-        if covers_trading_window(
-            capture.manifest.connected_at,
-            capture.manifest.disconnected_at,
-            trade_date=trade_date,
-            timezone=timezone,
-            schedule=configuration.market.sessions,
-        )
-        and frozenset(capture.manifest.symbols) == frozenset(configuration.market.symbols)
+    feature_capture = select_feature_capture(
+        captures,
+        configuration,
+        trade_date=trade_date,
     )
-    if len(feature_captures) != 1:
-        raise RuntimeError(
-            "Expected exactly one full-session capture matching the feature configuration"
-        )
     required_identifiers = (
         *(source.table_identifier(table.key) for table in source.tables),
         *(
@@ -86,18 +73,17 @@ def run(
                 capture.manifest.stream_session_id,
                 capture.manifest.message_count,
             )
-        capture = feature_captures[0]
         audit = publish_features(
             spark,
             landing_table=qualified_name(source.table_identifier("messages")),
             product=t0_trading,
-            capture=capture,
+            capture=feature_capture,
             configuration=configuration,
         )
         logger.info(
             "Published {} deterministic feature snapshots for SSI Stream session {}",
             audit.snapshot_count,
-            capture.manifest.stream_session_id,
+            feature_capture.manifest.stream_session_id,
         )
     finally:
         spark.stop()

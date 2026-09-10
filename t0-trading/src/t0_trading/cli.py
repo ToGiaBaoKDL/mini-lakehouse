@@ -44,6 +44,7 @@ from t0_trading.market.reconciliation import (
     ReconciliationReport,
     reconcile_session,
     reconcile_trade_date,
+    select_feature_capture,
 )
 from t0_trading.outcomes import build_outcome_audit, label_outcomes
 from t0_trading.provider import authenticated
@@ -112,6 +113,7 @@ def _replay_feature_session(
     )
     configuration = load_configuration(config)
     version = configuration.resolve(reader.trade_date)
+    reader = select_feature_capture((reader,), version, trade_date=reader.trade_date)
     snapshots = replay_features(reader.envelopes(), version, trade_date=reader.trade_date)
     report = build_feature_audit(
         snapshots,

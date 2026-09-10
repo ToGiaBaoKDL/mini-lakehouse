@@ -2,7 +2,16 @@
 set -eu
 
 # Permit delayed persistent-timer activation only inside the owned market-data window.
-case "$(TZ=Asia/Ho_Chi_Minh date +%u:%H)" in
-    [1-5]:0[89] | [1-5]:1[0-5]) exit 0 ;;
-    *) exit 1 ;;
-esac
+timestamp=$(TZ=Asia/Ho_Chi_Minh date +%u:%H:%M)
+weekday=${timestamp%%:*}
+clock=${timestamp#*:}
+hour=${clock%%:*}
+minute=${clock#*:}
+hour=${hour#0}
+minute=${minute#0}
+minute_of_day=$((hour * 60 + minute))
+
+if [ "$weekday" -le 5 ] && [ "$minute_of_day" -ge 510 ] && [ "$minute_of_day" -lt 940 ]; then
+    exit 0
+fi
+exit 1
