@@ -124,7 +124,9 @@ by `curated_t0_trading`:
 - `feature_snapshots` has one row per feature version, configuration SHA, symbol, and decision
   instant, including source position, eligibility, reasons, availability, and immutable hashes;
 - `feature_windows` has one child row per configured trailing window, avoiding hard-coded
-  `30s`/`60s`/`300s` columns as later effective versions add or remove windows.
+  `30s`/`60s`/`300s` columns as later effective versions add or remove windows;
+- `outcome_labels` has one immutable conditional Top-3 markout per outcome policy, feature
+  snapshot, action, and horizon.
 
 All snapshots, including deliberate abstentions during warm-up or sparse trading, are retained for
 leakage-safe research. `processed_at` records replay publication time, while `available_at` remains
@@ -160,7 +162,7 @@ publishing either dataset:
 
 ```bash
 AWS_PROFILE=tgbao-dev uv run --project t0-trading t0-trading audit-outcomes \
-  --manifest-uri s3://<landing-bucket>/market/ssi/stream/trade_date=YYYY-MM-DD/session=<uuid>/manifest.json \
+  --manifest-uri s3://<landing-bucket>/stream/ssi_fastconnect_stream/raw/trade_date=YYYY-MM-DD/session=<uuid>/manifest.json \
   --output /tmp/t0-outcome-audit.json
 ```
 
@@ -176,7 +178,15 @@ of already-settled inventory followed by a conditional ask-side repurchase. Thes
 research markouts, not claimed broker fills or executable round trips. They neither bypass Vietnam
 settlement constraints nor include an invented commission or tax schedule. Net PnL and portfolio
 eligibility remain unavailable until an account-specific, effective-dated cost and inventory policy
-is certified. Outcome labels are not yet persisted or consumed by signal generation.
+is certified. For a certified day, EMR publishes the complete label matrix with quote-sequence
+lineage, structured abstention reasons, and a canonical fingerprint. It remains research data and
+is not consumed by signal generation.
+
+dbt exposes `analytics_trading.fct_trading_backtest_observations` as a safe-by-default view. It
+inner joins the current passed certification, eligible snapshots, their normalized windows, and
+eligible outcomes using their existing immutable lineage. The view does not rederive market state,
+features, coverage, or returns, and failed certifications disappear immediately without an
+incremental-delete repair path.
 
 The bounded stream command subscribes to aggregate symbol data and one-minute intervals for
 `VIC,VHM`. SDK callbacks only serialize into a bounded in-memory queue; the main process writes
@@ -279,7 +289,7 @@ The EMR job independently validates every batch and publishes structurally valid
 landing and curated market-data tables even when reconnects make the day unsuitable for research.
 It then upserts `market_day_certifications` from the complete manifest set. Exactly one session must
 cover the configured market window and symbol scope for status `passed`; otherwise the job records
-the stable failure reason and withholds all feature snapshots and windows. The final Airflow task
+the stable failure reason and withholds all feature snapshots, windows, and outcomes. The final Airflow task
 reruns the shared reconciliation. An ineligible day uses the dedicated data-quality exit code, so
 Airflow marks that task skipped, keeps the completed DAG run successful, and sends a warning through
 the standard Slack and email routes. Configuration, AWS, checksum, schema, and replay failures remain
@@ -299,13 +309,13 @@ maps positive-price, positive-quantity
 with zero price, zero quantity, and unknown side remain available in landing without becoming
 synthetic trades. Any other malformed combination fails closed. Certified `QuoteMessage` records
 populate snapshots and levels. Retries reuse the same manifest and insert no duplicates; a
-conflicting manifest, message, tick, snapshot, or level fails closed.
+conflicting manifest, message, tick, snapshot, feature, window, or outcome fails closed.
 
 Offline feature and outcome audits use the same eligibility selector and therefore reject captures
-without full-session coverage. Future dbt backtest datasets must inner join
-`market_day_certifications` on trade date
-and configuration SHA with `status = 'passed'`; dbt must not rederive capture coverage from ticks or
-quotes. This distinguishes a genuinely quiet market from a day whose data is missing.
+without full-session coverage. The dbt backtest view inner joins `market_day_certifications` on
+trade date, configuration SHA, and selected session with `status = 'passed'`; dbt does not rederive
+capture coverage from ticks or quotes. This distinguishes a genuinely quiet market from a day whose
+data is missing.
 
 The same terminal manifest can be audited independently of Spark. The reader verifies checksum
 metadata, manifest and batch lineage, SDK/API versions, contiguous receipt sequence, row schema,

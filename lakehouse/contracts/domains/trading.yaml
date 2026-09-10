@@ -1,0 +1,10 @@
+version: 1
+name: trading
+database: analytics_trading
+owner: trading-analytics
+contact:
+  name: Trading Analytics
+  email: baokdl2226@gmail.com
+business_owner: trading
+description: Leakage-safe datasets for deterministic market research and backtesting.
+upstream_curated_products: [t0_trading]

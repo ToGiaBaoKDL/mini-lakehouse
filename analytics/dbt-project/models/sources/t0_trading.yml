@@ -1,0 +1,90 @@
+version: 2
+
+sources:
+  - name: t0_trading
+    description: Deterministic point-in-time T0 research facts reproduced from certified market captures.
+    database: awsdatacatalog
+    schema: curated_t0_trading
+    loader: emr-serverless
+    config:
+      tags: [t0-trading, trading]
+    meta:
+      owner: t0-trading
+      contact: baokdl2226@gmail.com
+    tables:
+      - name: market_day_certifications
+        description: Current deterministic eligibility of one market day for feature publication and backtesting.
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [trade_date, configuration_sha256]
+        columns:
+          - {name: trade_date, data_tests: [not_null]}
+          - {name: configuration_sha256, data_tests: [not_null]}
+          - name: status
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: [passed, failed]
+          - {name: evidence_sha256, data_tests: [not_null]}
+
+      - name: feature_snapshots
+        description: One versioned feature vector for a symbol at an exact decision instant.
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [feature_version, configuration_sha256, symbol, decision_at]
+        columns:
+          - {name: feature_version, data_tests: [not_null]}
+          - {name: configuration_sha256, data_tests: [not_null]}
+          - {name: symbol, data_tests: [not_null]}
+          - {name: trade_date, data_tests: [not_null]}
+          - {name: decision_at, data_tests: [not_null]}
+          - {name: stream_session_id, data_tests: [not_null]}
+          - {name: snapshot_sha256, data_tests: [not_null, unique]}
+
+      - name: feature_windows
+        description: One trailing-window component belonging to a deterministic feature snapshot.
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [feature_version, configuration_sha256, symbol, decision_at, window_seconds]
+        columns:
+          - {name: feature_version, data_tests: [not_null]}
+          - {name: configuration_sha256, data_tests: [not_null]}
+          - {name: symbol, data_tests: [not_null]}
+          - {name: trade_date, data_tests: [not_null]}
+          - {name: decision_at, data_tests: [not_null]}
+          - {name: window_seconds, data_tests: [not_null]}
+          - name: snapshot_sha256
+            data_tests:
+              - not_null
+              - relationships:
+                  arguments:
+                    to: source('t0_trading', 'feature_snapshots')
+                    field: snapshot_sha256
+
+      - name: outcome_labels
+        description: Immutable conditional Top-3 execution markouts for one feature snapshot, action, and horizon.
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [outcome_configuration_sha256, feature_snapshot_sha256, action, horizon_seconds]
+        columns:
+          - {name: outcome_configuration_sha256, data_tests: [not_null]}
+          - name: feature_snapshot_sha256
+            data_tests:
+              - not_null
+              - relationships:
+                  arguments:
+                    to: source('t0_trading', 'feature_snapshots')
+                    field: snapshot_sha256
+          - name: action
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: [BUY, SELL]
+          - {name: horizon_seconds, data_tests: [not_null]}
+          - {name: outcome_sha256, data_tests: [not_null, unique]}

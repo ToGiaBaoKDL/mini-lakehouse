@@ -1,0 +1,100 @@
+version: 2
+
+models:
+  - name: fct_trading_backtest_observations
+    description: Leakage-safe eligible feature windows and conditional execution outcomes from currently certified market days.
+    config:
+      meta:
+        default_time_dimension:
+          field: decision_at
+          interval: DAY
+        group_label: Trading research
+        label: Backtest observations
+        primary_key: [outcome_configuration_sha256, feature_snapshot_sha256, action, horizon_seconds, window_seconds]
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [outcome_configuration_sha256, feature_snapshot_sha256, action, horizon_seconds, window_seconds]
+    columns:
+      - {name: trade_date, description: Exchange-local date of the certified market session., data_type: date, data_tests: [not_null]}
+      - {name: symbol, description: Normalized security symbol., data_type: varchar, data_tests: [not_null]}
+      - name: decision_at
+        description: UTC point-in-time feature evaluation boundary.
+        data_type: timestamp
+        data_tests: [not_null]
+        config:
+          meta:
+            dimension:
+              label: Decision time
+              time_intervals: [MINUTE, HOUR, DAY, WEEK, MONTH]
+              type: timestamp
+      - {name: market_session, description: Exchange session containing the decision., data_type: varchar, data_tests: [not_null]}
+      - name: action
+        description: Conditional BUY or SELL action evaluated by the simulator.
+        data_type: varchar
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [BUY, SELL]
+      - {name: horizon_seconds, description: Markout horizon measured from decision time., data_type: bigint, data_tests: [not_null]}
+      - {name: window_seconds, description: Trailing feature-window duration., data_type: bigint, data_tests: [not_null]}
+      - {name: order_quantity, description: Shares simulated through the visible Top-3 book., data_type: bigint, data_tests: [not_null]}
+      - {name: feature_version, description: Deterministic feature formula version., data_type: varchar, data_tests: [not_null]}
+      - {name: configuration_version, description: Effective market and feature configuration version., data_type: varchar, data_tests: [not_null]}
+      - {name: configuration_sha256, description: Exact effective market and feature configuration fingerprint., data_type: varchar, data_tests: [not_null]}
+      - {name: outcome_version, description: Deterministic execution and markout policy version., data_type: varchar, data_tests: [not_null]}
+      - {name: outcome_configuration_sha256, description: Exact outcome policy fingerprint., data_type: varchar, data_tests: [not_null]}
+      - {name: stream_session_id, description: Sole certified source capture session., data_type: varchar, data_tests: [not_null]}
+      - {name: evidence_sha256, description: Fingerprint of the certified manifest evidence set., data_type: varchar, data_tests: [not_null]}
+      - {name: manifest_sha256, description: Terminal selected-session manifest fingerprint., data_type: varchar, data_tests: [not_null]}
+      - {name: feature_snapshot_sha256, description: Canonical parent feature snapshot fingerprint., data_type: varchar, data_tests: [not_null]}
+      - {name: outcome_sha256, description: Canonical complete outcome label fingerprint., data_type: varchar, data_tests: [not_null]}
+      - {name: last_receive_sequence, description: Latest callback sequence visible at decision time., data_type: bigint, data_tests: [not_null]}
+      - {name: entry_receive_sequence, description: Capture sequence used for the simulated entry., data_type: bigint, data_tests: [not_null]}
+      - {name: horizon_receive_sequence, description: Capture sequence used for the simulated exit markout., data_type: bigint, data_tests: [not_null]}
+      - {name: feature_available_at, description: Earliest UTC instant at which the feature was available., data_type: timestamp, data_tests: [not_null]}
+      - {name: entry_at, description: UTC simulated entry instant after configured latency., data_type: timestamp, data_tests: [not_null]}
+      - {name: horizon_at, description: UTC markout instant., data_type: timestamp, data_tests: [not_null]}
+      - {name: entry_quote_received_at, description: Receipt time of the quote used for entry., data_type: timestamp, data_tests: [not_null]}
+      - {name: horizon_quote_received_at, description: Receipt time of the quote used for exit markout., data_type: timestamp, data_tests: [not_null]}
+      - {name: trade_age_seconds, description: Receipt-time age of the latest trade at decision time., data_type: "decimal(18,6)"}
+      - {name: quote_age_seconds, description: Receipt-time age of the latest complete quote at decision time., data_type: "decimal(18,6)"}
+      - {name: mid_price, description: Best bid and ask midpoint in VND., data_type: "decimal(24,8)"}
+      - {name: microprice, description: Opposite-depth-weighted level-one microprice in VND., data_type: "decimal(24,8)"}
+      - {name: microprice_deviation_bps, description: Microprice deviation from midpoint in basis points., data_type: "decimal(18,4)"}
+      - {name: spread, description: Best ask minus best bid in VND., data_type: "decimal(18,0)"}
+      - {name: spread_bps, description: Quoted spread relative to midpoint in basis points., data_type: "decimal(18,4)"}
+      - {name: bid_depth, description: Visible configured-depth bid quantity., data_type: bigint}
+      - {name: ask_depth, description: Visible configured-depth ask quantity., data_type: bigint}
+      - {name: level_one_imbalance, description: Normalized best-level bid versus ask depth imbalance., data_type: "decimal(10,8)"}
+      - {name: depth_imbalance, description: Normalized configured-depth bid versus ask imbalance., data_type: "decimal(10,8)"}
+      - {name: trade_count, description: Executable trades in the trailing window., data_type: bigint, data_tests: [not_null]}
+      - {name: quote_change_count, description: Complete quote transitions in the trailing window., data_type: bigint, data_tests: [not_null]}
+      - {name: trade_volume, description: Matched share quantity in the trailing window., data_type: bigint, data_tests: [not_null]}
+      - {name: signed_trade_volume, description: Buyer-aggressed minus seller-aggressed window quantity., data_type: bigint, data_tests: [not_null]}
+      - {name: trade_volume_per_second, description: Matched quantity normalized by window duration., data_type: "decimal(24,8)"}
+      - {name: trade_volume_imbalance, description: Signed divided by total matched window volume., data_type: "decimal(10,8)"}
+      - {name: level_one_order_flow_imbalance, description: Best-level order-flow imbalance across quote transitions., data_type: bigint, data_tests: [not_null]}
+      - {name: price_return_bps, description: First-to-last matched-price return in the window., data_type: "decimal(18,4)"}
+      - {name: realized_volatility_bps, description: Root sum of squared adjacent trade returns., data_type: "decimal(18,4)"}
+      - {name: vwap, description: Window matched-price VWAP in VND., data_type: "decimal(24,8)"}
+      - {name: last_price_to_vwap_bps, description: Last matched-price deviation from window VWAP., data_type: "decimal(18,4)"}
+      - {name: entry_vwap, description: Simulated visible-book entry VWAP in VND., data_type: "decimal(24,8)", data_tests: [not_null]}
+      - {name: horizon_vwap, description: Simulated opposing-side horizon VWAP in VND., data_type: "decimal(24,8)", data_tests: [not_null]}
+      - name: gross_return_bps
+        description: Gross directional markout before fees and taxes in basis points.
+        data_type: "decimal(18,4)"
+        data_tests: [not_null]
+        config:
+          meta:
+            metrics:
+              average_gross_return_bps:
+                description: Average gross return across distinct simulated outcome paths.
+                distinct_keys: outcome_sha256
+                label: Average gross return (bps)
+                round: 4
+                type: average_distinct
+      - {name: certification_evaluated_at, description: UTC time the current evidence set was certified., data_type: timestamp, data_tests: [not_null]}
+      - {name: feature_processed_at, description: UTC durable feature materialization time., data_type: timestamp, data_tests: [not_null]}
+      - {name: outcome_processed_at, description: UTC durable outcome materialization time., data_type: timestamp, data_tests: [not_null]}

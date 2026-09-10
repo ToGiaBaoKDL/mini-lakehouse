@@ -15,3 +15,8 @@ groups:
     owner:
       name: Research Analytics
       email: baokdl2226@gmail.com
+
+  - name: trading
+    owner:
+      name: Trading Analytics
+      email: baokdl2226@gmail.com

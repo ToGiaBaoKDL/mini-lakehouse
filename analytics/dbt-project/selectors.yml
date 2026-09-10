@@ -10,3 +10,9 @@ selectors:
     definition:
       method: tag
       value: research
+
+  - name: trading
+    description: Leakage-safe trading models and their certified T0 sources.
+    definition:
+      method: tag
+      value: trading

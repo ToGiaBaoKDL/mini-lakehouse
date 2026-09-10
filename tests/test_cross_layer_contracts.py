@@ -29,7 +29,7 @@ def test_ssi_capture_writes_to_the_contract_owned_raw_prefix() -> None:
 def test_dbt_sources_match_curated_product_contracts() -> None:
     contracts = load_contracts()
     sources: dict[str, list[dict[str, object]]] = {}
-    for product_name in ("github", "arxiv"):
+    for product_name in ("github", "arxiv", "t0_trading"):
         source_file = _yaml((DBT_PROJECT / f"models/sources/{product_name}.yml").as_posix())
         source = cast(list[dict[str, object]], source_file["sources"])[0]
         product = contracts.curated_product(product_name)
@@ -149,6 +149,30 @@ def test_dbt_models_use_explicit_projections() -> None:
     for path in (DBT_PROJECT / "models").rglob("*.sql"):
         sql = path.read_text(encoding="utf-8")
         assert re.search(r"\bselect\s+\*", sql, flags=re.IGNORECASE) is None, path
+
+
+def test_trading_backtest_mart_reuses_certified_curated_facts() -> None:
+    sql = (DBT_PROJECT / "models/marts/trading/fct_trading_backtest_observations.sql").read_text(
+        encoding="utf-8"
+    )
+    metadata = (DBT_PROJECT / "models/marts/trading/_trading__models.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "where status = 'passed'" in sql
+    assert sql.count("where is_eligible") == 2
+    for model in (
+        "stg_trading__market_day_certifications",
+        "stg_trading__feature_snapshots",
+        "stg_trading__feature_windows",
+        "stg_trading__outcome_labels",
+    ):
+        assert f"ref('{model}')" in sql
+    assert "trade_ticks" not in sql
+    assert "quote_snapshots" not in sql
+    assert "gross_return_bps" in sql
+    assert "distinct_keys: outcome_sha256" in metadata
+    assert "type: average_distinct" in metadata
 
 
 def test_every_dbt_model_and_column_is_documented() -> None:

@@ -1,0 +1,20 @@
+select
+    feature_version,
+    configuration_sha256,
+    symbol,
+    trade_date,
+    decision_at,
+    window_seconds,
+    trade_count,
+    quote_change_count,
+    trade_volume,
+    signed_trade_volume,
+    trade_volume_per_second,
+    trade_volume_imbalance,
+    level_one_order_flow_imbalance,
+    price_return_bps,
+    realized_volatility_bps,
+    vwap,
+    last_price_to_vwap_bps,
+    snapshot_sha256
+from {{ source('t0_trading', 'feature_windows') }}

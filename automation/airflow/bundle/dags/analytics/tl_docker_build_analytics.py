@@ -15,8 +15,10 @@ from callbacks.notifications import (
 from config.assets import (
     ANALYTICS_ENGINEERING,
     ANALYTICS_RESEARCH,
+    ANALYTICS_TRADING,
     CURATED_ARXIV_METADATA,
     CURATED_GITHUB,
+    CURATED_T0_TRADING,
 )
 from config.templates import DAG_START_DATE, runtime_value
 from operators.docker import docker_task
@@ -42,6 +44,7 @@ def _analytics_group(
     *,
     inputs: tuple[Asset, ...],
     output: Asset,
+    check_freshness: bool = True,
 ) -> TaskGroup:
     environment = {
         "DBT_ANALYTICS_URI": runtime_value("storage/analytics_uri"),
@@ -55,15 +58,6 @@ def _analytics_group(
             python_callable=_domain_was_triggered,
             op_kwargs={"asset_uris": tuple(asset.uri for asset in inputs)},
         )
-        freshness = docker_task(
-            task_id="check_source_freshness",
-            image="dbt:runtime",
-            command=["source", "freshness", "--selector", domain],
-            workload=f"dbt-{domain}",
-            execution_timeout=timedelta(minutes=30),
-            environment=environment,
-            inlets=inputs,
-        )
         build = docker_task(
             task_id="build_analytics",
             image="dbt:runtime",
@@ -74,15 +68,27 @@ def _analytics_group(
             inlets=inputs,
             outlets=[output],
         )
-        selected.set_downstream(freshness)
-        freshness.set_downstream(build)
+        if check_freshness:
+            freshness = docker_task(
+                task_id="check_source_freshness",
+                image="dbt:runtime",
+                command=["source", "freshness", "--selector", domain],
+                workload=f"dbt-{domain}",
+                execution_timeout=timedelta(minutes=30),
+                environment=environment,
+                inlets=inputs,
+            )
+            selected.set_downstream(freshness)
+            freshness.set_downstream(build)
+        else:
+            selected.set_downstream(build)
     return group
 
 
 with DAG(
     dag_id="tl_docker_build_analytics",
     description="Build only analytics domains affected by curated asset events.",
-    schedule=CURATED_GITHUB | CURATED_ARXIV_METADATA,
+    schedule=CURATED_GITHUB | CURATED_ARXIV_METADATA | CURATED_T0_TRADING,
     start_date=DAG_START_DATE,
     catchup=False,
     max_active_runs=1,
@@ -99,4 +105,10 @@ with DAG(
         "research",
         inputs=(CURATED_ARXIV_METADATA,),
         output=ANALYTICS_RESEARCH,
+    )
+    _analytics_group(
+        "trading",
+        inputs=(CURATED_T0_TRADING,),
+        output=ANALYTICS_TRADING,
+        check_freshness=False,
     )

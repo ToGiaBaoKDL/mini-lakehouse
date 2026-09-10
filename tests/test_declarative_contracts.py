@@ -22,6 +22,7 @@ def test_repository_contracts_form_one_glue_registry() -> None:
     )
     assert contracts.domain("engineering").database == "analytics_engineering"
     assert contracts.domain("research").database == "analytics_research"
+    assert contracts.domain("trading").database == "analytics_trading"
     assert contracts.source("ssi_fastconnect_rest").raw_object_prefix == (
         "api/ssi_fastconnect_rest/raw"
     )
@@ -154,6 +155,7 @@ def test_t0_feature_contract_preserves_snapshot_and_window_grains() -> None:
     certifications = product.table("market_day_certifications")
     snapshots = product.table("feature_snapshots")
     windows = product.table("feature_windows")
+    outcomes = product.table("outcome_labels")
 
     assert product.database == "curated_t0_trading"
     assert product.owner == "t0-trading"
@@ -179,6 +181,12 @@ def test_t0_feature_contract_preserves_snapshot_and_window_grains() -> None:
         "decision_at",
     )
     assert windows.primary_key == (*snapshots.primary_key, "window_seconds")
+    assert outcomes.primary_key == (
+        "outcome_configuration_sha256",
+        "feature_snapshot_sha256",
+        "action",
+        "horizon_seconds",
+    )
     assert {column.name for column in snapshots.columns} >= {
         "stream_session_id",
         "last_receive_sequence",
@@ -187,6 +195,17 @@ def test_t0_feature_contract_preserves_snapshot_and_window_grains() -> None:
         "available_at",
         "manifest_sha256",
         "snapshot_sha256",
+    }
+    assert {column.name for column in outcomes.columns} >= {
+        "feature_configuration_sha256",
+        "feature_snapshot_sha256",
+        "stream_session_id",
+        "entry_receive_sequence",
+        "horizon_receive_sequence",
+        "gross_return_bps",
+        "is_eligible",
+        "outcome_reasons_json",
+        "outcome_sha256",
     }
     assert all(column.data_type != "double" for table in product.tables for column in table.columns)
 
@@ -204,6 +223,7 @@ def test_contract_layout_excludes_cloud_identity_and_maintenance_policy() -> Non
         "curated/t0_trading.yaml",
         "domains/engineering.yaml",
         "domains/research.yaml",
+        "domains/trading.yaml",
         "sources/arxiv.yaml",
         "sources/github_archive.yaml",
         "sources/ssi_fastconnect_rest.yaml",

@@ -15,6 +15,7 @@ from emr_jobs.market_data.stream_curated import publish as publish_curated
 from emr_jobs.market_data.stream_landing import publish as publish_landing
 from emr_jobs.t0_trading.certifications import publish as publish_certification
 from emr_jobs.t0_trading.features import publish as publish_features
+from emr_jobs.t0_trading.outcomes import publish as publish_outcomes
 
 
 def run(
@@ -29,7 +30,9 @@ def run(
     market_data = contracts.curated_product("market_data")
     t0_trading = contracts.curated_product("t0_trading")
     trade_date = date.fromisoformat(source_date)
-    configuration = parse_configuration(read_bytes(trading_config_uri).decode()).resolve(trade_date)
+    trading = parse_configuration(read_bytes(trading_config_uri).decode())
+    configuration = trading.resolve(trade_date)
+    outcome_policy = trading.resolve_outcomes(trade_date)
     configure_logging("ssi_market_data_stream", source_date)
     s3 = client()
     manifest_uris = discover_captures(
@@ -91,16 +94,31 @@ def run(
             for capture in captures
             if capture.manifest.stream_session_id == certification.selected_stream_session_id
         )
-        audit = publish_features(
+        landing_table = qualified_name(source.table_identifier("messages"))
+        snapshots, feature_audit = publish_features(
             spark,
-            landing_table=qualified_name(source.table_identifier("messages")),
+            landing_table=landing_table,
             product=t0_trading,
             capture=feature_capture,
             configuration=configuration,
         )
         logger.info(
             "Published {} deterministic feature snapshots for SSI Stream session {}",
-            audit.snapshot_count,
+            feature_audit.snapshot_count,
+            feature_capture.manifest.stream_session_id,
+        )
+        outcome_audit = publish_outcomes(
+            spark,
+            landing_table=landing_table,
+            product=t0_trading,
+            capture=feature_capture,
+            configuration=configuration,
+            policy=outcome_policy,
+            snapshots=snapshots,
+        )
+        logger.info(
+            "Published {} deterministic outcome labels for SSI Stream session {}",
+            outcome_audit.label_count,
             feature_capture.manifest.stream_session_id,
         )
     finally:

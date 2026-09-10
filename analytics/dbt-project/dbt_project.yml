@@ -32,6 +32,13 @@ models:
         +meta:
           owner: data-platform
           contact: baokdl2226@gmail.com
+      trading:
+        +enabled: "{{ env_var('DBT_DOMAIN') in ['all', 'trading'] }}"
+        +group: data_platform
+        +tags: [staging, t0-trading, trading]
+        +meta:
+          owner: data-platform
+          contact: baokdl2226@gmail.com
     intermediate:
       +materialized: ephemeral
       engineering:
@@ -68,3 +75,11 @@ models:
           owner: research-analytics
           contact: baokdl2226@gmail.com
           business_owner: research
+      trading:
+        +enabled: "{{ env_var('DBT_DOMAIN') in ['all', 'trading'] }}"
+        +group: trading
+        +tags: [mart, trading]
+        +meta:
+          owner: trading-analytics
+          contact: baokdl2226@gmail.com
+          business_owner: trading

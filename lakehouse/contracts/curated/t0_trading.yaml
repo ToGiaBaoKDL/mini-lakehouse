@@ -88,3 +88,37 @@ tables:
       - {field_id: 18, name: snapshot_sha256, data_type: string, required: true, description: Immutable parent snapshot fingerprint.}
     partitioning:
       - {field_id: 1000, field: trade_date, transform: identity}
+
+  - key: outcome_labels
+    name: outcome_labels
+    description: Immutable conditional Top-3 execution markouts for one feature snapshot, action, and horizon.
+    primary_key: [outcome_configuration_sha256, feature_snapshot_sha256, action, horizon_seconds]
+    columns:
+      - {field_id: 1, name: schema_version, data_type: long, required: true, description: Outcome label contract version.}
+      - {field_id: 2, name: outcome_version, data_type: string, required: true, description: Version of the deterministic execution and markout policy.}
+      - {field_id: 3, name: outcome_configuration_sha256, data_type: string, required: true, description: SHA-256 of the exact effective outcome policy.}
+      - {field_id: 4, name: feature_version, data_type: string, required: true, description: Version of the parent deterministic feature formulas and policies.}
+      - {field_id: 5, name: feature_configuration_sha256, data_type: string, required: true, description: SHA-256 of the exact parent feature configuration.}
+      - {field_id: 6, name: feature_snapshot_sha256, data_type: string, required: true, description: Immutable parent feature snapshot fingerprint.}
+      - {field_id: 7, name: stream_session_id, data_type: string, required: true, description: Certified SSI capture session used for both features and markouts.}
+      - {field_id: 8, name: symbol, data_type: string, required: true, description: Normalized security symbol.}
+      - {field_id: 9, name: trade_date, data_type: date, required: true, description: Exchange-local trading date.}
+      - {field_id: 10, name: decision_at, data_type: timestamptz, required: true, description: UTC point-in-time feature evaluation boundary.}
+      - {field_id: 11, name: action, data_type: string, required: true, description: Conditional BUY or SELL action evaluated by the simulator.}
+      - {field_id: 12, name: horizon_seconds, data_type: long, required: true, description: Markout horizon measured from the feature decision instant.}
+      - {field_id: 13, name: order_quantity, data_type: long, required: true, description: Shares walked through the visible Top-3 book.}
+      - {field_id: 14, name: entry_at, data_type: timestamptz, required: true, description: UTC simulated entry instant after configured latency.}
+      - {field_id: 15, name: horizon_at, data_type: timestamptz, required: true, description: UTC markout instant.}
+      - {field_id: 16, name: entry_quote_received_at, data_type: timestamptz, required: false, description: Receipt time of the quote selected for entry.}
+      - {field_id: 17, name: entry_receive_sequence, data_type: long, required: false, description: Capture sequence of the quote selected for entry.}
+      - {field_id: 18, name: entry_vwap, data_type: decimal, precision: 24, scale: 8, required: false, description: Simulated entry VWAP across visible book levels in VND.}
+      - {field_id: 19, name: horizon_quote_received_at, data_type: timestamptz, required: false, description: Receipt time of the quote selected for exit markout.}
+      - {field_id: 20, name: horizon_receive_sequence, data_type: long, required: false, description: Capture sequence of the quote selected for exit markout.}
+      - {field_id: 21, name: horizon_vwap, data_type: decimal, precision: 24, scale: 8, required: false, description: Simulated opposing-side VWAP at the horizon in VND.}
+      - {field_id: 22, name: gross_return_bps, data_type: decimal, precision: 18, scale: 4, required: false, description: Gross directional markout return before fees and taxes in basis points.}
+      - {field_id: 23, name: is_eligible, data_type: boolean, required: true, description: Whether every feature and execution-quality gate passed.}
+      - {field_id: 24, name: outcome_reasons_json, data_type: string, required: true, description: Canonical JSON array of structured outcome abstention reasons.}
+      - {field_id: 25, name: processed_at, data_type: timestamptz, required: true, description: UTC time of durable outcome materialization.}
+      - {field_id: 26, name: outcome_sha256, data_type: string, required: true, description: SHA-256 of the canonical complete OutcomeLabel.}
+    partitioning:
+      - {field_id: 1000, field: trade_date, transform: identity}

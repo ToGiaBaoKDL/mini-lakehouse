@@ -40,6 +40,12 @@ locals {
       analytics_database = "analytics_research"
       analytics_prefix   = "research"
     }
+    trading = {
+      curated_databases  = ["curated_t0_trading"]
+      curated_prefixes   = ["t0_trading"]
+      analytics_database = "analytics_trading"
+      analytics_prefix   = "trading"
+    }
   }
   athena_workload_prefixes = merge({
     arxiv_lens = "arxiv-lens"

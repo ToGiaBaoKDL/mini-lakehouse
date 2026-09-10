@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from pyspark.sql import SparkSession
-from pyspark.sql import functions as F
 from t0_trading.capture.reader import StreamSessionReader
 from t0_trading.configuration import TradingVersion
 from t0_trading.features import (
@@ -16,61 +15,12 @@ from t0_trading.features import (
     build_feature_audit,
     replay_features,
 )
-from t0_trading.market import StreamEnvelope
 
 from emr_jobs.common.contracts import spark_schema
 from emr_jobs.common.iceberg import qualified_name
+from emr_jobs.t0_trading.iceberg import insert_missing, require_compatible
+from emr_jobs.t0_trading.landing import envelopes
 from lakehouse.contracts.curated import CuratedProductContract
-
-
-def _utc(value: object) -> datetime:
-    if not isinstance(value, datetime):
-        raise RuntimeError("SSI Stream landing timestamp is invalid")
-    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
-
-
-def _envelopes(
-    spark: SparkSession,
-    *,
-    landing_table: str,
-    capture: StreamSessionReader,
-) -> Iterator[StreamEnvelope]:
-    manifest = capture.manifest
-    if manifest.message_count < 1:
-        raise RuntimeError("Feature materialization requires a non-empty stream capture")
-    rows = (
-        spark.table(landing_table)
-        .filter(F.col("stream_session_id") == manifest.stream_session_id)
-        .select(
-            "stream_session_id",
-            "receive_sequence",
-            "message_type",
-            "symbol",
-            "source_time_text",
-            "received_at",
-            "message_json",
-            "message_sha256",
-        )
-        .orderBy("receive_sequence")
-        .toLocalIterator(prefetchPartitions=True)
-    )
-    expected_sequence = 1
-    for row in rows:
-        if row.receive_sequence != expected_sequence:
-            raise RuntimeError("SSI Stream landing sequence is not contiguous")
-        yield StreamEnvelope(
-            stream_session_id=row.stream_session_id,
-            receive_sequence=row.receive_sequence,
-            message_type=row.message_type,
-            symbol=row.symbol,
-            source_time_text=row.source_time_text,
-            received_at=_utc(row.received_at),
-            message_json=row.message_json,
-            message_sha256=row.message_sha256,
-        )
-        expected_sequence += 1
-    if expected_sequence - 1 != manifest.message_count:
-        raise RuntimeError("SSI Stream landing count does not match its terminal manifest")
 
 
 def _materialization_rows(
@@ -146,47 +96,6 @@ def _materialization_rows(
     return tuple(snapshot_rows), tuple(window_rows)
 
 
-def _join(keys: Sequence[str]) -> str:
-    return " AND ".join(f"target.{key} = source.{key}" for key in keys)
-
-
-def _require_compatible(
-    spark: SparkSession,
-    *,
-    view: str,
-    target: str,
-    keys: Sequence[str],
-) -> None:
-    conflict = spark.sql(
-        f"""
-        SELECT 1
-        FROM {view} source
-        JOIN {target} target ON {_join(keys)}
-        WHERE target.snapshot_sha256 != source.snapshot_sha256
-        LIMIT 1
-        """
-    ).count()
-    if conflict:
-        raise RuntimeError(f"Immutable T0 feature conflict in {target}")
-
-
-def _insert_missing(
-    spark: SparkSession,
-    *,
-    view: str,
-    target: str,
-    keys: Sequence[str],
-) -> None:
-    spark.sql(
-        f"""
-        MERGE INTO {target} target
-        USING {view} source
-        ON {_join(keys)}
-        WHEN NOT MATCHED THEN INSERT *
-        """
-    )
-
-
 def publish(
     spark: SparkSession,
     *,
@@ -194,12 +103,12 @@ def publish(
     product: CuratedProductContract,
     capture: StreamSessionReader,
     configuration: TradingVersion,
-) -> FeatureAuditReport:
+) -> tuple[tuple[FeatureSnapshot, ...], FeatureAuditReport]:
     """Replay once, quality-gate the complete clock, then idempotently publish it."""
     manifest = capture.manifest
     trade_date = capture.trade_date
     snapshots = replay_features(
-        _envelopes(spark, landing_table=landing_table, capture=capture),
+        envelopes(spark, landing_table=landing_table, capture=capture),
         configuration,
         trade_date=trade_date,
     )
@@ -235,31 +144,33 @@ def publish(
     window_frame.createOrReplaceTempView(window_view)
 
     # Preflight both immutable targets before the first cross-table mutation.
-    _require_compatible(
+    require_compatible(
         spark,
         view=snapshot_view,
         target=snapshot_target,
         keys=snapshots_contract.primary_key,
+        fingerprint="snapshot_sha256",
     )
-    _require_compatible(
+    require_compatible(
         spark,
         view=window_view,
         target=window_target,
         keys=windows_contract.primary_key,
+        fingerprint="snapshot_sha256",
     )
     # Publish children first. The parent table is the cross-table publication boundary:
     # a failed child merge may leave harmless orphans, but never a visible snapshot
     # without all of its window facts. A retry completes both immutable MERGEs.
-    _insert_missing(
+    insert_missing(
         spark,
         view=window_view,
         target=window_target,
         keys=windows_contract.primary_key,
     )
-    _insert_missing(
+    insert_missing(
         spark,
         view=snapshot_view,
         target=snapshot_target,
         keys=snapshots_contract.primary_key,
     )
-    return audit
+    return snapshots, audit

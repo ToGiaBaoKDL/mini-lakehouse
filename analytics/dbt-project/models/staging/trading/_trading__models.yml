@@ -1,0 +1,100 @@
+version: 2
+
+models:
+  - name: stg_trading__market_day_certifications
+    description: Analytics-facing projection of current market-day backtest eligibility.
+    columns:
+      - {name: trade_date, description: Exchange-local trading date., data_type: date}
+      - {name: configuration_version, description: Effective trading configuration version., data_type: varchar}
+      - {name: configuration_sha256, description: Exact effective trading configuration fingerprint., data_type: varchar}
+      - {name: status, description: Current passed or failed certification status., data_type: varchar}
+      - {name: failure_reason, description: Stable certification failure reason when failed., data_type: varchar}
+      - {name: manifest_count, description: Terminal manifests in the current evidence set., data_type: bigint}
+      - {name: full_window_session_count, description: Sessions covering the configured capture window., data_type: bigint}
+      - {name: eligible_session_count, description: Full sessions matching the configured symbol scope., data_type: bigint}
+      - {name: selected_stream_session_id, description: Sole session selected by a passed certification., data_type: varchar}
+      - {name: evidence_sha256, description: Fingerprint of the sorted immutable manifest evidence., data_type: varchar}
+      - {name: evaluated_at, description: UTC time at which the current evidence was certified., data_type: timestamp}
+
+  - name: stg_trading__feature_snapshots
+    description: Analytics-facing projection of deterministic point-in-time feature vectors.
+    columns:
+      - {name: schema_version, description: Feature snapshot contract version., data_type: bigint}
+      - {name: feature_version, description: Deterministic feature formula version., data_type: varchar}
+      - {name: configuration_version, description: Effective trading configuration version., data_type: varchar}
+      - {name: configuration_sha256, description: Exact effective trading configuration fingerprint., data_type: varchar}
+      - {name: symbol, description: Normalized security symbol., data_type: varchar}
+      - {name: trade_date, description: Exchange-local trading date., data_type: date}
+      - {name: decision_at, description: UTC feature decision instant., data_type: timestamp}
+      - {name: market_session, description: Exchange session containing the decision., data_type: varchar}
+      - {name: stream_session_id, description: Certified source capture session., data_type: varchar}
+      - {name: last_receive_sequence, description: Latest callback sequence available at decision time., data_type: bigint}
+      - {name: trade_age_seconds, description: Receipt-time age of the latest trade., data_type: "decimal(18,6)"}
+      - {name: quote_age_seconds, description: Receipt-time age of the latest complete quote., data_type: "decimal(18,6)"}
+      - {name: mid_price, description: Best bid and ask midpoint in VND., data_type: "decimal(24,8)"}
+      - {name: microprice, description: Opposite-depth-weighted level-one microprice in VND., data_type: "decimal(24,8)"}
+      - {name: microprice_deviation_bps, description: Microprice deviation from midpoint in basis points., data_type: "decimal(18,4)"}
+      - {name: spread, description: Best ask minus best bid in VND., data_type: "decimal(18,0)"}
+      - {name: spread_bps, description: Quoted spread relative to midpoint in basis points., data_type: "decimal(18,4)"}
+      - {name: bid_depth, description: Visible configured-depth bid quantity., data_type: bigint}
+      - {name: ask_depth, description: Visible configured-depth ask quantity., data_type: bigint}
+      - {name: level_one_imbalance, description: Normalized best-level depth imbalance., data_type: "decimal(10,8)"}
+      - {name: depth_imbalance, description: Normalized configured-depth imbalance., data_type: "decimal(10,8)"}
+      - {name: is_eligible, description: Whether all feature quality and warm-up gates passed., data_type: boolean}
+      - {name: eligibility_reasons_json, description: Canonical feature abstention reasons., data_type: varchar}
+      - {name: available_at, description: Earliest UTC availability of the feature vector., data_type: timestamp}
+      - {name: processed_at, description: UTC durable feature materialization time., data_type: timestamp}
+      - {name: manifest_sha256, description: Terminal source manifest fingerprint., data_type: varchar}
+      - {name: snapshot_sha256, description: Canonical feature snapshot fingerprint., data_type: varchar}
+
+  - name: stg_trading__feature_windows
+    description: Analytics-facing projection of deterministic trailing-window features.
+    columns:
+      - {name: feature_version, description: Parent deterministic feature formula version., data_type: varchar}
+      - {name: configuration_sha256, description: Exact effective trading configuration fingerprint., data_type: varchar}
+      - {name: symbol, description: Normalized security symbol., data_type: varchar}
+      - {name: trade_date, description: Exchange-local trading date., data_type: date}
+      - {name: decision_at, description: UTC feature decision instant., data_type: timestamp}
+      - {name: window_seconds, description: Trailing receipt-time window duration., data_type: bigint}
+      - {name: trade_count, description: Executable trades in the window., data_type: bigint}
+      - {name: quote_change_count, description: Complete quote transitions in the window., data_type: bigint}
+      - {name: trade_volume, description: Matched share quantity in the window., data_type: bigint}
+      - {name: signed_trade_volume, description: Buyer-aggressed minus seller-aggressed quantity., data_type: bigint}
+      - {name: trade_volume_per_second, description: Matched quantity normalized by window duration., data_type: "decimal(24,8)"}
+      - {name: trade_volume_imbalance, description: Signed divided by total matched volume., data_type: "decimal(10,8)"}
+      - {name: level_one_order_flow_imbalance, description: Best-level order-flow imbalance across quote transitions., data_type: bigint}
+      - {name: price_return_bps, description: First-to-last matched-price return in basis points., data_type: "decimal(18,4)"}
+      - {name: realized_volatility_bps, description: Root sum of squared adjacent returns in basis points., data_type: "decimal(18,4)"}
+      - {name: vwap, description: Window matched-price VWAP in VND., data_type: "decimal(24,8)"}
+      - {name: last_price_to_vwap_bps, description: Last price deviation from window VWAP., data_type: "decimal(18,4)"}
+      - {name: snapshot_sha256, description: Immutable parent snapshot fingerprint., data_type: varchar}
+
+  - name: stg_trading__outcome_labels
+    description: Analytics-facing projection of deterministic conditional execution markouts.
+    columns:
+      - {name: schema_version, description: Outcome label contract version., data_type: bigint}
+      - {name: outcome_version, description: Deterministic execution and markout policy version., data_type: varchar}
+      - {name: outcome_configuration_sha256, description: Exact outcome policy fingerprint., data_type: varchar}
+      - {name: feature_version, description: Parent deterministic feature formula version., data_type: varchar}
+      - {name: feature_configuration_sha256, description: Exact parent feature configuration fingerprint., data_type: varchar}
+      - {name: feature_snapshot_sha256, description: Immutable parent feature snapshot fingerprint., data_type: varchar}
+      - {name: stream_session_id, description: Certified source capture session., data_type: varchar}
+      - {name: symbol, description: Normalized security symbol., data_type: varchar}
+      - {name: trade_date, description: Exchange-local trading date., data_type: date}
+      - {name: decision_at, description: UTC parent feature decision instant., data_type: timestamp}
+      - {name: action, description: Conditional BUY or SELL action., data_type: varchar}
+      - {name: horizon_seconds, description: Markout horizon from decision time., data_type: bigint}
+      - {name: order_quantity, description: Shares walked through the visible Top-3 book., data_type: bigint}
+      - {name: entry_at, description: UTC simulated entry instant after configured latency., data_type: timestamp}
+      - {name: horizon_at, description: UTC markout instant., data_type: timestamp}
+      - {name: entry_quote_received_at, description: Receipt time of the selected entry quote., data_type: timestamp}
+      - {name: entry_receive_sequence, description: Capture sequence of the selected entry quote., data_type: bigint}
+      - {name: entry_vwap, description: Simulated visible-book entry VWAP in VND., data_type: "decimal(24,8)"}
+      - {name: horizon_quote_received_at, description: Receipt time of the selected exit quote., data_type: timestamp}
+      - {name: horizon_receive_sequence, description: Capture sequence of the selected exit quote., data_type: bigint}
+      - {name: horizon_vwap, description: Simulated opposing-side horizon VWAP in VND., data_type: "decimal(24,8)"}
+      - {name: gross_return_bps, description: Gross directional markout before fees and taxes., data_type: "decimal(18,4)"}
+      - {name: is_eligible, description: Whether every feature and execution-quality gate passed., data_type: boolean}
+      - {name: outcome_reasons_json, description: Canonical outcome abstention reasons., data_type: varchar}
+      - {name: processed_at, description: UTC durable outcome materialization time., data_type: timestamp}
+      - {name: outcome_sha256, description: Canonical complete outcome label fingerprint., data_type: varchar}

@@ -158,15 +158,19 @@ def test_market_data_stream_materializes_features_with_the_shared_t0_core() -> N
         encoding="utf-8"
     )
     features = Path("lakehouse/emr/src/emr_jobs/t0_trading/features.py").read_text(encoding="utf-8")
+    outcomes = Path("lakehouse/emr/src/emr_jobs/t0_trading/outcomes.py").read_text(encoding="utf-8")
     image = Path("lakehouse/emr/Dockerfile").read_text(encoding="utf-8")
 
     assert 'curated_product("t0_trading")' in job
     assert "parse_configuration" in job
+    assert "resolve_outcomes" in job
     assert "trading_config_uri" in job
     assert "certify_market_day" in job
     assert "covers_trading_window" not in job
     assert job.index("publish_landing(") < job.index("publish_certification(")
     assert job.index("publish_certification(") < job.index("publish_features(")
+    assert job.index("publish_features(") < job.index("publish_outcomes(")
+    assert job.index('certification.status != "passed"') < job.index("publish_outcomes(")
     assert 'certification.status != "passed"' in job
     assert 'product.table("market_day_certifications")' in certifications
     assert "source.manifest_count < target.manifest_count" in certifications
@@ -174,15 +178,25 @@ def test_market_data_stream_materializes_features_with_the_shared_t0_core() -> N
     assert "WHEN NOT MATCHED THEN INSERT *" in certifications
     assert "replay_features" in features
     assert "build_feature_audit" in features
-    assert 'orderBy("receive_sequence")' in features
+    assert 'product.table("outcome_labels")' in outcomes
+    assert "label_outcomes" in outcomes
+    assert "build_outcome_audit" in outcomes
+    assert "outcome_sha256" in outcomes
+    assert outcomes.count("require_compatible(") == 1
+    assert outcomes.count("insert_missing(") == 1
     assert "snapshot.sha256" in features
-    assert "WHEN NOT MATCHED THEN INSERT *" in features
+    immutable = Path("lakehouse/emr/src/emr_jobs/t0_trading/iceberg.py").read_text(encoding="utf-8")
+    landing_reader = Path("lakehouse/emr/src/emr_jobs/t0_trading/landing.py").read_text(
+        encoding="utf-8"
+    )
+    assert "WHEN NOT MATCHED THEN INSERT *" in immutable
+    assert 'orderBy("receive_sequence")' in landing_reader
     publication = features.split("def publish(", maxsplit=1)[1]
-    assert publication.count("_require_compatible(") == 2
-    assert publication.count("_insert_missing(") == 2
-    assert publication.rfind("_require_compatible(") < publication.find("_insert_missing(")
-    assert publication.find("view=window_view", publication.find("_insert_missing(")) < (
-        publication.find("view=snapshot_view", publication.find("_insert_missing("))
+    assert publication.count("require_compatible(") == 2
+    assert publication.count("insert_missing(") == 2
+    assert publication.rfind("require_compatible(") < publication.find("insert_missing(")
+    assert publication.find("view=window_view", publication.find("insert_missing(")) < (
+        publication.find("view=snapshot_view", publication.find("insert_missing("))
     )
     assert "t0-trading/config/trading.yaml /output/trading.yaml" in image
 

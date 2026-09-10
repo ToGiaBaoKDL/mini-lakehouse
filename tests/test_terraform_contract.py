@@ -604,10 +604,12 @@ def test_reviewable_policy_is_not_hidden_in_tfvars() -> None:
     assert 'curated_databases  = ["curated_arxiv"]' in environment
     assert 'analytics_database = "analytics_engineering"' in environment
     assert 'analytics_database = "analytics_research"' in environment
+    assert 'analytics_database = "analytics_trading"' in environment
     assert 'curated_prefixes   = ["github"]' in environment
     assert 'curated_prefixes   = ["arxiv"]' in environment
     assert 'analytics_prefix   = "engineering"' in environment
     assert 'analytics_prefix   = "research"' in environment
+    assert 'analytics_prefix   = "trading"' in environment
     assert "notification_destinations" not in environment
     assert "arxiv_lens_access" not in example
     assert "workload_data_access" not in example

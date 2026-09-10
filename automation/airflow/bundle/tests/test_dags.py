@@ -268,13 +268,16 @@ def test_curated_assets_schedule_one_domain_aware_analytics_dag() -> None:
     bag = _bag()
     github_producer = _dag(bag, "etl_emr_ingest_github_archive")
     arxiv_producer = _dag(bag, "etl_emr_ingest_arxiv_metadata")
+    stream_producer = _dag(bag, "etl_emr_ingest_market_data_stream")
     analytics = _dag(bag, "tl_docker_build_analytics")
 
     github_asset = github_producer.get_task("process_github_archive_day").outlets[0]
     arxiv_asset = arxiv_producer.get_task("process_arxiv_metadata_day").outlets[0]
+    trading_asset = stream_producer.get_task("publish_market_data_stream").outlets[1]
     assert github_asset.uri == "lakehouse://curated/github"
     assert arxiv_asset.uri == "lakehouse://curated/arxiv/metadata"
-    assert analytics.schedule == github_asset | arxiv_asset
+    assert trading_asset.uri == "lakehouse://curated/t0-trading"
+    assert analytics.schedule == github_asset | arxiv_asset | trading_asset
 
     expectations = {
         "engineering": {
@@ -283,6 +286,7 @@ def test_curated_assets_schedule_one_domain_aware_analytics_dag() -> None:
             "selector": "engineering",
             "inputs": [github_asset],
             "output": "lakehouse://analytics/engineering",
+            "freshness": True,
         },
         "research": {
             "image": "dbt:runtime",
@@ -290,34 +294,49 @@ def test_curated_assets_schedule_one_domain_aware_analytics_dag() -> None:
             "selector": "research",
             "inputs": [arxiv_asset],
             "output": "lakehouse://analytics/research",
+            "freshness": True,
+        },
+        "trading": {
+            "image": "dbt:runtime",
+            "identity": "/tmp/dbt-trading",
+            "selector": "trading",
+            "inputs": [trading_asset],
+            "output": "lakehouse://analytics/trading",
+            "freshness": False,
         },
     }
     for domain, expected in expectations.items():
         inputs = cast(list[Asset], expected["inputs"])
         selected = analytics.get_task(f"{domain}.should_run")
-        freshness = analytics.get_task(f"{domain}.check_source_freshness")
         build = analytics.get_task(f"{domain}.build_analytics")
         assert isinstance(selected, ShortCircuitOperator)
-        assert isinstance(freshness, LoggedDockerOperator)
         assert isinstance(build, LoggedDockerOperator)
-        assert freshness.image == build.image == expected["image"]
-        assert freshness.command == [
-            "source",
-            "freshness",
-            "--selector",
-            expected["selector"],
-        ]
+        assert build.image == expected["image"]
         assert build.command == ["build", "--selector", expected["selector"]]
-        assert freshness.environment["DBT_DOMAIN"] == expected["selector"]
-        assert freshness.environment["DBT_SCHEMA"] == f"analytics_{expected['selector']}"
         assert selected.op_kwargs == {"asset_uris": tuple(asset.uri for asset in inputs)}
-        assert selected.downstream_task_ids == {f"{domain}.check_source_freshness"}
-        assert freshness.downstream_task_ids == {f"{domain}.build_analytics"}
-        assert freshness.retries == build.retries == 0
-        assert freshness.environment["AWS_CONFIG_FILE"] == "/run/aws/config"
-        assert freshness.mounts[0]["Source"] == expected["identity"]
-        assert freshness.inlets == build.inlets == inputs
+        assert build.retries == 0
+        assert build.environment["DBT_DOMAIN"] == expected["selector"]
+        assert build.environment["DBT_SCHEMA"] == f"analytics_{expected['selector']}"
+        assert build.environment["AWS_CONFIG_FILE"] == "/run/aws/config"
+        assert build.mounts[0]["Source"] == expected["identity"]
+        assert build.inlets == inputs
         assert build.outlets[0].uri == expected["output"]
+        if expected["freshness"]:
+            freshness = analytics.get_task(f"{domain}.check_source_freshness")
+            assert isinstance(freshness, LoggedDockerOperator)
+            assert freshness.command == [
+                "source",
+                "freshness",
+                "--selector",
+                expected["selector"],
+            ]
+            assert selected.downstream_task_ids == {f"{domain}.check_source_freshness"}
+            assert freshness.downstream_task_ids == {f"{domain}.build_analytics"}
+            assert freshness.environment == build.environment
+            assert freshness.mounts == build.mounts
+            assert freshness.inlets == inputs
+        else:
+            assert selected.downstream_task_ids == {f"{domain}.build_analytics"}
 
 
 def test_analytics_domain_gates_run_both_manually_and_only_affected_assets() -> None:
@@ -325,14 +344,16 @@ def test_analytics_domain_gates_run_both_manually_and_only_affected_assets() -> 
     analytics = _dag(bag, "tl_docker_build_analytics")
     engineering = analytics.get_task("engineering.should_run")
     research = analytics.get_task("research.should_run")
+    trading = analytics.get_task("trading.should_run")
     github_asset = (
         _dag(bag, "etl_emr_ingest_github_archive").get_task("process_github_archive_day").outlets[0]
     )
 
     assert isinstance(engineering, ShortCircuitOperator)
     assert isinstance(research, ShortCircuitOperator)
+    assert isinstance(trading, ShortCircuitOperator)
     manual_run = SimpleNamespace(run_type=DagRunType.MANUAL)
-    for gate in (engineering, research):
+    for gate in (engineering, research, trading):
         assert (
             gate.python_callable(
                 **gate.op_kwargs,
@@ -355,6 +376,14 @@ def test_analytics_domain_gates_run_both_manually_and_only_affected_assets() -> 
     assert (
         research.python_callable(
             **research.op_kwargs,
+            dag_run=asset_run,
+            triggering_asset_events=triggering_events,
+        )
+        is False
+    )
+    assert (
+        trading.python_callable(
+            **trading.op_kwargs,
             dag_run=asset_run,
             triggering_asset_events=triggering_events,
         )
