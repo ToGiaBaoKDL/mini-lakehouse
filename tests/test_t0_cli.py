@@ -208,19 +208,26 @@ def test_certify_stream_day_emits_a_structured_failed_assessment(monkeypatch: An
     monkeypatch.setattr("t0_trading.cli._stream_day_readers", readers)
     monkeypatch.setattr("t0_trading.cli.certify_market_day", certify)
 
-    result = CliRunner().invoke(
-        app,
-        [
-            "certify-stream-day",
-            "--trade-date",
-            "2026-09-04",
-            "--landing-uri",
-            "s3://landing/root",
-        ],
-    )
+    arguments = [
+        "certify-stream-day",
+        "--trade-date",
+        "2026-09-04",
+        "--landing-uri",
+        "s3://landing/root",
+    ]
+    result = CliRunner().invoke(app, arguments)
 
-    assert result.exit_code == 1
+    assert result.exit_code == 10
     assert json.loads(result.stdout) == certification.model_dump(mode="json")
+
+    def invalid_capture(*_args: object) -> tuple[object, ...]:
+        raise ValueError("invalid immutable capture")
+
+    monkeypatch.setattr("t0_trading.cli._stream_day_readers", invalid_capture)
+    technical_failure = CliRunner().invoke(app, arguments)
+
+    assert technical_failure.exit_code == 1
+    assert "invalid immutable capture" in technical_failure.output
 
 
 def test_cli_reports_safe_aws_failure_details(monkeypatch: Any) -> None:

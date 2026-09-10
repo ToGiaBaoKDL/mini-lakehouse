@@ -248,6 +248,8 @@ def test_market_data_stream_dag_publishes_evidence_before_eligibility_enforcemen
     assert validate.skip_on_exit_code == [99]
     assert validate.downstream_task_ids == {"publish_market_data_stream"}
     assert publish.downstream_task_ids == {"certify_market_data_stream"}
+    assert certify.skip_on_exit_code == [10]
+    assert len(certify.on_skipped_callback) == 2
     assert not certify.downstream_task_ids
     arguments = publish.job_driver["sparkSubmit"]["entryPointArguments"]
     assert arguments[0] == "--source-date"

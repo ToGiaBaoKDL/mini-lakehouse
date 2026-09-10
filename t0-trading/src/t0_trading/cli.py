@@ -53,6 +53,7 @@ from t0_trading.trading_dates import TradingDateError, require_observed_trade_da
 
 MARKET_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 DEFAULT_TRADING_CONFIG = Path("t0-trading/config/trading.yaml")
+INELIGIBLE_EXIT_CODE = 10
 
 
 def _safe_error(error: Exception) -> str:
@@ -100,7 +101,7 @@ def _emit_reconciliation(report: ReconciliationReport, output: Path | None = Non
 def _emit_market_day_certification(certification: MarketDayCertification) -> None:
     _emit_model(certification)
     if certification.status != "passed":
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=INELIGIBLE_EXIT_CODE)
 
 
 def _replay_feature_session(

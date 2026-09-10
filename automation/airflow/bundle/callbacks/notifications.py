@@ -88,3 +88,33 @@ def task_failure_callbacks() -> list[Callable[[Context], None]]:
             ),
         ),
     ]
+
+
+def task_data_quality_callbacks(*, detail: str) -> list[Callable[[Context], None]]:
+    """Route a task-owned data-quality warning through the standard channels."""
+    return [
+        send_slack_notification(
+            slack_conn_id="slack_api_default",
+            channel=SLACK_CHANNEL,
+            username="Lakehouse Airflow",
+            text=(
+                ":large_yellow_circle: *Data-quality warning*\n"
+                "*DAG:* `{{ dag.dag_id }}`\n"
+                "*Task:* `{{ ti.task_id }}`\n"
+                f"{detail}\n"
+                "<{{ ti.log_url }}|Open task log>"
+            ),
+        ),
+        send_smtp_notification(
+            smtp_conn_id="smtp_default",
+            to=ALERT_EMAIL,
+            subject="[Lakehouse] Data-quality warning in {{ dag.dag_id }}",
+            html_content=(
+                "<h3>Data-quality warning</h3>"
+                "<p><b>DAG:</b> {{ dag.dag_id }}<br>"
+                "<b>Task:</b> {{ ti.task_id }}<br>"
+                f"{detail}<br>"
+                '<a href="{{ ti.log_url }}">Open task log</a></p>'
+            ),
+        ),
+    ]

@@ -3,7 +3,11 @@
 from datetime import timedelta
 
 from airflow.sdk import DAG, CronPartitionTimetable
-from callbacks.notifications import dag_failure_callbacks, dag_success_callbacks
+from callbacks.notifications import (
+    dag_failure_callbacks,
+    dag_success_callbacks,
+    task_data_quality_callbacks,
+)
 from config.assets import CURATED_MARKET_DATA, CURATED_T0_TRADING
 from config.templates import (
     DAG_START_DATE,
@@ -83,6 +87,10 @@ with DAG(
         execution_timeout=timedelta(minutes=30),
         cpus=1,
         mem_limit="1g",
+        skip_on_exit_code=10,
+        on_skipped_callback=task_data_quality_callbacks(
+            detail="Stream evidence was published, but deterministic features were withheld."
+        ),
     )
     validate.set_downstream(publish)
     publish.set_downstream(certify)

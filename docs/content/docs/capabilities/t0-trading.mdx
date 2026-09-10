@@ -280,8 +280,11 @@ landing and curated market-data tables even when reconnects make the day unsuita
 It then upserts `market_day_certifications` from the complete manifest set. Exactly one session must
 cover the configured market window and symbol scope for status `passed`; otherwise the job records
 the stable failure reason and withholds all feature snapshots and windows. The final Airflow task
-reruns the shared reconciliation and fails the DAG when eligibility is not passed, preserving an
-operational signal without discarding valid evidence.
+reruns the shared reconciliation. An ineligible day uses the dedicated data-quality exit code, so
+Airflow marks that task skipped, keeps the completed DAG run successful, and sends a warning through
+the standard Slack and email routes. Configuration, AWS, checksum, schema, and replay failures remain
+technical failures and fail the DAG. This preserves an operational signal without discarding valid
+evidence or reporting a successful publication as broken infrastructure.
 
 Each session must pass manifest checksum, terminal-kind/error consistency, heartbeat, SDK/API
 version, contiguous sequence, batch identity, object location, record-count, message-hash,

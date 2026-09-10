@@ -1,7 +1,7 @@
 """Shared construction of isolated local Docker tasks."""
 
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import timedelta
 
 from airflow.providers.docker.operators.docker import DockerOperator
@@ -40,6 +40,7 @@ def docker_task(
     inlets: Sequence[Asset] = (),
     outlets: Sequence[Asset] = (),
     skip_on_exit_code: int | None = None,
+    on_skipped_callback: Sequence[Callable[[Context], None]] = (),
 ) -> LoggedDockerOperator:
     task_environment = {
         **(environment or {}),
@@ -75,4 +76,5 @@ def docker_task(
         outlets=list(outlets),
         on_failure_callback=task_failure_callbacks(),
         skip_on_exit_code=skip_on_exit_code,
+        on_skipped_callback=list(on_skipped_callback),
     )
