@@ -154,14 +154,24 @@ def test_market_data_stream_replay_uses_verified_sdk_models_and_top_three_quotes
 
 def test_market_data_stream_materializes_features_with_the_shared_t0_core() -> None:
     job = Path("lakehouse/emr/src/emr_jobs/market_data/stream_job.py").read_text(encoding="utf-8")
+    certifications = Path("lakehouse/emr/src/emr_jobs/t0_trading/certifications.py").read_text(
+        encoding="utf-8"
+    )
     features = Path("lakehouse/emr/src/emr_jobs/t0_trading/features.py").read_text(encoding="utf-8")
     image = Path("lakehouse/emr/Dockerfile").read_text(encoding="utf-8")
 
     assert 'curated_product("t0_trading")' in job
     assert "parse_configuration" in job
     assert "trading_config_uri" in job
-    assert "select_feature_capture" in job
+    assert "certify_market_day" in job
     assert "covers_trading_window" not in job
+    assert job.index("publish_landing(") < job.index("publish_certification(")
+    assert job.index("publish_certification(") < job.index("publish_features(")
+    assert 'certification.status != "passed"' in job
+    assert 'product.table("market_day_certifications")' in certifications
+    assert "source.manifest_count < target.manifest_count" in certifications
+    assert "source.manifest_count > target.manifest_count" in certifications
+    assert "WHEN NOT MATCHED THEN INSERT *" in certifications
     assert "replay_features" in features
     assert "build_feature_audit" in features
     assert 'orderBy("receive_sequence")' in features

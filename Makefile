@@ -100,6 +100,7 @@ lint: ## Run formatting, linting, and static type checks.
 	uv run ruff format --check .
 	uv run ruff check .
 	uv run --all-packages --all-extras pyright
+	uv run pyright --pythonversion 3.11 t0-trading/src
 	uv run --project automation/airflow pyright --project automation/airflow
 	uv run pyright --project lakehouse/emr
 

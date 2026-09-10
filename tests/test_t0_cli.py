@@ -1,8 +1,10 @@
+import json
 from datetime import date, timedelta
 from typing import Any
 
 from botocore.exceptions import ClientError
 from t0_trading.cli import app
+from t0_trading.market.reconciliation import MarketDayCertification
 from t0_trading.trading_dates import TradingDateError
 from typer.testing import CliRunner
 
@@ -19,6 +21,7 @@ def test_cli_help_and_validation_do_not_initialize_aws(monkeypatch: Any) -> None
     assert "capture-stream" in help_result.stdout
     assert "audit-features" in help_result.stdout
     assert "audit-outcomes" in help_result.stdout
+    assert "validate-stream-day" in help_result.stdout
     assert "certify-stream-day" in help_result.stdout
     assert "check-config" in help_result.stdout
 
@@ -68,7 +71,7 @@ def test_cli_help_and_validation_do_not_initialize_aws(monkeypatch: Any) -> None
     assert "current market" in future.output
 
 
-def test_certify_stream_day_skips_an_unobserved_trading_date(monkeypatch: Any) -> None:
+def test_validate_stream_day_skips_an_unobserved_trading_date(monkeypatch: Any) -> None:
     class _Context:
         def __enter__(self) -> object:
             return object()
@@ -105,7 +108,7 @@ def test_certify_stream_day_skips_an_unobserved_trading_date(monkeypatch: Any) -
     result = CliRunner().invoke(
         app,
         [
-            "certify-stream-day",
+            "validate-stream-day",
             "--trade-date",
             "2026-09-04",
             "--landing-uri",
@@ -115,6 +118,109 @@ def test_certify_stream_day_skips_an_unobserved_trading_date(monkeypatch: Any) -
 
     assert result.exit_code == 99
     assert "not an SSI-observed trading day" in result.output
+
+
+def test_validate_stream_day_reports_manifest_totals(monkeypatch: Any) -> None:
+    class _Context:
+        def __enter__(self) -> object:
+            return object()
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    class _Data:
+        market_data = object()
+
+        def __enter__(self) -> "_Data":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    class _Manifest:
+        def __init__(self, message_count: int) -> None:
+            self.message_count = message_count
+
+    class _Reader:
+        def __init__(self, message_count: int) -> None:
+            self.manifest = _Manifest(message_count)
+
+    def credentials(*_args: object) -> object:
+        return object()
+
+    def authentication(*_args: object) -> _Context:
+        return _Context()
+
+    def data(*_args: object) -> _Data:
+        return _Data()
+
+    def observed(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    def readers(*_args: object) -> tuple[_Reader, ...]:
+        return (_Reader(3), _Reader(5))
+
+    monkeypatch.setattr("t0_trading.cli.load_credentials", credentials)
+    monkeypatch.setattr("t0_trading.cli.authenticated", authentication)
+    monkeypatch.setattr("t0_trading.cli.Data", data)
+    monkeypatch.setattr("t0_trading.cli.require_observed_trade_date", observed)
+    monkeypatch.setattr("t0_trading.cli._stream_day_readers", readers)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "validate-stream-day",
+            "--trade-date",
+            "2026-09-04",
+            "--landing-uri",
+            "s3://landing/root",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {
+        "manifest_count": 2,
+        "message_count": 8,
+        "trade_date": "2026-09-04",
+    }
+
+
+def test_certify_stream_day_emits_a_structured_failed_assessment(monkeypatch: Any) -> None:
+    certification = MarketDayCertification(
+        trade_date=date(2026, 9, 4),
+        configuration_version="market-v1",
+        configuration_sha256="a" * 64,
+        status="failed",
+        failure_reason="no_full_session",
+        manifest_count=3,
+        full_window_session_count=0,
+        eligible_session_count=0,
+        selected_stream_session_id=None,
+        evidence_sha256="b" * 64,
+    )
+
+    def readers(*_args: object) -> tuple[object, ...]:
+        return (object(),)
+
+    def certify(*_args: object, **_kwargs: object) -> tuple[MarketDayCertification, None]:
+        return certification, None
+
+    monkeypatch.setattr("t0_trading.cli._stream_day_readers", readers)
+    monkeypatch.setattr("t0_trading.cli.certify_market_day", certify)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "certify-stream-day",
+            "--trade-date",
+            "2026-09-04",
+            "--landing-uri",
+            "s3://landing/root",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout) == certification.model_dump(mode="json")
 
 
 def test_cli_reports_safe_aws_failure_details(monkeypatch: Any) -> None:

@@ -32,11 +32,11 @@ with DAG(
     on_success_callback=dag_success_callbacks(),
     tags=["market-data", "etl", "emr", "ssi", "stream", "iceberg"],
 ) as dag:
-    certify = docker_task(
-        task_id="certify_market_data_stream",
+    validate = docker_task(
+        task_id="validate_market_data_stream",
         image="t0-trading:runtime",
         command=[
-            "certify-stream-day",
+            "validate-stream-day",
             "--trade-date",
             TRADE_DATE,
             "--landing-uri",
@@ -46,8 +46,6 @@ with DAG(
         execution_timeout=timedelta(minutes=30),
         cpus=1,
         mem_limit="1g",
-        retries=1,
-        retry_delay=timedelta(minutes=10),
         skip_on_exit_code=99,
     )
     publish = emr_spark_job(
@@ -71,4 +69,20 @@ with DAG(
             "spark.dynamicAllocation.maxExecutors": "2",
         },
     )
-    certify.set_downstream(publish)
+    certify = docker_task(
+        task_id="certify_market_data_stream",
+        image="t0-trading:runtime",
+        command=[
+            "certify-stream-day",
+            "--trade-date",
+            TRADE_DATE,
+            "--landing-uri",
+            runtime_value("storage/landing_uri"),
+        ],
+        workload="t0-trading",
+        execution_timeout=timedelta(minutes=30),
+        cpus=1,
+        mem_limit="1g",
+    )
+    validate.set_downstream(publish)
+    publish.set_downstream(certify)

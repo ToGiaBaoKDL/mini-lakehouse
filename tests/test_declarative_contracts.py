@@ -151,12 +151,27 @@ def test_market_data_contracts_are_ssi_only_replayable_and_conformed() -> None:
 
 def test_t0_feature_contract_preserves_snapshot_and_window_grains() -> None:
     product = load_contracts().curated_product("t0_trading")
+    certifications = product.table("market_day_certifications")
     snapshots = product.table("feature_snapshots")
     windows = product.table("feature_windows")
 
     assert product.database == "curated_t0_trading"
     assert product.owner == "t0-trading"
     assert product.upstream_sources == ("ssi_fastconnect_stream",)
+    assert certifications.primary_key == ("trade_date", "configuration_sha256")
+    assert {column.name for column in certifications.columns} == {
+        "trade_date",
+        "configuration_version",
+        "configuration_sha256",
+        "status",
+        "failure_reason",
+        "manifest_count",
+        "full_window_session_count",
+        "eligible_session_count",
+        "selected_stream_session_id",
+        "evidence_sha256",
+        "evaluated_at",
+    }
     assert snapshots.primary_key == (
         "feature_version",
         "configuration_sha256",

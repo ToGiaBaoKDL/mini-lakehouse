@@ -16,7 +16,11 @@ from t0_trading.capture.reader import (
 )
 from t0_trading.configuration import load_configuration
 from t0_trading.identity import canonical_json, sha256
-from t0_trading.market.reconciliation import reconcile_session, reconcile_trade_date
+from t0_trading.market.reconciliation import (
+    certify_market_day,
+    reconcile_session,
+    reconcile_trade_date,
+)
 from t0_trading.market.session import (
     MarketSession,
     covers_trading_window,
@@ -440,6 +444,47 @@ def test_trade_date_reconciliation_ignores_partial_recovery_sessions() -> None:
     assert report.error_type == "WebSocketError"
 
 
+def test_market_day_certification_preserves_evidence_but_rejects_partial_captures() -> None:
+    version = load_configuration(Path("t0-trading/config/trading.yaml")).resolve(TRADE_DATE)
+    fragments = (
+        _reader(connected_at="2026-09-04T02:10:00+00:00"),
+        _reader(connected_at="2026-09-04T02:11:00+00:00"),
+        _reader(connected_at="2026-09-04T02:12:00+00:00"),
+    )
+
+    certification, report = certify_market_day(fragments, version, trade_date=TRADE_DATE)
+
+    assert certification.status == "failed"
+    assert certification.failure_reason == "no_full_session"
+    assert certification.manifest_count == 3
+    assert certification.full_window_session_count == 0
+    assert certification.eligible_session_count == 0
+    assert certification.selected_stream_session_id is None
+    assert report is None
+    reordered, _ = certify_market_day(
+        tuple(reversed(fragments)),
+        version,
+        trade_date=TRADE_DATE,
+    )
+    assert certification.evidence_sha256 == reordered.evidence_sha256
+
+
+def test_market_day_certification_rejects_a_full_capture_with_the_wrong_scope() -> None:
+    version = load_configuration(Path("t0-trading/config/trading.yaml")).resolve(TRADE_DATE)
+
+    certification, report = certify_market_day(
+        (_reader(symbols=("VIC",), include_vhm=False),),
+        version,
+        trade_date=TRADE_DATE,
+    )
+
+    assert certification.status == "failed"
+    assert certification.failure_reason == "capture_scope_mismatch"
+    assert certification.full_window_session_count == 1
+    assert certification.eligible_session_count == 0
+    assert report is None
+
+
 def test_reader_streams_verified_rows_and_reconciliation_matches_ohlcv() -> None:
     reader = _reader()
     assert [row.receive_sequence for row in reader.envelopes()] == list(range(1, 8))
@@ -477,6 +522,22 @@ def test_reconciliation_fails_closed_on_an_ohlcv_difference() -> None:
         "VIC@2026-09-04T09:15:00+07:00:interval_not_causal_trade_prefix["
         "observed_at=2026-09-04T09:15:57+07:00]",
     )
+
+
+def test_market_day_certification_withholds_a_session_that_fails_reconciliation() -> None:
+    version = load_configuration(Path("t0-trading/config/trading.yaml")).resolve(TRADE_DATE)
+
+    certification, report = certify_market_day(
+        (_reader(interval_close=101),),
+        version,
+        trade_date=TRADE_DATE,
+    )
+
+    assert report is not None and report.status == "failed"
+    assert certification.status == "failed"
+    assert certification.failure_reason == "reconciliation_failed"
+    assert certification.eligible_session_count == 1
+    assert certification.selected_stream_session_id is None
 
 
 def test_reconciliation_accepts_a_provider_interval_that_precedes_the_last_trade() -> None:

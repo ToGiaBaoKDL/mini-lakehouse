@@ -41,9 +41,10 @@ from t0_trading.features import (
     replay_features,
 )
 from t0_trading.market.reconciliation import (
+    MarketDayCertification,
     ReconciliationReport,
+    certify_market_day,
     reconcile_session,
-    reconcile_trade_date,
     select_feature_capture,
 )
 from t0_trading.outcomes import build_outcome_audit, label_outcomes
@@ -96,6 +97,12 @@ def _emit_reconciliation(report: ReconciliationReport, output: Path | None = Non
         raise typer.Exit(code=1)
 
 
+def _emit_market_day_certification(certification: MarketDayCertification) -> None:
+    _emit_model(certification)
+    if certification.status != "passed":
+        raise typer.Exit(code=1)
+
+
 def _replay_feature_session(
     manifest_uri: str,
     region: str,
@@ -124,6 +131,18 @@ def _replay_feature_session(
         input_message_count=reader.manifest.message_count,
     )
     return reader, configuration, snapshots, report
+
+
+def _stream_day_readers(
+    trade_date: date,
+    landing_uri: str,
+    region: str,
+) -> tuple[StreamSessionReader, ...]:
+    client = boto3.client("s3", region_name=region)
+    manifest_uris = stream_manifest_uris(client, landing_uri, trade_date)
+    if not manifest_uris:
+        raise ValueError("no terminal SSI Stream session exists for the trading date")
+    return tuple(StreamSessionReader.from_uri(client, uri) for uri in manifest_uris)
 
 
 def check_config(
@@ -470,37 +489,28 @@ def certify_stream_day_command(
         typer.Option(help="Exchange-local trade date in YYYY-MM-DD format."),
     ],
     landing_uri: Annotated[str, typer.Option(help="Landing S3 root URI.")],
-    secret_id: Annotated[
-        str | None,
-        typer.Option(help="Managed SSI market-data secret; defaults from the environment."),
-    ] = None,
-    region: Annotated[str, typer.Option(help="AWS region for SSI credentials and S3.")] = (
+    region: Annotated[str, typer.Option(help="AWS region containing the landing bucket.")] = (
         "ap-southeast-1"
     ),
     config: Annotated[Path, typer.Option(help="Versioned non-secret trading YAML.")] = (
         DEFAULT_TRADING_CONFIG
     ),
 ) -> None:
-    """Certify one scheduled SSI Stream trade date before lakehouse publication."""
+    """Certify one immutable SSI Stream trade date for features and backtesting."""
     parsed_trade_date = _parse_trade_date(trade_date)
-    environment = os.environ.get("LAKEHOUSE_ENVIRONMENT", "dev")
-    effective_secret_id = secret_id or f"lakehouse/{environment}/t0-trading/ssi"
     try:
         version = load_configuration(config).resolve(parsed_trade_date)
-        credentials = load_credentials(effective_secret_id, region)
-        with authenticated(credentials) as auth, Data(auth) as data:
-            require_observed_trade_date(data.market_data, trade_date=parsed_trade_date)
-        client = boto3.client("s3", region_name=region)
-        readers = tuple(
-            StreamSessionReader.from_uri(client, uri)
-            for uri in stream_manifest_uris(client, landing_uri, parsed_trade_date)
+        readers = _stream_day_readers(
+            parsed_trade_date,
+            landing_uri,
+            region,
         )
-        report = reconcile_trade_date(readers, version, trade_date=parsed_trade_date)
-    except TradingDateError as error:
-        typer.echo(str(error), err=True)
-        raise typer.Exit(code=99) from error
+        certification, _ = certify_market_day(
+            readers,
+            version,
+            trade_date=parsed_trade_date,
+        )
     except (
-        CredentialError,
         StreamCaptureReadError,
         TradingConfigurationError,
         ValueError,
@@ -510,7 +520,57 @@ def certify_stream_day_command(
     except Exception as error:  # SDK/AWS boundary: never print provider payload or credentials.
         typer.echo(f"SSI stream certification failed: {_safe_error(error)}", err=True)
         raise typer.Exit(code=1) from None
-    _emit_reconciliation(report)
+    _emit_market_day_certification(certification)
+
+
+def validate_stream_day_command(
+    trade_date: Annotated[
+        str,
+        typer.Option(help="Exchange-local trade date in YYYY-MM-DD format."),
+    ],
+    landing_uri: Annotated[str, typer.Option(help="Landing S3 root URI.")],
+    secret_id: Annotated[
+        str | None,
+        typer.Option(help="Managed SSI market-data secret; defaults from the environment."),
+    ] = None,
+    region: Annotated[str, typer.Option(help="AWS region for SSI credentials and S3.")] = (
+        "ap-southeast-1"
+    ),
+) -> None:
+    """Validate terminal manifests for one observed SSI Stream trade date."""
+    parsed_trade_date = _parse_trade_date(trade_date)
+    environment = os.environ.get("LAKEHOUSE_ENVIRONMENT", "dev")
+    effective_secret_id = secret_id or f"lakehouse/{environment}/t0-trading/ssi"
+    try:
+        credentials = load_credentials(effective_secret_id, region)
+        with authenticated(credentials) as auth, Data(auth) as data:
+            require_observed_trade_date(data.market_data, trade_date=parsed_trade_date)
+        readers = _stream_day_readers(
+            parsed_trade_date,
+            landing_uri,
+            region,
+        )
+        message_count = sum(reader.manifest.message_count for reader in readers)
+    except TradingDateError as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=99) from error
+    except (CredentialError, StreamCaptureReadError, ValueError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+    except Exception as error:  # SDK/AWS boundary: never print provider payload or credentials.
+        typer.echo(f"SSI stream validation failed: {_safe_error(error)}", err=True)
+        raise typer.Exit(code=1) from None
+    typer.echo(
+        json.dumps(
+            {
+                "manifest_count": len(readers),
+                "message_count": message_count,
+                "trade_date": parsed_trade_date.isoformat(),
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    )
 
 
 app = typer.Typer(
@@ -532,4 +592,5 @@ app.command("capture-stream")(capture_stream_command)
 app.command("reconcile-stream")(reconcile_stream_command)
 app.command("audit-features")(audit_features_command)
 app.command("audit-outcomes")(audit_outcomes_command)
+app.command("validate-stream-day")(validate_stream_day_command)
 app.command("certify-stream-day")(certify_stream_day_command)

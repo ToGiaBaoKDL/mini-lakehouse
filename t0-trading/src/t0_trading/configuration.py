@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, time
 from itertools import pairwise
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TypeVar
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
@@ -46,6 +46,9 @@ class _EffectiveVersion(_StrictModel):
         return sha256(self.canonical_bytes())
 
 
+_EffectiveVersionT = TypeVar("_EffectiveVersionT", bound=_EffectiveVersion)
+
+
 def _validate_effective_versions(values: tuple[_EffectiveVersion, ...], label: str) -> None:
     ordered = sorted(values, key=lambda item: item.effective_from)
     if not ordered or tuple(ordered) != values:
@@ -59,9 +62,10 @@ def _validate_effective_versions(values: tuple[_EffectiveVersion, ...], label: s
         raise ValueError(f"{label} effective intervals must not overlap")
 
 
-def _resolve_effective[Version: _EffectiveVersion](
-    values: tuple[Version, ...], value: date, label: str
-) -> Version:
+# Keep Python 3.11 syntax because this package is bundled into the EMR runtime.
+def _resolve_effective(  # noqa: UP047
+    values: tuple[_EffectiveVersionT, ...], value: date, label: str
+) -> _EffectiveVersionT:
     matches = tuple(version for version in values if version.contains(value))
     if len(matches) != 1:
         raise TradingConfigurationError(

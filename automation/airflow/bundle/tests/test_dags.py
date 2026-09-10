@@ -220,7 +220,7 @@ def test_market_data_rest_dag_keeps_capture_and_publication_bounded() -> None:
     assert publish.outlets[0].uri == "lakehouse://curated/market-data"
 
 
-def test_market_data_stream_dag_certifies_before_publication() -> None:
+def test_market_data_stream_dag_publishes_evidence_before_eligibility_enforcement() -> None:
     dag = _dag(_bag(), "etl_emr_ingest_market_data_stream")
 
     assert isinstance(dag.timetable, CronPartitionTimetable)
@@ -228,21 +228,27 @@ def test_market_data_stream_dag_certifies_before_publication() -> None:
     assert dag.timetable.key_format == "%Y-%m-%d"
     assert dag.max_active_runs == 1
     assert not dag.params
-    certify = dag.get_task("certify_market_data_stream")
+    validate = dag.get_task("validate_market_data_stream")
     publish = dag.get_task("publish_market_data_stream")
-    assert isinstance(certify, LoggedDockerOperator)
+    certify = dag.get_task("certify_market_data_stream")
+    assert isinstance(validate, LoggedDockerOperator)
     assert isinstance(publish, LoggedEmrServerlessStartJobOperator)
-    assert certify.image == "t0-trading:runtime"
-    assert certify.mounts is not None
-    assert certify.mounts[0]["Source"] == "/tmp/t0-trading"
-    assert isinstance(certify.command, list)
-    assert certify.command[:2] == ["certify-stream-day", "--trade-date"]
-    assert "dag_run.partition_key or dag_run.run_after" in certify.command[2]
-    assert "--landing-uri" in certify.command
-    assert certify.retries == 1
-    assert certify.retry_delay == timedelta(minutes=10)
-    assert certify.skip_on_exit_code == [99]
-    assert certify.downstream_task_ids == {"publish_market_data_stream"}
+    assert isinstance(certify, LoggedDockerOperator)
+    for task, command in (
+        (validate, "validate-stream-day"),
+        (certify, "certify-stream-day"),
+    ):
+        assert task.image == "t0-trading:runtime"
+        assert task.mounts is not None
+        assert task.mounts[0]["Source"] == "/tmp/t0-trading"
+        assert isinstance(task.command, list)
+        assert task.command[:2] == [command, "--trade-date"]
+        assert "dag_run.partition_key or dag_run.run_after" in task.command[2]
+        assert "--landing-uri" in task.command
+    assert validate.skip_on_exit_code == [99]
+    assert validate.downstream_task_ids == {"publish_market_data_stream"}
+    assert publish.downstream_task_ids == {"certify_market_data_stream"}
+    assert not certify.downstream_task_ids
     arguments = publish.job_driver["sparkSubmit"]["entryPointArguments"]
     assert arguments[0] == "--source-date"
     assert "dag_run.partition_key or dag_run.run_after" in arguments[1]
