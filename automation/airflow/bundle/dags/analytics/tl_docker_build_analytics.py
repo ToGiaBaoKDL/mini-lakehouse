@@ -1,49 +1,19 @@
-"""Build only the analytics domains affected by curated asset events."""
+"""Build every analytics domain on one predictable daily schedule."""
 
-from collections.abc import Mapping, Sequence
 from datetime import timedelta
 
-from airflow.models.asset import AssetEvent
-from airflow.models.dagrun import DagRun
-from airflow.providers.standard.operators.python import ShortCircuitOperator
-from airflow.sdk import DAG, Asset, TaskGroup
-from airflow.utils.types import DagRunType
+from airflow.sdk import DAG, TaskGroup
 from callbacks.notifications import (
     dag_failure_callbacks,
     dag_success_callbacks,
-)
-from config.assets import (
-    ANALYTICS_ENGINEERING,
-    ANALYTICS_RESEARCH,
-    ANALYTICS_TRADING,
-    CURATED_ARXIV_METADATA,
-    CURATED_GITHUB,
-    CURATED_T0_TRADING,
 )
 from config.templates import DAG_START_DATE, runtime_value
 from operators.docker import docker_task
 
 
-def _domain_was_triggered(
-    *,
-    asset_uris: tuple[str, ...],
-    dag_run: DagRun,
-    triggering_asset_events: Mapping[Asset, Sequence[AssetEvent]] | None = None,
-) -> bool:
-    """Run every domain manually, or only domains touched by an asset-triggered run."""
-    if dag_run.run_type == DagRunType.MANUAL:
-        return True
-    return any(
-        asset.uri in asset_uris and events
-        for asset, events in (triggering_asset_events or {}).items()
-    )
-
-
 def _analytics_group(
     domain: str,
     *,
-    inputs: tuple[Asset, ...],
-    output: Asset,
     check_freshness: bool = True,
 ) -> TaskGroup:
     environment = {
@@ -53,11 +23,6 @@ def _analytics_group(
         "DBT_SCHEMA": f"analytics_{domain}",
     }
     with TaskGroup(group_id=domain) as group:
-        selected = ShortCircuitOperator(
-            task_id="should_run",
-            python_callable=_domain_was_triggered,
-            op_kwargs={"asset_uris": tuple(asset.uri for asset in inputs)},
-        )
         build = docker_task(
             task_id="build_analytics",
             image="dbt:runtime",
@@ -65,8 +30,6 @@ def _analytics_group(
             workload=f"dbt-{domain}",
             execution_timeout=timedelta(hours=2),
             environment=environment,
-            inlets=inputs,
-            outlets=[output],
         )
         if check_freshness:
             freshness = docker_task(
@@ -76,19 +39,15 @@ def _analytics_group(
                 workload=f"dbt-{domain}",
                 execution_timeout=timedelta(minutes=30),
                 environment=environment,
-                inlets=inputs,
             )
-            selected.set_downstream(freshness)
             freshness.set_downstream(build)
-        else:
-            selected.set_downstream(build)
     return group
 
 
 with DAG(
     dag_id="tl_docker_build_analytics",
-    description="Build only analytics domains affected by curated asset events.",
-    schedule=CURATED_GITHUB | CURATED_ARXIV_METADATA | CURATED_T0_TRADING,
+    description="Build every analytics domain daily at 12:30 Asia/Ho_Chi_Minh.",
+    schedule="30 12 * * *",
     start_date=DAG_START_DATE,
     catchup=False,
     max_active_runs=1,
@@ -96,19 +55,9 @@ with DAG(
     on_success_callback=dag_success_callbacks(),
     tags=["analytics", "tl", "dbt", "docker"],
 ) as dag:
-    _analytics_group(
-        "engineering",
-        inputs=(CURATED_GITHUB,),
-        output=ANALYTICS_ENGINEERING,
-    )
-    _analytics_group(
-        "research",
-        inputs=(CURATED_ARXIV_METADATA,),
-        output=ANALYTICS_RESEARCH,
-    )
+    _analytics_group("engineering")
+    _analytics_group("research")
     _analytics_group(
         "trading",
-        inputs=(CURATED_T0_TRADING,),
-        output=ANALYTICS_TRADING,
         check_freshness=False,
     )

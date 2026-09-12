@@ -4,7 +4,6 @@ import warnings
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
 from unittest.mock import Mock, PropertyMock, patch
 from urllib.parse import ParseResult, urlparse
 
@@ -15,10 +14,8 @@ os.environ.setdefault("HOST_AWS_IDENTITY_DIR", "/tmp")
 os.environ["LAKEHOUSE_ENVIRONMENT"] = "ci"
 
 from airflow.models import DagBag
-from airflow.providers.standard.operators.python import ShortCircuitOperator
-from airflow.sdk import DAG, Asset, CronPartitionTimetable
+from airflow.sdk import DAG, CronPartitionTimetable
 from airflow.utils.file import list_py_file_paths
-from airflow.utils.types import DagRunType
 from jinja2 import StrictUndefined
 from jinja2.sandbox import SandboxedEnvironment
 from operators import emr as emr_module
@@ -264,63 +261,45 @@ def test_market_data_stream_dag_publishes_evidence_before_eligibility_enforcemen
     assert publish.outlets[1].uri == "lakehouse://curated/t0-trading"
 
 
-def test_curated_assets_schedule_one_domain_aware_analytics_dag() -> None:
+def test_analytics_runs_every_domain_on_one_daily_schedule() -> None:
     bag = _bag()
-    github_producer = _dag(bag, "etl_emr_ingest_github_archive")
-    arxiv_producer = _dag(bag, "etl_emr_ingest_arxiv_metadata")
-    stream_producer = _dag(bag, "etl_emr_ingest_market_data_stream")
     analytics = _dag(bag, "tl_docker_build_analytics")
 
-    github_asset = github_producer.get_task("process_github_archive_day").outlets[0]
-    arxiv_asset = arxiv_producer.get_task("process_arxiv_metadata_day").outlets[0]
-    trading_asset = stream_producer.get_task("publish_market_data_stream").outlets[1]
-    assert github_asset.uri == "lakehouse://curated/github"
-    assert arxiv_asset.uri == "lakehouse://curated/arxiv/metadata"
-    assert trading_asset.uri == "lakehouse://curated/t0-trading"
-    assert analytics.schedule == github_asset | arxiv_asset | trading_asset
+    assert analytics.schedule == "30 12 * * *"
+    assert analytics.max_active_runs == 1
 
     expectations = {
         "engineering": {
             "image": "dbt:runtime",
             "identity": "/tmp/dbt-engineering",
             "selector": "engineering",
-            "inputs": [github_asset],
-            "output": "lakehouse://analytics/engineering",
             "freshness": True,
         },
         "research": {
             "image": "dbt:runtime",
             "identity": "/tmp/dbt-research",
             "selector": "research",
-            "inputs": [arxiv_asset],
-            "output": "lakehouse://analytics/research",
             "freshness": True,
         },
         "trading": {
             "image": "dbt:runtime",
             "identity": "/tmp/dbt-trading",
             "selector": "trading",
-            "inputs": [trading_asset],
-            "output": "lakehouse://analytics/trading",
             "freshness": False,
         },
     }
     for domain, expected in expectations.items():
-        inputs = cast(list[Asset], expected["inputs"])
-        selected = analytics.get_task(f"{domain}.should_run")
         build = analytics.get_task(f"{domain}.build_analytics")
-        assert isinstance(selected, ShortCircuitOperator)
         assert isinstance(build, LoggedDockerOperator)
         assert build.image == expected["image"]
         assert build.command == ["build", "--selector", expected["selector"]]
-        assert selected.op_kwargs == {"asset_uris": tuple(asset.uri for asset in inputs)}
         assert build.retries == 0
         assert build.environment["DBT_DOMAIN"] == expected["selector"]
         assert build.environment["DBT_SCHEMA"] == f"analytics_{expected['selector']}"
         assert build.environment["AWS_CONFIG_FILE"] == "/run/aws/config"
         assert build.mounts[0]["Source"] == expected["identity"]
-        assert build.inlets == inputs
-        assert build.outlets[0].uri == expected["output"]
+        assert build.inlets == []
+        assert build.outlets == []
         if expected["freshness"]:
             freshness = analytics.get_task(f"{domain}.check_source_freshness")
             assert isinstance(freshness, LoggedDockerOperator)
@@ -330,65 +309,10 @@ def test_curated_assets_schedule_one_domain_aware_analytics_dag() -> None:
                 "--selector",
                 expected["selector"],
             ]
-            assert selected.downstream_task_ids == {f"{domain}.check_source_freshness"}
             assert freshness.downstream_task_ids == {f"{domain}.build_analytics"}
             assert freshness.environment == build.environment
             assert freshness.mounts == build.mounts
-            assert freshness.inlets == inputs
-        else:
-            assert selected.downstream_task_ids == {f"{domain}.build_analytics"}
-
-
-def test_analytics_domain_gates_run_both_manually_and_only_affected_assets() -> None:
-    bag = _bag()
-    analytics = _dag(bag, "tl_docker_build_analytics")
-    engineering = analytics.get_task("engineering.should_run")
-    research = analytics.get_task("research.should_run")
-    trading = analytics.get_task("trading.should_run")
-    github_asset = (
-        _dag(bag, "etl_emr_ingest_github_archive").get_task("process_github_archive_day").outlets[0]
-    )
-
-    assert isinstance(engineering, ShortCircuitOperator)
-    assert isinstance(research, ShortCircuitOperator)
-    assert isinstance(trading, ShortCircuitOperator)
-    manual_run = SimpleNamespace(run_type=DagRunType.MANUAL)
-    for gate in (engineering, research, trading):
-        assert (
-            gate.python_callable(
-                **gate.op_kwargs,
-                dag_run=manual_run,
-                triggering_asset_events={},
-            )
-            is True
-        )
-
-    asset_run = SimpleNamespace(run_type=DagRunType.ASSET_TRIGGERED)
-    triggering_events = {github_asset: [object()]}
-    assert (
-        engineering.python_callable(
-            **engineering.op_kwargs,
-            dag_run=asset_run,
-            triggering_asset_events=triggering_events,
-        )
-        is True
-    )
-    assert (
-        research.python_callable(
-            **research.op_kwargs,
-            dag_run=asset_run,
-            triggering_asset_events=triggering_events,
-        )
-        is False
-    )
-    assert (
-        trading.python_callable(
-            **trading.op_kwargs,
-            dag_run=asset_run,
-            triggering_asset_events=triggering_events,
-        )
-        is False
-    )
+            assert freshness.inlets == []
 
 
 def test_dags_share_timezone_and_expose_job_and_worker_tags() -> None:
