@@ -40,7 +40,7 @@ dbt-deps: ## Install locked dbt packages.
 
 dbt-validate: dbt-deps ## Parse dbt without accessing AWS data.
 	@set -eu; for domain in $(DBT_DOMAINS); do \
-		DBT_DOMAIN="$$domain" DBT_SCHEMA="analytics_$$domain" \
+		DBT_DOMAIN="$$domain" DBT_SCHEMA=analytics \
 		DBT_QUERY_RESULTS_URI=s3://validation/query-results DBT_ANALYTICS_URI=s3://validation \
 			$(DBT_RUNTIME) dbt parse \
 				--project-dir $(DBT_PROJECT) --profiles-dir $(DBT_PROJECT) \
@@ -66,7 +66,7 @@ dbt-build: ## Build DBT_DOMAIN analytics with its isolated runtime identity.
 		$(AWS_WORKLOAD_ENV) AWS_CONFIG_FILE="$(AWS_IDENTITY_DIR)/dbt-$(DBT_DOMAIN)/host-config" \
 		DBT_QUERY_RESULTS_URI="$${QUERY_RESULTS_URI}" \
 		DBT_ANALYTICS_URI="$${ANALYTICS_URI}" \
-		DBT_DOMAIN="$(DBT_DOMAIN)" DBT_SCHEMA="analytics_$(DBT_DOMAIN)" \
+		DBT_DOMAIN="$(DBT_DOMAIN)" DBT_SCHEMA=analytics \
 		$(DBT_RUNTIME) dbt build --selector "$(DBT_DOMAIN)" \
 			--project-dir $(DBT_PROJECT) --profiles-dir $(DBT_PROJECT)
 

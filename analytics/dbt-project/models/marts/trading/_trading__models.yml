@@ -49,7 +49,17 @@ models:
       - {name: evidence_sha256, description: Fingerprint of the certified manifest evidence set., data_type: varchar, data_tests: [not_null]}
       - {name: manifest_sha256, description: Terminal selected-session manifest fingerprint., data_type: varchar, data_tests: [not_null]}
       - {name: feature_snapshot_sha256, description: Canonical parent feature snapshot fingerprint., data_type: varchar, data_tests: [not_null]}
-      - {name: outcome_sha256, description: Canonical complete outcome label fingerprint., data_type: varchar, data_tests: [not_null]}
+      - name: outcome_sha256
+        description: Canonical complete outcome label fingerprint.
+        data_type: varchar
+        data_tests: [not_null]
+        config:
+          meta:
+            metrics:
+              outcome_count:
+                description: Distinct simulated execution and markout paths.
+                label: Outcome paths
+                type: count_distinct
       - {name: last_receive_sequence, description: Latest callback sequence visible at decision time., data_type: bigint, data_tests: [not_null]}
       - {name: entry_receive_sequence, description: Capture sequence used for the simulated entry., data_type: bigint, data_tests: [not_null]}
       - {name: horizon_receive_sequence, description: Capture sequence used for the simulated exit markout., data_type: bigint, data_tests: [not_null]}

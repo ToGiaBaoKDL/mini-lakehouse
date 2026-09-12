@@ -114,6 +114,7 @@ def test_dbt_athena_configuration_is_explicit() -> None:
         domain_marts = cast(dict[str, object], marts[domain_name])
         mart_meta = cast(dict[str, object], domain_marts["+meta"])
 
+        assert domain_marts["+schema"] == domain_name
         assert domain_marts["+group"] == domain_name
         assert domain_name in cast(list[str], domain_marts["+tags"])
         assert mart_meta == {
@@ -125,6 +126,7 @@ def test_dbt_athena_configuration_is_explicit() -> None:
     data_operations = Path("make/data.mk").read_text(encoding="utf-8")
     assert "/athena/dbt_$(DBT_DOMAIN)_output_uri" in data_operations
     assert "DBT_QUERY_RESULTS_URI" in data_operations
+    assert "DBT_SCHEMA=analytics" in data_operations
     assert "athena/workgroup" not in data_operations
 
 

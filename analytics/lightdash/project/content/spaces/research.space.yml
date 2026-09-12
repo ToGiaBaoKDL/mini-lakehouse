@@ -1,0 +1,9 @@
+access:
+  groups: []
+  inheritParentPermissions: true
+  projectMemberAccessRole: null
+  users: []
+contentType: space
+slug: research
+spaceName: Research
+version: 1

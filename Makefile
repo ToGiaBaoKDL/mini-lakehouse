@@ -10,8 +10,8 @@ T0_STREAM_SPOOL_DIR ?= $(HOME)/.local/state/lakehouse/$(LAKEHOUSE_ENVIRONMENT)/t
 HOST_BIND_ADDRESS ?= 127.0.0.1
 AIRFLOW_BASE_URL ?= http://$(HOST_BIND_ADDRESS):8080
 RUNTIME_PARAMETER_PREFIX := /lakehouse/$(LAKEHOUSE_ENVIRONMENT)
-LIGHTDASH_CLI_VERSION := 1.146.0
-LIGHTDASH_CONTENT_DIRS := $(wildcard analytics/lightdash/projects/*/content)
+LIGHTDASH_CLI_VERSION := 2.134.2
+LIGHTDASH_CONTENT_DIR := analytics/lightdash/project/content
 
 export LAKEHOUSE_ENVIRONMENT
 export LOCAL_UID
@@ -45,9 +45,7 @@ lightdash-validate: ## Validate managed Lightdash content with the pinned CLI.
 	@test "$$(lightdash --version | sed -n '1p')" = "$(LIGHTDASH_CLI_VERSION)" || { \
 		printf '%s\n' "Lightdash CLI $(LIGHTDASH_CLI_VERSION) is required."; exit 1; \
 	}
-	@set -eu; for content in $(LIGHTDASH_CONTENT_DIRS); do \
-		lightdash lint --path "$$content"; \
-	done
+	lightdash lint --path "$(LIGHTDASH_CONTENT_DIR)"
 
 netdata-validate: ## Validate the Netdata runtime without contacting the services host.
 	sh -n infra/runtime/host/netdata-statsd-firewall \

@@ -282,7 +282,7 @@ def test_lightdash_uses_owned_database_storage_and_sdk_credentials() -> None:
         "/usr/local/bin/aws_signing_helper:/usr/local/bin/aws_signing_helper:ro"
         in service["volumes"]
     )
-    assert "/api/v1/health" in service["healthcheck"]["test"][-1]
+    assert "/api/v1/readyz" in service["healthcheck"]["test"][-1]
     assert service["deploy"]["resources"]["limits"] == {"cpus": "1.0", "memory": "2G"}
 
 

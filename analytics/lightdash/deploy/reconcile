@@ -68,6 +68,15 @@ compose() {
     docker compose --project-name lightdash -f "$script_dir/compose.yaml" "$@"
 }
 
+compose run --rm --no-deps --entrypoint sh lightdash -ec '
+    export PGPASSWORD="$(cat /run/secrets/lightdash_database_password)"
+    exec pnpm -F backend migrate-production preflight --json --strict
+'
+
+# This single-instance service uses Recreate rollouts so upgrades never cross a
+# release marked unsafe for rolling deployment.
+compose down --remove-orphans
+
 deploy_status=0
 compose up -d --remove-orphans --wait --wait-timeout 300 || deploy_status=$?
 if [ "$deploy_status" -ne 0 ]; then
@@ -76,3 +85,8 @@ if [ "$deploy_status" -ne 0 ]; then
     compose logs --no-color --tail 200 lightdash >&2 || true
     exit "$deploy_status"
 fi
+
+compose exec -T lightdash sh -ec '
+    export PGPASSWORD="$(cat /run/secrets/lightdash_database_password)"
+    exec pnpm -F backend migrate-production status --json
+'

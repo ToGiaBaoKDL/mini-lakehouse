@@ -1,4 +1,5 @@
-LIGHTDASH_BUILD_CONTEXT := https://github.com/lightdash/lightdash.git#f57276359a0ffcf38c201f95503e671bf80910cd
+# Lightdash 2.134.2
+LIGHTDASH_BUILD_CONTEXT := https://github.com/lightdash/lightdash.git#0d552a2945af139cd6425111acd3b63b89b7b1ae
 
 .PHONY: images-check airflow-build arxiv-lens-build dbt-image-build \
 	lakehouse-ingest-build t0-trading-build lightdash-build images-build

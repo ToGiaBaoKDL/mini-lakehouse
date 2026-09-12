@@ -1,0 +1,36 @@
+chartConfig:
+  config:
+    eChartsConfig:
+      series:
+        - color: "#E8590C"
+          encode:
+            xRef:
+              field: fct_trading_backtest_observations_action
+            yRef:
+              field: fct_trading_backtest_observations_average_gross_return_bps
+          name: Average gross return (bps)
+          type: bar
+    layout:
+      xField: fct_trading_backtest_observations_action
+      yField:
+        - fct_trading_backtest_observations_average_gross_return_bps
+  type: cartesian
+contentType: chart
+dashboardSlug: trading-overview
+metricQuery:
+  dimensions:
+    - fct_trading_backtest_observations_action
+  exploreName: fct_trading_backtest_observations
+  filters: {}
+  limit: 10
+  metrics:
+    - fct_trading_backtest_observations_average_gross_return_bps
+  sorts:
+    - descending: true
+      fieldId: fct_trading_backtest_observations_average_gross_return_bps
+  tableCalculations: []
+name: Average gross return by action
+slug: trading-gross-return-by-action
+spaceSlug: trading
+tableName: fct_trading_backtest_observations
+version: 1

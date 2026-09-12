@@ -266,6 +266,11 @@ def test_each_component_owns_its_deployment_operation() -> None:
     assert '"$bundle_root/infra/runtime/postgres/deploy" airflow' in airflow
     assert "docker compose --project-name lightdash" in lightdash
     assert '"$bundle_root/infra/runtime/postgres/deploy" lightdash' in lightdash
+    assert "migrate-production preflight --json --strict" in lightdash
+    assert lightdash.index("migrate-production preflight") < lightdash.index(
+        "compose down --remove-orphans"
+    )
+    assert "migrate-production status --json" in lightdash
     assert "infra/runtime/postgres/deploy" not in t0_trading
     assert "docker compose --project-name t0-trading" in t0_trading
     assert "create --force-recreate --remove-orphans" in t0_trading
@@ -467,7 +472,7 @@ def test_each_custom_component_has_a_thin_release_caller() -> None:
         "release-lightdash.yml": (
             "component: lightdash",
             "dockerfile: dockerfile",
-            "external_source_revision: f57276359a0ffcf38c201f95503e671bf80910cd",
+            "external_source_revision: 0d552a2945af139cd6425111acd3b63b89b7b1ae",
             "external_source_url: https://github.com/lightdash/lightdash",
             "platforms: linux/arm64",
             "repository: tgbao-dev-analytics-lightdash",
@@ -533,12 +538,12 @@ def test_lightdash_release_builds_the_pinned_upstream_source_natively() -> None:
     lightdash = _workflow("release-lightdash.yml")
     images_makefile = Path("make/images.mk").read_text(encoding="utf-8")
 
-    upstream = "https://github.com/lightdash/lightdash.git#f57276359a0ffcf38c201f95503e671bf80910cd"
+    upstream = "https://github.com/lightdash/lightdash.git#0d552a2945af139cd6425111acd3b63b89b7b1ae"
     assert (
         '[[ "$BUILD_CONTEXT" == "$EXTERNAL_SOURCE_URL.git#$EXTERNAL_SOURCE_REVISION" ]]' in reusable
     )
     assert f"build_context: {upstream}" in lightdash
-    assert "external_source_revision: f57276359a0ffcf38c201f95503e671bf80910cd" in lightdash
+    assert "external_source_revision: 0d552a2945af139cd6425111acd3b63b89b7b1ae" in lightdash
     assert "external_source_url: https://github.com/lightdash/lightdash" in lightdash
     assert "SOURCE_TAG:" in reusable
     assert "--image-manifest-media-type" in reusable
@@ -555,31 +560,43 @@ def test_lightdash_skills_match_the_pinned_runtime_cli() -> None:
                 encoding="utf-8"
             )
         )
-        assert manifest["version"] == "1.146.0"
+        assert manifest["version"] == "2.134.2"
 
     makefile = Path("Makefile").read_text(encoding="utf-8")
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
-    assert "LIGHTDASH_CLI_VERSION := 1.146.0" in makefile
-    assert "@lightdash/cli@1.146.0" in workflow
+    assert "LIGHTDASH_CLI_VERSION := 2.134.2" in makefile
+    assert "@lightdash/cli@2.134.2" in workflow
 
 
 def test_lightdash_content_and_runtime_have_separate_owners() -> None:
     release = _workflow("release-lightdash.yml")
-    project_delivery = _workflow("deploy-lightdash-projects.yml")
+    project_delivery = _workflow("deploy-lightdash-project.yml")
 
     root = Path("analytics/lightdash")
-    assert (root / "projects/engineering/content").is_dir()
-    assert (root / "projects/research/content").is_dir()
+    assert (root / "project/content").is_dir()
+    assert not (root / "projects").exists()
     assert not (root / "deploy/projects.py").exists()
     assert not (root / "deploy/environments/dev.yml").exists()
-    assert "analytics/lightdash/projects/**" not in release
+    assert "analytics/lightdash/project/**" not in release
     assert "analytics/lightdash/deploy/**" not in project_delivery
-    assert "analytics/lightdash/projects/**" in project_delivery
+    assert "analytics/lightdash/project/**" in project_delivery
+
+    content = root / "project/content"
+    spaces = {
+        yaml.safe_load(path.read_text(encoding="utf-8"))["slug"]
+        for path in (content / "spaces").glob("*.space.yml")
+    }
+    assert spaces == {"engineering", "research", "trading"}
+    for path in (content / "charts").rglob("*.yml"):
+        chart = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert chart["spaceSlug"] in spaces
+    for path in (content / "dashboards").rglob("*.yml"):
+        dashboard = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert dashboard["spaceSlug"] in spaces
 
 
-def test_lightdash_projects_use_protected_stateless_delivery() -> None:
-    workflow = _workflow("deploy-lightdash-projects.yml")
-    workflow_config = yaml.safe_load(workflow)
+def test_lightdash_project_uses_protected_stateless_delivery() -> None:
+    workflow = _workflow("deploy-lightdash-project.yml")
     github_environment = Path("infra/terraform/github/environments/dev/main.tf").read_text(
         encoding="utf-8"
     )
@@ -595,35 +612,30 @@ def test_lightdash_projects_use_protected_stateless_delivery() -> None:
     assert "LIGHTDASH_CI_SECRET_ID" in workflow
     assert "tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888" in workflow
     assert "ping: tgbao-dev-services" in workflow
-    assert "npm install --global @lightdash/cli@1.146.0" in workflow
+    assert "LIGHTDASH_VERSION: 2.134.2" in workflow
+    assert 'npm install --global "@lightdash/cli@$LIGHTDASH_VERSION"' in workflow
     assert (
         'echo "$GITHUB_WORKSPACE/analytics/dbt-project/runtime/.venv/bin" >> "$GITHUB_PATH"'
         in workflow
     )
     assert "cancel-in-progress: false" in workflow
-    assert "strategy:" in workflow
-    assert "fail-fast: false" in workflow
-    assert "max-parallel: 2" in workflow
-    assert "LIGHTDASH_PROJECT: ${{ matrix.project_uuid }}" in workflow
+    assert "strategy:" not in workflow
+    assert "DBT_DOMAIN: all" in workflow
+    assert "DBT_SCHEMA: analytics" in workflow
+    assert "LIGHTDASH_PROJECT: bde2b242-ad5d-495b-a581-7a1f74787902" in workflow
+    assert "LIGHTDASH_PROJECT_NAME: Lakehouse Analytics" in workflow
+    assert "analytics/lightdash/project/content" in workflow
+    assert "Wait for matching Lightdash server" in workflow
+    assert "lightdash config rename-project" in workflow
     assert "lightdash config get-project" in workflow
     assert workflow.count("lightdash deploy") == 1
     assert workflow.count("lightdash upload") == 1
     assert workflow.count("lightdash validate") == 1
-    assert workflow.count("--force") == 1
+    assert "--force" not in workflow
     assert workflow.count("--skip-dbt-compile") == 2
     assert workflow.count("--skip-warehouse-catalog") == 2
     assert workflow.count("--no-partial-compilation") == 2
     assert workflow.count("--show-chart-configuration-warnings") == 1
-    projects = workflow_config["jobs"]["deploy"]["strategy"]["matrix"]["include"]
-    projects_root = Path("analytics/lightdash/projects")
-    managed_domains = {path.name for path in projects_root.iterdir() if path.is_dir()}
-    assert {project["domain"] for project in projects} == managed_domains
-    assert len({project["project_uuid"] for project in projects}) == len(projects)
-    for project in projects:
-        domain = project["domain"]
-        assert project["schema"] == f"analytics_{domain}"
-        assert project["content_dir"] == f"analytics/lightdash/projects/{domain}/content"
-        assert re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", project["project_uuid"])
     assert "lightdash login" not in workflow
     for variable in ("LIGHTDASH_CI_SECRET_ID", "LIGHTDASH_URL"):
         assert variable in github_environment

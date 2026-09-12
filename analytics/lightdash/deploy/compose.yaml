@@ -48,7 +48,7 @@ services:
         - CMD
         - node
         - -e
-        - fetch('http://localhost:8080/api/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+        - fetch('http://localhost:8080/api/v1/readyz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
       interval: 10s
       timeout: 5s
       retries: 18

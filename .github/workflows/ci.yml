@@ -40,5 +40,5 @@ jobs:
       - run: uv sync --frozen --project automation/airflow --all-groups
       - run: corepack enable && corepack prepare pnpm@11.21.0 --activate
       - run: pnpm --dir docs install --frozen-lockfile
-      - run: npm install --global @lightdash/cli@1.146.0
+      - run: npm install --global @lightdash/cli@2.134.2
       - run: make check

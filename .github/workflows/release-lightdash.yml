@@ -18,10 +18,11 @@ jobs:
       contents: read
       id-token: write
     with:
-      build_context: https://github.com/lightdash/lightdash.git#f57276359a0ffcf38c201f95503e671bf80910cd
+      # Lightdash 2.134.2
+      build_context: https://github.com/lightdash/lightdash.git#0d552a2945af139cd6425111acd3b63b89b7b1ae
       component: lightdash
       dockerfile: dockerfile
-      external_source_revision: f57276359a0ffcf38c201f95503e671bf80910cd
+      external_source_revision: 0d552a2945af139cd6425111acd3b63b89b7b1ae
       external_source_url: https://github.com/lightdash/lightdash
       platforms: linux/arm64
       repository: tgbao-dev-analytics-lightdash

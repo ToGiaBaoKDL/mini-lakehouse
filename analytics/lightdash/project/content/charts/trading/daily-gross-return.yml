@@ -1,0 +1,37 @@
+chartConfig:
+  config:
+    eChartsConfig:
+      series:
+        - color: "#E8590C"
+          encode:
+            xRef:
+              field: fct_trading_backtest_observations_decision_at_day
+            yRef:
+              field: fct_trading_backtest_observations_average_gross_return_bps
+          name: Average gross return (bps)
+          type: line
+    layout:
+      showGridY: true
+      xField: fct_trading_backtest_observations_decision_at_day
+      yField:
+        - fct_trading_backtest_observations_average_gross_return_bps
+  type: cartesian
+contentType: chart
+dashboardSlug: trading-overview
+metricQuery:
+  dimensions:
+    - fct_trading_backtest_observations_decision_at_day
+  exploreName: fct_trading_backtest_observations
+  filters: {}
+  limit: 500
+  metrics:
+    - fct_trading_backtest_observations_average_gross_return_bps
+  sorts:
+    - descending: false
+      fieldId: fct_trading_backtest_observations_decision_at_day
+  tableCalculations: []
+name: Daily average gross return
+slug: trading-daily-gross-return
+spaceSlug: trading
+tableName: fct_trading_backtest_observations
+version: 1
