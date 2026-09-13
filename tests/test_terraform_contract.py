@@ -426,9 +426,13 @@ def test_data_consumers_use_reviewed_database_and_prefix_entitlements() -> None:
     assert '"${var.bucket_arns.analytics}/*"' not in dbt
     assert "local.curated_database_arns_by_workload.arxiv_lens" in lens
     assert "local.curated_prefixes_by_workload.arxiv_lens" in lens
+    assert "local.curated_database_arns_by_workload.lightdash" in lightdash
+    assert "local.curated_table_arns_by_workload.lightdash" in lightdash
+    assert "local.curated_prefixes_by_workload.lightdash" in lightdash
+    assert "local.curated_object_arns_by_workload.lightdash" in lightdash
     assert "local.analytics_database_arns_by_workload.lightdash" in lightdash
     assert "local.analytics_object_arns_by_workload.lightdash" in lightdash
-    assert "local.curated_object_arns_by_workload" not in lightdash
+    assert '"${var.bucket_arns.curated}/*"' not in lightdash
     assert "var.bucket_arns.lightdash" in lightdash
     assert '"glue:CreateTable"' not in lightdash
 

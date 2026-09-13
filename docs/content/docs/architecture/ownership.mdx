@@ -42,7 +42,8 @@ short-lived STS credentials; it stores no AWS access key.
 - EMR owns landing and curated data-plane access.
 - Each dbt domain reads only its curated inputs and manages only its analytics database and prefix.
 - ArXiv Lens reads curated ArXiv data and writes only its Athena results.
-- Lightdash reads analytics databases and owns its application bucket and query results.
+- Lightdash reads analytics databases, plus the exact curated dependency of the certification-gated
+  Trading view, and owns its application bucket and query results.
 - The services deployer pulls reviewed images and reads connector material, but cannot read
   application secrets or data.
 

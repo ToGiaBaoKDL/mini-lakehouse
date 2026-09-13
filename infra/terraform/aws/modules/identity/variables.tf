@@ -247,7 +247,7 @@ variable "workload_data_access" {
   validation {
     condition = (
       alltrue([
-        for workload in ["arxiv_lens"] :
+        for workload in ["arxiv_lens", "lightdash"] :
         contains(keys(var.workload_data_access.curated), workload)
       ]) &&
       length([

@@ -59,6 +59,10 @@ locals {
         databases = ["curated_arxiv"]
         prefixes  = ["arxiv"]
       }
+      lightdash = {
+        databases = local.analytics_domains.trading.curated_databases
+        prefixes  = local.analytics_domains.trading.curated_prefixes
+      }
       }, {
       for domain, access in local.analytics_domains : "dbt_${domain}" => {
         databases = access.curated_databases

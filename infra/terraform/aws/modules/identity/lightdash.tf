@@ -28,7 +28,7 @@ data "aws_iam_policy_document" "lightdash" {
     resources = [var.athena_data_catalog_arn]
   }
   statement {
-    sid = "ReadAnalyticsCatalog"
+    sid = "ReadQueryCatalog"
     actions = [
       "glue:GetDatabase",
       "glue:GetDatabases",
@@ -39,6 +39,8 @@ data "aws_iam_policy_document" "lightdash" {
     ]
     resources = concat(
       [local.glue_catalog_arn],
+      local.curated_database_arns_by_workload.lightdash,
+      local.curated_table_arns_by_workload.lightdash,
       local.analytics_database_arns_by_workload.lightdash,
       local.analytics_table_arns_by_workload.lightdash,
     )
@@ -58,9 +60,25 @@ data "aws_iam_policy_document" "lightdash" {
     actions = ["s3:GetBucketLocation"]
     resources = [
       var.bucket_arns.analytics,
+      var.bucket_arns.curated,
       var.bucket_arns.lightdash,
       var.bucket_arns.query_results,
     ]
+  }
+  statement {
+    sid       = "ListCuratedViewData"
+    actions   = ["s3:ListBucket"]
+    resources = [var.bucket_arns.curated]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = local.curated_prefixes_by_workload.lightdash
+    }
+  }
+  statement {
+    sid       = "ReadCuratedViewObjects"
+    actions   = ["s3:GetObject"]
+    resources = local.curated_object_arns_by_workload.lightdash
   }
   statement {
     sid       = "ListAnalyticsData"
