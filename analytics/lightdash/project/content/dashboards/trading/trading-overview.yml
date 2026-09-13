@@ -7,7 +7,7 @@ config:
   defaultDateZoomGranularity: Day
   isAddFilterDisabled: false
   isDateZoomDisabled: false
-description: Certified, leakage-safe offline execution outcomes for trading research.
+description: Certified, leakage-safe conditional execution markouts for trading research.
 filters:
   dimensions:
     - disabled: false
@@ -21,6 +21,38 @@ filters:
         fieldId: fct_trading_backtest_observations_decision_at
         tableName: fct_trading_backtest_observations
       values: [30]
+    - disabled: true
+      label: Symbol
+      operator: equals
+      required: false
+      target:
+        fieldId: fct_trading_backtest_observations_symbol
+        tableName: fct_trading_backtest_observations
+      values: []
+    - disabled: true
+      label: Action
+      operator: equals
+      required: false
+      target:
+        fieldId: fct_trading_backtest_observations_action
+        tableName: fct_trading_backtest_observations
+      values: []
+    - disabled: true
+      label: Horizon (seconds)
+      operator: equals
+      required: false
+      target:
+        fieldId: fct_trading_backtest_observations_horizon_seconds
+        tableName: fct_trading_backtest_observations
+      values: []
+    - disabled: true
+      label: Feature window (seconds)
+      operator: equals
+      required: false
+      target:
+        fieldId: fct_trading_backtest_observations_window_seconds
+        tableName: fct_trading_backtest_observations
+      values: []
 name: Trading overview
 slug: trading-overview
 spaceSlug: trading
@@ -33,37 +65,91 @@ tiles:
       hideTitle: false
       title: Outcome paths
     type: saved_chart
-    w: 18
+    w: 9
     x: 0
     y: 0
   - h: 3
     properties:
-      chartName: Average gross return
+      chartName: Mean gross markout
       chartSlug: trading-average-gross-return
       hideTitle: false
-      title: Average gross return
+      title: Mean gross markout
     type: saved_chart
-    w: 18
+    w: 9
+    x: 9
+    y: 0
+  - h: 3
+    properties:
+      chartName: Positive gross markouts
+      chartSlug: trading-positive-gross-markout-rate
+      hideTitle: false
+      title: Positive gross markouts
+    type: saved_chart
+    w: 9
     x: 18
+    y: 0
+  - h: 3
+    properties:
+      chartName: Mean quoted spread
+      chartSlug: trading-average-spread
+      hideTitle: false
+      title: Mean quoted spread
+    type: saved_chart
+    w: 9
+    x: 27
     y: 0
   - h: 8
     properties:
-      chartName: Daily average gross return
+      chartName: Daily markout and spread
       chartSlug: trading-daily-gross-return
       hideTitle: false
-      title: Daily average gross return
+      title: Daily markout and spread
     type: saved_chart
     w: 24
     x: 0
     y: 3
   - h: 8
     properties:
-      chartName: Average gross return by action
-      chartSlug: trading-gross-return-by-action
-      hideTitle: false
-      title: Average gross return by action
-    type: saved_chart
+      content: |
+        ## How to read this dashboard
+
+        - **1 bp = 0.01%.** Return and spread charts use basis points.
+        - Markouts are equal-weighted over distinct eligible outcome paths, so feature-window joins do not duplicate observations.
+        - BUY and SELL are conditional executable Top-3 book simulations before fees and taxes—not strategy signals or realized P&L.
+        - A negative two-sided mean commonly reflects crossing the spread at entry and horizon. Use the symbol, action and horizon filters to test a specific hypothesis.
+      title: Metric contract
+    type: markdown
     w: 12
     x: 24
     y: 3
+  - h: 7
+    properties:
+      chartName: Mean gross markout by action
+      chartSlug: trading-gross-return-by-action
+      hideTitle: false
+      title: Mean gross markout by action
+    type: saved_chart
+    w: 12
+    x: 0
+    y: 11
+  - h: 7
+    properties:
+      chartName: Mean gross markout by horizon
+      chartSlug: trading-gross-return-by-horizon
+      hideTitle: false
+      title: Mean gross markout by horizon
+    type: saved_chart
+    w: 12
+    x: 12
+    y: 11
+  - h: 7
+    properties:
+      chartName: Mean gross markout by symbol
+      chartSlug: trading-gross-return-by-symbol
+      hideTitle: false
+      title: Mean gross markout by symbol
+    type: saved_chart
+    w: 12
+    x: 24
+    y: 11
 version: 1

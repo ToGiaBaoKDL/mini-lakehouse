@@ -10,6 +10,13 @@ models:
           interval: DAY
         group_label: Trading research
         label: Backtest observations
+        metrics:
+          positive_gross_markout_rate_pct:
+            description: Share of distinct eligible conditional outcome paths with a gross markout above zero; before fees and taxes.
+            label: Positive gross markouts (%)
+            round: 1
+            sql: 100.0 * COUNT(DISTINCT CASE WHEN ${TABLE}.gross_return_bps > 0 THEN ${TABLE}.outcome_sha256 END) / NULLIF(COUNT(DISTINCT ${TABLE}.outcome_sha256), 0)
+            type: number
         primary_key: [outcome_configuration_sha256, feature_snapshot_sha256, action, horizon_seconds, window_seconds]
     data_tests:
       - dbt_utils.unique_combination_of_columns:
@@ -17,7 +24,15 @@ models:
             combination_of_columns: [outcome_configuration_sha256, feature_snapshot_sha256, action, horizon_seconds, window_seconds]
     columns:
       - {name: trade_date, description: Exchange-local date of the certified market session., data_type: date, data_tests: [not_null]}
-      - {name: symbol, description: Normalized security symbol., data_type: varchar, data_tests: [not_null]}
+      - name: symbol
+        description: Normalized security symbol.
+        data_type: varchar
+        data_tests: [not_null]
+        config:
+          meta:
+            dimension:
+              label: Symbol
+              type: string
       - name: decision_at
         description: UTC point-in-time feature evaluation boundary.
         data_type: timestamp
@@ -37,8 +52,29 @@ models:
           - accepted_values:
               arguments:
                 values: [BUY, SELL]
-      - {name: horizon_seconds, description: Markout horizon measured from decision time., data_type: bigint, data_tests: [not_null]}
-      - {name: window_seconds, description: Trailing feature-window duration., data_type: bigint, data_tests: [not_null]}
+        config:
+          meta:
+            dimension:
+              label: Action
+              type: string
+      - name: horizon_seconds
+        description: Markout horizon measured from decision time.
+        data_type: bigint
+        data_tests: [not_null]
+        config:
+          meta:
+            dimension:
+              label: Horizon (seconds)
+              type: number
+      - name: window_seconds
+        description: Trailing feature-window duration.
+        data_type: bigint
+        data_tests: [not_null]
+        config:
+          meta:
+            dimension:
+              label: Feature window (seconds)
+              type: number
       - {name: order_quantity, description: Shares simulated through the visible Top-3 book., data_type: bigint, data_tests: [not_null]}
       - {name: feature_version, description: Deterministic feature formula version., data_type: varchar, data_tests: [not_null]}
       - {name: configuration_version, description: Effective market and feature configuration version., data_type: varchar, data_tests: [not_null]}
@@ -74,7 +110,18 @@ models:
       - {name: microprice, description: Opposite-depth-weighted level-one microprice in VND., data_type: "decimal(24,8)"}
       - {name: microprice_deviation_bps, description: Microprice deviation from midpoint in basis points., data_type: "decimal(18,4)"}
       - {name: spread, description: Best ask minus best bid in VND., data_type: "decimal(18,0)"}
-      - {name: spread_bps, description: Quoted spread relative to midpoint in basis points., data_type: "decimal(18,4)"}
+      - name: spread_bps
+        description: Quoted spread relative to midpoint in basis points.
+        data_type: "decimal(18,4)"
+        config:
+          meta:
+            metrics:
+              average_spread_bps:
+                description: Average quoted spread across distinct eligible feature snapshots.
+                distinct_keys: feature_snapshot_sha256
+                label: Mean quoted spread (bps)
+                round: 2
+                type: average_distinct
       - {name: bid_depth, description: Visible configured-depth bid quantity., data_type: bigint}
       - {name: ask_depth, description: Visible configured-depth ask quantity., data_type: bigint}
       - {name: level_one_imbalance, description: Normalized best-level bid versus ask depth imbalance., data_type: "decimal(10,8)"}
@@ -100,10 +147,10 @@ models:
           meta:
             metrics:
               average_gross_return_bps:
-                description: Average gross return across distinct simulated outcome paths.
+                description: Equal-weight mean gross markout across distinct eligible conditional BUY and SELL paths; before fees and taxes, not strategy P&L.
                 distinct_keys: outcome_sha256
-                label: Average gross return (bps)
-                round: 4
+                label: Mean gross markout (bps)
+                round: 2
                 type: average_distinct
       - {name: certification_evaluated_at, description: UTC time the current evidence set was certified., data_type: timestamp, data_tests: [not_null]}
       - {name: feature_processed_at, description: UTC durable feature materialization time., data_type: timestamp, data_tests: [not_null]}

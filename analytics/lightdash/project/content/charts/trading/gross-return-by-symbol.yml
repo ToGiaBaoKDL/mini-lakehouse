@@ -5,7 +5,7 @@ chartConfig:
         - color: "#E8590C"
           encode:
             xRef:
-              field: fct_trading_backtest_observations_action
+              field: fct_trading_backtest_observations_symbol
             yRef:
               field: fct_trading_backtest_observations_average_gross_return_bps
           name: Mean gross markout (bps)
@@ -13,7 +13,7 @@ chartConfig:
       yAxis:
         - name: Basis points (bps)
     layout:
-      xField: fct_trading_backtest_observations_action
+      xField: fct_trading_backtest_observations_symbol
       yField:
         - fct_trading_backtest_observations_average_gross_return_bps
   type: cartesian
@@ -21,18 +21,18 @@ contentType: chart
 dashboardSlug: trading-overview
 metricQuery:
   dimensions:
-    - fct_trading_backtest_observations_action
+    - fct_trading_backtest_observations_symbol
   exploreName: fct_trading_backtest_observations
   filters: {}
-  limit: 10
+  limit: 20
   metrics:
     - fct_trading_backtest_observations_average_gross_return_bps
   sorts:
     - descending: true
       fieldId: fct_trading_backtest_observations_average_gross_return_bps
   tableCalculations: []
-name: Mean gross markout by action
-slug: trading-gross-return-by-action
+name: Mean gross markout by symbol
+slug: trading-gross-return-by-symbol
 spaceSlug: trading
 tableName: fct_trading_backtest_observations
 version: 1

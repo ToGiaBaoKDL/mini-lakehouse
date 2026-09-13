@@ -1,7 +1,7 @@
 chartConfig:
   config:
-    label: Mean gross markout (bps)
-    selectedField: fct_trading_backtest_observations_average_gross_return_bps
+    label: Positive gross markouts (%)
+    selectedField: fct_trading_backtest_observations_positive_gross_markout_rate_pct
     showBigNumberLabel: true
   type: big_number
 contentType: chart
@@ -12,11 +12,11 @@ metricQuery:
   filters: {}
   limit: 1
   metrics:
-    - fct_trading_backtest_observations_average_gross_return_bps
+    - fct_trading_backtest_observations_positive_gross_markout_rate_pct
   sorts: []
   tableCalculations: []
-name: Mean gross markout
-slug: trading-average-gross-return
+name: Positive gross markouts
+slug: trading-positive-gross-markout-rate
 spaceSlug: trading
 tableName: fct_trading_backtest_observations
 version: 1

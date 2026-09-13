@@ -1,7 +1,7 @@
 chartConfig:
   config:
-    label: Mean gross markout (bps)
-    selectedField: fct_trading_backtest_observations_average_gross_return_bps
+    label: Mean quoted spread (bps)
+    selectedField: fct_trading_backtest_observations_average_spread_bps
     showBigNumberLabel: true
   type: big_number
 contentType: chart
@@ -12,11 +12,11 @@ metricQuery:
   filters: {}
   limit: 1
   metrics:
-    - fct_trading_backtest_observations_average_gross_return_bps
+    - fct_trading_backtest_observations_average_spread_bps
   sorts: []
   tableCalculations: []
-name: Mean gross markout
-slug: trading-average-gross-return
+name: Mean quoted spread
+slug: trading-average-spread
 spaceSlug: trading
 tableName: fct_trading_backtest_observations
 version: 1

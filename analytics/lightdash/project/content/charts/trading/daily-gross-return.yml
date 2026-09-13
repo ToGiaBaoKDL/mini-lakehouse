@@ -8,13 +8,24 @@ chartConfig:
               field: fct_trading_backtest_observations_decision_at_day
             yRef:
               field: fct_trading_backtest_observations_average_gross_return_bps
-          name: Average gross return (bps)
+          name: Mean gross markout (bps)
           type: line
+        - color: "#4C6EF5"
+          encode:
+            xRef:
+              field: fct_trading_backtest_observations_decision_at_day
+            yRef:
+              field: fct_trading_backtest_observations_average_spread_bps
+          name: Mean quoted spread (bps)
+          type: line
+      yAxis:
+        - name: Basis points (bps)
     layout:
       showGridY: true
       xField: fct_trading_backtest_observations_decision_at_day
       yField:
         - fct_trading_backtest_observations_average_gross_return_bps
+        - fct_trading_backtest_observations_average_spread_bps
   type: cartesian
 contentType: chart
 dashboardSlug: trading-overview
@@ -26,11 +37,12 @@ metricQuery:
   limit: 500
   metrics:
     - fct_trading_backtest_observations_average_gross_return_bps
+    - fct_trading_backtest_observations_average_spread_bps
   sorts:
     - descending: false
       fieldId: fct_trading_backtest_observations_decision_at_day
   tableCalculations: []
-name: Daily average gross return
+name: Daily markout and spread
 slug: trading-daily-gross-return
 spaceSlug: trading
 tableName: fct_trading_backtest_observations
