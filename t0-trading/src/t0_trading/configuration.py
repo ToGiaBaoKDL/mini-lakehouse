@@ -219,6 +219,23 @@ class OutcomeVersion(_EffectiveVersion):
         return self
 
 
+class StrategyVersion(_EffectiveVersion):
+    """Effective structural inputs for deterministic research scores."""
+
+    momentum_window_seconds: int = Field(ge=1)
+    order_flow_window_seconds: int = Field(ge=1)
+    relative_value_window_seconds: int = Field(ge=1)
+    relative_value_symbols: tuple[str, str]
+
+    @model_validator(mode="after")
+    def validate_strategies(self) -> StrategyVersion:
+        if len(set(self.relative_value_symbols)) != 2 or any(
+            not symbol or symbol != symbol.strip().upper() for symbol in self.relative_value_symbols
+        ):
+            raise ValueError("relative_value_symbols must contain two unique uppercase symbols")
+        return self
+
+
 class TradingVersion(_EffectiveVersion):
     market: MarketConfiguration
     data_quality: DataQualityConfiguration
@@ -229,11 +246,13 @@ class TradingConfiguration(_StrictModel):
     schema_version: int = Field(ge=1)
     versions: tuple[TradingVersion, ...]
     outcomes: tuple[OutcomeVersion, ...]
+    strategies: tuple[StrategyVersion, ...]
 
     @model_validator(mode="after")
     def validate_versions(self) -> TradingConfiguration:
         _validate_effective_versions(self.versions, "configuration")
         _validate_effective_versions(self.outcomes, "outcome")
+        _validate_effective_versions(self.strategies, "strategy")
         return self
 
     def resolve(self, value: date) -> TradingVersion:
@@ -241,6 +260,9 @@ class TradingConfiguration(_StrictModel):
 
     def resolve_outcomes(self, value: date) -> OutcomeVersion:
         return _resolve_effective(self.outcomes, value, "outcome")
+
+    def resolve_strategies(self, value: date) -> StrategyVersion:
+        return _resolve_effective(self.strategies, value, "strategy")
 
     def canonical_bytes(self) -> bytes:
         return canonical_json(self.model_dump(mode="json"))

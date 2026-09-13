@@ -33,7 +33,14 @@ def test_trading_configuration_is_strict_effective_dated_and_stable() -> None:
     assert outcomes.horizons_seconds == (30, 60, 300)
     assert outcomes.order_quantity == 100
     assert outcomes.execution_latency_milliseconds == 500
+    strategies = configuration.resolve_strategies(date(2026, 9, 5))
+    assert strategies.version == "microstructure-scores-v1"
+    assert strategies.momentum_window_seconds == 60
+    assert strategies.order_flow_window_seconds == 30
+    assert strategies.relative_value_window_seconds == 300
+    assert strategies.relative_value_symbols == ("VIC", "VHM")
     assert len(outcomes.sha256) == 64
+    assert len(strategies.sha256) == 64
     assert len(configuration.sha256) == 64
     assert len(version.sha256) == 64
     assert version.sha256 != configuration.sha256
@@ -67,6 +74,27 @@ def test_outcome_assumptions_do_not_change_feature_configuration_identity() -> N
     assert (
         changed.resolve_outcomes(effective_date).sha256
         != original.resolve_outcomes(effective_date).sha256
+    )
+
+
+def test_strategy_assumptions_have_an_independent_identity() -> None:
+    original = load_configuration(CONFIGURATION)
+    changed = parse_configuration(
+        CONFIGURATION.read_text(encoding="utf-8").replace(
+            "momentum_window_seconds: 60",
+            "momentum_window_seconds: 300",
+        )
+    )
+    effective_date = date(2026, 9, 5)
+
+    assert changed.resolve(effective_date).sha256 == original.resolve(effective_date).sha256
+    assert (
+        changed.resolve_outcomes(effective_date).sha256
+        == original.resolve_outcomes(effective_date).sha256
+    )
+    assert (
+        changed.resolve_strategies(effective_date).sha256
+        != original.resolve_strategies(effective_date).sha256
     )
 
 
@@ -116,6 +144,7 @@ def test_trading_configuration_rejects_overlapping_versions(tmp_path: Path) -> N
         "schema_version": 1,
         "versions": versions,
         "outcomes": load_configuration(CONFIGURATION).model_dump(mode="json")["outcomes"],
+        "strategies": load_configuration(CONFIGURATION).model_dump(mode="json")["strategies"],
     }
     path = tmp_path / "trading.yaml"
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -131,6 +160,8 @@ def test_trading_configuration_fails_closed_for_unconfigured_date() -> None:
         configuration.resolve(date(2026, 8, 26))
     with pytest.raises(TradingConfigurationError, match="found 0"):
         configuration.resolve_outcomes(date(2026, 8, 26))
+    with pytest.raises(TradingConfigurationError, match="found 0"):
+        configuration.resolve_strategies(date(2026, 8, 26))
 
 
 @pytest.mark.parametrize(
@@ -142,6 +173,29 @@ def test_trading_configuration_fails_closed_for_unconfigured_date() -> None:
     ),
 )
 def test_trading_configuration_rejects_invalid_outcome_policy(
+    tmp_path: Path,
+    original: str,
+    invalid: str,
+) -> None:
+    path = tmp_path / "trading.yaml"
+    path.write_text(
+        CONFIGURATION.read_text(encoding="utf-8").replace(original, invalid),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TradingConfigurationError, match="invalid trading configuration"):
+        load_configuration(path)
+
+
+@pytest.mark.parametrize(
+    ("original", "invalid"),
+    (
+        ("momentum_window_seconds: 60", "momentum_window_seconds: 0"),
+        ("relative_value_symbols: [VIC, VHM]", "relative_value_symbols: [VIC, VIC]"),
+        ("relative_value_symbols: [VIC, VHM]", "relative_value_symbols: [vic, VHM]"),
+    ),
+)
+def test_trading_configuration_rejects_invalid_strategy_policy(
     tmp_path: Path,
     original: str,
     invalid: str,

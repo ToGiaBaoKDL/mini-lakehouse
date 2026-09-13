@@ -47,8 +47,9 @@ from t0_trading.market.reconciliation import (
     reconcile_session,
     select_feature_capture,
 )
-from t0_trading.outcomes import build_outcome_audit, label_outcomes
+from t0_trading.outcomes import OutcomeLabel, build_outcome_audit, label_outcomes
 from t0_trading.provider import authenticated
+from t0_trading.strategy import evaluate_scores, score_features
 from t0_trading.trading_dates import TradingDateError, require_observed_trade_date
 
 MARKET_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
@@ -134,6 +135,23 @@ def _replay_feature_session(
     return reader, configuration, snapshots, report
 
 
+def _replay_outcome_session(
+    manifest_uri: str,
+    region: str,
+    config: Path,
+) -> tuple[
+    StreamSessionReader,
+    TradingConfiguration,
+    tuple[FeatureSnapshot, ...],
+    tuple[OutcomeLabel, ...],
+]:
+    reader, configuration, snapshots, _ = _replay_feature_session(manifest_uri, region, config)
+    version = configuration.resolve(reader.trade_date)
+    policy = configuration.resolve_outcomes(reader.trade_date)
+    labels = label_outcomes(snapshots, reader.envelopes(), version, policy)
+    return reader, configuration, snapshots, labels
+
+
 def _stream_day_readers(
     trade_date: date,
     landing_uri: str,
@@ -170,6 +188,7 @@ def check_config(
         configuration = load_configuration(config)
         version = configuration.resolve(selected_date)
         outcomes = configuration.resolve_outcomes(selected_date)
+        strategies = configuration.resolve_strategies(selected_date)
     except TradingConfigurationError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error
@@ -180,6 +199,8 @@ def check_config(
                 "effective_date": selected_date.isoformat(),
                 "outcome_version": outcomes.version,
                 "outcome_version_sha256": outcomes.sha256,
+                "strategy_version": strategies.version,
+                "strategy_version_sha256": strategies.sha256,
                 "version": version.version,
                 "version_sha256": version.sha256,
             },
@@ -461,10 +482,11 @@ def audit_outcomes_command(
 ) -> None:
     """Replay, label, and summarize one terminal session without publishing outcomes."""
     try:
-        reader, configuration, snapshots, _ = _replay_feature_session(manifest_uri, region, config)
+        reader, configuration, snapshots, labels = _replay_outcome_session(
+            manifest_uri, region, config
+        )
         version = configuration.resolve(reader.trade_date)
         policy = configuration.resolve_outcomes(reader.trade_date)
-        labels = label_outcomes(snapshots, reader.envelopes(), version, policy)
         report = build_outcome_audit(
             snapshots,
             labels,
@@ -480,6 +502,50 @@ def audit_outcomes_command(
         raise typer.Exit(code=1) from error
     except (CaptureStoreUnavailable, ClientError) as error:
         typer.echo(f"SSI outcome audit failed: {_safe_error(error)}", err=True)
+        raise typer.Exit(code=1) from None
+    _emit_model(report, output)
+
+
+def audit_strategies_command(
+    manifest_uri: Annotated[
+        str,
+        typer.Option(help="Terminal SSI Stream manifest S3 URI."),
+    ],
+    region: Annotated[str, typer.Option(help="AWS region containing the landing bucket.")] = (
+        "ap-southeast-1"
+    ),
+    config: Annotated[Path, typer.Option(help="Versioned non-secret trading YAML.")] = (
+        DEFAULT_TRADING_CONFIG
+    ),
+    output: Annotated[
+        Path | None,
+        typer.Option(help="Optional local JSON path; stdout is always emitted."),
+    ] = None,
+) -> None:
+    """Replay threshold-free strategy scores against gross conditional outcomes."""
+    try:
+        reader, configuration, snapshots, labels = _replay_outcome_session(
+            manifest_uri, region, config
+        )
+        strategy_policy = configuration.resolve_strategies(reader.trade_date)
+        outcome_policy = configuration.resolve_outcomes(reader.trade_date)
+        scores = score_features(
+            snapshots,
+            configuration.resolve(reader.trade_date),
+            strategy_policy,
+        )
+        report = evaluate_scores(
+            scores,
+            labels,
+            strategy_policy,
+            outcome_policy,
+            trade_date=reader.trade_date,
+        )
+    except (StreamCaptureReadError, TradingConfigurationError, ValueError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+    except (CaptureStoreUnavailable, ClientError) as error:
+        typer.echo(f"SSI strategy audit failed: {_safe_error(error)}", err=True)
         raise typer.Exit(code=1) from None
     _emit_model(report, output)
 
@@ -593,5 +659,6 @@ app.command("capture-stream")(capture_stream_command)
 app.command("reconcile-stream")(reconcile_stream_command)
 app.command("audit-features")(audit_features_command)
 app.command("audit-outcomes")(audit_outcomes_command)
+app.command("audit-strategies")(audit_strategies_command)
 app.command("validate-stream-day")(validate_stream_day_command)
 app.command("certify-stream-day")(certify_stream_day_command)

@@ -7,6 +7,14 @@ outcomes:
     order_quantity: 100
     # Explicit research assumption, not measured SSI order-routing latency.
     execution_latency_milliseconds: 500
+strategies:
+  - version: microstructure-scores-v1
+    effective_from: 2026-08-27
+    effective_to: null
+    momentum_window_seconds: 60
+    order_flow_window_seconds: 30
+    relative_value_window_seconds: 300
+    relative_value_symbols: [VIC, VHM]
 versions:
   - version: market-state-v1
     effective_from: 2026-08-27

@@ -182,6 +182,27 @@ is certified. For a certified day, EMR publishes the complete label matrix with 
 lineage, structured abstention reasons, and a canonical fingerprint. It remains research data and
 is not consumed by signal generation.
 
+## Offline strategy scores
+
+The side-effect-free `t0_trading.strategy` package derives three threshold-free research scores
+directly from eligible `FeatureSnapshot` objects: volatility-normalized momentum confirmed by trade
+flow, normalized order flow and book imbalance, and a symmetric VIC/VHM relative-value score. Each
+score is bounded to `[-1, 1]`, uses exact decimal arithmetic, and carries the feature snapshot and
+effective strategy-policy fingerprints. Its sign selects the matching conditional BUY or SELL
+outcome only for evaluation; it is not an order, signal, or execution instruction.
+
+Strategy configuration is effective-versioned independently from market features and outcome
+assumptions. The evaluator requires exact score-to-label lineage and reports directed-score rate,
+eligible-outcome coverage, positive gross-markout rate, and average gross return in basis points for
+each strategy and horizon. It deliberately omits net PnL until a verified account-specific cost
+policy exists, and it does not choose thresholds from the evaluated session.
+
+```bash
+AWS_PROFILE=tgbao-dev uv run --project t0-trading t0-trading audit-strategies \
+  --manifest-uri s3://<landing-bucket>/stream/ssi_fastconnect_stream/raw/trade_date=YYYY-MM-DD/session=<uuid>/manifest.json \
+  --output /tmp/t0-strategy-audit.json
+```
+
 dbt exposes `analytics_trading.fct_trading_backtest_observations` as a safe-by-default view. It
 inner joins the current passed certification, eligible snapshots, their normalized windows, and
 eligible outcomes using their existing immutable lineage. The view does not rederive market state,
