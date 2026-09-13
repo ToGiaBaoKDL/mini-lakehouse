@@ -33,7 +33,7 @@ jobs:
       LIGHTDASH_PROJECT: bde2b242-ad5d-495b-a581-7a1f74787902
       LIGHTDASH_PROJECT_NAME: Lakehouse Analytics
       LIGHTDASH_URL: ${{ vars.LIGHTDASH_URL }}
-      LIGHTDASH_VERSION: 2.134.2
+      LIGHTDASH_RELEASE_VERSION: 2.134.2
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -53,7 +53,7 @@ jobs:
         run: |
           uv sync --frozen --project analytics/dbt-project/runtime
           echo "$GITHUB_WORKSPACE/analytics/dbt-project/runtime/.venv/bin" >> "$GITHUB_PATH"
-      - run: npm install --global "@lightdash/cli@$LIGHTDASH_VERSION"
+      - run: npm install --global "@lightdash/cli@$LIGHTDASH_RELEASE_VERSION"
       - uses: aws-actions/configure-aws-credentials@acca2b1b2070338fb9fd1ca27ecee81d687e58e5 # v6.1.2
         with:
           aws-region: ap-southeast-1
@@ -74,14 +74,14 @@ jobs:
           for attempt in $(seq 1 120); do
             server_version=$(curl --connect-timeout 5 --max-time 10 --silent --show-error \
               "$LIGHTDASH_URL/api/v1/health" | jq -r '.results.version // empty' || true)
-            if [ "$server_version" = "$LIGHTDASH_VERSION" ]; then
+            if [ "$server_version" = "$LIGHTDASH_RELEASE_VERSION" ]; then
               exit 0
             fi
             printf 'Waiting for Lightdash %s (server reported %s; attempt %s/120).\n' \
-              "$LIGHTDASH_VERSION" "${server_version:-unavailable}" "$attempt"
+              "$LIGHTDASH_RELEASE_VERSION" "${server_version:-unavailable}" "$attempt"
             sleep 10
           done
-          printf 'Lightdash server did not converge to %s.\n' "$LIGHTDASH_VERSION" >&2
+          printf 'Lightdash server did not converge to %s.\n' "$LIGHTDASH_RELEASE_VERSION" >&2
           exit 1
       - name: Compile analytics semantic layer
         env:

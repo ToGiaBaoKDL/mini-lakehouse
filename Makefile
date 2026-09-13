@@ -67,6 +67,7 @@ lint: ## Run formatting, linting, and static type checks.
 		infra/runtime/identity/workload-identities \
 		infra/runtime/delivery/deploy-component \
 		infra/runtime/delivery/image-repository \
+		infra/runtime/delivery/prune-component-images \
 		infra/runtime/delivery/pull-image \
 		infra/runtime/cloudflare/deploy \
 		infra/runtime/cloudflare/sync-secret \

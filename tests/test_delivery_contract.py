@@ -100,6 +100,23 @@ def test_service_pull_uses_short_lived_registry_login() -> None:
     assert "Image must be an immutable digest from the $repository" in pull
     assert "services-deployer/host-config" in pull
     assert "AWS CLI v2 is missing from the services host." in pull
+    assert pull.index('"$script_dir/prune-component-images"') < pull.index('docker pull "$image"')
+
+
+def test_component_delivery_prunes_only_superseded_owned_images() -> None:
+    prune = Path("infra/runtime/delivery/prune-component-images").read_text(encoding="utf-8")
+    deploy = Path("infra/runtime/delivery/deploy-component").read_text(encoding="utf-8")
+
+    assert 'repository=$("$script_dir/image-repository" "$component")' in prune
+    assert "repository_uri=${keep_image%@sha256:*}" in prune
+    assert 'docker ps --all --quiet --filter "ancestor=$image_id"' in prune
+    assert "grep -Eq ':(runtime|local)$'" in prune
+    assert 'docker image rm "$reference"' in prune
+    assert "docker image prune" not in prune
+    assert "docker system prune" not in prune
+    assert deploy.index('"$deploy" "$image"') < deploy.index(
+        '"$script_dir/prune-component-images" "$component" "$image"'
+    )
 
 
 def test_image_repositories_follow_capability_ownership() -> None:
@@ -612,8 +629,8 @@ def test_lightdash_project_uses_protected_stateless_delivery() -> None:
     assert "LIGHTDASH_CI_SECRET_ID" in workflow
     assert "tailscale/github-action@780049a30b6ff5c378a9e7b389d15ece7a204888" in workflow
     assert "ping: tgbao-dev-services" in workflow
-    assert "LIGHTDASH_VERSION: 2.134.2" in workflow
-    assert 'npm install --global "@lightdash/cli@$LIGHTDASH_VERSION"' in workflow
+    assert "LIGHTDASH_RELEASE_VERSION: 2.134.2" in workflow
+    assert 'npm install --global "@lightdash/cli@$LIGHTDASH_RELEASE_VERSION"' in workflow
     assert (
         'echo "$GITHUB_WORKSPACE/analytics/dbt-project/runtime/.venv/bin" >> "$GITHUB_PATH"'
         in workflow

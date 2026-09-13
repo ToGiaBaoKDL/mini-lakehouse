@@ -35,6 +35,7 @@ aws --version 2>&1 | grep -q '^aws-cli/2\.' || {
 }
 
 registry=${image%%/*}
+"$script_dir/prune-component-images" "$component" "$image"
 docker_config=$(mktemp -d "${TMPDIR:-/tmp}/lakehouse-docker.XXXXXX")
 cleanup() {
     DOCKER_CONFIG="$docker_config" docker logout "$registry" >/dev/null 2>&1 || true

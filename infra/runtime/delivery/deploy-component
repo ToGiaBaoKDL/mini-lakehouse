@@ -49,4 +49,8 @@ case "$component" in
 esac
 
 "$deploy" "$image"
+case "$component" in
+    cloudflare | netdata) ;;
+    *) "$script_dir/prune-component-images" "$component" "$image" ;;
+esac
 printf '%s\n' "Deployed $component as $image"

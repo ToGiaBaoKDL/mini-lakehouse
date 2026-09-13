@@ -1,0 +1,53 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 2 ]; then
+    printf '%s\n' "Usage: prune-component-images <component> <image@sha256:digest>" >&2
+    exit 2
+fi
+
+component=$1
+keep_image=$2
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repository=$("$script_dir/image-repository" "$component")
+
+printf '%s' "$keep_image" \
+    | grep -Eq "^[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com/$repository@sha256:[0-9a-f]{64}$" \
+    || {
+    printf '%s\n' "Keep image must be an immutable digest from the $repository repository." >&2
+    exit 2
+}
+
+repository_uri=${keep_image%@sha256:*}
+keep_id=$(docker image inspect --format '{{.Id}}' "$keep_image" 2>/dev/null || true)
+
+docker image ls --digests --no-trunc \
+    --format '{{.Repository}}@{{.Digest}}' "$repository_uri" \
+    | while IFS= read -r reference; do
+        case "$reference" in
+            *@sha256:*) ;;
+            *) continue ;;
+        esac
+        [ "$reference" != "$keep_image" ] || continue
+
+        image_id=$(docker image inspect --format '{{.Id}}' "$reference" 2>/dev/null || true)
+        [ -n "$image_id" ] || continue
+        [ "$image_id" != "$keep_id" ] || continue
+
+        # A running, stopped, or prepared container owns its image until that
+        # container is removed. This includes the scheduled T0 capture.
+        if [ -n "$(docker ps --all --quiet --filter "ancestor=$image_id")" ]; then
+            continue
+        fi
+
+        # Airflow task images are intentionally materialized from ECR behind a
+        # stable local alias and may have no container between DAG runs.
+        if docker image inspect --format '{{range .RepoTags}}{{println .}}{{end}}' "$image_id" \
+            | grep -Eq ':(runtime|local)$'; then
+            continue
+        fi
+
+        docker image rm "$reference"
+    done
+
+printf '%s\n' "Reconciled stale $component image references."

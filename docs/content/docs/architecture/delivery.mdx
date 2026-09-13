@@ -30,6 +30,11 @@ flowchart LR
 - dbt and Lightdash are under one Analytics ownership boundary but retain separate deployments.
 - OCR has no ECR repository or OCI deployment; Modal owns the remote GPU app.
 - Documentation builds to `docs/out` and deploys without a container or service host.
+- ECR retains release history. The services host keeps container-owned images and stable local task
+  aliases, and removes only superseded images from the component being deployed. Cleanup runs before
+  a pull and again after a successful deployment; it never performs a host-wide image or volume prune.
 
 Rollback selects a previously verified immutable image digest or EMR revision. DAG renames and
-directory refactors are direct cutovers; compatibility aliases are not retained.
+directory refactors are direct cutovers; compatibility aliases are not retained. Stateful upgrades
+also follow the component recovery runbook: restoring an older image does not reverse a database
+migration.
