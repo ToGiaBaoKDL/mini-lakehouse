@@ -325,6 +325,7 @@ def test_netdata_airflow_statsd_is_private_bounded_and_unit_explicit() -> None:
 
     for metric in (
         "scheduler_heartbeat",
+        "triggerer_heartbeat",
         "dag_processor_heartbeat",
         "scheduler.tasks.executable",
         "scheduler.tasks.starving",

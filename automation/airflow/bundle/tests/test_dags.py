@@ -295,7 +295,7 @@ def test_analytics_runs_every_domain_on_one_daily_schedule() -> None:
         assert build.command == ["build", "--selector", expected["selector"]]
         assert build.retries == 0
         assert build.environment["DBT_DOMAIN"] == expected["selector"]
-        assert build.environment["DBT_SCHEMA"] == f"analytics_{expected['selector']}"
+        assert build.environment["DBT_SCHEMA"] == "analytics"
         assert build.environment["AWS_CONFIG_FILE"] == "/run/aws/config"
         assert build.mounts[0]["Source"] == expected["identity"]
         assert build.inlets == []

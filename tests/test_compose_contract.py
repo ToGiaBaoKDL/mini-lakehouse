@@ -30,6 +30,7 @@ def test_compose_owns_only_self_hosted_application_services() -> None:
         "airflow-api-server",
         "airflow-scheduler",
         "airflow-dag-processor",
+        "airflow-triggerer",
     }
     assert set(_compose(ARXIV_LENS_COMPOSE)["services"]) == {"arxiv-lens"}
     assert set(_compose(LIGHTDASH_COMPOSE)["services"]) == {"lightdash"}
@@ -56,6 +57,7 @@ def test_airflow_uses_local_executor_and_required_runtime_components() -> None:
     assert "variables_prefix" in environment["AIRFLOW__SECRETS__BACKEND_KWARGS"]
     assert "profile_name" not in environment["AIRFLOW__SECRETS__BACKEND_KWARGS"]
     assert payload["services"]["airflow-dag-processor"]["command"] == "airflow dag-processor"
+    assert payload["services"]["airflow-triggerer"]["command"] == "airflow triggerer"
     bundle_config = json.loads(environment["AIRFLOW__DAG_PROCESSOR__DAG_BUNDLE_CONFIG_LIST"])
     assert bundle_config == [
         {
@@ -170,6 +172,7 @@ def test_airflow_runtime_components_have_role_appropriate_healthchecks() -> None
     assert "/api/v2/version" in services["airflow-api-server"]["healthcheck"]["test"][-1]
     assert "SchedulerJob" in services["airflow-scheduler"]["healthcheck"]["test"][-1]
     assert "DagProcessorJob" in services["airflow-dag-processor"]["healthcheck"]["test"][-1]
+    assert "TriggererJob" in services["airflow-triggerer"]["healthcheck"]["test"][-1]
     assert "healthcheck" not in services["airflow-init"]
     postgres = _compose(POSTGRES_COMPOSE)["services"]
     assert "healthcheck" in postgres["metadata-postgres"]
@@ -373,7 +376,7 @@ def test_airflow_uses_bounded_native_statsd_metrics() -> None:
 
     for family in (
         "critical_section_duration",
-        "dag_processor_heartbeat",
+        "(scheduler|triggerer|dag_processor)_heartbeat",
         "tasks\\.(executable|starving)",
         "queued_duration",
     ):

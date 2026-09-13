@@ -20,7 +20,7 @@ def _analytics_group(
         "DBT_ANALYTICS_URI": runtime_value("storage/analytics_uri"),
         "DBT_DOMAIN": domain,
         "DBT_QUERY_RESULTS_URI": runtime_value(f"athena/dbt_{domain}_output_uri"),
-        "DBT_SCHEMA": f"analytics_{domain}",
+        "DBT_SCHEMA": "analytics",
     }
     with TaskGroup(group_id=domain) as group:
         build = docker_task(
