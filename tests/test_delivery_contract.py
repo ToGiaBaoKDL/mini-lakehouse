@@ -284,6 +284,7 @@ def test_each_component_owns_its_deployment_operation() -> None:
     assert "docker compose --project-name lightdash" in lightdash
     assert '"$bundle_root/infra/runtime/postgres/deploy" lightdash' in lightdash
     assert "migrate-production preflight --json --strict" in lightdash
+    assert 'export LIGHTDASH_SECRET="$(cat /run/secrets/lightdash_secret)"' in lightdash
     assert lightdash.index("migrate-production preflight") < lightdash.index(
         "compose down --remove-orphans"
     )
