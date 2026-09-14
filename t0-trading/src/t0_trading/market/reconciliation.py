@@ -200,7 +200,7 @@ class ReconciliationReport(BaseModel):
 
 
 class MarketDayCertification(BaseModel):
-    """Current deterministic backtest eligibility for one market day and configuration."""
+    """Current deterministic backtest eligibility and observed capture gaps for one market day."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -240,8 +240,6 @@ class MarketDayCertification(BaseModel):
             raise ValueError("market-day certification outcome is inconsistent")
         if len(set(self.selected_stream_session_ids)) != len(self.selected_stream_session_ids):
             raise ValueError("selected stream sessions must be unique")
-        if not passed and self.gaps:
-            raise ValueError("failed market-day certification cannot authorize capture gaps")
         if (
             (self.failure_reason == "no_terminal_session") != (self.manifest_count == 0)
             or (
@@ -598,6 +596,9 @@ def reconcile_capture(
         configuration,
         trade_date=capture.trade_date,
         finish_at=capture.disconnected_at,
+        segment_covered_until={
+            reader.manifest.stream_session_id: reader.covered_until for reader in capture.sessions
+        },
         observe=observe_event,
     )
     replayed_bars = {

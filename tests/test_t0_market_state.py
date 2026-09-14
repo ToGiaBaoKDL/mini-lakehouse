@@ -245,6 +245,36 @@ def test_replay_and_incremental_processing_use_identical_state_transitions() -> 
     assert replayed.state.integrity_issues == incremental.integrity_issues
 
 
+def test_replay_finalizes_closed_bar_at_transport_segment_boundary() -> None:
+    first = _trade(1, "2026/09/04 09:00:05", 100, 10, "B").model_copy(
+        update={
+            "stream_session_id": "session-1",
+            "received_at": datetime(2026, 9, 4, 2, 0, 6, tzinfo=UTC),
+        }
+    )
+    second = _trade(1, "2026/09/04 09:02:05", 101, 5, "S").model_copy(
+        update={
+            "stream_session_id": "session-2",
+            "received_at": datetime(2026, 9, 4, 2, 2, 6, tzinfo=UTC),
+        }
+    )
+
+    replayed = replay(
+        (first, second),
+        _configuration(),
+        finish_at=datetime(2026, 9, 4, 2, 3, tzinfo=UTC),
+        segment_covered_until={
+            "session-1": datetime(2026, 9, 4, 2, 1, 10, tzinfo=UTC),
+            "session-2": datetime(2026, 9, 4, 2, 3, tzinfo=UTC),
+        },
+    )
+
+    assert tuple(bar.start for bar in replayed.finalized_bars) == (
+        datetime(2026, 9, 4, 2, 0, tzinfo=UTC),
+        datetime(2026, 9, 4, 2, 2, tzinfo=UTC),
+    )
+
+
 def test_fractional_price_is_rejected_at_the_source_boundary() -> None:
     state = MarketState(_configuration())
 

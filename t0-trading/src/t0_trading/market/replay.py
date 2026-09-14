@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -30,6 +30,7 @@ def replay(
     configuration: TradingVersion,
     *,
     finish_at: datetime | None = None,
+    segment_covered_until: Mapping[str, datetime] | None = None,
     trade_date: date | None = None,
     observe: Callable[[MarketEvent], None] | None = None,
 ) -> ReplayResult:
@@ -41,10 +42,23 @@ def replay(
     event_counts: Counter[str] = Counter()
     session_counts: Counter[str] = Counter()
     latest_received_at: datetime | None = None
+    active_stream_session_id: str | None = None
     timezone = ZoneInfo(configuration.market.timezone)
     for envelope in envelopes:
+        if (
+            active_stream_session_id is not None
+            and envelope.stream_session_id != active_stream_session_id
+            and segment_covered_until is not None
+        ):
+            boundary = segment_covered_until.get(active_stream_session_id)
+            if boundary is None:
+                raise ValueError("stream segment coverage is incomplete")
+            if latest_received_at is not None and boundary < latest_received_at:
+                raise ValueError("stream segment coverage precedes its last receipt")
+            bars.extend(state.advance(boundary, available_at=boundary))
         input_count += 1
         latest_received_at = envelope.received_at
+        active_stream_session_id = envelope.stream_session_id
         update = state.apply(envelope)
         business_event_count += update.event is not None
         if update.event is not None:
@@ -63,10 +77,18 @@ def replay(
                 ).value
             ] += 1
         bars.extend(update.finalized_bars)
-    if finish_at is not None:
-        if latest_received_at is not None and finish_at < latest_received_at:
+    effective_finish_at = finish_at
+    if active_stream_session_id is not None and segment_covered_until is not None:
+        boundary = segment_covered_until.get(active_stream_session_id)
+        if boundary is None:
+            raise ValueError("stream segment coverage is incomplete")
+        effective_finish_at = (
+            boundary if effective_finish_at is None else min(effective_finish_at, boundary)
+        )
+    if effective_finish_at is not None:
+        if latest_received_at is not None and effective_finish_at < latest_received_at:
             raise ValueError("finish_at must not precede the last captured receipt")
-        bars.extend(state.advance(finish_at, available_at=finish_at))
+        bars.extend(state.advance(effective_finish_at, available_at=effective_finish_at))
     return ReplayResult(
         state=state,
         input_count=input_count,

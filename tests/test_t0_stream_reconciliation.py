@@ -11,12 +11,14 @@ from t0_trading.capture import MAX_STREAM_BATCH_MESSAGES, SSI_STREAM_RAW_PREFIX
 from t0_trading.capture.reader import (
     StreamBatch,
     StreamCaptureReadError,
+    StreamGap,
     StreamSessionReader,
     stream_manifest_uris,
 )
 from t0_trading.configuration import load_configuration
 from t0_trading.identity import canonical_json, sha256
 from t0_trading.market.reconciliation import (
+    MarketDayCertification,
     certify_market_day,
     reconcile_session,
     reconcile_trade_date,
@@ -585,6 +587,32 @@ def test_market_day_certification_preserves_evidence_but_rejects_partial_capture
         trade_date=TRADE_DATE,
     )
     assert certification.evidence_sha256 == reordered.evidence_sha256
+
+
+def test_failed_reconciliation_preserves_observed_gaps_without_authorizing_capture() -> None:
+    certification = MarketDayCertification(
+        trade_date=TRADE_DATE,
+        configuration_version="market-v1",
+        configuration_sha256="a" * 64,
+        status="failed",
+        failure_reason="reconciliation_failed",
+        manifest_count=2,
+        full_window_session_count=0,
+        eligible_session_count=2,
+        selected_stream_session_id=None,
+        selected_stream_session_ids=(),
+        gaps=(
+            StreamGap(
+                started_at=datetime(2026, 9, 4, 2, 15, 25, tzinfo=UTC),
+                ended_at=datetime(2026, 9, 4, 2, 15, 40, tzinfo=UTC),
+            ),
+        ),
+        evidence_sha256="b" * 64,
+    )
+
+    assert certification.gaps[0].duration_milliseconds == 15_000
+    with pytest.raises(ValueError, match="reconciliation failed"):
+        select_feature_capture((), certification)
 
 
 def test_market_day_certification_ignores_an_attempt_without_a_heartbeat() -> None:
