@@ -49,7 +49,12 @@ from t0_trading.market.reconciliation import (
 )
 from t0_trading.outcomes import OutcomeLabel, build_outcome_audit, label_outcomes
 from t0_trading.provider import authenticated
-from t0_trading.strategy import evaluate_scores, score_features
+from t0_trading.strategy import (
+    StrategyScore,
+    evaluate_scores,
+    evaluate_walk_forward,
+    score_features,
+)
 from t0_trading.trading_dates import TradingDateError, require_observed_trade_date
 
 MARKET_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
@@ -152,6 +157,25 @@ def _replay_outcome_session(
     return reader, configuration, snapshots, labels
 
 
+def _replay_strategy_session(
+    manifest_uri: str,
+    region: str,
+    config: Path,
+) -> tuple[
+    StreamSessionReader,
+    TradingConfiguration,
+    tuple[StrategyScore, ...],
+    tuple[OutcomeLabel, ...],
+]:
+    reader, configuration, snapshots, labels = _replay_outcome_session(manifest_uri, region, config)
+    scores = score_features(
+        snapshots,
+        configuration.resolve(reader.trade_date),
+        configuration.resolve_strategies(reader.trade_date),
+    )
+    return reader, configuration, scores, labels
+
+
 def _stream_day_readers(
     trade_date: date,
     landing_uri: str,
@@ -189,6 +213,7 @@ def check_config(
         version = configuration.resolve(selected_date)
         outcomes = configuration.resolve_outcomes(selected_date)
         strategies = configuration.resolve_strategies(selected_date)
+        strategy_evaluation = configuration.resolve_strategy_evaluation(selected_date)
     except TradingConfigurationError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error
@@ -201,6 +226,8 @@ def check_config(
                 "outcome_version_sha256": outcomes.sha256,
                 "strategy_version": strategies.version,
                 "strategy_version_sha256": strategies.sha256,
+                "strategy_evaluation_version": strategy_evaluation.version,
+                "strategy_evaluation_version_sha256": strategy_evaluation.sha256,
                 "version": version.version,
                 "version_sha256": version.sha256,
             },
@@ -524,16 +551,11 @@ def audit_strategies_command(
 ) -> None:
     """Replay threshold-free strategy scores against gross conditional outcomes."""
     try:
-        reader, configuration, snapshots, labels = _replay_outcome_session(
+        reader, configuration, scores, labels = _replay_strategy_session(
             manifest_uri, region, config
         )
         strategy_policy = configuration.resolve_strategies(reader.trade_date)
         outcome_policy = configuration.resolve_outcomes(reader.trade_date)
-        scores = score_features(
-            snapshots,
-            configuration.resolve(reader.trade_date),
-            strategy_policy,
-        )
         report = evaluate_scores(
             scores,
             labels,
@@ -546,6 +568,50 @@ def audit_strategies_command(
         raise typer.Exit(code=1) from error
     except (CaptureStoreUnavailable, ClientError) as error:
         typer.echo(f"SSI strategy audit failed: {_safe_error(error)}", err=True)
+        raise typer.Exit(code=1) from None
+    _emit_model(report, output)
+
+
+def audit_walk_forward_command(
+    manifest_uri: Annotated[
+        list[str],
+        typer.Option(help="Terminal SSI Stream manifest S3 URI; repeat for each session."),
+    ],
+    region: Annotated[str, typer.Option(help="AWS region containing the landing bucket.")] = (
+        "ap-southeast-1"
+    ),
+    config: Annotated[Path, typer.Option(help="Versioned non-secret trading YAML.")] = (
+        DEFAULT_TRADING_CONFIG
+    ),
+    output: Annotated[
+        Path | None,
+        typer.Option(help="Optional local JSON path; stdout is always emitted."),
+    ] = None,
+) -> None:
+    """Evaluate training-derived score buckets on purged future session folds."""
+    try:
+        sessions: dict[date, tuple[tuple[StrategyScore, ...], tuple[OutcomeLabel, ...]]] = {}
+        configuration: TradingConfiguration | None = None
+        for uri in manifest_uri:
+            reader, loaded, scores, labels = _replay_strategy_session(uri, region, config)
+            if reader.trade_date in sessions:
+                raise ValueError("walk-forward manifests must have unique trade dates")
+            configuration = loaded
+            sessions[reader.trade_date] = (scores, labels)
+        if configuration is None:
+            raise ValueError("walk-forward evaluation requires manifests")
+        first_date = min(sessions)
+        report = evaluate_walk_forward(
+            sessions,
+            configuration.resolve_strategies(first_date),
+            configuration.resolve_outcomes(first_date),
+            configuration.resolve_strategy_evaluation(first_date),
+        )
+    except (StreamCaptureReadError, TradingConfigurationError, ValueError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+    except (CaptureStoreUnavailable, ClientError) as error:
+        typer.echo(f"SSI walk-forward audit failed: {_safe_error(error)}", err=True)
         raise typer.Exit(code=1) from None
     _emit_model(report, output)
 
@@ -660,5 +726,6 @@ app.command("reconcile-stream")(reconcile_stream_command)
 app.command("audit-features")(audit_features_command)
 app.command("audit-outcomes")(audit_outcomes_command)
 app.command("audit-strategies")(audit_strategies_command)
+app.command("audit-walk-forward")(audit_walk_forward_command)
 app.command("validate-stream-day")(validate_stream_day_command)
 app.command("certify-stream-day")(certify_stream_day_command)

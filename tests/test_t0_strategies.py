@@ -8,7 +8,7 @@ from t0_trading.features import FeatureSnapshot, WindowFeatures
 from t0_trading.market.session import MarketSession
 from t0_trading.numeric import basis_points
 from t0_trading.outcomes import OutcomeLabel
-from t0_trading.strategy import evaluate_scores, score_features
+from t0_trading.strategy import evaluate_scores, evaluate_walk_forward, score_features
 
 CONFIGURATION = Path("t0-trading/config/trading.yaml")
 TRADE_DATE = date(2026, 9, 4)
@@ -49,8 +49,13 @@ def _window(
     )
 
 
-def _snapshot(symbol: str) -> FeatureSnapshot:
+def _snapshot(
+    symbol: str,
+    *,
+    trade_date: date = TRADE_DATE,
+) -> FeatureSnapshot:
     configuration, _, _ = _policies()
+    decision_at = datetime(trade_date.year, trade_date.month, trade_date.day, 2, 30, tzinfo=UTC)
     is_vic = symbol == "VIC"
     if is_vic:
         windows = (
@@ -105,8 +110,8 @@ def _snapshot(symbol: str) -> FeatureSnapshot:
         configuration_version=configuration.version,
         configuration_sha256=configuration.sha256,
         symbol=symbol,
-        trade_date=TRADE_DATE,
-        decision_at=DECISION_AT,
+        trade_date=trade_date,
+        decision_at=decision_at,
         market_session=MarketSession.CONTINUOUS_AM,
         stream_session_id="session-1",
         last_receive_sequence=10,
@@ -144,17 +149,17 @@ def _labels(snapshots: tuple[FeatureSnapshot, ...]) -> tuple[OutcomeLabel, ...]:
                         feature_snapshot_sha256=snapshot.sha256,
                         stream_session_id="session-1",
                         symbol=snapshot.symbol,
-                        trade_date=TRADE_DATE,
-                        decision_at=DECISION_AT,
+                        trade_date=snapshot.trade_date,
+                        decision_at=snapshot.decision_at,
                         action=action,
                         horizon_seconds=horizon,
                         order_quantity=outcome_policy.order_quantity,
-                        entry_at=DECISION_AT + timedelta(milliseconds=500),
-                        horizon_at=DECISION_AT + timedelta(seconds=horizon),
-                        entry_quote_received_at=DECISION_AT,
+                        entry_at=snapshot.decision_at + timedelta(milliseconds=500),
+                        horizon_at=snapshot.decision_at + timedelta(seconds=horizon),
+                        entry_quote_received_at=snapshot.decision_at,
                         entry_receive_sequence=10,
                         entry_vwap=entry,
-                        horizon_quote_received_at=DECISION_AT + timedelta(seconds=horizon),
+                        horizon_quote_received_at=snapshot.decision_at + timedelta(seconds=horizon),
                         horizon_receive_sequence=11,
                         horizon_vwap=exit_price,
                         gross_return_bps=basis_points(movement, entry),
@@ -274,4 +279,82 @@ def test_strategy_evaluation_fails_closed_on_duplicate_or_wrong_policy_lineage()
             strategy_policy,
             outcome_policy,
             trade_date=TRADE_DATE,
+        )
+
+
+def test_walk_forward_uses_training_quantiles_and_explicit_purge_sessions() -> None:
+    configuration = load_configuration(CONFIGURATION)
+    strategy_policy = configuration.resolve_strategies(TRADE_DATE)
+    outcome_policy = configuration.resolve_outcomes(TRADE_DATE)
+    evaluation_policy = configuration.resolve_strategy_evaluation(TRADE_DATE).model_copy(
+        update={
+            "score_bucket_count": 2,
+            "minimum_training_sessions": 2,
+            "validation_sessions": 1,
+            "purge_sessions": 1,
+        }
+    )
+    dates = tuple(date(2026, 9, day) for day in range(1, 7))
+    sessions = {}
+    for index, trade_date in enumerate(dates, start=1):
+        snapshots = (
+            _snapshot("VIC", trade_date=trade_date),
+            _snapshot("VHM", trade_date=trade_date),
+        )
+        scores = score_features(snapshots, configuration.resolve(trade_date), strategy_policy)
+        multiplier = Decimal(index) / 10
+        sessions[trade_date] = (
+            tuple(
+                score.model_copy(update={"signed_score": score.signed_score * multiplier})
+                for score in scores
+            ),
+            _labels(snapshots),
+        )
+
+    report = evaluate_walk_forward(
+        sessions,
+        strategy_policy,
+        outcome_policy,
+        evaluation_policy,
+    )
+    repeated = evaluate_walk_forward(
+        dict(reversed(tuple(sessions.items()))),
+        strategy_policy,
+        outcome_policy,
+        evaluation_policy,
+    )
+
+    assert report.sha256 == repeated.sha256
+    assert len(report.folds) == 3
+    assert report.pending_dates == ()
+    first = report.folds[0]
+    assert first.training_dates == dates[:2]
+    assert first.purged_dates == (dates[2],)
+    assert first.validation_dates == (dates[3],)
+    assert len(first.evaluations) == 36
+    first_momentum_buy_bucket = next(
+        item
+        for item in first.evaluations
+        if item.strategy == "momentum"
+        and item.direction == "BUY"
+        and item.horizon_seconds == 30
+        and item.bucket == 1
+    )
+    assert first_momentum_buy_bucket.upper_strength_inclusive == Decimal("0.025")
+    assert all(item.score_count == 0 for item in first.evaluations if item.bucket == 1)
+    assert all(
+        item.score_count == 1
+        and item.eligible_outcome_count == 1
+        and item.positive_outcome_rate == Decimal("1.000000")
+        and item.average_gross_return_bps == Decimal("100.0000")
+        for item in first.evaluations
+        if item.bucket == 2
+    )
+
+    with pytest.raises(ValueError, match="requires at least 4 sessions"):
+        evaluate_walk_forward(
+            {trade_date: sessions[trade_date] for trade_date in dates[:3]},
+            strategy_policy,
+            outcome_policy,
+            evaluation_policy,
         )

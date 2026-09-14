@@ -39,8 +39,15 @@ def test_trading_configuration_is_strict_effective_dated_and_stable() -> None:
     assert strategies.order_flow_window_seconds == 30
     assert strategies.relative_value_window_seconds == 300
     assert strategies.relative_value_symbols == ("VIC", "VHM")
+    evaluation = configuration.resolve_strategy_evaluation(date(2026, 9, 5))
+    assert evaluation.version == "purged-walk-forward-v1"
+    assert evaluation.score_bucket_count == 5
+    assert evaluation.minimum_training_sessions == 20
+    assert evaluation.validation_sessions == 5
+    assert evaluation.purge_sessions == 1
     assert len(outcomes.sha256) == 64
     assert len(strategies.sha256) == 64
+    assert len(evaluation.sha256) == 64
     assert len(configuration.sha256) == 64
     assert len(version.sha256) == 64
     assert version.sha256 != configuration.sha256
@@ -98,6 +105,31 @@ def test_strategy_assumptions_have_an_independent_identity() -> None:
     )
 
 
+def test_strategy_evaluation_assumptions_have_an_independent_identity() -> None:
+    original = load_configuration(CONFIGURATION)
+    changed = parse_configuration(
+        CONFIGURATION.read_text(encoding="utf-8").replace(
+            "score_bucket_count: 5",
+            "score_bucket_count: 10",
+        )
+    )
+    effective_date = date(2026, 9, 5)
+
+    assert changed.resolve(effective_date).sha256 == original.resolve(effective_date).sha256
+    assert (
+        changed.resolve_outcomes(effective_date).sha256
+        == original.resolve_outcomes(effective_date).sha256
+    )
+    assert (
+        changed.resolve_strategies(effective_date).sha256
+        == original.resolve_strategies(effective_date).sha256
+    )
+    assert (
+        changed.resolve_strategy_evaluation(effective_date).sha256
+        != original.resolve_strategy_evaluation(effective_date).sha256
+    )
+
+
 @pytest.mark.parametrize(
     ("original", "invalid"),
     (
@@ -145,6 +177,9 @@ def test_trading_configuration_rejects_overlapping_versions(tmp_path: Path) -> N
         "versions": versions,
         "outcomes": load_configuration(CONFIGURATION).model_dump(mode="json")["outcomes"],
         "strategies": load_configuration(CONFIGURATION).model_dump(mode="json")["strategies"],
+        "strategy_evaluations": load_configuration(CONFIGURATION).model_dump(mode="json")[
+            "strategy_evaluations"
+        ],
     }
     path = tmp_path / "trading.yaml"
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -162,6 +197,8 @@ def test_trading_configuration_fails_closed_for_unconfigured_date() -> None:
         configuration.resolve_outcomes(date(2026, 8, 26))
     with pytest.raises(TradingConfigurationError, match="found 0"):
         configuration.resolve_strategies(date(2026, 8, 26))
+    with pytest.raises(TradingConfigurationError, match="found 0"):
+        configuration.resolve_strategy_evaluation(date(2026, 8, 26))
 
 
 @pytest.mark.parametrize(
@@ -196,6 +233,30 @@ def test_trading_configuration_rejects_invalid_outcome_policy(
     ),
 )
 def test_trading_configuration_rejects_invalid_strategy_policy(
+    tmp_path: Path,
+    original: str,
+    invalid: str,
+) -> None:
+    path = tmp_path / "trading.yaml"
+    path.write_text(
+        CONFIGURATION.read_text(encoding="utf-8").replace(original, invalid),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TradingConfigurationError, match="invalid trading configuration"):
+        load_configuration(path)
+
+
+@pytest.mark.parametrize(
+    ("original", "invalid"),
+    (
+        ("score_bucket_count: 5", "score_bucket_count: 1"),
+        ("minimum_training_sessions: 20", "minimum_training_sessions: 1"),
+        ("validation_sessions: 5", "validation_sessions: 0"),
+        ("purge_sessions: 1", "purge_sessions: 0"),
+    ),
+)
+def test_trading_configuration_rejects_invalid_strategy_evaluation_policy(
     tmp_path: Path,
     original: str,
     invalid: str,

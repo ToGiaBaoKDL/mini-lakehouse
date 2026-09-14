@@ -203,6 +203,28 @@ AWS_PROFILE=tgbao-dev uv run --project t0-trading t0-trading audit-strategies \
   --output /tmp/t0-strategy-audit.json
 ```
 
+The separate `strategy_evaluations` policy defines five score-strength buckets, 20 minimum
+training sessions, five-session validation blocks, and a one-session purge gap. Keeping this policy
+outside the strategy definition means changing the sampling design cannot change an existing
+score's identity. Each expanding fold learns nearest-rank bucket boundaries from absolute directed
+scores on training dates only, excludes the immediately preceding purge date, and evaluates complete
+future validation blocks. Quantiles are fitted separately per strategy and BUY/SELL direction so one
+side cannot conceal the other. Tied boundaries remain visible as empty buckets instead of being
+adjusted using validation data. Incomplete trailing blocks are reported as pending rather than
+silently mixed into a smaller fold.
+
+```bash
+AWS_PROFILE=tgbao-dev uv run --project t0-trading t0-trading audit-walk-forward \
+  --manifest-uri s3://<landing-bucket>/stream/ssi_fastconnect_stream/raw/trade_date=<date-1>/session=<uuid>/manifest.json \
+  --manifest-uri s3://<landing-bucket>/stream/ssi_fastconnect_stream/raw/trade_date=<date-2>/session=<uuid>/manifest.json \
+  --output /tmp/t0-walk-forward-audit.json
+```
+
+The command requires at least 26 certified sessions under the initial policy. Reports contain only
+out-of-sample gross markouts per fold, strategy, horizon, and bucket. They carry feature, strategy,
+outcome, and evaluation fingerprints and contain no runtime timestamp, so identical immutable inputs
+produce the same report hash.
+
 dbt exposes `analytics_trading.fct_trading_backtest_observations` as a safe-by-default view. It
 inner joins the current passed certification, eligible snapshots, their normalized windows, and
 eligible outcomes using their existing immutable lineage. The view does not rederive market state,

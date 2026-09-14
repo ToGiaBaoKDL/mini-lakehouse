@@ -96,21 +96,21 @@ class StrategyEvaluationReport(BaseModel):
         return self
 
 
-def _average(values: Sequence[Decimal]) -> Decimal | None:
+def average_gross_return(values: Sequence[Decimal]) -> Decimal | None:
     if not values:
         return None
     return ratio(sum(values, Decimal(0)), len(values), quantum=BPS_QUANTUM)
 
 
-def evaluate_scores(
+def match_directed_outcomes(
     scores: Sequence[StrategyScore],
     labels: Sequence[OutcomeLabel],
     strategy_policy: StrategyVersion,
     outcome_policy: OutcomeVersion,
     *,
     trade_date: date,
-) -> StrategyEvaluationReport:
-    """Match each directed score to its exact conditional outcome matrix."""
+) -> dict[int, tuple[tuple[StrategyScore, OutcomeLabel], ...]]:
+    """Validate lineage and match directed scores to every configured horizon."""
     if not strategy_policy.contains(trade_date) or not outcome_policy.contains(trade_date):
         raise ValueError("evaluation policies are not effective for the trade date")
     score_keys = {(score.strategy, score.feature_snapshot_sha256) for score in scores}
@@ -144,35 +144,60 @@ def evaluate_scores(
         raise ValueError("outcome label policy lineage is inconsistent")
     labels_by_key = dict(zip(label_keys, labels, strict=True))
 
+    matched_by_horizon: dict[int, tuple[tuple[StrategyScore, OutcomeLabel], ...]] = {}
+    directed = tuple(score for score in scores if score.direction is not None)
+    for horizon in outcome_policy.horizons_seconds:
+        matched: list[tuple[StrategyScore, OutcomeLabel]] = []
+        for score in directed:
+            direction = score.direction
+            if direction is None:
+                raise ValueError("directed strategy score has no direction")
+            key = (
+                outcome_policy.sha256,
+                score.feature_snapshot_sha256,
+                direction,
+                horizon,
+            )
+            label = labels_by_key.get(key)
+            if label is None:
+                raise ValueError("outcomes do not cover every directed strategy score")
+            if (
+                label.symbol != score.symbol
+                or label.decision_at != score.decision_at
+                or label.feature_version != score.feature_version
+                or label.feature_configuration_sha256 != score.feature_configuration_sha256
+            ):
+                raise ValueError("strategy outcome lineage is inconsistent")
+            matched.append((score, label))
+        matched_by_horizon[horizon] = tuple(matched)
+    return matched_by_horizon
+
+
+def evaluate_scores(
+    scores: Sequence[StrategyScore],
+    labels: Sequence[OutcomeLabel],
+    strategy_policy: StrategyVersion,
+    outcome_policy: OutcomeVersion,
+    *,
+    trade_date: date,
+) -> StrategyEvaluationReport:
+    """Summarize exact conditional outcomes for one session of strategy scores."""
+    matched_by_horizon = match_directed_outcomes(
+        scores,
+        labels,
+        strategy_policy,
+        outcome_policy,
+        trade_date=trade_date,
+    )
+
     evaluations: list[StrategyHorizonEvaluation] = []
     for strategy in STRATEGY_NAMES:
         selected_scores = tuple(score for score in scores if score.strategy == strategy)
-        directed = tuple(score for score in selected_scores if score.direction is not None)
+        directed_count = sum(score.direction is not None for score in selected_scores)
         for horizon in outcome_policy.horizons_seconds:
-            matched: list[OutcomeLabel] = []
-            for score in directed:
-                direction = score.direction
-                if direction is None:
-                    raise ValueError("directed strategy score has no direction")
-                key = (
-                    outcome_policy.sha256,
-                    score.feature_snapshot_sha256,
-                    direction,
-                    horizon,
-                )
-                label = labels_by_key.get(key)
-                if label is None:
-                    raise ValueError("outcomes do not cover every directed strategy score")
-                if (
-                    label.outcome_version != outcome_policy.version
-                    or label.trade_date != trade_date
-                    or label.symbol != score.symbol
-                    or label.decision_at != score.decision_at
-                    or label.feature_version != score.feature_version
-                    or label.feature_configuration_sha256 != score.feature_configuration_sha256
-                ):
-                    raise ValueError("strategy outcome lineage is inconsistent")
-                matched.append(label)
+            matched = tuple(
+                label for score, label in matched_by_horizon[horizon] if score.strategy == strategy
+            )
             eligible_returns = tuple(
                 label.gross_return_bps
                 for label in matched
@@ -184,13 +209,13 @@ def evaluate_scores(
                     strategy=strategy,
                     horizon_seconds=horizon,
                     score_count=len(selected_scores),
-                    directed_score_count=len(directed),
+                    directed_score_count=directed_count,
                     eligible_outcome_count=len(eligible_returns),
                     positive_outcome_count=positive_count,
-                    directed_rate=rate(len(directed), len(selected_scores)),
-                    outcome_coverage_rate=rate(len(eligible_returns), len(directed)),
+                    directed_rate=rate(directed_count, len(selected_scores)),
+                    outcome_coverage_rate=rate(len(eligible_returns), directed_count),
                     positive_outcome_rate=rate(positive_count, len(eligible_returns)),
-                    average_gross_return_bps=_average(eligible_returns),
+                    average_gross_return_bps=average_gross_return(eligible_returns),
                 )
             )
 

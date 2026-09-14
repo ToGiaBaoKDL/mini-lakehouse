@@ -15,6 +15,14 @@ strategies:
     order_flow_window_seconds: 30
     relative_value_window_seconds: 300
     relative_value_symbols: [VIC, VHM]
+strategy_evaluations:
+  - version: purged-walk-forward-v1
+    effective_from: 2026-08-27
+    effective_to: null
+    score_bucket_count: 5
+    minimum_training_sessions: 20
+    validation_sessions: 5
+    purge_sessions: 1
 versions:
   - version: market-state-v1
     effective_from: 2026-08-27

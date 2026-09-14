@@ -236,6 +236,15 @@ class StrategyVersion(_EffectiveVersion):
         return self
 
 
+class StrategyEvaluationVersion(_EffectiveVersion):
+    """Effective sampling policy for out-of-sample strategy evaluation."""
+
+    score_bucket_count: int = Field(ge=2, le=20)
+    minimum_training_sessions: int = Field(ge=2)
+    validation_sessions: int = Field(ge=1)
+    purge_sessions: int = Field(ge=1)
+
+
 class TradingVersion(_EffectiveVersion):
     market: MarketConfiguration
     data_quality: DataQualityConfiguration
@@ -247,12 +256,14 @@ class TradingConfiguration(_StrictModel):
     versions: tuple[TradingVersion, ...]
     outcomes: tuple[OutcomeVersion, ...]
     strategies: tuple[StrategyVersion, ...]
+    strategy_evaluations: tuple[StrategyEvaluationVersion, ...]
 
     @model_validator(mode="after")
     def validate_versions(self) -> TradingConfiguration:
         _validate_effective_versions(self.versions, "configuration")
         _validate_effective_versions(self.outcomes, "outcome")
         _validate_effective_versions(self.strategies, "strategy")
+        _validate_effective_versions(self.strategy_evaluations, "strategy evaluation")
         return self
 
     def resolve(self, value: date) -> TradingVersion:
@@ -263,6 +274,9 @@ class TradingConfiguration(_StrictModel):
 
     def resolve_strategies(self, value: date) -> StrategyVersion:
         return _resolve_effective(self.strategies, value, "strategy")
+
+    def resolve_strategy_evaluation(self, value: date) -> StrategyEvaluationVersion:
+        return _resolve_effective(self.strategy_evaluations, value, "strategy evaluation")
 
     def canonical_bytes(self) -> bytes:
         return canonical_json(self.model_dump(mode="json"))
