@@ -20,6 +20,7 @@ from t0_trading.market.reconciliation import (
     certify_market_day,
     reconcile_session,
     reconcile_trade_date,
+    select_feature_capture,
 )
 from t0_trading.market.session import (
     MarketSession,
@@ -192,6 +193,8 @@ def _reader(
     disconnected_at: str = "2026-09-04T09:00:00+00:00",
     disconnect_kind: str = "shutdown",
     error_type: str | None = None,
+    session_id: str = SESSION_ID,
+    last_heartbeat_at: str | None = None,
 ) -> StreamSessionReader:
     rows = [
         _quote_row(
@@ -278,6 +281,8 @@ def _reader(
         disconnected_at=disconnected_at,
         disconnect_kind=disconnect_kind,
         error_type=error_type,
+        session_id=session_id,
+        last_heartbeat_at=last_heartbeat_at,
     )
 
 
@@ -291,19 +296,25 @@ def _reader_from_rows(
     disconnected_at: str = "2026-09-04T09:00:00+00:00",
     disconnect_kind: str = "shutdown",
     error_type: str | None = None,
+    session_id: str = SESSION_ID,
+    last_heartbeat_at: str | None = None,
 ) -> StreamSessionReader:
+    rows = [{**row, "stream_session_id": session_id} for row in rows]
     body = gzip.compress(
         b"".join(canonical_json(row) + b"\n" for row in rows),
         mtime=0,
     )
     digest = sha256(body)
     message_count = len(rows)
-    object_key = f"{SESSION_PREFIX}/batches/000000000001-{message_count:012d}-{digest}.json.gz"
+    session_prefix = (
+        f"{SSI_STREAM_RAW_PREFIX}/trade_date={TRADE_DATE.isoformat()}/session={session_id}"
+    )
+    object_key = f"{session_prefix}/batches/000000000001-{message_count:012d}-{digest}.json.gz"
     batch = {
         "batch_id": sha256(
             canonical_json(
                 {
-                    "stream_session_id": SESSION_ID,
+                    "stream_session_id": session_id,
                     "first_receive_sequence": 1,
                     "last_receive_sequence": message_count,
                     "object_sha256": digest,
@@ -317,10 +328,10 @@ def _reader_from_rows(
         "object_sha256": digest,
         "published_at": batch_published_at,
     }
-    manifest_key = f"{SESSION_PREFIX}/manifest.json"
+    manifest_key = f"{session_prefix}/manifest.json"
     manifest = {
         "schema_version": 1,
-        "stream_session_id": SESSION_ID,
+        "stream_session_id": session_id,
         "symbols": list(symbols),
         "connected_at": connected_at,
         "disconnected_at": disconnected_at,
@@ -329,7 +340,7 @@ def _reader_from_rows(
         "first_receive_sequence": 1,
         "last_receive_sequence": message_count,
         "heartbeat_count": 960,
-        "last_heartbeat_at": "2026-09-04T08:59:59+00:00",
+        "last_heartbeat_at": last_heartbeat_at or disconnected_at,
         "last_business_message_at": rows[-1]["received_at"],
         "batch_count": 1,
         "batches": [batch],
@@ -427,7 +438,7 @@ def test_trade_date_reconciliation_requires_one_market_window_session() -> None:
     assert reconcile_trade_date((reader,), version, trade_date=TRADE_DATE).status == "passed"
     with pytest.raises(ValueError, match="no terminal"):
         reconcile_trade_date((), version, trade_date=TRADE_DATE)
-    with pytest.raises(ValueError, match="found 2"):
+    with pytest.raises(ValueError, match="no unambiguous"):
         reconcile_trade_date((reader, reader), version, trade_date=TRADE_DATE)
 
 
@@ -439,9 +450,114 @@ def test_trade_date_reconciliation_ignores_partial_recovery_sessions() -> None:
     report = reconcile_trade_date((full, partial), version, trade_date=TRADE_DATE)
 
     assert report.status == "passed"
-    assert report.stream_session_id == full.manifest.stream_session_id
-    assert report.disconnect_kind == "capture_error"
-    assert report.error_type == "WebSocketError"
+    assert report.stream_session_ids == (full.manifest.stream_session_id,)
+
+
+def test_trade_date_reconciliation_certifies_ordered_segments_and_localizes_gap() -> None:
+    version = load_configuration(Path("t0-trading/config/trading.yaml")).resolve(TRADE_DATE)
+    first_rows = [
+        _quote_row(
+            1,
+            symbol="VIC",
+            trading_time="2026/09/04 09:15:01",
+            received_at=datetime(2026, 9, 4, 2, 15, 2, tzinfo=UTC),
+        ),
+        _quote_row(
+            2,
+            symbol="VHM",
+            trading_time="2026/09/04 09:15:02",
+            received_at=datetime(2026, 9, 4, 2, 15, 3, tzinfo=UTC),
+        ),
+        _trade_row(
+            3,
+            symbol="VIC",
+            trading_time="2026/09/04 09:15:05",
+            price=100,
+            quantity=10,
+            side="B",
+            total_volume=10,
+            received_at=datetime(2026, 9, 4, 2, 15, 6, tzinfo=UTC),
+        ),
+        _trade_row(
+            4,
+            symbol="VHM",
+            trading_time="2026/09/04 09:15:10",
+            price=200,
+            quantity=5,
+            side="B",
+            total_volume=5,
+            received_at=datetime(2026, 9, 4, 2, 15, 11, tzinfo=UTC),
+        ),
+        _interval_row(
+            5,
+            symbol="VHM",
+            observed_time="2026/09/04 09:15:20",
+            open_price=200,
+            high=200,
+            low=200,
+            close=200,
+            volume=5,
+            received_at=datetime(2026, 9, 4, 2, 15, 21, tzinfo=UTC),
+        ),
+    ]
+    second_rows = [
+        _trade_row(
+            1,
+            symbol="VIC",
+            trading_time="2026/09/04 09:15:40",
+            price=102,
+            quantity=20,
+            side="S",
+            total_volume=30,
+            received_at=datetime(2026, 9, 4, 2, 15, 41, tzinfo=UTC),
+        ),
+        _interval_row(
+            2,
+            observed_time="2026/09/04 09:15:57",
+            close=102,
+            high=102,
+            volume=30,
+            received_at=datetime(2026, 9, 4, 2, 15, 58, tzinfo=UTC),
+        ),
+    ]
+    first = _reader_from_rows(
+        first_rows,
+        session_id="39daeb94-73ad-4f3f-a40c-7f045697dce2",
+        connected_at="2026-09-04T01:00:00+00:00",
+        disconnected_at="2026-09-04T02:15:30+00:00",
+        disconnect_kind="stale",
+        error_type="HeartbeatTimeout",
+        last_heartbeat_at="2026-09-04T02:15:25+00:00",
+    )
+    second = _reader_from_rows(
+        second_rows,
+        session_id="82486490-3782-4ea0-b58f-344724fe0310",
+        connected_at="2026-09-04T02:15:40+00:00",
+        disconnected_at="2026-09-04T09:00:00+00:00",
+    )
+
+    certification, report = certify_market_day(
+        (second, first),
+        version,
+        trade_date=TRADE_DATE,
+    )
+
+    assert certification.status == "passed"
+    assert certification.selected_stream_session_ids == (
+        first.manifest.stream_session_id,
+        second.manifest.stream_session_id,
+    )
+    assert certification.gaps[0].duration_milliseconds == 15_000
+    assert report is not None and report.status == "passed"
+    assert report.gap_count == 1
+    assert report.gap_interval_update_count == 2
+    selected = select_feature_capture((second, first), certification)
+    assert tuple(selected.envelopes())[-1].receive_sequence == 2
+    with pytest.raises(ValueError, match="evidence is not reproducible"):
+        select_feature_capture(
+            (second, first),
+            certification.model_copy(update={"evidence_sha256": "0" * 64}),
+        )
 
 
 def test_market_day_certification_preserves_evidence_but_rejects_partial_captures() -> None:
@@ -460,6 +576,8 @@ def test_market_day_certification_preserves_evidence_but_rejects_partial_capture
     assert certification.full_window_session_count == 0
     assert certification.eligible_session_count == 0
     assert certification.selected_stream_session_id is None
+    assert certification.selected_stream_session_ids == ()
+    assert certification.gaps == ()
     assert report is None
     reordered, _ = certify_market_day(
         tuple(reversed(fragments)),
@@ -467,6 +585,25 @@ def test_market_day_certification_preserves_evidence_but_rejects_partial_capture
         trade_date=TRADE_DATE,
     )
     assert certification.evidence_sha256 == reordered.evidence_sha256
+
+
+def test_market_day_certification_ignores_an_attempt_without_a_heartbeat() -> None:
+    version = load_configuration(Path("t0-trading/config/trading.yaml")).resolve(TRADE_DATE)
+    reader = _reader()
+    reader.manifest = reader.manifest.model_copy(
+        update={
+            "disconnect_kind": "stale",
+            "heartbeat_count": 0,
+            "last_heartbeat_at": None,
+            "error_type": "MissingHeartbeat",
+        }
+    )
+
+    certification, report = certify_market_day((reader,), version, trade_date=TRADE_DATE)
+
+    assert certification.status == "failed"
+    assert certification.failure_reason == "no_full_session"
+    assert report is None
 
 
 def test_market_day_certification_rejects_a_full_capture_with_the_wrong_scope() -> None:
@@ -538,6 +675,7 @@ def test_market_day_certification_withholds_a_session_that_fails_reconciliation(
     assert certification.failure_reason == "reconciliation_failed"
     assert certification.eligible_session_count == 1
     assert certification.selected_stream_session_id is None
+    assert certification.selected_stream_session_ids == ()
 
 
 def test_reconciliation_accepts_a_provider_interval_that_precedes_the_last_trade() -> None:

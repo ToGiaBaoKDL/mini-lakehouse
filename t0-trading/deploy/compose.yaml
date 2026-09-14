@@ -1,4 +1,4 @@
-# SSI stream capture runtime. systemd owns its weekday start/stop schedule.
+# Reconnect-safe SSI stream capture runtime. systemd owns its weekday window.
 
 services:
   stream-capture:

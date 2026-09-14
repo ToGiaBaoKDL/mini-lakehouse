@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
+from t0_trading.capture.reader import StreamGap
 from t0_trading.configuration import TradingVersion
 from t0_trading.features.calculators import (
     BookValues,
@@ -119,6 +120,13 @@ class FeatureEngine:
         """Apply one captured callback without emitting an implicit decision."""
         if self._last_decision_at is not None and envelope.received_at < self._last_decision_at:
             raise ValueError("envelope was received before the last emitted decision")
+        if (
+            self._last_stream_session_id is not None
+            and envelope.stream_session_id != self._last_stream_session_id
+        ):
+            self._symbols = {
+                symbol: _SymbolFeatures() for symbol in self.configuration.market.symbols
+            }
         update = self.market.apply(envelope)
         if update.event is not None:
             self._observe(update.event)
@@ -271,6 +279,7 @@ def replay_features(
     configuration: TradingVersion,
     *,
     trade_date: date,
+    gaps: Sequence[StreamGap] = (),
 ) -> tuple[FeatureSnapshot, ...]:
     """Replay receipt-ordered inputs through the same engine used by a live clock."""
     engine = FeatureEngine(configuration)
@@ -281,7 +290,19 @@ def replay_features(
         while pending is not None and pending.received_at <= decision_at:
             engine.apply(pending)
             pending = next(iterator, None)
-        snapshots.extend(engine.snapshots(decision_at))
+        current = engine.snapshots(decision_at)
+        gap_affected = any(
+            gap.started_at
+            <= decision_at
+            < gap.ended_at + timedelta(seconds=configuration.features.warmup_seconds)
+            for gap in gaps
+        )
+        snapshots.extend(
+            snapshot.model_copy(update={"reasons": (*snapshot.reasons, "CAPTURE_GAP")})
+            if gap_affected and "CAPTURE_GAP" not in snapshot.reasons
+            else snapshot
+            for snapshot in current
+        )
     # Exhaust lazy readers so their terminal checksum and sequence validation runs even though
     # features intentionally stop before the closing auction.
     deque(iterator, maxlen=0)

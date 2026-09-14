@@ -3,9 +3,12 @@ import json
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 from zoneinfo import ZoneInfo
 
 import pytest
+from t0_trading.capture.reader import StreamDayReader, StreamGap
 from t0_trading.configuration import load_configuration
 from t0_trading.features import FeatureSnapshot
 from t0_trading.market import StreamEnvelope
@@ -20,6 +23,20 @@ MARKET_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 def _configuration():
     configuration = load_configuration(CONFIGURATION)
     return configuration.resolve(TRADE_DATE), configuration.resolve_outcomes(TRADE_DATE)
+
+
+def _capture(message_count: int) -> StreamDayReader:
+    return cast(
+        StreamDayReader,
+        SimpleNamespace(
+            trade_date=TRADE_DATE,
+            manifest_uris=("s3://landing/stream/manifest.json",),
+            stream_session_ids=("session-1",),
+            evidence_sha256="a" * 64,
+            message_count=message_count,
+            session_message_counts={"session-1": message_count},
+        ),
+    )
 
 
 def _received(hour: int, minute: int, second: int, microsecond: int = 0) -> datetime:
@@ -147,6 +164,27 @@ def test_future_quote_cannot_change_an_earlier_outcome() -> None:
     assert tuple(label for label in base if label.horizon_seconds == 30) == tuple(
         label for label in repeated if label.horizon_seconds == 30
     )
+
+
+def test_outcome_crossing_a_capture_gap_is_withheld() -> None:
+    configuration, configured_policy = _configuration()
+    policy = configured_policy.model_copy(update={"horizons_seconds": (30,)})
+    snapshot = _snapshot(_received(9, 20, 0))
+    gap = StreamGap(
+        started_at=_received(9, 20, 10),
+        ended_at=_received(9, 20, 20),
+    )
+
+    labels = label_outcomes(
+        (snapshot,),
+        _base_quotes(),
+        configuration,
+        policy,
+        gaps=(gap,),
+    )
+
+    assert all(label.reasons == ("CAPTURE_GAP",) for label in labels)
+    assert all(label.gross_return_bps is None for label in labels)
 
 
 def test_latest_incomplete_book_supersedes_an_older_complete_quote() -> None:
@@ -291,20 +329,14 @@ def test_outcome_audit_reconciles_coverage_returns_and_directionality() -> None:
         labels,
         configuration,
         policy,
-        trade_date=TRADE_DATE,
-        manifest_uri="s3://landing/stream/manifest.json",
-        stream_session_id="session-1",
-        input_message_count=2,
+        capture=_capture(2),
     )
     repeated = build_outcome_audit(
         snapshots,
         labels,
         configuration,
         policy,
-        trade_date=TRADE_DATE,
-        manifest_uri="s3://landing/stream/manifest.json",
-        stream_session_id="session-1",
-        input_message_count=2,
+        capture=_capture(2),
     )
 
     assert report.model_dump_json() == repeated.model_dump_json()
@@ -349,10 +381,7 @@ def test_outcome_audit_rejects_incomplete_or_drifted_label_matrices() -> None:
             selected,
             configuration,
             policy,
-            trade_date=TRADE_DATE,
-            manifest_uri="s3://landing/stream/manifest.json",
-            stream_session_id="session-1",
-            input_message_count=2,
+            capture=_capture(2),
         )
 
     with pytest.raises(ValueError, match="every snapshot/action/horizon exactly once"):

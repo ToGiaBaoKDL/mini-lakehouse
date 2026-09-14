@@ -4,7 +4,7 @@ from datetime import date
 
 from loguru import logger
 from t0_trading.configuration import parse_configuration
-from t0_trading.market.reconciliation import certify_market_day
+from t0_trading.market.reconciliation import certify_market_day, select_feature_capture
 
 from emr_jobs.common.contracts import load_contracts
 from emr_jobs.common.iceberg import qualified_name, require_tables
@@ -89,10 +89,9 @@ def run(
                 certification.failure_reason,
             )
             return
-        feature_capture = next(
-            capture
-            for capture in captures
-            if capture.manifest.stream_session_id == certification.selected_stream_session_id
+        feature_capture = select_feature_capture(
+            captures,
+            certification,
         )
         landing_table = qualified_name(source.table_identifier("messages"))
         snapshots, feature_audit = publish_features(
@@ -101,11 +100,12 @@ def run(
             product=t0_trading,
             capture=feature_capture,
             configuration=configuration,
+            gaps=certification.gaps,
         )
         logger.info(
-            "Published {} deterministic feature snapshots for SSI Stream session {}",
+            "Published {} deterministic feature snapshots from {} SSI Stream segment(s)",
             feature_audit.snapshot_count,
-            feature_capture.manifest.stream_session_id,
+            len(feature_capture.sessions),
         )
         outcome_audit = publish_outcomes(
             spark,
@@ -115,11 +115,12 @@ def run(
             configuration=configuration,
             policy=outcome_policy,
             snapshots=snapshots,
+            gaps=certification.gaps,
         )
         logger.info(
-            "Published {} deterministic outcome labels for SSI Stream session {}",
+            "Published {} deterministic outcome labels from {} SSI Stream segment(s)",
             outcome_audit.label_count,
-            feature_capture.manifest.stream_session_id,
+            len(feature_capture.sessions),
         )
     finally:
         spark.stop()

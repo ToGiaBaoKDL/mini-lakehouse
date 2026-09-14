@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from pyspark.sql import SparkSession
-from t0_trading.capture.reader import StreamSessionReader
+from t0_trading.capture.reader import StreamDayReader, StreamGap
 from t0_trading.configuration import TradingVersion
 from t0_trading.features import (
     FeatureAuditReport,
@@ -101,31 +101,29 @@ def publish(
     *,
     landing_table: str,
     product: CuratedProductContract,
-    capture: StreamSessionReader,
+    capture: StreamDayReader,
     configuration: TradingVersion,
+    gaps: Sequence[StreamGap] = (),
 ) -> tuple[tuple[FeatureSnapshot, ...], FeatureAuditReport]:
     """Replay once, quality-gate the complete clock, then idempotently publish it."""
-    manifest = capture.manifest
     trade_date = capture.trade_date
     snapshots = replay_features(
         envelopes(spark, landing_table=landing_table, capture=capture),
         configuration,
         trade_date=trade_date,
+        gaps=gaps,
     )
     audit = build_feature_audit(
         snapshots,
         configuration,
-        trade_date=trade_date,
-        manifest_uri=capture.uri,
-        stream_session_id=manifest.stream_session_id,
-        input_message_count=manifest.message_count,
+        capture=capture,
     )
     processed_at = datetime.now(UTC)
     snapshots_contract = product.table("feature_snapshots")
     windows_contract = product.table("feature_windows")
     snapshot_rows, window_rows = _materialization_rows(
         snapshots,
-        manifest_sha256=capture.manifest_sha256,
+        manifest_sha256=capture.evidence_sha256,
         processed_at=processed_at,
     )
     snapshot_frame = spark.createDataFrame(

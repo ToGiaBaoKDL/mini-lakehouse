@@ -190,7 +190,7 @@ def test_market_data_stream_materializes_features_with_the_shared_t0_core() -> N
         encoding="utf-8"
     )
     assert "WHEN NOT MATCHED THEN INSERT *" in immutable
-    assert 'orderBy("receive_sequence")' in landing_reader
+    assert 'orderBy("received_at", "stream_session_id", "receive_sequence")' in landing_reader
     publication = features.split("def publish(", maxsplit=1)[1]
     assert publication.count("require_compatible(") == 2
     assert publication.count("insert_missing(") == 2

@@ -45,7 +45,7 @@ export T0_STREAM_DURATION_SECONDS=${T0_STREAM_DURATION_SECONDS:-86400}
 service=lakehouse-t0-stream-capture.service
 if "$script_dir/stream-window"; then
     printf '%s\n' \
-        "T0 deployment refused: rerun outside the market-data window to preserve one full session." >&2
+        "T0 deployment refused: rerun outside the market-data window to avoid a capture gap." >&2
     exit 75
 fi
 

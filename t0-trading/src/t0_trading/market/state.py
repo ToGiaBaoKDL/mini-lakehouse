@@ -160,6 +160,7 @@ class MarketState:
     def __init__(self, configuration: TradingVersion) -> None:
         self.configuration = configuration
         self._symbols = {symbol: _SymbolState() for symbol in configuration.market.symbols}
+        self._active_stream_session_id: str | None = None
         self._last_sequence: dict[str, int] = {}
         self._last_received_at: dict[str, datetime] = {}
         self._integrity_issues: set[str] = set()
@@ -191,6 +192,14 @@ class MarketState:
         return tuple(issues)
 
     def apply(self, envelope: StreamEnvelope) -> MarketUpdate:
+        if (
+            self._active_stream_session_id is not None
+            and envelope.stream_session_id != self._active_stream_session_id
+        ):
+            # A reconnect has unknown upstream history. Retain transport-integrity evidence,
+            # but never carry market state across the unobserved interval.
+            self._symbols = {symbol: _SymbolState() for symbol in self.configuration.market.symbols}
+        self._active_stream_session_id = envelope.stream_session_id
         issues = self._sequence_issues(envelope)
         if SEQUENCE_REGRESSION in issues or RECEIPT_TIME_REGRESSION in issues:
             return MarketUpdate(event=None, issues=issues)

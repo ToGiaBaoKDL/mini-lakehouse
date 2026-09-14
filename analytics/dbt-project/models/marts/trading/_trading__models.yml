@@ -81,9 +81,9 @@ models:
       - {name: configuration_sha256, description: Exact effective market and feature configuration fingerprint., data_type: varchar, data_tests: [not_null]}
       - {name: outcome_version, description: Deterministic execution and markout policy version., data_type: varchar, data_tests: [not_null]}
       - {name: outcome_configuration_sha256, description: Exact outcome policy fingerprint., data_type: varchar, data_tests: [not_null]}
-      - {name: stream_session_id, description: Sole certified source capture session., data_type: varchar, data_tests: [not_null]}
+      - {name: stream_session_id, description: Source transport segment visible at the decision instant., data_type: varchar, data_tests: [not_null]}
       - {name: evidence_sha256, description: Fingerprint of the certified manifest evidence set., data_type: varchar, data_tests: [not_null]}
-      - {name: manifest_sha256, description: Terminal selected-session manifest fingerprint., data_type: varchar, data_tests: [not_null]}
+      - {name: manifest_sha256, description: Selected immutable manifest-set fingerprint., data_type: varchar, data_tests: [not_null]}
       - {name: feature_snapshot_sha256, description: Canonical parent feature snapshot fingerprint., data_type: varchar, data_tests: [not_null]}
       - name: outcome_sha256
         description: Canonical complete outcome label fingerprint.

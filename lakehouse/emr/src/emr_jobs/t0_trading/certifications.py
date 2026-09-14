@@ -1,5 +1,6 @@
 """Publish the current deterministic market-day eligibility assessment."""
 
+import json
 from datetime import UTC, datetime
 
 from pyspark.sql import SparkSession
@@ -22,7 +23,18 @@ def publish(
     frame = spark.createDataFrame(
         [
             {
-                **certification.model_dump(mode="python"),
+                **certification.model_dump(
+                    mode="python",
+                    exclude={"selected_stream_session_ids", "gaps"},
+                ),
+                "selected_stream_session_ids_json": json.dumps(
+                    certification.selected_stream_session_ids,
+                    separators=(",", ":"),
+                ),
+                "gap_count": len(certification.gaps),
+                "gap_duration_milliseconds": sum(
+                    gap.duration_milliseconds for gap in certification.gaps
+                ),
                 "evaluated_at": datetime.now(UTC),
             }
         ],
@@ -40,13 +52,19 @@ def publish(
         WHERE source.manifest_count < target.manifest_count
            OR (source.manifest_count = target.manifest_count
                AND source.evidence_sha256 != target.evidence_sha256)
-           OR (source.evidence_sha256 = target.evidence_sha256 AND NOT (
+           OR (source.evidence_sha256 = target.evidence_sha256
+               AND target.selected_stream_session_ids_json IS NOT NULL
+               AND NOT (
                 source.configuration_version <=> target.configuration_version
             AND source.status <=> target.status
             AND source.failure_reason <=> target.failure_reason
             AND source.full_window_session_count <=> target.full_window_session_count
             AND source.eligible_session_count <=> target.eligible_session_count
             AND source.selected_stream_session_id <=> target.selected_stream_session_id
+            AND source.selected_stream_session_ids_json
+                <=> target.selected_stream_session_ids_json
+            AND source.gap_count <=> target.gap_count
+            AND source.gap_duration_milliseconds <=> target.gap_duration_milliseconds
            ))
         LIMIT 1
         """
@@ -59,7 +77,10 @@ def publish(
         USING {view} source
         ON target.trade_date = source.trade_date
            AND target.configuration_sha256 = source.configuration_sha256
-        WHEN MATCHED AND source.manifest_count > target.manifest_count THEN UPDATE SET
+        WHEN MATCHED AND (
+            source.manifest_count > target.manifest_count
+            OR target.selected_stream_session_ids_json IS NULL
+        ) THEN UPDATE SET
             configuration_version = source.configuration_version,
             status = source.status,
             failure_reason = source.failure_reason,
@@ -67,6 +88,9 @@ def publish(
             full_window_session_count = source.full_window_session_count,
             eligible_session_count = source.eligible_session_count,
             selected_stream_session_id = source.selected_stream_session_id,
+            selected_stream_session_ids_json = source.selected_stream_session_ids_json,
+            gap_count = source.gap_count,
+            gap_duration_milliseconds = source.gap_duration_milliseconds,
             evidence_sha256 = source.evidence_sha256,
             evaluated_at = source.evaluated_at
         WHEN NOT MATCHED THEN INSERT *

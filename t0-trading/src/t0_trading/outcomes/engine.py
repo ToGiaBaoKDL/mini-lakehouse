@@ -9,6 +9,7 @@ from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from zoneinfo import ZoneInfo
 
+from t0_trading.capture.reader import StreamGap
 from t0_trading.configuration import OutcomeVersion, TradingVersion
 from t0_trading.features import FeatureSnapshot
 from t0_trading.market import StreamEnvelope
@@ -23,18 +24,22 @@ _ACTIONS: tuple[Action, ...] = ("BUY", "SELL")
 
 @dataclass(slots=True)
 class _QuoteTape:
-    positions: list[tuple[datetime, int]] = field(default_factory=list)
+    positions: list[tuple[datetime, str, int]] = field(default_factory=list)
     quotes: list[QuoteSnapshot] = field(default_factory=list)
 
     def append(self, quote: QuoteSnapshot) -> None:
-        position = (quote.received_at, quote.position.receive_sequence)
+        position = (
+            quote.received_at,
+            quote.position.stream_session_id,
+            quote.position.receive_sequence,
+        )
         if self.positions and position <= self.positions[-1]:
             raise ValueError("quote tape must be strictly ordered by receipt and sequence")
         self.positions.append(position)
         self.quotes.append(quote)
 
     def latest(self, evaluated_at: datetime) -> QuoteSnapshot | None:
-        index = bisect_right(self.positions, (evaluated_at, 2**63 - 1)) - 1
+        index = bisect_right(self.positions, (evaluated_at, "\U0010ffff", 2**63 - 1)) - 1
         return self.quotes[index] if index >= 0 else None
 
 
@@ -59,10 +64,13 @@ def _execution_price(
     quantity: int,
     stale_after: timedelta,
     phase: str,
+    stream_session_id: str,
 ) -> tuple[QuoteSnapshot | None, Decimal | None, str | None]:
     quote = tape.latest(evaluated_at)
     if quote is None:
         return None, None, f"MISSING_{phase}_QUOTE"
+    if quote.position.stream_session_id != stream_session_id:
+        return quote, None, f"CROSS_SEGMENT_{phase}_QUOTE"
     if not quote.is_complete:
         return quote, None, f"INCOMPLETE_{phase}_BOOK"
     if (
@@ -80,14 +88,14 @@ def _quote_tapes(
     envelopes: Iterable[StreamEnvelope],
     configuration: TradingVersion,
     *,
-    stream_session_id: str,
+    stream_session_ids: frozenset[str],
     trade_date: date,
 ) -> dict[str, _QuoteTape]:
     tapes = {symbol: _QuoteTape() for symbol in configuration.market.symbols}
 
-    def one_session() -> Iterable[StreamEnvelope]:
+    def selected_sessions() -> Iterable[StreamEnvelope]:
         for envelope in envelopes:
-            if envelope.stream_session_id != stream_session_id:
+            if envelope.stream_session_id not in stream_session_ids:
                 raise ValueError("outcome replay input lineage is inconsistent")
             yield envelope
 
@@ -96,7 +104,7 @@ def _quote_tapes(
             tapes[event.symbol].append(event)
 
     result = replay(
-        one_session(),
+        selected_sessions(),
         configuration,
         trade_date=trade_date,
         observe=observe,
@@ -111,14 +119,16 @@ def label_outcomes(
     envelopes: Iterable[StreamEnvelope],
     configuration: TradingVersion,
     policy: OutcomeVersion,
+    *,
+    gaps: Sequence[StreamGap] = (),
 ) -> tuple[OutcomeLabel, ...]:
     """Label every snapshot/action/horizon without consulting future state early."""
     if not snapshots:
         return ()
     stream_session_ids = {snapshot.stream_session_id for snapshot in snapshots}
-    if None in stream_session_ids or len(stream_session_ids) != 1:
-        raise ValueError("outcome snapshots must reference one stream session")
-    stream_session_id = next(value for value in stream_session_ids if value is not None)
+    if None in stream_session_ids:
+        raise ValueError("outcome snapshots must reference captured stream sessions")
+    selected_session_ids = frozenset(value for value in stream_session_ids if value is not None)
     trade_date = snapshots[0].trade_date
     timezone = ZoneInfo(configuration.market.timezone)
     snapshot_keys = {(snapshot.symbol, snapshot.decision_at) for snapshot in snapshots}
@@ -146,7 +156,7 @@ def label_outcomes(
     tapes = _quote_tapes(
         envelopes,
         configuration,
-        stream_session_id=stream_session_id,
+        stream_session_ids=selected_session_ids,
         trade_date=trade_date,
     )
     latency = timedelta(milliseconds=policy.execution_latency_milliseconds)
@@ -154,6 +164,8 @@ def label_outcomes(
     policy_sha256 = policy.sha256
     labels: list[OutcomeLabel] = []
     for snapshot in snapshots:
+        if snapshot.stream_session_id is None:
+            raise ValueError("outcome snapshot is missing stream lineage")
         _, session_stop = session_window(
             snapshot.trade_date,
             snapshot.market_session,
@@ -166,6 +178,9 @@ def label_outcomes(
         for horizon in policy.horizons_seconds:
             horizon_at = snapshot.decision_at + timedelta(seconds=horizon)
             outside_session = entry_at >= session_stop or horizon_at >= session_stop
+            crosses_gap = any(
+                gap.started_at <= horizon_at and gap.ended_at > snapshot.decision_at for gap in gaps
+            )
             for action in _ACTIONS:
                 reasons = ["FEATURE_INELIGIBLE"] if not snapshot.is_eligible else []
                 entry_quote: QuoteSnapshot | None = None
@@ -175,6 +190,8 @@ def label_outcomes(
                 gross_return_bps: Decimal | None = None
                 if outside_session:
                     reasons.append("HORIZON_OUTSIDE_SESSION")
+                elif crosses_gap:
+                    reasons.append("CAPTURE_GAP")
                 else:
                     tape = tapes[snapshot.symbol]
                     if action not in entry_executions:
@@ -185,6 +202,7 @@ def label_outcomes(
                             quantity=policy.order_quantity,
                             stale_after=stale_after,
                             phase="ENTRY",
+                            stream_session_id=snapshot.stream_session_id,
                         )
                     entry_quote, entry_vwap, entry_reason = entry_executions[action]
                     horizon_action: Action = "SELL" if action == "BUY" else "BUY"
@@ -195,6 +213,7 @@ def label_outcomes(
                         quantity=policy.order_quantity,
                         stale_after=stale_after,
                         phase="HORIZON",
+                        stream_session_id=snapshot.stream_session_id,
                     )
                     if entry_reason is not None:
                         reasons.append(entry_reason)
@@ -214,7 +233,7 @@ def label_outcomes(
                         feature_version=snapshot.feature_version,
                         feature_configuration_sha256=snapshot.configuration_sha256,
                         feature_snapshot_sha256=snapshot_sha256,
-                        stream_session_id=stream_session_id,
+                        stream_session_id=snapshot.stream_session_id,
                         symbol=snapshot.symbol,
                         trade_date=snapshot.trade_date,
                         decision_at=snapshot.decision_at,

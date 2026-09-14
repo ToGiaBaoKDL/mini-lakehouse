@@ -15,18 +15,19 @@ import boto3
 import typer
 from botocore.exceptions import ClientError
 from pydantic import BaseModel
-from ssi_sdk import Data, Stream
+from ssi_sdk import Data
 
 from t0_trading.capture import MAX_STREAM_BATCH_MESSAGES
 from t0_trading.capture.reader import (
     StreamCaptureReadError,
+    StreamDayReader,
     StreamSessionReader,
     stream_manifest_uris,
 )
 from t0_trading.capture.rest import RestCaptureOptions, capture_rest
 from t0_trading.capture.spool import CaptureSpool
 from t0_trading.capture.store import CaptureStoreUnavailable, S3CaptureStore
-from t0_trading.capture.stream import StreamCaptureOptions, capture_stream
+from t0_trading.capture.stream import StreamCaptureOptions, capture_stream_resilient
 from t0_trading.certification import CertificationOptions, run_certification
 from t0_trading.configuration import (
     TradingConfiguration,
@@ -48,7 +49,7 @@ from t0_trading.market.reconciliation import (
     select_feature_capture,
 )
 from t0_trading.outcomes import OutcomeLabel, build_outcome_audit, label_outcomes
-from t0_trading.provider import authenticated
+from t0_trading.provider import authenticated, market_stream
 from t0_trading.strategy import (
     StrategyScore,
     evaluate_scores,
@@ -115,7 +116,7 @@ def _replay_feature_session(
     region: str,
     config: Path,
 ) -> tuple[
-    StreamSessionReader,
+    StreamDayReader,
     TradingConfiguration,
     tuple[FeatureSnapshot, ...],
     FeatureAuditReport,
@@ -127,16 +128,10 @@ def _replay_feature_session(
     )
     configuration = load_configuration(config)
     version = configuration.resolve(reader.trade_date)
-    reader = select_feature_capture((reader,), version, trade_date=reader.trade_date)
+    certification, _ = certify_market_day((reader,), version, trade_date=reader.trade_date)
+    reader = select_feature_capture((reader,), certification)
     snapshots = replay_features(reader.envelopes(), version, trade_date=reader.trade_date)
-    report = build_feature_audit(
-        snapshots,
-        version,
-        trade_date=reader.trade_date,
-        manifest_uri=reader.uri,
-        stream_session_id=reader.manifest.stream_session_id,
-        input_message_count=reader.manifest.message_count,
-    )
+    report = build_feature_audit(snapshots, version, capture=reader)
     return reader, configuration, snapshots, report
 
 
@@ -145,7 +140,7 @@ def _replay_outcome_session(
     region: str,
     config: Path,
 ) -> tuple[
-    StreamSessionReader,
+    StreamDayReader,
     TradingConfiguration,
     tuple[FeatureSnapshot, ...],
     tuple[OutcomeLabel, ...],
@@ -162,7 +157,7 @@ def _replay_strategy_session(
     region: str,
     config: Path,
 ) -> tuple[
-    StreamSessionReader,
+    StreamDayReader,
     TradingConfiguration,
     tuple[StrategyScore, ...],
     tuple[OutcomeLabel, ...],
@@ -380,7 +375,7 @@ def capture_stream_command(
         typer.Option(help="Optional runtime readiness marker written after the first heartbeat."),
     ] = None,
 ) -> None:
-    """Capture one bounded SSI stream session as immutable S3 micro-batches."""
+    """Capture one bounded market window as reconnect-safe immutable segments."""
     environment = os.environ.get("LAKEHOUSE_ENVIRONMENT", "dev")
     effective_secret_id = secret_id or f"lakehouse/{environment}/t0-trading/ssi"
     try:
@@ -409,15 +404,21 @@ def capture_stream_command(
         credentials = load_credentials(effective_secret_id, region)
         store = S3CaptureStore(boto3.client("s3", region_name=region), landing_uri)
         spool = CaptureSpool(spool_dir, max_bytes=spool_max_bytes) if spool_dir else None
-        with authenticated(credentials) as auth, Stream(auth) as stream:
-            manifest_uri = capture_stream(
-                stream.streaming,
-                store,
-                options,
-                stop=stop,
-                on_ready=(lambda: ready_file.touch()) if ready_file is not None else None,
-                spool=spool,
-            )
+        manifest_uris = capture_stream_resilient(
+            lambda: market_stream(credentials),
+            store,
+            options,
+            stop=stop,
+            on_ready=(lambda: ready_file.touch()) if ready_file is not None else None,
+            on_unavailable=(
+                lambda: ready_file.unlink(missing_ok=True) if ready_file is not None else None
+            ),
+            on_retry=lambda error, delay: typer.echo(
+                f"SSI stream unavailable ({type(error).__name__}); reconnecting in {delay:g}s",
+                err=True,
+            ),
+            spool=spool,
+        )
     except CredentialError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error
@@ -427,7 +428,8 @@ def capture_stream_command(
     finally:
         for signum, handler in previous_handlers.items():
             signal.signal(signum, handler)
-    typer.echo(manifest_uri)
+    for manifest_uri in manifest_uris:
+        typer.echo(manifest_uri)
 
 
 def reconcile_stream_command(
@@ -519,10 +521,7 @@ def audit_outcomes_command(
             labels,
             version,
             policy,
-            trade_date=reader.trade_date,
-            manifest_uri=reader.uri,
-            stream_session_id=reader.manifest.stream_session_id,
-            input_message_count=reader.manifest.message_count,
+            capture=reader,
         )
     except (StreamCaptureReadError, TradingConfigurationError, ValueError) as error:
         typer.echo(str(error), err=True)

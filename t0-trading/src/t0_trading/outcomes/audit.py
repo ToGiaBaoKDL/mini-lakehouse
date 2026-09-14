@@ -10,6 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from t0_trading.capture.reader import StreamDayReader
 from t0_trading.configuration import OutcomeVersion, TradingVersion
 from t0_trading.features import FeatureSnapshot
 from t0_trading.numeric import quantiles, rate
@@ -153,11 +154,12 @@ class SymbolOutcomeAudit(_StrictModel):
 
 
 class OutcomeAuditReport(_StrictModel):
-    """Stable JSON report for labels derived from one terminal stream session."""
+    """Stable JSON report for labels derived from one logical stream capture."""
 
-    schema_version: Literal[1] = 1
-    manifest_uri: str = Field(pattern=r"^s3://")
-    stream_session_id: str = Field(min_length=1)
+    schema_version: Literal[2] = 2
+    manifest_uris: tuple[str, ...]
+    stream_session_ids: tuple[str, ...]
+    evidence_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     trade_date: date
     configuration_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
     configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -192,6 +194,9 @@ class OutcomeAuditReport(_StrictModel):
             or symbol_labels != self.label_count
             or symbol_eligible != self.eligible_count
             or self.eligible_rate != rate(self.eligible_count, self.label_count)
+            or not self.manifest_uris
+            or not self.stream_session_ids
+            or len(self.manifest_uris) != len(self.stream_session_ids)
         ):
             raise ValueError("outcome audit totals do not reconcile")
         return self
@@ -326,14 +331,12 @@ def build_outcome_audit(
     configuration: TradingVersion,
     policy: OutcomeVersion,
     *,
-    trade_date: date,
-    manifest_uri: str,
-    stream_session_id: str,
-    input_message_count: int,
+    capture: StreamDayReader,
 ) -> OutcomeAuditReport:
     """Reconcile and summarize a complete label matrix for validated feature snapshots."""
     if not snapshots:
         raise ValueError("outcome audit requires feature snapshots")
+    trade_date = capture.trade_date
     snapshot_by_hash = {snapshot.sha256: snapshot for snapshot in snapshots}
     if len(snapshot_by_hash) != len(snapshots):
         raise ValueError("outcome audit feature snapshot identities are not unique")
@@ -358,18 +361,21 @@ def build_outcome_audit(
             or label.outcome_configuration_sha256 != policy_sha256
             or label.feature_version != configuration.features.version
             or label.feature_configuration_sha256 != configuration.sha256
-            or label.stream_session_id != stream_session_id
+            or label.stream_session_id != snapshot.stream_session_id
+            or label.stream_session_id not in capture.stream_session_ids
             or label.trade_date != trade_date
             or label.symbol != snapshot.symbol
             or label.decision_at != snapshot.decision_at
             or label.order_quantity != policy.order_quantity
             or (
                 label.entry_receive_sequence is not None
-                and label.entry_receive_sequence > input_message_count
+                and label.entry_receive_sequence
+                > capture.session_message_counts[label.stream_session_id]
             )
             or (
                 label.horizon_receive_sequence is not None
-                and label.horizon_receive_sequence > input_message_count
+                and label.horizon_receive_sequence
+                > capture.session_message_counts[label.stream_session_id]
             )
         ):
             raise ValueError("outcome audit lineage is inconsistent")
@@ -378,14 +384,15 @@ def build_outcome_audit(
         or not policy.contains(trade_date)
         or any(
             snapshot.trade_date != trade_date
-            or snapshot.stream_session_id != stream_session_id
+            or snapshot.stream_session_id not in capture.stream_session_ids
             or snapshot.configuration_version != configuration.version
             or snapshot.configuration_sha256 != configuration.sha256
             or snapshot.feature_version != configuration.features.version
             or snapshot.symbol not in configuration.market.symbols
             or (
                 snapshot.last_receive_sequence is not None
-                and snapshot.last_receive_sequence > input_message_count
+                and snapshot.last_receive_sequence
+                > capture.session_message_counts[snapshot.stream_session_id]
             )
             for snapshot in snapshots
         )
@@ -426,15 +433,16 @@ def build_outcome_audit(
 
     eligible_count = sum(label.is_eligible for label in labels)
     return OutcomeAuditReport(
-        manifest_uri=manifest_uri,
-        stream_session_id=stream_session_id,
+        manifest_uris=capture.manifest_uris,
+        stream_session_ids=capture.stream_session_ids,
+        evidence_sha256=capture.evidence_sha256,
         trade_date=trade_date,
         configuration_version=configuration.version,
         configuration_sha256=configuration.sha256,
         feature_version=configuration.features.version,
         outcome_version=policy.version,
         outcome_configuration_sha256=policy_sha256,
-        input_message_count=input_message_count,
+        input_message_count=capture.message_count,
         snapshot_count=len(snapshots),
         label_count=len(labels),
         eligible_count=eligible_count,

@@ -196,8 +196,8 @@ def test_t0_certification_uses_the_official_read_only_sdk_boundary() -> None:
 
     assert '"ssi-sdk==3.2.1"' in project
     assert "from ssi_sdk import Data, Stream" in certification
-    assert "from ssi_sdk import Data, Stream" in cli
-    assert "from ssi_sdk import Auth, Config" in provider
+    assert "from ssi_sdk import Data" in cli
+    assert "from ssi_sdk import Auth, Config, Stream" in provider
     assert "market.get_ohlc_1minute_historical" in capture
     assert "market.get_master_data_historical" in capture
     assert "SSI_SDK_VERSION" in certification
@@ -296,7 +296,7 @@ def test_each_component_owns_its_deployment_operation() -> None:
     assert "create --force-recreate --remove-orphans" in t0_trading
     assert 'sudo "$script_dir/reconcile-schedule"' in t0_trading
     assert 'if "$script_dir/stream-window"; then' in t0_trading
-    assert "rerun outside the market-data window to preserve one full session" in t0_trading
+    assert "rerun outside the market-data window to avoid a capture gap" in t0_trading
     assert t0_trading.index('if "$script_dir/stream-window"; then') < t0_trading.index(
         "sudo systemctl stop"
     )

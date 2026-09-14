@@ -2,6 +2,7 @@ import gzip
 import hashlib
 import json
 from collections.abc import Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -9,6 +10,7 @@ from threading import Event
 from typing import Any
 
 import pytest
+from t0_trading.capture.reader import StreamManifest
 from t0_trading.capture.spool import CaptureSpool
 from t0_trading.capture.store import CaptureStoreUnavailable
 from t0_trading.capture.stream import (
@@ -16,6 +18,7 @@ from t0_trading.capture.stream import (
     StreamCaptureError,
     StreamCaptureOptions,
     capture_stream,
+    capture_stream_resilient,
 )
 from t0_trading.identity import canonical_json, sha256
 
@@ -69,6 +72,18 @@ class _Timer:
 
     def clock(self) -> datetime:
         return self.epoch + timedelta(seconds=self.value)
+
+
+class _Stop:
+    def __init__(self, timer: _Timer) -> None:
+        self.timer = timer
+
+    def is_set(self) -> bool:
+        return False
+
+    def wait(self, timeout: float) -> bool:
+        self.timer.value += timeout
+        return False
 
 
 @dataclass
@@ -191,6 +206,76 @@ def test_stream_capture_fails_closed_when_heartbeats_are_stale() -> None:
     assert manifest_objects[0]["error_type"] == "HeartbeatTimeout"
 
 
+def test_stream_capture_reconnects_with_a_fresh_sdk_context() -> None:
+    store = _Store()
+    timer = _Timer()
+    streams = [_Stream(timer, heartbeat=False), _Stream(timer)]
+    opened: list[_Stream] = []
+
+    @contextmanager
+    def client_factory():
+        stream = streams[len(opened)]
+        opened.append(stream)
+        yield stream
+
+    manifests = capture_stream_resilient(
+        client_factory,
+        store,
+        StreamCaptureOptions(
+            duration_seconds=2,
+            heartbeat_seconds=0.2,
+            stale_after_seconds=0.5,
+            flush_seconds=0.5,
+            batch_size=10,
+            queue_size=10,
+        ),
+        stop=_Stop(timer),  # type: ignore[arg-type]
+        clock=timer.clock,
+        timer=timer.tick,
+    )
+
+    assert len(opened) == 2
+    assert len(manifests) == 2
+    terminal = [
+        json.loads(store.objects[uri.removeprefix("s3://landing/root/")]) for uri in manifests
+    ]
+    assert [manifest["disconnect_kind"] for manifest in terminal] == ["stale", "completed"]
+
+
+def test_stream_capture_retries_a_connection_failure_without_inventing_a_segment() -> None:
+    store = _Store()
+    timer = _Timer()
+    attempts = 0
+
+    @contextmanager
+    def client_factory():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            timer.value += 0.25
+            raise ConnectionError("unavailable")
+        yield _Stream(timer)
+
+    manifests = capture_stream_resilient(
+        client_factory,
+        store,
+        StreamCaptureOptions(
+            duration_seconds=2,
+            heartbeat_seconds=0.2,
+            stale_after_seconds=0.5,
+            flush_seconds=0.5,
+            batch_size=10,
+            queue_size=10,
+        ),
+        stop=_Stop(timer),  # type: ignore[arg-type]
+        clock=timer.clock,
+        timer=timer.tick,
+    )
+
+    assert attempts == 2
+    assert len(manifests) == 1
+
+
 def test_stream_capture_cannot_report_clean_shutdown_before_a_heartbeat() -> None:
     store = _Store()
     timer = _Timer()
@@ -220,6 +305,7 @@ def test_stream_capture_cannot_report_clean_shutdown_before_a_heartbeat() -> Non
     )
     assert manifest["disconnect_kind"] == "stale"
     assert manifest["error_type"] == "MissingHeartbeat"
+    assert StreamManifest.model_validate(manifest).last_heartbeat_at is None
 
 
 def test_stream_capture_spools_batch_and_terminal_manifest_during_s3_outage(

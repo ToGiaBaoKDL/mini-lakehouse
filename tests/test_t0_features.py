@@ -3,8 +3,11 @@ import json
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
+from t0_trading.capture.reader import StreamDayReader, StreamGap
 from t0_trading.configuration import load_configuration
 from t0_trading.features import (
     FeatureEngine,
@@ -20,6 +23,20 @@ TRADE_DATE = date(2026, 9, 4)
 
 def _configuration():
     return load_configuration(CONFIGURATION).resolve(TRADE_DATE)
+
+
+def _capture(message_count: int) -> StreamDayReader:
+    return cast(
+        StreamDayReader,
+        SimpleNamespace(
+            trade_date=TRADE_DATE,
+            manifest_uris=("s3://landing/stream/manifest.json",),
+            stream_session_ids=("session-1",),
+            evidence_sha256="a" * 64,
+            message_count=message_count,
+            session_message_counts={"session-1": message_count},
+        ),
+    )
 
 
 def _received(hour: int, minute: int, second: int) -> datetime:
@@ -326,6 +343,40 @@ def test_full_replay_exhausts_its_verified_input() -> None:
     assert exhausted is True
 
 
+def test_replay_fails_closed_only_during_gap_recovery_window() -> None:
+    configuration = _configuration()
+    observations = tuple(
+        envelope.model_copy(
+            update={
+                "stream_session_id": "session-2",
+                "receive_sequence": index - 5,
+            }
+        )
+        if envelope.received_at >= _received(9, 19, 45)
+        else envelope
+        for index, envelope in enumerate(_observations(), start=1)
+    )
+    gap = StreamGap(
+        started_at=_received(9, 19, 42),
+        ended_at=_received(9, 19, 44),
+    )
+
+    snapshots = replay_features(
+        observations,
+        configuration,
+        trade_date=TRADE_DATE,
+        gaps=(gap,),
+    )
+    affected = next(
+        snapshot
+        for snapshot in snapshots
+        if snapshot.symbol == "VIC" and snapshot.decision_at == _received(9, 20, 5)
+    )
+
+    assert affected.stream_session_id == "session-2"
+    assert "CAPTURE_GAP" in affected.reasons
+
+
 def test_feature_audit_is_complete_reconciled_and_deterministic() -> None:
     configuration = _configuration()
     snapshots = replay_features(_observations(), configuration, trade_date=TRADE_DATE)
@@ -334,10 +385,7 @@ def test_feature_audit_is_complete_reconciled_and_deterministic() -> None:
         return build_feature_audit(
             snapshots,
             configuration,
-            trade_date=TRADE_DATE,
-            manifest_uri="s3://landing/stream/manifest.json",
-            stream_session_id="session-1",
-            input_message_count=9,
+            capture=_capture(9),
         )
 
     report = build()
@@ -375,8 +423,5 @@ def test_feature_audit_rejects_incomplete_replay_coverage() -> None:
         build_feature_audit(
             snapshots[:-1],
             configuration,
-            trade_date=TRADE_DATE,
-            manifest_uri="s3://landing/stream/manifest.json",
-            stream_session_id="session-1",
-            input_message_count=9,
+            capture=_capture(9),
         )

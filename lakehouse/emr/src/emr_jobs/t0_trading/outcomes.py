@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from pyspark.sql import SparkSession
-from t0_trading.capture.reader import StreamSessionReader
+from t0_trading.capture.reader import StreamDayReader, StreamGap
 from t0_trading.configuration import OutcomeVersion, TradingVersion
 from t0_trading.features import FeatureSnapshot
 from t0_trading.outcomes import (
@@ -71,28 +71,26 @@ def publish(
     *,
     landing_table: str,
     product: CuratedProductContract,
-    capture: StreamSessionReader,
+    capture: StreamDayReader,
     configuration: TradingVersion,
     policy: OutcomeVersion,
     snapshots: Sequence[FeatureSnapshot],
+    gaps: Sequence[StreamGap] = (),
 ) -> OutcomeAuditReport:
     """Quality-gate and idempotently publish one complete outcome matrix."""
-    manifest = capture.manifest
     labels = label_outcomes(
         snapshots,
         envelopes(spark, landing_table=landing_table, capture=capture),
         configuration,
         policy,
+        gaps=gaps,
     )
     audit = build_outcome_audit(
         snapshots,
         labels,
         configuration,
         policy,
-        trade_date=capture.trade_date,
-        manifest_uri=capture.uri,
-        stream_session_id=manifest.stream_session_id,
-        input_message_count=manifest.message_count,
+        capture=capture,
     )
     contract = product.table("outcome_labels")
     frame = spark.createDataFrame(

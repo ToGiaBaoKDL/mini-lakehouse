@@ -198,6 +198,8 @@ def test_certify_stream_day_emits_a_structured_failed_assessment(monkeypatch: An
         full_window_session_count=0,
         eligible_session_count=0,
         selected_stream_session_id=None,
+        selected_stream_session_ids=(),
+        gaps=(),
         evidence_sha256="b" * 64,
     )
 

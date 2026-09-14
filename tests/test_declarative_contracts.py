@@ -171,6 +171,9 @@ def test_t0_feature_contract_preserves_snapshot_and_window_grains() -> None:
         "full_window_session_count",
         "eligible_session_count",
         "selected_stream_session_id",
+        "selected_stream_session_ids_json",
+        "gap_count",
+        "gap_duration_milliseconds",
         "evidence_sha256",
         "evaluated_at",
     }

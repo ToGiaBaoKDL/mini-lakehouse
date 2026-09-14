@@ -1,4 +1,4 @@
-"""Deterministic quality summary for one full-session feature replay."""
+"""Deterministic quality summary for one certified market-day feature replay."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from t0_trading.capture.reader import StreamDayReader
 from t0_trading.configuration import TradingVersion
 from t0_trading.features.engine import decision_times
 from t0_trading.features.model import FeatureSnapshot
@@ -94,16 +95,18 @@ class SymbolFeatureAudit(Coverage):
 
 
 class FeatureAuditReport(_StrictModel):
-    """Stable JSON report for one terminal manifest and feature version."""
+    """Stable JSON report for one logical capture and feature version."""
 
-    schema_version: Literal[1] = 1
-    manifest_uri: str = Field(pattern=r"^s3://")
-    stream_session_id: str = Field(min_length=1)
+    schema_version: Literal[2] = 2
+    manifest_uris: tuple[str, ...]
+    stream_session_ids: tuple[str, ...]
+    evidence_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     trade_date: date
     feature_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
     configuration_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
     configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     input_message_count: int = Field(ge=0)
+    last_decision_stream_session_id: str = Field(min_length=1)
     last_decision_receive_sequence: int | None = Field(ge=1)
     first_decision_at: datetime
     last_decision_at: datetime
@@ -118,8 +121,9 @@ class FeatureAuditReport(_StrictModel):
             or sum(item.snapshot_count for item in self.symbols.values()) != self.snapshot_count
             or self.first_decision_at > self.last_decision_at
             or (
-                self.last_decision_receive_sequence is not None
-                and self.last_decision_receive_sequence > self.input_message_count
+                not self.manifest_uris
+                or not self.stream_session_ids
+                or len(self.manifest_uris) != len(self.stream_session_ids)
             )
         ):
             raise ValueError("feature audit totals are inconsistent")
@@ -163,12 +167,10 @@ def build_feature_audit(
     snapshots: Sequence[FeatureSnapshot],
     configuration: TradingVersion,
     *,
-    trade_date: date,
-    manifest_uri: str,
-    stream_session_id: str,
-    input_message_count: int,
+    capture: StreamDayReader,
 ) -> FeatureAuditReport:
     """Validate and summarize one complete point-in-time feature replay."""
+    trade_date = capture.trade_date
     expected_times = tuple(decision_times(configuration, trade_date))
     expected_keys = {
         (symbol, decision_at)
@@ -178,12 +180,23 @@ def build_feature_audit(
     observed_keys = {(snapshot.symbol, snapshot.decision_at) for snapshot in snapshots}
     if len(observed_keys) != len(snapshots) or observed_keys != expected_keys:
         raise ValueError("feature replay does not cover every configured decision key exactly once")
+
+    def position_matches(snapshot: FeatureSnapshot) -> bool:
+        session_id = snapshot.stream_session_id
+        sequence = snapshot.last_receive_sequence
+        return (
+            session_id is not None
+            and sequence is not None
+            and session_id in capture.stream_session_ids
+            and sequence <= capture.session_message_counts[session_id]
+        )
+
     if any(
         snapshot.trade_date != trade_date
         or snapshot.feature_version != configuration.features.version
         or snapshot.configuration_version != configuration.version
         or snapshot.configuration_sha256 != configuration.sha256
-        or snapshot.stream_session_id != stream_session_id
+        or not position_matches(snapshot)
         or tuple(window.window_seconds for window in snapshot.windows)
         != configuration.features.windows_seconds
         for snapshot in snapshots
@@ -261,20 +274,20 @@ def build_feature_audit(
             eligible_distributions=distributions,
         )
 
-    receive_sequences = tuple(
-        snapshot.last_receive_sequence
-        for snapshot in snapshots
-        if snapshot.last_receive_sequence is not None
-    )
+    last_snapshot = snapshots[-1]
+    if last_snapshot.stream_session_id is None or last_snapshot.last_receive_sequence is None:
+        raise ValueError("feature replay is missing terminal stream lineage")
     return FeatureAuditReport(
-        manifest_uri=manifest_uri,
-        stream_session_id=stream_session_id,
+        manifest_uris=capture.manifest_uris,
+        stream_session_ids=capture.stream_session_ids,
+        evidence_sha256=capture.evidence_sha256,
         trade_date=trade_date,
         feature_version=configuration.features.version,
         configuration_version=configuration.version,
         configuration_sha256=configuration.sha256,
-        input_message_count=input_message_count,
-        last_decision_receive_sequence=max(receive_sequences, default=None),
+        input_message_count=capture.message_count,
+        last_decision_stream_session_id=last_snapshot.stream_session_id,
+        last_decision_receive_sequence=last_snapshot.last_receive_sequence,
         first_decision_at=expected_times[0],
         last_decision_at=expected_times[-1],
         snapshot_count=len(snapshots),

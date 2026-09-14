@@ -21,10 +21,13 @@ tables:
       - {field_id: 5, name: failure_reason, data_type: string, required: false, description: Stable failure reason; null only when status is passed.}
       - {field_id: 6, name: manifest_count, data_type: long, required: true, description: Terminal manifests included in the current evidence set.}
       - {field_id: 7, name: full_window_session_count, data_type: long, required: true, description: Sessions individually covering the configured market window.}
-      - {field_id: 8, name: eligible_session_count, data_type: long, required: true, description: Full-window sessions whose symbol scope matches the configuration.}
-      - {field_id: 9, name: selected_stream_session_id, data_type: string, required: false, description: Sole session authorized for feature replay when status is passed.}
+      - {field_id: 8, name: eligible_session_count, data_type: long, required: true, description: Transport segments in the selected logical capture before reconciliation.}
+      - {field_id: 9, name: selected_stream_session_id, data_type: string, required: false, description: Authorized transport session for backward-compatible single-segment captures.}
       - {field_id: 10, name: evidence_sha256, data_type: string, required: true, description: SHA-256 of the sorted immutable manifest hash set.}
       - {field_id: 11, name: evaluated_at, data_type: timestamptz, required: true, description: UTC time the current evidence set was first evaluated.}
+      - {field_id: 12, name: selected_stream_session_ids_json, data_type: string, required: false, description: Canonical JSON array of transport segments authorized for logical-day replay.}
+      - {field_id: 13, name: gap_count, data_type: long, required: false, description: Active-market transport gaps in the authorized capture.}
+      - {field_id: 14, name: gap_duration_milliseconds, data_type: long, required: false, description: Total duration of active-market transport gaps in milliseconds.}
     partitioning:
       - {field_id: 1000, field: trade_date, transform: identity}
 
@@ -58,7 +61,7 @@ tables:
       - {field_id: 23, name: eligibility_reasons_json, data_type: string, required: true, description: Canonical JSON array of structured abstention reasons.}
       - {field_id: 24, name: available_at, data_type: timestamptz, required: true, description: Earliest UTC instant at which the feature vector was available.}
       - {field_id: 25, name: processed_at, data_type: timestamptz, required: true, description: UTC time of durable replay materialization.}
-      - {field_id: 26, name: manifest_sha256, data_type: string, required: true, description: SHA-256 of the terminal source manifest.}
+      - {field_id: 26, name: manifest_sha256, data_type: string, required: true, description: SHA-256 of the selected immutable manifest set.}
       - {field_id: 27, name: snapshot_sha256, data_type: string, required: true, description: SHA-256 of the canonical complete FeatureSnapshot.}
     partitioning:
       - {field_id: 1000, field: trade_date, transform: identity}

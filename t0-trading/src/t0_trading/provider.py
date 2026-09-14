@@ -6,7 +6,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
 
-from ssi_sdk import Auth, Config
+from ssi_sdk import Auth, Config, Stream
 
 from t0_trading.credentials import Credentials
 
@@ -25,3 +25,10 @@ def authenticated(credentials: Credentials) -> Generator[Any, None, None]:
     with Auth(config) as auth:
         auth.authenticate()  # pyright: ignore[reportCallIssue] - SDK dynamic public delegate.
         yield auth
+
+
+@contextmanager
+def market_stream(credentials: Credentials) -> Generator[Any, None, None]:
+    """Yield a fresh official streaming service for one transport segment."""
+    with authenticated(credentials) as auth, Stream(auth) as stream:
+        yield stream.streaming

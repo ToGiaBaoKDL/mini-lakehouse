@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import gzip
 from collections.abc import Callable, Mapping
-from contextlib import redirect_stdout
-from dataclasses import dataclass
+from contextlib import AbstractContextManager, redirect_stdout
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from io import StringIO
 from queue import Empty, Full, Queue
@@ -31,6 +31,11 @@ MARKET_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 
 class StreamCaptureError(RuntimeError):
     """A connected stream session ended without a complete healthy capture."""
+
+    def __init__(self, disconnect_kind: str, manifest_uri: str) -> None:
+        super().__init__(f"SSI stream capture ended as {disconnect_kind}")
+        self.disconnect_kind = disconnect_kind
+        self.manifest_uri = manifest_uri
 
 
 @dataclass(frozen=True, slots=True)
@@ -364,5 +369,59 @@ def capture_stream(
         spool.stage_json(manifest_key, manifest)
         spool.drain(store)
     if disconnect_kind not in {"completed", "shutdown"}:
-        raise StreamCaptureError(f"SSI stream capture ended as {disconnect_kind}")
+        raise StreamCaptureError(disconnect_kind, store.uri(manifest_key))
     return store.uri(manifest_key)
+
+
+def capture_stream_resilient(
+    client_factory: Callable[[], AbstractContextManager[Any]],
+    store: CaptureStore,
+    options: StreamCaptureOptions,
+    *,
+    stop: Event | None = None,
+    clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    timer: Callable[[], float] = monotonic,
+    on_ready: Callable[[], None] | None = None,
+    on_unavailable: Callable[[], None] | None = None,
+    on_retry: Callable[[Exception, float], None] | None = None,
+    spool: CaptureSpool | None = None,
+) -> tuple[str, ...]:
+    """Reconnect and resubscribe through fresh SDK contexts until the bounded window ends."""
+    stop = stop or Event()
+    deadline = timer() + options.duration_seconds
+    manifests: list[str] = []
+    retry_count = 0
+    while not stop.is_set() and (remaining := deadline - timer()) > 0:
+        if on_unavailable is not None:
+            on_unavailable()
+        try:
+            with client_factory() as client:
+                manifests.append(
+                    capture_stream(
+                        client,
+                        store,
+                        replace(options, duration_seconds=remaining),
+                        stop=stop,
+                        clock=clock,
+                        timer=timer,
+                        on_ready=on_ready,
+                        spool=spool,
+                    )
+                )
+        except Exception as error:
+            if isinstance(error, StreamCaptureError):
+                manifests.append(error.manifest_uri)
+            retry_count += 1
+            delay = min(30.0, float(2 ** min(retry_count - 1, 5)), max(0.0, deadline - timer()))
+            if delay <= 0:
+                break
+            if on_retry is not None:
+                on_retry(error, delay)
+            stop.wait(delay)
+            continue
+        break
+    if not manifests:
+        if stop.is_set():
+            return ()
+        raise RuntimeError("SSI stream capture ended without a transport segment")
+    return tuple(manifests)

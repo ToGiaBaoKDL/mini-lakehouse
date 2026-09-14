@@ -5,7 +5,7 @@ with certified_days as (
         trade_date,
         configuration_version,
         configuration_sha256,
-        selected_stream_session_id,
+        selected_stream_session_ids,
         evidence_sha256,
         evaluated_at
     from {{ ref('stg_trading__market_day_certifications') }}
@@ -154,7 +154,7 @@ final as (
     inner join certified_days as certifications
         on snapshots.trade_date = certifications.trade_date
         and snapshots.configuration_sha256 = certifications.configuration_sha256
-        and snapshots.stream_session_id = certifications.selected_stream_session_id
+        and contains(certifications.selected_stream_session_ids, snapshots.stream_session_id)
     inner join feature_windows as windows
         on snapshots.feature_version = windows.feature_version
         and snapshots.configuration_sha256 = windows.configuration_sha256

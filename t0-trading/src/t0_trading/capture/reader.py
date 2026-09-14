@@ -5,9 +5,10 @@ from __future__ import annotations
 import gzip
 import json
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, date, datetime
+from itertools import pairwise
 from typing import Any, Literal, Protocol
 from urllib.parse import urlparse
 from uuid import UUID
@@ -99,8 +100,8 @@ class StreamManifest(_StrictModel):
     message_count: int = Field(ge=0)
     first_receive_sequence: int | None
     last_receive_sequence: int | None
-    heartbeat_count: int = Field(ge=1)
-    last_heartbeat_at: datetime
+    heartbeat_count: int = Field(ge=0)
+    last_heartbeat_at: datetime | None
     last_business_message_at: datetime | None
     batch_count: int = Field(ge=0)
     batches: tuple[StreamBatch, ...]
@@ -134,7 +135,11 @@ class StreamManifest(_StrictModel):
             raise ValueError("symbols must contain unique uppercase identifiers")
         if not self.connected_at <= self.disconnected_at <= self.published_at:
             raise ValueError("terminal timestamps are not ordered")
-        if not self.connected_at <= self.last_heartbeat_at <= self.disconnected_at:
+        if (self.heartbeat_count == 0) != (self.last_heartbeat_at is None):
+            raise ValueError("heartbeat summary is inconsistent")
+        if self.last_heartbeat_at is not None and not (
+            self.connected_at <= self.last_heartbeat_at <= self.disconnected_at
+        ):
             raise ValueError("last heartbeat falls outside the connection")
         if self.last_business_message_at is not None and not (
             self.connected_at <= self.last_business_message_at <= self.disconnected_at
@@ -157,7 +162,9 @@ class StreamManifest(_StrictModel):
         ):
             raise ValueError("message summary does not cover the terminal sequence")
         clean_terminal = self.disconnect_kind in {"completed", "shutdown"}
-        if clean_terminal != (self.error_type is None):
+        if clean_terminal != (self.error_type is None) or (
+            clean_terminal and self.heartbeat_count == 0
+        ):
             raise ValueError("terminal kind and error_type are inconsistent")
         return self
 
@@ -233,6 +240,13 @@ class StreamSessionReader:
     def batch_uri(self, batch: StreamBatch) -> str:
         """Resolve one validated manifest batch through the reader-owned store."""
         return self._store.uri(batch.object_key)
+
+    @property
+    def covered_until(self) -> datetime:
+        """Last instant backed by a healthy transport heartbeat."""
+        if self.manifest.disconnect_kind == "stale":
+            return self.manifest.last_heartbeat_at or self.manifest.connected_at
+        return self.manifest.disconnected_at
 
     def _validate_batches(self) -> None:
         expected_sequence = 1
@@ -327,3 +341,132 @@ class StreamSessionReader:
                 yield batch, future.result()
                 if (following := next(batches, None)) is not None:
                     pending.append((following, executor.submit(self._read_batch, following)))
+
+
+class StreamGap(BaseModel):
+    """A bounded loss-of-transport interval between immutable stream segments."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    started_at: datetime
+    ended_at: datetime
+
+    @field_validator("started_at", "ended_at")
+    @classmethod
+    def normalize_timestamp(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("stream gap timestamps must be timezone-aware")
+        return value.astimezone(UTC)
+
+    @model_validator(mode="after")
+    def validate_order(self) -> StreamGap:
+        if self.ended_at <= self.started_at:
+            raise ValueError("stream gap must have positive duration")
+        return self
+
+    @property
+    def duration_milliseconds(self) -> int:
+        return round((self.ended_at - self.started_at).total_seconds() * 1_000)
+
+    def overlaps(self, started_at: datetime, ended_at: datetime) -> bool:
+        """Return whether a half-open interval intersects unavailable transport."""
+        if any(
+            value.tzinfo is None or value.utcoffset() is None for value in (started_at, ended_at)
+        ):
+            raise ValueError("gap comparison timestamps must be timezone-aware")
+        return (
+            started_at.astimezone(UTC) < self.ended_at
+            and ended_at.astimezone(UTC) > self.started_at
+        )
+
+
+class StreamDayReader:
+    """Read one logical market day from ordered immutable transport segments."""
+
+    def __init__(self, sessions: Sequence[StreamSessionReader]) -> None:
+        ordered = tuple(
+            sorted(
+                sessions,
+                key=lambda reader: (
+                    reader.manifest.connected_at,
+                    reader.manifest.disconnected_at,
+                    reader.manifest.stream_session_id,
+                ),
+            )
+        )
+        if not ordered:
+            raise ValueError("stream day requires at least one transport segment")
+        if len({reader.manifest.stream_session_id for reader in ordered}) != len(ordered):
+            raise ValueError("stream day contains duplicate transport segments")
+        first = ordered[0]
+        if any(
+            reader.trade_date != first.trade_date
+            or reader.manifest.symbols != first.manifest.symbols
+            or reader.manifest.api_version != first.manifest.api_version
+            or reader.manifest.sdk_version != first.manifest.sdk_version
+            for reader in ordered[1:]
+        ):
+            raise ValueError("stream day segment lineage is inconsistent")
+        for previous, current in pairwise(ordered):
+            if current.manifest.connected_at < previous.manifest.disconnected_at:
+                raise ValueError("stream day transport segments overlap")
+        self.sessions = ordered
+        self.trade_date = first.trade_date
+        self.symbols = first.manifest.symbols
+
+    @property
+    def stream_session_ids(self) -> tuple[str, ...]:
+        return tuple(reader.manifest.stream_session_id for reader in self.sessions)
+
+    @property
+    def manifest_uris(self) -> tuple[str, ...]:
+        return tuple(reader.uri for reader in self.sessions)
+
+    @property
+    def evidence_sha256(self) -> str:
+        return sha256(canonical_json(sorted(reader.manifest_sha256 for reader in self.sessions)))
+
+    @property
+    def message_count(self) -> int:
+        return sum(reader.manifest.message_count for reader in self.sessions)
+
+    @property
+    def session_message_counts(self) -> dict[str, int]:
+        return {
+            reader.manifest.stream_session_id: reader.manifest.message_count
+            for reader in self.sessions
+        }
+
+    @property
+    def connected_at(self) -> datetime:
+        return self.sessions[0].manifest.connected_at
+
+    @property
+    def disconnected_at(self) -> datetime:
+        return self.sessions[-1].manifest.disconnected_at
+
+    @property
+    def covered_until(self) -> datetime:
+        return self.sessions[-1].covered_until
+
+    @property
+    def gaps(self) -> tuple[StreamGap, ...]:
+        return tuple(
+            StreamGap(
+                started_at=previous.covered_until,
+                ended_at=current.manifest.connected_at,
+            )
+            for previous, current in pairwise(self.sessions)
+            if previous.covered_until < current.manifest.connected_at
+        )
+
+    def envelopes(self) -> Iterator[StreamEnvelope]:
+        previous_received_at: datetime | None = None
+        for reader in self.sessions:
+            for envelope in reader.envelopes():
+                if previous_received_at is not None and envelope.received_at < previous_received_at:
+                    raise StreamCaptureReadError(
+                        "stream day receipt time regressed across segments"
+                    )
+                previous_received_at = envelope.received_at
+                yield envelope

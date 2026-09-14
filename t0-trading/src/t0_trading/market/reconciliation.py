@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, computed_field, model_validator
 from ssi_sdk.models import IntervalMessage
 
-from t0_trading.capture.reader import StreamDisconnectKind, StreamSessionReader
+from t0_trading.capture.reader import StreamDayReader, StreamGap, StreamSessionReader
 from t0_trading.configuration import TradingVersion
 from t0_trading.identity import canonical_json, sha256
 from t0_trading.market.events import (
@@ -27,8 +27,11 @@ from t0_trading.market.events import (
 from t0_trading.market.replay import replay
 from t0_trading.market.session import (
     TRADE_SESSIONS,
+    MarketSession,
     covers_trading_window,
     session_at,
+    session_window,
+    trading_window,
 )
 from t0_trading.market.state import Bar, bar_start
 
@@ -40,6 +43,7 @@ MarketDayFailureReason = Literal[
     "no_full_session",
     "capture_scope_mismatch",
     "multiple_full_sessions",
+    "overlapping_sessions",
     "reconciliation_failed",
 ]
 
@@ -99,9 +103,14 @@ class _TradePrefix:
 class _CaptureSet:
     manifest_count: int
     full_window_session_count: int
-    eligible: tuple[StreamSessionReader, ...]
+    selected: StreamDayReader | None
+    gaps: tuple[StreamGap, ...]
     failure_reason: MarketDayFailureReason | None
     evidence_sha256: str
+
+
+def _evidence_sha256(readers: Sequence[StreamSessionReader]) -> str:
+    return sha256(canonical_json(sorted(reader.manifest_sha256 for reader in readers)))
 
 
 class ReconciliationReport(BaseModel):
@@ -109,15 +118,15 @@ class ReconciliationReport(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    manifest_uri: str
-    stream_session_id: str
+    manifest_uris: tuple[str, ...]
+    stream_session_ids: tuple[str, ...]
     trade_date: str
     configuration_version: str
     configuration_sha256: str
     connected_at: datetime
     disconnected_at: datetime
-    disconnect_kind: StreamDisconnectKind
-    error_type: str | None
+    gap_count: int = Field(ge=0)
+    gap_duration_milliseconds: int = Field(ge=0)
     full_session_coverage: bool
     capture_scope_matches_configuration: bool
     trade_symbols: tuple[str, ...]
@@ -133,6 +142,7 @@ class ReconciliationReport(BaseModel):
     provider_interval_update_count: int
     provider_interval_minute_count: int
     matched_interval_update_count: int
+    gap_interval_update_count: int
     final_interval_exact_minute_count: int
     provider_interval_progression_issue_count: int
     differences: tuple[str, ...]
@@ -149,12 +159,20 @@ class ReconciliationReport(BaseModel):
             raise ValueError("event counts do not reconcile to business_event_count")
         if (
             self.provider_interval_update_count != self.message_counts.get("IntervalMessage", 0)
-            or self.matched_interval_update_count > self.provider_interval_update_count
+            or self.matched_interval_update_count + self.gap_interval_update_count
+            > self.provider_interval_update_count
             or self.provider_interval_minute_count > self.provider_interval_update_count
             or self.final_interval_exact_minute_count > self.provider_interval_minute_count
             or self.provider_interval_progression_issue_count > self.provider_interval_update_count
+            or (self.gap_count < 1 and self.gap_duration_milliseconds != 0)
         ):
             raise ValueError("provider interval counts are inconsistent")
+        if (
+            not self.manifest_uris
+            or len(self.manifest_uris) != len(self.stream_session_ids)
+            or len(set(self.stream_session_ids)) != len(self.stream_session_ids)
+        ):
+            raise ValueError("reconciliation capture lineage is inconsistent")
         if any(
             tuple(sorted(set(symbols))) != symbols
             for symbols in (self.trade_symbols, self.quote_symbols)
@@ -172,7 +190,8 @@ class ReconciliationReport(BaseModel):
             and self.cumulative_volume_baseline_matches
             and self.out_of_session_trade_count == 0
             and self.business_event_count > 0
-            and self.matched_interval_update_count == self.provider_interval_update_count
+            and self.matched_interval_update_count + self.gap_interval_update_count
+            == self.provider_interval_update_count
             and self.provider_interval_progression_issue_count == 0
             and not self.differences
             and not self.replay_issues
@@ -194,37 +213,43 @@ class MarketDayCertification(BaseModel):
     full_window_session_count: int = Field(ge=0)
     eligible_session_count: int = Field(ge=0)
     selected_stream_session_id: str | None
+    selected_stream_session_ids: tuple[str, ...]
+    gaps: tuple[StreamGap, ...]
     evidence_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
     @model_validator(mode="after")
     def validate_outcome(self) -> MarketDayCertification:
         if (
             self.full_window_session_count > self.manifest_count
-            or self.eligible_session_count > self.full_window_session_count
+            or self.eligible_session_count > self.manifest_count
         ):
             raise ValueError("market-day certification counts are inconsistent")
         passed = self.status == "passed"
         if (
             passed != (self.failure_reason is None)
-            or passed != (self.selected_stream_session_id is not None)
-            or (passed and self.eligible_session_count != 1)
+            or passed != bool(self.selected_stream_session_ids)
+            or (passed and self.eligible_session_count != len(self.selected_stream_session_ids))
+            or (not passed and self.selected_stream_session_ids)
+            or self.selected_stream_session_id
+            != (
+                self.selected_stream_session_ids[0]
+                if len(self.selected_stream_session_ids) == 1
+                else None
+            )
         ):
             raise ValueError("market-day certification outcome is inconsistent")
-        selection_reason: MarketDayFailureReason | None
-        if self.manifest_count == 0:
-            selection_reason = "no_terminal_session"
-        elif self.full_window_session_count == 0:
-            selection_reason = "no_full_session"
-        elif self.eligible_session_count == 0:
-            selection_reason = "capture_scope_mismatch"
-        elif self.eligible_session_count > 1:
-            selection_reason = "multiple_full_sessions"
-        else:
-            selection_reason = None
-        allowed_reasons = (
-            {selection_reason} if selection_reason is not None else {None, "reconciliation_failed"}
-        )
-        if self.failure_reason not in allowed_reasons:
+        if len(set(self.selected_stream_session_ids)) != len(self.selected_stream_session_ids):
+            raise ValueError("selected stream sessions must be unique")
+        if not passed and self.gaps:
+            raise ValueError("failed market-day certification cannot authorize capture gaps")
+        if (
+            (self.failure_reason == "no_terminal_session") != (self.manifest_count == 0)
+            or (
+                self.failure_reason == "multiple_full_sessions"
+                and self.full_window_session_count < 2
+            )
+            or (self.failure_reason == "reconciliation_failed" and self.eligible_session_count < 1)
+        ):
             raise ValueError("market-day certification reason is inconsistent")
         return self
 
@@ -310,40 +335,95 @@ def _capture_set(
     if any(reader.trade_date != trade_date for reader in readers):
         raise ValueError("SSI Stream session escaped the requested trading date")
     timezone = ZoneInfo(configuration.market.timezone)
+    market_open, market_close = trading_window(
+        trade_date,
+        timezone=timezone,
+        schedule=configuration.market.sessions,
+    )
+    ready = tuple(reader for reader in readers if reader.manifest.heartbeat_count > 0)
     full_window = tuple(
         reader
-        for reader in readers
+        for reader in ready
         if covers_trading_window(
             reader.manifest.connected_at,
-            reader.manifest.disconnected_at,
+            reader.covered_until,
             trade_date=trade_date,
             timezone=timezone,
             schedule=configuration.market.sessions,
         )
     )
-    eligible = tuple(
-        reader
-        for reader in full_window
-        if set(reader.manifest.symbols) == set(configuration.market.symbols)
+    configured_symbols = set(configuration.market.symbols)
+    scoped_manifests = tuple(
+        reader for reader in readers if set(reader.manifest.symbols) == configured_symbols
     )
+    scoped = tuple(reader for reader in ready if reader in scoped_manifests)
+    eligible_full = tuple(reader for reader in full_window if reader in scoped)
+    selected: StreamDayReader | None = None
     if not readers:
         failure_reason: MarketDayFailureReason | None = "no_terminal_session"
-    elif not full_window:
-        failure_reason = "no_full_session"
-    elif not eligible:
-        failure_reason = "capture_scope_mismatch"
-    elif len(eligible) > 1:
+    elif len(eligible_full) > 1:
         failure_reason = "multiple_full_sessions"
-    else:
+    elif len(eligible_full) == 1:
+        selected = StreamDayReader(eligible_full)
         failure_reason = None
+    elif not scoped_manifests:
+        failure_reason = "capture_scope_mismatch"
+    elif not scoped:
+        failure_reason = "no_full_session"
+    else:
+        relevant = tuple(
+            reader
+            for reader in scoped
+            if reader.manifest.connected_at <= market_close and reader.covered_until >= market_open
+        )
+        if (
+            not relevant
+            or min(reader.manifest.connected_at for reader in relevant) > market_open
+            or max(reader.covered_until for reader in relevant) < market_close
+        ):
+            failure_reason = "no_full_session"
+        else:
+            try:
+                selected = StreamDayReader(relevant)
+            except ValueError:
+                failure_reason = "overlapping_sessions"
+            else:
+                failure_reason = None
+    gaps = _active_gaps(selected, configuration) if selected is not None else ()
     return _CaptureSet(
         manifest_count=len(readers),
         full_window_session_count=len(full_window),
-        eligible=eligible,
+        selected=selected,
+        gaps=gaps,
         failure_reason=failure_reason,
-        evidence_sha256=sha256(
-            canonical_json(sorted(reader.manifest_sha256 for reader in readers))
-        ),
+        evidence_sha256=_evidence_sha256(readers),
+    )
+
+
+def _active_gaps(
+    capture: StreamDayReader,
+    configuration: TradingVersion,
+) -> tuple[StreamGap, ...]:
+    timezone = ZoneInfo(configuration.market.timezone)
+    windows = tuple(
+        session_window(
+            capture.trade_date,
+            session,
+            timezone=timezone,
+            schedule=configuration.market.sessions,
+        )
+        for session in (
+            MarketSession.OPENING_AUCTION,
+            MarketSession.CONTINUOUS_AM,
+            MarketSession.CONTINUOUS_PM,
+            MarketSession.CLOSING_AUCTION,
+        )
+    )
+    return tuple(
+        StreamGap(started_at=max(gap.started_at, start), ended_at=min(gap.ended_at, end))
+        for gap in capture.gaps
+        for start, end in windows
+        if gap.started_at < end and gap.ended_at > start
     )
 
 
@@ -353,26 +433,30 @@ def certify_market_day(
     *,
     trade_date: date,
 ) -> tuple[MarketDayCertification, ReconciliationReport | None]:
-    """Certify the sole full capture and return its detailed reconciliation when available."""
+    """Certify one logical market-day capture assembled from immutable segments."""
     capture_set = _capture_set(readers, configuration, trade_date=trade_date)
-    candidate = next(iter(capture_set.eligible)) if len(capture_set.eligible) == 1 else None
-    report = reconcile_session(candidate, configuration) if candidate is not None else None
+    candidate = capture_set.selected
+    report = (
+        reconcile_capture(candidate, configuration, gaps=capture_set.gaps)
+        if candidate is not None
+        else None
+    )
     failure_reason = capture_set.failure_reason
     if report is not None and report.status != "passed":
         failure_reason = "reconciliation_failed"
-    selected = candidate if failure_reason is None else None
+    selected_ids = candidate.stream_session_ids if failure_reason is None and candidate else ()
     return MarketDayCertification(
         trade_date=trade_date,
         configuration_version=configuration.version,
         configuration_sha256=configuration.sha256,
-        status="passed" if selected is not None else "failed",
+        status="passed" if selected_ids else "failed",
         failure_reason=failure_reason,
         manifest_count=capture_set.manifest_count,
         full_window_session_count=capture_set.full_window_session_count,
-        eligible_session_count=len(capture_set.eligible),
-        selected_stream_session_id=(
-            selected.manifest.stream_session_id if selected is not None else None
-        ),
+        eligible_session_count=len(candidate.sessions) if candidate is not None else 0,
+        selected_stream_session_id=selected_ids[0] if len(selected_ids) == 1 else None,
+        selected_stream_session_ids=selected_ids,
+        gaps=capture_set.gaps,
         evidence_sha256=capture_set.evidence_sha256,
     ), report
 
@@ -383,48 +467,56 @@ def reconcile_trade_date(
     *,
     trade_date: date,
 ) -> ReconciliationReport:
-    """Select and certify the sole capture covering the configured market window."""
+    """Select and certify the logical capture covering the configured market window."""
     certification, report = certify_market_day(readers, configuration, trade_date=trade_date)
     if report is None:
         if certification.failure_reason == "no_terminal_session":
             raise ValueError("no terminal SSI Stream session exists for the trading date")
         raise ValueError(
-            "expected exactly one SSI Stream session covering the market window and symbol scope, "
-            f"found {certification.eligible_session_count}"
+            "no unambiguous SSI Stream segment chain covers the market window and symbol scope"
         )
     return report
 
 
 def select_feature_capture(
     readers: Sequence[StreamSessionReader],
-    configuration: TradingVersion,
-    *,
-    trade_date: date,
-) -> StreamSessionReader:
-    """Select exactly one fully reconciled capture for deterministic feature replay."""
-    certification, _ = certify_market_day(readers, configuration, trade_date=trade_date)
+    certification: MarketDayCertification,
+) -> StreamDayReader:
+    """Rebuild the exact logical capture authorized by an existing certification."""
     if certification.failure_reason == "no_terminal_session":
         raise ValueError("no terminal SSI Stream session exists for the trading date")
     if certification.status != "passed":
         if certification.failure_reason == "reconciliation_failed":
             raise ValueError("SSI Stream session reconciliation failed")
         raise ValueError(
-            "expected exactly one SSI Stream session covering the market window and symbol scope, "
-            f"found {certification.eligible_session_count}"
+            "no unambiguous SSI Stream segment chain covers the market window and symbol scope"
         )
-    return next(
-        reader
-        for reader in readers
-        if reader.manifest.stream_session_id == certification.selected_stream_session_id
+    by_id = {reader.manifest.stream_session_id: reader for reader in readers}
+    if (
+        len(by_id) != len(readers)
+        or _evidence_sha256(readers) != certification.evidence_sha256
+        or any(session_id not in by_id for session_id in certification.selected_stream_session_ids)
+    ):
+        raise ValueError("certified SSI Stream evidence is not reproducible")
+    selected = StreamDayReader(
+        tuple(by_id[session_id] for session_id in certification.selected_stream_session_ids)
     )
+    if (
+        selected.trade_date != certification.trade_date
+        or selected.stream_session_ids != certification.selected_stream_session_ids
+    ):
+        raise ValueError("certified SSI Stream capture selection is not reproducible")
+    return selected
 
 
-def reconcile_session(
-    reader: StreamSessionReader,
+def reconcile_capture(
+    capture: StreamDayReader,
     configuration: TradingVersion,
+    *,
+    gaps: Sequence[StreamGap] = (),
 ) -> ReconciliationReport:
-    """Read once, replay once, and match provider intervals to observed trade prefixes."""
-    if not configuration.contains(reader.trade_date):
+    """Read one logical day and reconcile provider intervals outside known gaps."""
+    if not configuration.contains(capture.trade_date):
         raise ValueError("configuration is not effective for the captured trade date")
     timezone = ZoneInfo(configuration.market.timezone)
     message_counts: Counter[str] = Counter()
@@ -450,7 +542,7 @@ def reconcile_session(
         first_trades.setdefault(event.symbol, event)
         session = session_at(
             event.event_time,
-            trade_date=reader.trade_date,
+            trade_date=capture.trade_date,
             timezone=timezone,
             schedule=configuration.market.sessions,
         )
@@ -470,20 +562,27 @@ def reconcile_session(
 
     def observed() -> Iterable[StreamEnvelope]:
         nonlocal provider_interval_progression_issue_count
-        for envelope in reader.envelopes():
+        for envelope in capture.envelopes():
             message_counts[envelope.message_type] += 1
             interval = _provider_bar(envelope, timezone)
             if interval is not None:
                 if interval.symbol not in configuration.market.symbols:
                     raise ValueError("SSI interval symbol is outside the configured universe")
-                if interval.start.date() != reader.trade_date:
+                if interval.start.date() != capture.trade_date:
                     raise ValueError("SSI interval does not belong to the captured trade date")
                 key = (interval.symbol, interval.start)
                 current = provider_bars.get(key)
                 issue = (
                     _interval_progression_issue(current, interval) if current is not None else None
                 )
-                if issue is None:
+                affected = any(
+                    gap.overlaps(
+                        interval.start,
+                        interval.start + timedelta(seconds=interval_seconds),
+                    )
+                    for gap in gaps
+                )
+                if issue is None or affected:
                     provider_bars[key] = interval
                 else:
                     provider_interval_progression_issue_count += 1
@@ -497,8 +596,8 @@ def reconcile_session(
     result = replay(
         observed(),
         configuration,
-        trade_date=reader.trade_date,
-        finish_at=reader.manifest.disconnected_at,
+        trade_date=capture.trade_date,
+        finish_at=capture.disconnected_at,
         observe=observe_event,
     )
     replayed_bars = {
@@ -508,6 +607,8 @@ def reconcile_session(
     replay_keys = set(replayed_bars)
     final_exact = 0
     for symbol, start in sorted(provider_keys | replay_keys):
+        if any(gap.overlaps(start, start + timedelta(seconds=interval_seconds)) for gap in gaps):
+            continue
         label = f"{symbol}@{start.isoformat()}"
         provider = provider_bars.get((symbol, start))
         reconstructed = replayed_bars.get((symbol, start))
@@ -519,8 +620,18 @@ def reconcile_session(
             final_exact += 1
 
     matched_updates = 0
+    gap_updates = 0
     for interval in provider_updates:
         key = (interval.symbol, interval.start)
+        if any(
+            gap.overlaps(
+                interval.start,
+                interval.start + timedelta(seconds=interval_seconds),
+            )
+            for gap in gaps
+        ):
+            gap_updates += 1
+            continue
         prefix_time = observed_prefixes.get(key, {}).get(interval.values)
         if prefix_time is not None and prefix_time <= interval.observed_at:
             matched_updates += 1
@@ -532,14 +643,14 @@ def reconcile_session(
             )
 
     full_session_coverage = covers_trading_window(
-        reader.manifest.connected_at,
-        reader.manifest.disconnected_at,
-        trade_date=reader.trade_date,
+        capture.connected_at,
+        capture.covered_until,
+        trade_date=capture.trade_date,
         timezone=timezone,
         schedule=configuration.market.sessions,
     )
     configured_symbols = set(configuration.market.symbols)
-    capture_scope_matches_configuration = set(reader.manifest.symbols) == configured_symbols
+    capture_scope_matches_configuration = set(capture.symbols) == configured_symbols
     for symbol in sorted(configured_symbols - trade_symbols):
         differences.add(f"{symbol}:configured_symbol_without_trade")
     for symbol in sorted(configured_symbols - quote_symbols):
@@ -554,15 +665,15 @@ def reconcile_session(
     for session, count in sorted(out_of_session_trades.items()):
         differences.add(f"trade_outside_session[{session}]={count}")
     return ReconciliationReport(
-        manifest_uri=reader.uri,
-        stream_session_id=reader.manifest.stream_session_id,
-        trade_date=reader.trade_date.isoformat(),
+        manifest_uris=capture.manifest_uris,
+        stream_session_ids=capture.stream_session_ids,
+        trade_date=capture.trade_date.isoformat(),
         configuration_version=configuration.version,
         configuration_sha256=configuration.sha256,
-        connected_at=reader.manifest.connected_at,
-        disconnected_at=reader.manifest.disconnected_at,
-        disconnect_kind=reader.manifest.disconnect_kind,
-        error_type=reader.manifest.error_type,
+        connected_at=capture.connected_at,
+        disconnected_at=capture.disconnected_at,
+        gap_count=len(gaps),
+        gap_duration_milliseconds=sum(gap.duration_milliseconds for gap in gaps),
         full_session_coverage=full_session_coverage,
         capture_scope_matches_configuration=capture_scope_matches_configuration,
         trade_symbols=tuple(sorted(trade_symbols)),
@@ -578,8 +689,17 @@ def reconcile_session(
         provider_interval_update_count=len(provider_updates),
         provider_interval_minute_count=len(provider_bars),
         matched_interval_update_count=matched_updates,
+        gap_interval_update_count=gap_updates,
         final_interval_exact_minute_count=final_exact,
         provider_interval_progression_issue_count=provider_interval_progression_issue_count,
         differences=tuple(sorted(differences)),
         replay_issues=result.issues,
     )
+
+
+def reconcile_session(
+    reader: StreamSessionReader,
+    configuration: TradingVersion,
+) -> ReconciliationReport:
+    """Reconcile one transport segment through the logical-day implementation."""
+    return reconcile_capture(StreamDayReader((reader,)), configuration)
