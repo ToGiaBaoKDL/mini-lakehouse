@@ -183,17 +183,16 @@ def test_environment_uses_only_domain_modules() -> None:
     }
 
 
-def test_terraform_operator_billing_access_is_read_only() -> None:
+def test_terraform_operator_has_explicit_billing_job_function() -> None:
     environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
     example = Path("infra/terraform/aws/environments/dev/terraform.tfvars.example").read_text(
         encoding="utf-8"
     )
 
-    assert 'resource "aws_iam_user_policy_attachment" "billing_read_only"' in environment
-    assert "var.billing_read_only_user_names" in environment
-    assert "policy/AWSBillingReadOnlyAccess" in environment
-    assert "billing_read_only_user_names" in example
-    assert "BillingFullAccess" not in environment
+    assert 'resource "aws_iam_user_policy_attachment" "billing"' in environment
+    assert "var.billing_user_names" in environment
+    assert "policy/job-function/Billing" in environment
+    assert "billing_user_names" in example
 
 
 def test_emr_uses_the_managed_aws_data_plane_without_vpc_connectivity() -> None:

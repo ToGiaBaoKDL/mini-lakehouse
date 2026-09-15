@@ -10,15 +10,15 @@ variable "catalog_admin_principal_arns" {
   }
 }
 
-variable "billing_read_only_user_names" {
+variable "billing_user_names" {
   type        = set(string)
-  description = "Existing IAM users allowed to inspect Billing and Cost Management without mutation access."
+  description = "Existing IAM users allowed to manage Billing, costs, budgets, and payment methods."
 
   validation {
-    condition = length(var.billing_read_only_user_names) > 0 && alltrue([
-      for name in var.billing_read_only_user_names : name == trimspace(name) && name != ""
+    condition = length(var.billing_user_names) > 0 && alltrue([
+      for name in var.billing_user_names : name == trimspace(name) && name != ""
     ])
-    error_message = "At least one non-empty billing read-only IAM user name is required."
+    error_message = "At least one non-empty billing IAM user name is required."
   }
 }
 
