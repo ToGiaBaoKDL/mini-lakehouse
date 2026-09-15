@@ -10,6 +10,18 @@ variable "catalog_admin_principal_arns" {
   }
 }
 
+variable "billing_read_only_user_names" {
+  type        = set(string)
+  description = "Existing IAM users allowed to inspect Billing and Cost Management without mutation access."
+
+  validation {
+    condition = length(var.billing_read_only_user_names) > 0 && alltrue([
+      for name in var.billing_read_only_user_names : name == trimspace(name) && name != ""
+    ])
+    error_message = "At least one non-empty billing read-only IAM user name is required."
+  }
+}
+
 variable "roles_anywhere_ca_certificate_path" {
   type        = string
   description = "Path to the public PEM CA certificate trusted for external workload identities."

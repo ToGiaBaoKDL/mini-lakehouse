@@ -175,13 +175,25 @@ def test_environment_uses_only_domain_modules() -> None:
         for path in Path("infra/terraform/aws/modules").iterdir()
         if path.is_dir() and any(path.glob("*.tf"))
     }
-
     assert modules == {
         "container_registry",
         "emr_serverless",
         "identity",
         "storage",
     }
+
+
+def test_terraform_operator_billing_access_is_read_only() -> None:
+    environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
+    example = Path("infra/terraform/aws/environments/dev/terraform.tfvars.example").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'resource "aws_iam_user_policy_attachment" "billing_read_only"' in environment
+    assert "var.billing_read_only_user_names" in environment
+    assert "policy/AWSBillingReadOnlyAccess" in environment
+    assert "billing_read_only_user_names" in example
+    assert "BillingFullAccess" not in environment
 
 
 def test_emr_uses_the_managed_aws_data_plane_without_vpc_connectivity() -> None:

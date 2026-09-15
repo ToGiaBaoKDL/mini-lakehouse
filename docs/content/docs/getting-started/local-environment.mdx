@@ -28,6 +28,9 @@ aws sts get-caller-identity
 
 Catalog mutation uses the dedicated assumed-role profile described in
 [Lakehouse](/docs/capabilities/lakehouse). Runtime containers do not inherit this operator profile.
+The dev Terraform root grants its configured operator IAM user AWS-managed billing read access.
+Billing console access additionally requires the root user to activate **IAM user and role access to
+Billing information** once in AWS Account settings.
 
 ## Local services
 
