@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from t0_trading.configuration import load_configuration
+from t0_trading.decisions import DecisionEngine, replay_decisions
 from t0_trading.features import FeatureSnapshot, WindowFeatures
 from t0_trading.market.session import MarketSession
 from t0_trading.numeric import basis_points
@@ -53,9 +54,17 @@ def _snapshot(
     symbol: str,
     *,
     trade_date: date = TRADE_DATE,
+    decision_at: datetime | None = None,
 ) -> FeatureSnapshot:
     configuration, _, _ = _policies()
-    decision_at = datetime(trade_date.year, trade_date.month, trade_date.day, 2, 30, tzinfo=UTC)
+    decision_at = decision_at or datetime(
+        trade_date.year,
+        trade_date.month,
+        trade_date.day,
+        2,
+        30,
+        tzinfo=UTC,
+    )
     is_vic = symbol == "VIC"
     if is_vic:
         windows = (
@@ -358,3 +367,76 @@ def test_walk_forward_uses_training_quantiles_and_explicit_purge_sessions() -> N
             outcome_policy,
             evaluation_policy,
         )
+
+
+def test_shadow_decisions_are_thresholded_rate_limited_and_order_independent() -> None:
+    configuration = load_configuration(CONFIGURATION)
+    market, outcome_policy, strategy_policy = _policies()
+    decision_policy = configuration.resolve_decisions(TRADE_DATE).model_copy(
+        update={
+            "rules": tuple(
+                rule.model_copy(
+                    update={
+                        "buy_minimum_strength": Decimal("0.10"),
+                        "sell_minimum_strength": Decimal("0.10"),
+                    }
+                )
+                for rule in configuration.resolve_decisions(TRADE_DATE).rules
+            ),
+            "maximum_spread_bps": Decimal(200),
+            "maximum_trade_age_seconds": Decimal(60),
+            "maximum_quote_age_seconds": Decimal(60),
+        }
+    )
+    first_snapshots = (_snapshot("VIC"), _snapshot("VHM"))
+    second_at = DECISION_AT + timedelta(seconds=5)
+    second_snapshots = (
+        _snapshot("VIC", decision_at=second_at),
+        _snapshot("VHM", decision_at=second_at),
+    )
+
+    engine = DecisionEngine(market, strategy_policy, outcome_policy, decision_policy)
+    first = engine.decisions(tuple(reversed(first_snapshots)))
+    second = engine.decisions(second_snapshots)
+    replayed = replay_decisions(
+        (*reversed(second_snapshots), *reversed(first_snapshots)),
+        market,
+        strategy_policy,
+        outcome_policy,
+        decision_policy,
+    )
+
+    assert len(first) == 6
+    assert {decision.action for decision in first} == {"BUY", "SELL"}
+    assert len({decision.sha256 for decision in first}) == 6
+    assert all(decision.action == "ABSTAIN" for decision in second)
+    assert all(decision.reasons == ("COOLDOWN",) for decision in second)
+    assert replayed == (*first, *second)
+
+
+def test_shadow_decisions_fail_closed_on_feature_and_risk_gates() -> None:
+    configuration = load_configuration(CONFIGURATION)
+    market, outcome_policy, strategy_policy = _policies()
+    decision_policy = configuration.resolve_decisions(TRADE_DATE)
+    ineligible = _snapshot("VIC").model_copy(update={"reasons": ("CAPTURE_GAP",)})
+
+    decisions = DecisionEngine(
+        market,
+        strategy_policy,
+        outcome_policy,
+        decision_policy,
+    ).decisions((ineligible, _snapshot("VHM")))
+
+    vic = tuple(decision for decision in decisions if decision.symbol == "VIC")
+    assert all(decision.action == "ABSTAIN" for decision in vic)
+    assert all(decision.reasons == ("CAPTURE_GAP", "SCORE_UNAVAILABLE") for decision in vic)
+    assert all(decision.action == "ABSTAIN" for decision in decisions)
+    vhm = tuple(decision for decision in decisions if decision.symbol == "VHM")
+    assert all(
+        "SPREAD_LIMIT" in decision.reasons
+        for decision in vhm
+        if decision.strategy != "relative_value"
+    )
+    assert next(decision for decision in vhm if decision.strategy == "relative_value").reasons == (
+        "SCORE_UNAVAILABLE",
+    )

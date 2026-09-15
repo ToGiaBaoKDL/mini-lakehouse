@@ -9,10 +9,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from t0_trading.configuration import OutcomeVersion, StrategyVersion
+from t0_trading.configuration import STRATEGY_NAMES, OutcomeVersion, StrategyName, StrategyVersion
 from t0_trading.numeric import BPS_QUANTUM, rate, ratio
 from t0_trading.outcomes import OutcomeLabel
-from t0_trading.strategy.model import STRATEGY_NAMES, StrategyName, StrategyScore
+from t0_trading.strategy.model import StrategyScore
 
 
 class StrategyHorizonEvaluation(BaseModel):

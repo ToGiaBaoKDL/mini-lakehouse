@@ -9,6 +9,7 @@ from typing import cast
 import pytest
 from t0_trading.capture.reader import StreamDayReader, StreamGap
 from t0_trading.configuration import load_configuration
+from t0_trading.decisions import DecisionEngine, replay_decisions
 from t0_trading.features import (
     FeatureEngine,
     build_feature_audit,
@@ -285,10 +286,18 @@ def test_feature_snapshot_has_exact_book_flow_momentum_and_liquidity_values() ->
 
 def test_live_clock_and_full_replay_emit_identical_point_in_time_snapshots() -> None:
     configuration = _configuration()
+    loaded = load_configuration(CONFIGURATION)
     envelopes = _observations()
     decision_at = _received(9, 20, 5)
     live = FeatureEngine(configuration)
+    live_decisions = DecisionEngine(
+        configuration,
+        loaded.resolve_strategies(TRADE_DATE),
+        loaded.resolve_outcomes(TRADE_DATE),
+        loaded.resolve_decisions(TRADE_DATE),
+    )
     live_snapshots = []
+    live_journal = []
     pending = iter(envelopes)
     envelope = next(pending, None)
     for current in decision_times(configuration, TRADE_DATE):
@@ -297,7 +306,9 @@ def test_live_clock_and_full_replay_emit_identical_point_in_time_snapshots() -> 
         while envelope is not None and envelope.received_at <= current:
             live.apply(envelope)
             envelope = next(pending, None)
-        live_snapshots.extend(live.snapshots(current))
+        current_snapshots = live.snapshots(current)
+        live_snapshots.extend(current_snapshots)
+        live_journal.extend(live_decisions.decisions(current_snapshots))
 
     replayed = tuple(
         snapshot
@@ -306,6 +317,13 @@ def test_live_clock_and_full_replay_emit_identical_point_in_time_snapshots() -> 
     )
 
     assert replayed == tuple(live_snapshots)
+    assert replay_decisions(
+        replayed,
+        configuration,
+        loaded.resolve_strategies(TRADE_DATE),
+        loaded.resolve_outcomes(TRADE_DATE),
+        loaded.resolve_decisions(TRADE_DATE),
+    ) == tuple(live_journal)
 
 
 def test_future_observations_cannot_change_an_earlier_feature_snapshot() -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
 from threading import Event
@@ -35,12 +36,14 @@ from t0_trading.configuration import (
     load_configuration,
 )
 from t0_trading.credentials import CredentialError, load_credentials
+from t0_trading.decisions import replay_decisions
 from t0_trading.features import (
     FeatureAuditReport,
     FeatureSnapshot,
     build_feature_audit,
     replay_features,
 )
+from t0_trading.identity import sha256
 from t0_trading.market.reconciliation import (
     MarketDayCertification,
     ReconciliationReport,
@@ -130,9 +133,23 @@ def _replay_feature_session(
     version = configuration.resolve(reader.trade_date)
     certification, _ = certify_market_day((reader,), version, trade_date=reader.trade_date)
     reader = select_feature_capture((reader,), certification)
-    snapshots = replay_features(reader.envelopes(), version, trade_date=reader.trade_date)
-    report = build_feature_audit(snapshots, version, capture=reader)
+    snapshots, report = _replay_feature_capture(reader, configuration)
     return reader, configuration, snapshots, report
+
+
+def _replay_feature_capture(
+    reader: StreamDayReader,
+    configuration: TradingConfiguration,
+) -> tuple[tuple[FeatureSnapshot, ...], FeatureAuditReport]:
+    version = configuration.resolve(reader.trade_date)
+    snapshots = replay_features(
+        reader.envelopes(),
+        version,
+        trade_date=reader.trade_date,
+        gaps=reader.gaps,
+    )
+    report = build_feature_audit(snapshots, version, capture=reader)
+    return snapshots, report
 
 
 def _replay_outcome_session(
@@ -215,6 +232,7 @@ def check_config(
         outcomes = configuration.resolve_outcomes(selected_date)
         strategies = configuration.resolve_strategies(selected_date)
         strategy_evaluation = configuration.resolve_strategy_evaluation(selected_date)
+        decisions = configuration.resolve_decisions(selected_date)
     except TradingConfigurationError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error
@@ -229,6 +247,8 @@ def check_config(
                 "strategy_version_sha256": strategies.sha256,
                 "strategy_evaluation_version": strategy_evaluation.version,
                 "strategy_evaluation_version_sha256": strategy_evaluation.sha256,
+                "decision_version": decisions.version,
+                "decision_version_sha256": decisions.sha256,
                 "version": version.version,
                 "version_sha256": version.sha256,
             },
@@ -621,6 +641,71 @@ def audit_walk_forward_command(
     _emit_model(report, output)
 
 
+def journal_decisions_command(
+    trade_date: Annotated[
+        str,
+        typer.Option(help="Certified exchange-local trade date in YYYY-MM-DD format."),
+    ],
+    landing_uri: Annotated[str, typer.Option(help="Landing S3 root URI.")],
+    output: Annotated[
+        Path,
+        typer.Option(help="Local deterministic JSON Lines decision journal path."),
+    ],
+    region: Annotated[str, typer.Option(help="AWS region containing the landing bucket.")] = (
+        "ap-southeast-1"
+    ),
+    config: Annotated[Path, typer.Option(help="Versioned non-secret trading YAML.")] = (
+        DEFAULT_TRADING_CONFIG
+    ),
+) -> None:
+    """Replay one certified day into an offline journal using the shadow decision engine."""
+    parsed_trade_date = _parse_trade_date(trade_date)
+    try:
+        configuration = load_configuration(config)
+        version = configuration.resolve(parsed_trade_date)
+        readers = _stream_day_readers(parsed_trade_date, landing_uri, region)
+        certification, _ = certify_market_day(
+            readers,
+            version,
+            trade_date=parsed_trade_date,
+        )
+        capture = select_feature_capture(readers, certification)
+        snapshots, _ = _replay_feature_capture(capture, configuration)
+        decisions = replay_decisions(
+            snapshots,
+            version,
+            configuration.resolve_strategies(parsed_trade_date),
+            configuration.resolve_outcomes(parsed_trade_date),
+            configuration.resolve_decisions(parsed_trade_date),
+        )
+    except (StreamCaptureReadError, TradingConfigurationError, ValueError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+    except (CaptureStoreUnavailable, ClientError) as error:
+        typer.echo(f"SSI decision journal failed: {_safe_error(error)}", err=True)
+        raise typer.Exit(code=1) from None
+
+    body = b"".join(decision.canonical_bytes() + b"\n" for decision in decisions)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(body)
+    action_counts = Counter(decision.action for decision in decisions)
+    typer.echo(
+        json.dumps(
+            {
+                "action_counts": {
+                    action: action_counts[action] for action in ("BUY", "SELL", "ABSTAIN")
+                },
+                "decision_count": len(decisions),
+                "journal_sha256": sha256(body),
+                "output": str(output),
+                "trade_date": parsed_trade_date.isoformat(),
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    )
+
+
 def certify_stream_day_command(
     trade_date: Annotated[
         str,
@@ -732,5 +817,6 @@ app.command("audit-features")(audit_features_command)
 app.command("audit-outcomes")(audit_outcomes_command)
 app.command("audit-strategies")(audit_strategies_command)
 app.command("audit-walk-forward")(audit_walk_forward_command)
+app.command("journal-decisions")(journal_decisions_command)
 app.command("validate-stream-day")(validate_stream_day_command)
 app.command("certify-stream-day")(certify_stream_day_command)

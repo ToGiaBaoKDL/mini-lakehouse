@@ -23,6 +23,30 @@ strategy_evaluations:
     minimum_training_sessions: 20
     validation_sessions: 5
     purge_sessions: 1
+decisions:
+  - version: microstructure-decisions-v1
+    effective_from: 2026-08-27
+    effective_to: null
+    strategy_version: microstructure-scores-v1
+    outcome_version: top3-taker-markout-v1
+    # Provisional in-sample q80 thresholds. Shadow-only until purged walk-forward validates them.
+    rules:
+      - strategy: momentum
+        horizon_seconds: 60
+        buy_minimum_strength: "0.68"
+        sell_minimum_strength: "0.69"
+      - strategy: order_flow
+        horizon_seconds: 300
+        buy_minimum_strength: "0.41"
+        sell_minimum_strength: "0.43"
+      - strategy: relative_value
+        horizon_seconds: 300
+        buy_minimum_strength: "0.37"
+        sell_minimum_strength: "0.37"
+    maximum_spread_bps: "25"
+    maximum_trade_age_seconds: "30"
+    maximum_quote_age_seconds: "5"
+    cooldown_seconds: 60
 versions:
   - version: market-state-v1
     effective_from: 2026-08-27

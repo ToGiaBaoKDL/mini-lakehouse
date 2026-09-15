@@ -8,11 +8,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
+from t0_trading.configuration import StrategyName
 from t0_trading.identity import canonical_json, sha256
 from t0_trading.outcomes import Action
-
-StrategyName = Literal["momentum", "order_flow", "relative_value"]
-STRATEGY_NAMES: tuple[StrategyName, ...] = ("momentum", "order_flow", "relative_value")
 
 
 class StrategyScore(BaseModel):

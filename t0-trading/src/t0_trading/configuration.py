@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, time
+from decimal import Decimal
 from itertools import pairwise
 from pathlib import Path
 from typing import Literal, TypeVar
@@ -154,6 +155,9 @@ DecisionSessionName = Literal[
     "closing_auction",
 ]
 
+StrategyName = Literal["momentum", "order_flow", "relative_value"]
+STRATEGY_NAMES: tuple[StrategyName, ...] = ("momentum", "order_flow", "relative_value")
+
 _SESSION_ORDER: tuple[DecisionSessionName, ...] = (
     "opening_auction",
     "continuous_am",
@@ -245,6 +249,33 @@ class StrategyEvaluationVersion(_EffectiveVersion):
     purge_sessions: int = Field(ge=1)
 
 
+class DecisionRule(_StrictModel):
+    """One directional threshold and evaluation horizon for a research score."""
+
+    strategy: StrategyName
+    horizon_seconds: int = Field(ge=1)
+    buy_minimum_strength: Decimal = Field(gt=0, le=1)
+    sell_minimum_strength: Decimal = Field(gt=0, le=1)
+
+
+class DecisionVersion(_EffectiveVersion):
+    """Effective shadow-decision policy, independent from score calculation."""
+
+    strategy_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    outcome_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    rules: tuple[DecisionRule, ...]
+    maximum_spread_bps: Decimal = Field(gt=0)
+    maximum_trade_age_seconds: Decimal = Field(gt=0)
+    maximum_quote_age_seconds: Decimal = Field(gt=0)
+    cooldown_seconds: int = Field(ge=0, le=86_400)
+
+    @model_validator(mode="after")
+    def validate_decisions(self) -> DecisionVersion:
+        if tuple(rule.strategy for rule in self.rules) != STRATEGY_NAMES:
+            raise ValueError("decision rules must cover every strategy once in canonical order")
+        return self
+
+
 class TradingVersion(_EffectiveVersion):
     market: MarketConfiguration
     data_quality: DataQualityConfiguration
@@ -257,6 +288,7 @@ class TradingConfiguration(_StrictModel):
     outcomes: tuple[OutcomeVersion, ...]
     strategies: tuple[StrategyVersion, ...]
     strategy_evaluations: tuple[StrategyEvaluationVersion, ...]
+    decisions: tuple[DecisionVersion, ...]
 
     @model_validator(mode="after")
     def validate_versions(self) -> TradingConfiguration:
@@ -264,6 +296,17 @@ class TradingConfiguration(_StrictModel):
         _validate_effective_versions(self.outcomes, "outcome")
         _validate_effective_versions(self.strategies, "strategy")
         _validate_effective_versions(self.strategy_evaluations, "strategy evaluation")
+        _validate_effective_versions(self.decisions, "decision")
+        strategy_versions = {version.version for version in self.strategies}
+        outcome_versions = {version.version for version in self.outcomes}
+        if any(
+            decision.strategy_version not in strategy_versions
+            or decision.outcome_version not in outcome_versions
+            for decision in self.decisions
+        ):
+            raise ValueError(
+                "decision policies must reference configured score and outcome versions"
+            )
         return self
 
     def resolve(self, value: date) -> TradingVersion:
@@ -277,6 +320,9 @@ class TradingConfiguration(_StrictModel):
 
     def resolve_strategy_evaluation(self, value: date) -> StrategyEvaluationVersion:
         return _resolve_effective(self.strategy_evaluations, value, "strategy evaluation")
+
+    def resolve_decisions(self, value: date) -> DecisionVersion:
+        return _resolve_effective(self.decisions, value, "decision")
 
     def canonical_bytes(self) -> bytes:
         return canonical_json(self.model_dump(mode="json"))

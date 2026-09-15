@@ -12,15 +12,17 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from t0_trading.configuration import (
+    STRATEGY_NAMES,
     OutcomeVersion,
     StrategyEvaluationVersion,
+    StrategyName,
     StrategyVersion,
 )
 from t0_trading.identity import canonical_json, sha256
 from t0_trading.numeric import rate
 from t0_trading.outcomes import Action, OutcomeLabel
 from t0_trading.strategy.evaluation import average_gross_return, match_directed_outcomes
-from t0_trading.strategy.model import STRATEGY_NAMES, StrategyName, StrategyScore
+from t0_trading.strategy.model import StrategyScore
 
 _Session = tuple[Sequence[StrategyScore], Sequence[OutcomeLabel]]
 _DIRECTIONS: tuple[Action, ...] = ("BUY", "SELL")

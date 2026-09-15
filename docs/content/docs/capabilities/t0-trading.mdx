@@ -4,8 +4,9 @@ description: An evidence-gated SSI market-data and assisted-decision capability.
 ---
 
 T0 Trading has a catalog foundation, a scheduled bounded REST publication path, weekday live stream
-capture, and manifest-scoped replay. The capability does not emit signals, initialize an SSI
-trading client, or place broker orders.
+capture, manifest-scoped replay, and deterministic offline/shadow decisions. Shadow output remains
+a journal: the capability does not send notifications, initialize an SSI trading client, or place
+broker orders.
 
 ## Provider boundary
 
@@ -61,9 +62,10 @@ contracts do not add a runtime branch, generic repository, or empty application 
 
 `t0-trading/config/trading.yaml` is the single non-secret configuration document. Strict Pydantic
 models reject unknown fields, invalid effective intervals, duplicate identifiers, and unsupported
-market-state settings. The canonical document and selected effective version each have a stable
-SHA-256 identity. Signal generation is not present yet; unverified fee, tax, risk, and strategy
-thresholds are not represented by placeholder values.
+market-state settings. The canonical document and each selected effective policy have a stable
+SHA-256 identity. Decision thresholds are isolated from feature, score, outcome, and evaluation
+identities. The initial thresholds are explicitly provisional shadow settings derived from an
+in-sample score profile; they cannot authorize advisory or live execution.
 
 The side-effect-free `t0_trading.market` package owns three boundaries: decoding persisted SDK
 messages into the certified event subset, deterministic market-state transitions, and ordered
@@ -135,8 +137,8 @@ the sole landing and curated mutation owner.
 
 This core has no S3, database, notification, or broker side effects. Replay invokes it explicitly;
 the capture service remains responsible only for lossless raw evidence and SDK callbacks perform
-only a non-blocking queue write. A future decision runtime will consume the same snapshots without
-adding a generic capture callback. dbt remains the downstream analytics owner and does not
+only a non-blocking queue write. The shadow decision engine consumes the same incremental snapshots
+without adding another provider callback. dbt remains the downstream analytics owner and does not
 reimplement market-state or point-in-time feature transitions.
 
 ## Offline outcome labels
@@ -224,6 +226,32 @@ The command requires at least 26 certified sessions under the initial policy. Re
 out-of-sample gross markouts per fold, strategy, horizon, and bucket. They carry feature, strategy,
 outcome, and evaluation fingerprints and contain no runtime timestamp, so identical immutable inputs
 produce the same report hash.
+
+## Offline and shadow decisions
+
+The `t0_trading.decisions` package turns each candidate strategy score into `BUY`, `SELL`, or
+`ABSTAIN` using an effective-dated policy. Momentum, order-flow, and relative-value remain separate
+candidates; the engine does not manufacture an ensemble before out-of-sample evidence exists.
+Directional thresholds are independent for each side. Shared fail-closed gates limit quoted spread,
+trade age, quote age, and repeated decisions during a per-strategy cooldown.
+
+Offline replay and a shadow clock call the same stateful `DecisionEngine`. Mode is deliberately not
+part of decision identity: it controls the input and sink, not the formula. A golden test advances
+the live feature and decision clocks over captured envelopes and compares every immutable decision
+with full replay. The replay CLI discovers all terminal segments for a certified trade date and
+writes canonical JSON Lines without notification or broker side effects:
+
+```bash
+AWS_PROFILE=tgbao-dev uv run --project t0-trading t0-trading journal-decisions \
+  --trade-date YYYY-MM-DD \
+  --landing-uri s3://<landing-bucket> \
+  --output /tmp/t0-decisions-YYYY-MM-DD.jsonl
+```
+
+The command prints action counts and a SHA-256 for the complete journal. Replaying the same immutable
+capture and policy produces byte-identical output. These records remain shadow research evidence;
+notification routing, user acknowledgement, inventory checks, and broker execution belong to later
+advisory and live lifecycles.
 
 dbt exposes `analytics_trading.fct_trading_backtest_observations` as a safe-by-default view. It
 inner joins the current passed certification, eligible snapshots, their normalized windows, and

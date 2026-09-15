@@ -1,5 +1,6 @@
 import json
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -45,9 +46,25 @@ def test_trading_configuration_is_strict_effective_dated_and_stable() -> None:
     assert evaluation.minimum_training_sessions == 20
     assert evaluation.validation_sessions == 5
     assert evaluation.purge_sessions == 1
+    decisions = configuration.resolve_decisions(date(2026, 9, 5))
+    assert decisions.version == "microstructure-decisions-v1"
+    assert decisions.strategy_version == strategies.version
+    assert decisions.outcome_version == outcomes.version
+    assert tuple(rule.strategy for rule in decisions.rules) == (
+        "momentum",
+        "order_flow",
+        "relative_value",
+    )
+    assert decisions.rules[0].buy_minimum_strength == Decimal("0.68")
+    assert decisions.rules[1].horizon_seconds == 300
+    assert decisions.maximum_spread_bps == Decimal(25)
+    assert decisions.maximum_trade_age_seconds == Decimal(30)
+    assert decisions.maximum_quote_age_seconds == Decimal(5)
+    assert decisions.cooldown_seconds == 60
     assert len(outcomes.sha256) == 64
     assert len(strategies.sha256) == 64
     assert len(evaluation.sha256) == 64
+    assert len(decisions.sha256) == 64
     assert len(configuration.sha256) == 64
     assert len(version.sha256) == 64
     assert version.sha256 != configuration.sha256
@@ -127,6 +144,27 @@ def test_strategy_evaluation_assumptions_have_an_independent_identity() -> None:
     assert (
         changed.resolve_strategy_evaluation(effective_date).sha256
         != original.resolve_strategy_evaluation(effective_date).sha256
+    )
+
+
+def test_decision_assumptions_have_an_independent_identity() -> None:
+    original = load_configuration(CONFIGURATION)
+    changed = parse_configuration(
+        CONFIGURATION.read_text(encoding="utf-8").replace(
+            'buy_minimum_strength: "0.68"',
+            'buy_minimum_strength: "0.70"',
+        )
+    )
+    effective_date = date(2026, 9, 5)
+
+    assert changed.resolve(effective_date).sha256 == original.resolve(effective_date).sha256
+    assert (
+        changed.resolve_strategies(effective_date).sha256
+        == original.resolve_strategies(effective_date).sha256
+    )
+    assert (
+        changed.resolve_decisions(effective_date).sha256
+        != original.resolve_decisions(effective_date).sha256
     )
 
 
