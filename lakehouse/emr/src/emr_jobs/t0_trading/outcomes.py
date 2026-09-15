@@ -83,6 +83,7 @@ def publish(
         envelopes(spark, landing_table=landing_table, capture=capture),
         configuration,
         policy,
+        authorized_stream_session_ids=capture.stream_session_ids,
         gaps=gaps,
     )
     audit = build_outcome_audit(

@@ -1,5 +1,6 @@
 import hashlib
 import json
+from collections.abc import Iterable, Sequence
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -9,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from t0_trading.capture.reader import StreamDayReader, StreamGap
-from t0_trading.configuration import load_configuration
+from t0_trading.configuration import OutcomeVersion, TradingVersion, load_configuration
 from t0_trading.features import FeatureSnapshot
 from t0_trading.market import StreamEnvelope
 from t0_trading.market.session import MarketSession
@@ -18,11 +19,31 @@ from t0_trading.outcomes import OutcomeLabel, build_outcome_audit, label_outcome
 CONFIGURATION = Path("t0-trading/config/trading.yaml")
 TRADE_DATE = date(2026, 9, 4)
 MARKET_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
+STREAM_SESSION_IDS = ("session-1",)
 
 
 def _configuration():
     configuration = load_configuration(CONFIGURATION)
     return configuration.resolve(TRADE_DATE), configuration.resolve_outcomes(TRADE_DATE)
+
+
+def _label_outcomes(
+    snapshots: Sequence[FeatureSnapshot],
+    envelopes: Iterable[StreamEnvelope],
+    configuration: TradingVersion,
+    policy: OutcomeVersion,
+    *,
+    authorized_stream_session_ids: Sequence[str] = STREAM_SESSION_IDS,
+    gaps: Sequence[StreamGap] = (),
+) -> tuple[OutcomeLabel, ...]:
+    return label_outcomes(
+        snapshots,
+        envelopes,
+        configuration,
+        policy,
+        authorized_stream_session_ids=authorized_stream_session_ids,
+        gaps=gaps,
+    )
 
 
 def _capture(message_count: int) -> StreamDayReader:
@@ -86,6 +107,7 @@ def _quote(
     quantities: tuple[int, int, int] = (60, 60, 60),
     complete: bool = True,
     source_time: datetime | None = None,
+    stream_session_id: str = "session-1",
 ) -> StreamEnvelope:
     active_quantities = quantities if complete else (quantities[0], 0, 0)
     bid_prices = (bid, bid - 1, bid - 2) if complete else (bid, 0, 0)
@@ -103,7 +125,7 @@ def _quote(
     }
     message_json = json.dumps(payload, separators=(",", ":"), sort_keys=True)
     return StreamEnvelope(
-        stream_session_id="session-1",
+        stream_session_id=stream_session_id,
         receive_sequence=sequence,
         message_type="QuoteMessage",
         symbol="VIC",
@@ -131,7 +153,7 @@ def test_top_three_book_walk_and_directional_markouts_are_exact() -> None:
     configuration, policy = _configuration()
     snapshot = _snapshot(_received(9, 20, 0))
 
-    labels = label_outcomes((snapshot,), _base_quotes(), configuration, policy)
+    labels = _label_outcomes((snapshot,), _base_quotes(), configuration, policy)
     buy = next(label for label in labels if label.action == "BUY" and label.horizon_seconds == 30)
     sell = next(label for label in labels if label.action == "SELL" and label.horizon_seconds == 30)
 
@@ -152,9 +174,9 @@ def test_top_three_book_walk_and_directional_markouts_are_exact() -> None:
 def test_future_quote_cannot_change_an_earlier_outcome() -> None:
     configuration, policy = _configuration()
     snapshot = _snapshot(_received(9, 20, 0))
-    base = label_outcomes((snapshot,), _base_quotes(), configuration, policy)
+    base = _label_outcomes((snapshot,), _base_quotes(), configuration, policy)
     future = _quote(3, received_at=_received(9, 20, 31), bid=900, ask=901)
-    repeated = label_outcomes(
+    repeated = _label_outcomes(
         (snapshot,),
         (*_base_quotes(), future),
         configuration,
@@ -166,6 +188,43 @@ def test_future_quote_cannot_change_an_earlier_outcome() -> None:
     )
 
 
+def test_outcomes_accept_every_certified_segment_without_weakening_lineage() -> None:
+    configuration, policy = _configuration()
+    snapshot = _snapshot(_received(9, 20, 0))
+    later_segment = _quote(
+        1,
+        received_at=_received(14, 33, 0),
+        bid=105,
+        ask=106,
+        stream_session_id="session-2",
+    )
+
+    labels = _label_outcomes(
+        (snapshot,),
+        (*_base_quotes(), later_segment),
+        configuration,
+        policy,
+        authorized_stream_session_ids=("session-1", "session-2"),
+    )
+
+    assert len(labels) == 6
+    with pytest.raises(ValueError, match="replay input lineage"):
+        _label_outcomes(
+            (snapshot,),
+            (*_base_quotes(), later_segment),
+            configuration,
+            policy,
+        )
+    with pytest.raises(ValueError, match="snapshot capture lineage"):
+        _label_outcomes(
+            (snapshot,),
+            _base_quotes(),
+            configuration,
+            policy,
+            authorized_stream_session_ids=("session-2",),
+        )
+
+
 def test_outcome_crossing_a_capture_gap_is_withheld() -> None:
     configuration, configured_policy = _configuration()
     policy = configured_policy.model_copy(update={"horizons_seconds": (30,)})
@@ -175,7 +234,7 @@ def test_outcome_crossing_a_capture_gap_is_withheld() -> None:
         ended_at=_received(9, 20, 20),
     )
 
-    labels = label_outcomes(
+    labels = _label_outcomes(
         (snapshot,),
         _base_quotes(),
         configuration,
@@ -204,7 +263,7 @@ def test_latest_incomplete_book_supersedes_an_older_complete_quote() -> None:
 
     label = next(
         item
-        for item in label_outcomes((snapshot,), quotes, configuration, policy)
+        for item in _label_outcomes((snapshot,), quotes, configuration, policy)
         if item.action == "BUY" and item.horizon_seconds == 30
     )
 
@@ -220,7 +279,7 @@ def test_stale_depth_and_session_boundaries_fail_closed() -> None:
     shallow = (
         _quote(1, received_at=_received(9, 20, 0), bid=100, ask=101, quantities=(30, 30, 30)),
     )
-    labels = label_outcomes((snapshot,), shallow, configuration, policy)
+    labels = _label_outcomes((snapshot,), shallow, configuration, policy)
 
     thirty = next(item for item in labels if item.action == "BUY" and item.horizon_seconds == 30)
     sixty = next(item for item in labels if item.action == "BUY" and item.horizon_seconds == 60)
@@ -228,7 +287,7 @@ def test_stale_depth_and_session_boundaries_fail_closed() -> None:
     assert sixty.reasons == ("INSUFFICIENT_ENTRY_DEPTH", "STALE_HORIZON_QUOTE")
 
     closing = _snapshot(_received(11, 29, 55))
-    outside = label_outcomes((closing,), (), configuration, policy)
+    outside = _label_outcomes((closing,), (), configuration, policy)
     assert all("HORIZON_OUTSIDE_SESSION" in item.reasons for item in outside)
     assert all(item.gross_return_bps is None for item in outside)
 
@@ -236,7 +295,7 @@ def test_stale_depth_and_session_boundaries_fail_closed() -> None:
 def test_feature_eligibility_and_input_lineage_are_preserved() -> None:
     configuration, policy = _configuration()
     snapshot = _snapshot(_received(9, 20, 0), reasons=("STALE_QUOTE",))
-    labels = label_outcomes((snapshot,), _base_quotes(), configuration, policy)
+    labels = _label_outcomes((snapshot,), _base_quotes(), configuration, policy)
 
     thirty = next(item for item in labels if item.action == "BUY" and item.horizon_seconds == 30)
     assert thirty.gross_return_bps == Decimal("157.7909")
@@ -244,7 +303,7 @@ def test_feature_eligibility_and_input_lineage_are_preserved() -> None:
     assert thirty.is_eligible is False
 
     with pytest.raises(ValueError, match="SEQUENCE_GAP"):
-        label_outcomes(
+        _label_outcomes(
             (snapshot,),
             (_quote(2, received_at=_received(9, 20, 0), bid=100, ask=101),),
             configuration,
@@ -252,7 +311,7 @@ def test_feature_eligibility_and_input_lineage_are_preserved() -> None:
         )
 
     with pytest.raises(ValueError, match="configuration lineage"):
-        label_outcomes(
+        _label_outcomes(
             (_snapshot(_received(9, 20, 0), symbol="HPG"),),
             _base_quotes(),
             configuration,
@@ -260,7 +319,7 @@ def test_feature_eligibility_and_input_lineage_are_preserved() -> None:
         )
 
     with pytest.raises(ValueError, match="configuration lineage"):
-        label_outcomes(
+        _label_outcomes(
             (
                 _snapshot(
                     _received(9, 20, 0),
@@ -288,7 +347,7 @@ def test_outcomes_reuse_market_integrity_and_source_time_freshness() -> None:
     )
 
     with pytest.raises(ValueError, match="QUOTE_TIME_REGRESSION"):
-        label_outcomes((snapshot,), regressed, configuration, policy)
+        _label_outcomes((snapshot,), regressed, configuration, policy)
 
     delayed = (
         _quote(
@@ -308,7 +367,7 @@ def test_outcomes_reuse_market_integrity_and_source_time_freshness() -> None:
     )
     label = next(
         item
-        for item in label_outcomes((snapshot,), delayed, configuration, policy)
+        for item in _label_outcomes((snapshot,), delayed, configuration, policy)
         if item.action == "BUY" and item.horizon_seconds == 30
     )
 
@@ -322,7 +381,7 @@ def test_outcome_audit_reconciles_coverage_returns_and_directionality() -> None:
         _snapshot(_received(9, 20, 0)),
         _snapshot(_received(9, 20, 0), symbol="VHM"),
     )
-    labels = label_outcomes(snapshots, _base_quotes(), configuration, policy)
+    labels = _label_outcomes(snapshots, _base_quotes(), configuration, policy)
 
     report = build_outcome_audit(
         snapshots,
@@ -373,7 +432,7 @@ def test_outcome_audit_rejects_incomplete_or_drifted_label_matrices() -> None:
         _snapshot(_received(9, 20, 0)),
         _snapshot(_received(9, 20, 0), symbol="VHM"),
     )
-    labels = label_outcomes(snapshots, _base_quotes(), configuration, policy)
+    labels = _label_outcomes(snapshots, _base_quotes(), configuration, policy)
 
     def build(selected: tuple[OutcomeLabel, ...]) -> object:
         return build_outcome_audit(

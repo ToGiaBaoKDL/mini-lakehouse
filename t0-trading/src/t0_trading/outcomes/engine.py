@@ -88,14 +88,14 @@ def _quote_tapes(
     envelopes: Iterable[StreamEnvelope],
     configuration: TradingVersion,
     *,
-    stream_session_ids: frozenset[str],
+    authorized_stream_session_ids: frozenset[str],
     trade_date: date,
 ) -> dict[str, _QuoteTape]:
     tapes = {symbol: _QuoteTape() for symbol in configuration.market.symbols}
 
     def selected_sessions() -> Iterable[StreamEnvelope]:
         for envelope in envelopes:
-            if envelope.stream_session_id not in stream_session_ids:
+            if envelope.stream_session_id not in authorized_stream_session_ids:
                 raise ValueError("outcome replay input lineage is inconsistent")
             yield envelope
 
@@ -120,15 +120,24 @@ def label_outcomes(
     configuration: TradingVersion,
     policy: OutcomeVersion,
     *,
+    authorized_stream_session_ids: Sequence[str],
     gaps: Sequence[StreamGap] = (),
 ) -> tuple[OutcomeLabel, ...]:
     """Label every snapshot/action/horizon without consulting future state early."""
     if not snapshots:
         return ()
-    stream_session_ids = {snapshot.stream_session_id for snapshot in snapshots}
-    if None in stream_session_ids:
+    authorized_session_ids = frozenset(authorized_stream_session_ids)
+    if (
+        not authorized_session_ids
+        or len(authorized_session_ids) != len(authorized_stream_session_ids)
+        or any(not session_id for session_id in authorized_session_ids)
+    ):
+        raise ValueError("outcome capture lineage is inconsistent")
+    snapshot_session_ids = {snapshot.stream_session_id for snapshot in snapshots}
+    if None in snapshot_session_ids:
         raise ValueError("outcome snapshots must reference captured stream sessions")
-    selected_session_ids = frozenset(value for value in stream_session_ids if value is not None)
+    if not snapshot_session_ids.issubset(authorized_session_ids):
+        raise ValueError("outcome snapshot capture lineage is inconsistent")
     trade_date = snapshots[0].trade_date
     timezone = ZoneInfo(configuration.market.timezone)
     snapshot_keys = {(snapshot.symbol, snapshot.decision_at) for snapshot in snapshots}
@@ -156,7 +165,7 @@ def label_outcomes(
     tapes = _quote_tapes(
         envelopes,
         configuration,
-        stream_session_ids=selected_session_ids,
+        authorized_stream_session_ids=authorized_session_ids,
         trade_date=trade_date,
     )
     latency = timedelta(milliseconds=policy.execution_latency_milliseconds)

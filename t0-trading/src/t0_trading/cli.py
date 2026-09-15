@@ -148,7 +148,13 @@ def _replay_outcome_session(
     reader, configuration, snapshots, _ = _replay_feature_session(manifest_uri, region, config)
     version = configuration.resolve(reader.trade_date)
     policy = configuration.resolve_outcomes(reader.trade_date)
-    labels = label_outcomes(snapshots, reader.envelopes(), version, policy)
+    labels = label_outcomes(
+        snapshots,
+        reader.envelopes(),
+        version,
+        policy,
+        authorized_stream_session_ids=reader.stream_session_ids,
+    )
     return reader, configuration, snapshots, labels
 
 
