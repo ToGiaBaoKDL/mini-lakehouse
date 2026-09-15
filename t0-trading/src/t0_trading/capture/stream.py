@@ -363,8 +363,15 @@ def capture_stream(
         failure_type = type(error).__name__
 
     if observer is not None:
+        unavailable_at = disconnected_at
+        if disconnect_kind == "stale":
+            unavailable_at = (
+                datetime.fromisoformat(receiver.last_heartbeat_at)
+                if receiver.last_heartbeat_at is not None
+                else connected_at
+            )
         observer.disconnected(
-            disconnected_at,
+            unavailable_at,
             unavailable=disconnect_kind not in {"completed", "shutdown"},
         )
 

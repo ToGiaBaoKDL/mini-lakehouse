@@ -13,6 +13,7 @@ from t0_trading.identity import canonical_json, sha256
 from t0_trading.market.session import MarketSession
 
 DecisionAction = Literal["BUY", "SELL", "ABSTAIN"]
+DECISION_ACTIONS: tuple[DecisionAction, ...] = ("BUY", "SELL", "ABSTAIN")
 
 
 class StrategyDecision(BaseModel):

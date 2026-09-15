@@ -203,6 +203,7 @@ def test_stream_capture_publishes_batches_and_one_terminal_manifest(tmp_path: Pa
 def test_stream_capture_fails_closed_when_heartbeats_are_stale() -> None:
     store = _Store()
     timer = _Timer()
+    observer = _Observer()
 
     try:
         capture_stream(
@@ -219,6 +220,7 @@ def test_stream_capture_fails_closed_when_heartbeats_are_stale() -> None:
             clock=timer.clock,
             timer=timer.tick,
             session_id="stale-session",
+            observer=observer,
         )
     except StreamCaptureError as error:
         assert "stale" in str(error)
@@ -230,6 +232,7 @@ def test_stream_capture_fails_closed_when_heartbeats_are_stale() -> None:
     ]
     assert manifest_objects[0]["disconnect_kind"] == "stale"
     assert manifest_objects[0]["error_type"] == "HeartbeatTimeout"
+    assert observer.disconnection == (timer.epoch, True)
 
 
 def test_stream_capture_reconnects_with_a_fresh_sdk_context() -> None:

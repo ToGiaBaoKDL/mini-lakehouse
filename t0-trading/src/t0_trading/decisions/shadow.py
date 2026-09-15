@@ -23,12 +23,11 @@ from t0_trading.configuration import (
     TradingVersion,
 )
 from t0_trading.decisions.engine import DecisionEngine
-from t0_trading.decisions.model import DecisionAction
+from t0_trading.decisions.model import DECISION_ACTIONS, DecisionAction
 from t0_trading.features import FeatureEngine, FeatureSnapshot, decision_times
 from t0_trading.identity import canonical_json, sha256
 from t0_trading.market import StreamEnvelope
 
-_ACTIONS: tuple[DecisionAction, ...] = ("BUY", "SELL", "ABSTAIN")
 _COMPLETED_RETENTION = timedelta(days=14)
 _PARTIAL_RETENTION = timedelta(days=3)
 
@@ -91,7 +90,7 @@ class ShadowJournalManifest(BaseModel):
 
     @model_validator(mode="after")
     def validate_manifest(self) -> ShadowJournalManifest:
-        expected_actions = set(_ACTIONS)
+        expected_actions = set(DECISION_ACTIONS)
         if self.first_connected_at > self.completed_at:
             raise ValueError("shadow journal timestamps are not ordered")
         if (
@@ -206,7 +205,7 @@ class ShadowDecisionJournal:
 
     @property
     def action_counts(self) -> dict[DecisionAction, int]:
-        return {action: self._action_counts[action] for action in _ACTIONS}
+        return {action: self._action_counts[action] for action in DECISION_ACTIONS}
 
     def _fail(self, error: Exception) -> None:
         if self._failed:

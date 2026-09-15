@@ -266,6 +266,18 @@ remains the primary workload and continues independently. The local journal is p
 a serving database or notification queue. Completed local artifacts are retained for 14 days and
 partial artifacts for three days; cleanup runs before the scheduled capture opens a new journal.
 
+Audit a committed local journal against the exact terminal capture lineage declared by its manifest:
+
+```bash
+uv run --project t0-trading t0-trading audit-shadow-journal \
+  --manifest /path/to/YYYY-MM-DDTHHMMSS.ffffffZ.manifest.json
+```
+
+The audit validates canonical local artifacts, effective policy hashes, the complete decision clock,
+every S3 manifest and batch checksum, receipt ordering, capture gaps, decision counts, and finally
+compares every journal record byte-for-byte with deterministic replay. It is read-only and exits
+non-zero on any mismatch.
+
 dbt exposes `analytics_trading.fct_trading_backtest_observations` as a safe-by-default view. It
 inner joins the current passed certification, eligible snapshots, their normalized windows, and
 eligible outcomes using their existing immutable lineage. The view does not rederive market state,

@@ -37,7 +37,10 @@ from t0_trading.configuration import (
 )
 from t0_trading.credentials import CredentialError, load_credentials
 from t0_trading.decisions import (
+    DECISION_ACTIONS,
     ShadowDecisionJournal,
+    ShadowJournalAuditError,
+    audit_shadow_journal,
     prune_shadow_journals,
     replay_decisions,
 )
@@ -751,9 +754,7 @@ def journal_decisions_command(
     typer.echo(
         json.dumps(
             {
-                "action_counts": {
-                    action: action_counts[action] for action in ("BUY", "SELL", "ABSTAIN")
-                },
+                "action_counts": {action: action_counts[action] for action in DECISION_ACTIONS},
                 "decision_count": len(decisions),
                 "journal_sha256": sha256(body),
                 "output": str(output),
@@ -763,6 +764,49 @@ def journal_decisions_command(
             sort_keys=True,
         )
     )
+
+
+def audit_shadow_journal_command(
+    manifest: Annotated[
+        Path,
+        typer.Option(
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            help="Local committed shadow journal manifest.",
+        ),
+    ],
+    region: Annotated[str, typer.Option(help="AWS region containing the landing bucket.")] = (
+        "ap-southeast-1"
+    ),
+    config: Annotated[Path, typer.Option(help="Versioned non-secret trading YAML.")] = (
+        DEFAULT_TRADING_CONFIG
+    ),
+    output: Annotated[
+        Path | None,
+        typer.Option(help="Optional local JSON path; stdout is always emitted."),
+    ] = None,
+) -> None:
+    """Prove a local shadow journal is byte-identical to immutable S3 replay."""
+    try:
+        report = audit_shadow_journal(
+            manifest,
+            boto3.client("s3", region_name=region),
+            load_configuration(config),
+        )
+    except (
+        ShadowJournalAuditError,
+        StreamCaptureReadError,
+        TradingConfigurationError,
+        ValueError,
+    ) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+    except (CaptureStoreUnavailable, ClientError) as error:
+        typer.echo(f"SSI shadow journal audit failed: {_safe_error(error)}", err=True)
+        raise typer.Exit(code=1) from None
+    _emit_model(report, output)
 
 
 def certify_stream_day_command(
@@ -877,5 +921,6 @@ app.command("audit-outcomes")(audit_outcomes_command)
 app.command("audit-strategies")(audit_strategies_command)
 app.command("audit-walk-forward")(audit_walk_forward_command)
 app.command("journal-decisions")(journal_decisions_command)
+app.command("audit-shadow-journal")(audit_shadow_journal_command)
 app.command("validate-stream-day")(validate_stream_day_command)
 app.command("certify-stream-day")(certify_stream_day_command)
