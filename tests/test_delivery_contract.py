@@ -303,6 +303,7 @@ def test_each_component_owns_its_deployment_operation() -> None:
     assert "sudo systemctl start" not in t0_trading
     assert "storage/landing_uri" in t0_trading
     assert "T0_STREAM_SPOOL_DIR" in t0_trading
+    assert "T0_SHADOW_JOURNAL_DIR" in t0_trading
     assert "install -d -m 0700" in t0_trading
     assert "--force-recreate" not in lightdash
     assert "docker compose --project-name arxiv-lens" in lens

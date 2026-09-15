@@ -1,6 +1,7 @@
 import hashlib
 import json
-from datetime import UTC, date, datetime
+import os
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,7 +10,13 @@ from typing import cast
 import pytest
 from t0_trading.capture.reader import StreamDayReader, StreamGap
 from t0_trading.configuration import load_configuration
-from t0_trading.decisions import DecisionEngine, replay_decisions
+from t0_trading.decisions import (
+    DecisionEngine,
+    ShadowDecisionJournal,
+    ShadowJournalManifest,
+    prune_shadow_journals,
+    replay_decisions,
+)
 from t0_trading.features import (
     FeatureEngine,
     build_feature_audit,
@@ -24,6 +31,21 @@ TRADE_DATE = date(2026, 9, 4)
 
 def _configuration():
     return load_configuration(CONFIGURATION).resolve(TRADE_DATE)
+
+
+def _short_configuration():
+    configuration = _configuration()
+    sessions = configuration.market.sessions.model_copy(
+        update={"continuous_am": (time(9, 15), time(9, 21))}
+    )
+    return configuration.model_copy(
+        update={
+            "market": configuration.market.model_copy(update={"sessions": sessions}),
+            "features": configuration.features.model_copy(
+                update={"decision_sessions": ("continuous_am",)}
+            ),
+        }
+    )
 
 
 def _capture(message_count: int) -> StreamDayReader:
@@ -324,6 +346,205 @@ def test_live_clock_and_full_replay_emit_identical_point_in_time_snapshots() -> 
         loaded.resolve_outcomes(TRADE_DATE),
         loaded.resolve_decisions(TRADE_DATE),
     ) == tuple(live_journal)
+
+
+def test_shadow_journal_matches_multi_segment_replay_and_commits_manifest(
+    tmp_path: Path,
+) -> None:
+    loaded = load_configuration(CONFIGURATION)
+    configuration = _short_configuration()
+    first_segment = _observations()[:4]
+    second_segment = tuple(
+        envelope.model_copy(update={"stream_session_id": "session-2", "receive_sequence": sequence})
+        for sequence, envelope in enumerate(_observations()[4:], start=1)
+    )
+    gap = StreamGap(
+        started_at=_received(9, 16, 0),
+        ended_at=_received(9, 19, 30),
+    )
+    capture_manifests = (
+        "s3://landing/stream/trade_date=2026-09-04/session=session-1/manifest.json",
+        "s3://landing/stream/trade_date=2026-09-04/session=session-2/manifest.json",
+    )
+    output = tmp_path / "shadow.jsonl"
+    journal = ShadowDecisionJournal(
+        output,
+        TRADE_DATE,
+        configuration,
+        loaded.resolve_strategies(TRADE_DATE),
+        loaded.resolve_outcomes(TRADE_DATE),
+        loaded.resolve_decisions(TRADE_DATE),
+    )
+    journal.connected("session-1", _received(9, 0, 0))
+    for envelope in first_segment:
+        journal.ingest((envelope,))
+        journal.advance(envelope.received_at + timedelta(seconds=5))
+    journal.disconnected(gap.started_at, unavailable=True)
+    journal.connected("session-2", gap.ended_at)
+    for envelope in second_segment:
+        journal.ingest((envelope,))
+        journal.advance(envelope.received_at + timedelta(seconds=5))
+    journal.close(_received(9, 21, 0), capture_manifests)
+
+    expected = replay_decisions(
+        replay_features(
+            (*first_segment, *second_segment),
+            configuration,
+            trade_date=TRADE_DATE,
+            gaps=(gap,),
+        ),
+        configuration,
+        loaded.resolve_strategies(TRADE_DATE),
+        loaded.resolve_outcomes(TRADE_DATE),
+        loaded.resolve_decisions(TRADE_DATE),
+    )
+    expected_body = b"".join(decision.canonical_bytes() + b"\n" for decision in expected)
+    manifest = ShadowJournalManifest.model_validate_json(journal.manifest_output.read_bytes())
+
+    assert output.read_bytes() == expected_body
+    assert journal.decision_count == len(expected)
+    assert journal.journal_sha256 == hashlib.sha256(expected_body).hexdigest()
+    assert manifest.capture_manifest_uris == capture_manifests
+    assert manifest.stream_session_ids == ("session-1", "session-2")
+    assert manifest.decision_count == len(expected)
+    assert manifest.journal_sha256 == journal.journal_sha256
+    assert journal.manifest is not None
+    assert manifest.sha256 == journal.manifest.sha256
+    assert any("CAPTURE_GAP" in decision.reasons for decision in expected)
+    assert not journal.partial_output.exists()
+    assert not journal.partial_manifest_output.exists()
+
+
+@pytest.mark.parametrize(
+    ("completed_at", "capture_manifests"),
+    (
+        (
+            _received(9, 20, 5),
+            ("s3://landing/stream/trade_date=2026-09-04/session=session-1/manifest.json",),
+        ),
+        (_received(9, 21, 0), ()),
+    ),
+)
+def test_shadow_journal_requires_every_decision_clock_and_terminal_manifest(
+    tmp_path: Path,
+    completed_at: datetime,
+    capture_manifests: tuple[str, ...],
+) -> None:
+    loaded = load_configuration(CONFIGURATION)
+    configuration = _short_configuration()
+    output = tmp_path / "shadow.jsonl"
+    journal = ShadowDecisionJournal(
+        output,
+        TRADE_DATE,
+        configuration,
+        loaded.resolve_strategies(TRADE_DATE),
+        loaded.resolve_outcomes(TRADE_DATE),
+        loaded.resolve_decisions(TRADE_DATE),
+    )
+    journal.connected("session-1", _received(9, 0, 0))
+    journal.close(completed_at, capture_manifests)
+
+    assert journal.failed is True
+    assert journal.partial_output.exists()
+    assert not output.exists()
+    assert not journal.manifest_output.exists()
+
+
+def test_shadow_journal_fails_closed_without_raising_into_capture(tmp_path: Path) -> None:
+    loaded = load_configuration(CONFIGURATION)
+    configuration = loaded.resolve(TRADE_DATE)
+    failures: list[str] = []
+
+    def failing_error_callback(error: Exception) -> None:
+        failures.append(type(error).__name__)
+        raise RuntimeError("observer reporting must not reach capture")
+
+    output = tmp_path / "shadow.jsonl"
+    journal = ShadowDecisionJournal(
+        output,
+        TRADE_DATE,
+        configuration,
+        loaded.resolve_strategies(TRADE_DATE),
+        loaded.resolve_outcomes(TRADE_DATE),
+        loaded.resolve_decisions(TRADE_DATE),
+        on_error=failing_error_callback,
+    )
+
+    journal.ingest((_observations()[1], _observations()[0]))
+    journal.advance(_received(9, 20, 5))
+
+    assert journal.failed is True
+    assert failures == ["ValueError"]
+    assert journal.partial_output.exists()
+    assert not output.exists()
+
+
+def test_shadow_journal_initialization_failure_leaves_no_artifact(tmp_path: Path) -> None:
+    loaded = load_configuration(CONFIGURATION)
+    invalid_policy = loaded.resolve_decisions(TRADE_DATE).model_copy(
+        update={"strategy_version": "missing-strategy"}
+    )
+
+    with pytest.raises(ValueError, match="lineage"):
+        ShadowDecisionJournal(
+            tmp_path / "shadow.jsonl",
+            TRADE_DATE,
+            _configuration(),
+            loaded.resolve_strategies(TRADE_DATE),
+            loaded.resolve_outcomes(TRADE_DATE),
+            invalid_policy,
+        )
+
+    assert not any(tmp_path.iterdir())
+
+
+def test_shadow_journal_rejects_a_late_first_connection(tmp_path: Path) -> None:
+    loaded = load_configuration(CONFIGURATION)
+    journal = ShadowDecisionJournal(
+        tmp_path / "shadow.jsonl",
+        TRADE_DATE,
+        _short_configuration(),
+        loaded.resolve_strategies(TRADE_DATE),
+        loaded.resolve_outcomes(TRADE_DATE),
+        loaded.resolve_decisions(TRADE_DATE),
+    )
+
+    journal.connected("session-1", _received(9, 15, 6))
+
+    assert journal.failed is True
+    assert journal.partial_output.exists()
+    assert not journal.output.exists()
+
+
+def test_shadow_journal_retention_is_scoped_by_artifact_state(tmp_path: Path) -> None:
+    now = datetime(2026, 9, 16, tzinfo=UTC)
+    old_completed = (
+        tmp_path / "old.jsonl",
+        tmp_path / "old.manifest.json",
+    )
+    old_partial = (
+        tmp_path / "failed.jsonl.partial",
+        tmp_path / "failed.manifest.json.partial",
+    )
+    retained = (
+        tmp_path / "recent.jsonl",
+        tmp_path / "recent.manifest.json",
+        tmp_path / "recent.jsonl.partial",
+        tmp_path / "unowned.txt",
+    )
+    for path in (*old_completed, *old_partial, *retained):
+        path.touch()
+    for path in old_completed:
+        timestamp = (now - timedelta(days=15)).timestamp()
+        os.utime(path, (timestamp, timestamp))
+    for path in old_partial:
+        timestamp = (now - timedelta(days=4)).timestamp()
+        os.utime(path, (timestamp, timestamp))
+
+    prune_shadow_journals(tmp_path, observed_at=now)
+
+    assert all(not path.exists() for path in (*old_completed, *old_partial))
+    assert all(path.exists() for path in retained)
 
 
 def test_future_observations_cannot_change_an_earlier_feature_snapshot() -> None:

@@ -507,6 +507,8 @@ def test_t0_stream_capture_is_scheduled_externally_and_uses_its_workload_identit
         "/var/lib/t0-trading/spool",
         "--spool-max-bytes",
         "${T0_STREAM_SPOOL_MAX_BYTES:-268435456}",
+        "--shadow-journal-dir",
+        "/var/lib/t0-trading/shadow",
         "--ready-file",
         "/tmp/t0-stream-ready",
     ]
@@ -514,6 +516,7 @@ def test_t0_stream_capture_is_scheduled_externally_and_uses_its_workload_identit
     assert service["volumes"] == [
         "${AWS_IDENTITY_DIR}/t0-trading:/run/aws:ro",
         "${T0_STREAM_SPOOL_DIR}:/var/lib/t0-trading/spool",
+        "${T0_SHADOW_JOURNAL_DIR}:/var/lib/t0-trading/shadow",
     ]
     assert set(service["environment"]) == {
         "LAKEHOUSE_ENVIRONMENT",

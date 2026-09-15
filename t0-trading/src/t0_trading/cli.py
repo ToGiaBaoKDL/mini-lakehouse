@@ -6,7 +6,7 @@ import json
 import os
 import signal
 from collections import Counter
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from threading import Event
 from typing import Annotated
@@ -36,7 +36,11 @@ from t0_trading.configuration import (
     load_configuration,
 )
 from t0_trading.credentials import CredentialError, load_credentials
-from t0_trading.decisions import replay_decisions
+from t0_trading.decisions import (
+    ShadowDecisionJournal,
+    prune_shadow_journals,
+    replay_decisions,
+)
 from t0_trading.features import (
     FeatureAuditReport,
     FeatureSnapshot,
@@ -396,6 +400,10 @@ def capture_stream_command(
         typer.Option(help="Optional persistent directory for pending stream objects."),
     ] = None,
     spool_max_bytes: Annotated[int, typer.Option(min=1)] = 268_435_456,
+    shadow_journal_dir: Annotated[
+        Path | None,
+        typer.Option(help="Optional persistent directory for local shadow decision journals."),
+    ] = None,
     ready_file: Annotated[
         Path | None,
         typer.Option(help="Optional runtime readiness marker written after the first heartbeat."),
@@ -405,7 +413,9 @@ def capture_stream_command(
     environment = os.environ.get("LAKEHOUSE_ENVIRONMENT", "dev")
     effective_secret_id = secret_id or f"lakehouse/{environment}/t0-trading/ssi"
     try:
-        version = load_configuration(config).resolve(datetime.now(MARKET_TIMEZONE).date())
+        trade_date = datetime.now(MARKET_TIMEZONE).date()
+        configuration = load_configuration(config)
+        version = configuration.resolve(trade_date)
         options = StreamCaptureOptions(
             symbols=version.market.symbols,
             duration_seconds=duration_seconds,
@@ -426,10 +436,36 @@ def capture_stream_command(
         signum: signal.signal(signum, lambda _signum, _frame: stop.set())
         for signum in (signal.SIGINT, signal.SIGTERM)
     }
+    journal: ShadowDecisionJournal | None = None
+    capture_completed = False
     try:
         credentials = load_credentials(effective_secret_id, region)
         store = S3CaptureStore(boto3.client("s3", region_name=region), landing_uri)
         spool = CaptureSpool(spool_dir, max_bytes=spool_max_bytes) if spool_dir else None
+        if shadow_journal_dir is not None:
+            try:
+                started_at = datetime.now(UTC)
+                prune_shadow_journals(shadow_journal_dir, observed_at=started_at)
+                output = shadow_journal_dir / (
+                    f"{trade_date.isoformat()}T{started_at.strftime('%H%M%S.%fZ')}.jsonl"
+                )
+                journal = ShadowDecisionJournal(
+                    output,
+                    trade_date,
+                    version,
+                    configuration.resolve_strategies(trade_date),
+                    configuration.resolve_outcomes(trade_date),
+                    configuration.resolve_decisions(trade_date),
+                    on_error=lambda error: typer.echo(
+                        f"T0 shadow journal disabled ({type(error).__name__})",
+                        err=True,
+                    ),
+                )
+            except (OSError, ValueError) as error:
+                typer.echo(
+                    f"T0 shadow journal unavailable ({type(error).__name__})",
+                    err=True,
+                )
         manifest_uris = capture_stream_resilient(
             lambda: market_stream(credentials),
             store,
@@ -444,7 +480,11 @@ def capture_stream_command(
                 err=True,
             ),
             spool=spool,
+            observer=journal,
         )
+        if journal is not None:
+            journal.close(datetime.now(UTC), manifest_uris)
+        capture_completed = True
     except CredentialError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error
@@ -452,8 +492,27 @@ def capture_stream_command(
         typer.echo(f"SSI stream capture failed: {_safe_error(error)}", err=True)
         raise typer.Exit(code=1) from None
     finally:
+        if journal is not None and not capture_completed:
+            journal.abort()
         for signum, handler in previous_handlers.items():
             signal.signal(signum, handler)
+    if journal is not None and journal.journal_sha256 is not None:
+        typer.echo(
+            json.dumps(
+                {
+                    "action_counts": journal.action_counts,
+                    "decision_count": journal.decision_count,
+                    "journal_sha256": journal.journal_sha256,
+                    "manifest": str(journal.manifest_output),
+                    "manifest_sha256": journal.manifest.sha256 if journal.manifest else None,
+                    "output": str(journal.output),
+                    "trade_date": trade_date.isoformat(),
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            err=True,
+        )
     for manifest_uri in manifest_uris:
         typer.echo(manifest_uri)
 

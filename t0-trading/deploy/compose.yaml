@@ -18,6 +18,8 @@ services:
       - /var/lib/t0-trading/spool
       - --spool-max-bytes
       - ${T0_STREAM_SPOOL_MAX_BYTES:-268435456}
+      - --shadow-journal-dir
+      - /var/lib/t0-trading/shadow
       - --ready-file
       - /tmp/t0-stream-ready
     environment:
@@ -27,6 +29,7 @@ services:
     volumes:
       - ${AWS_IDENTITY_DIR}/t0-trading:/run/aws:ro
       - ${T0_STREAM_SPOOL_DIR}:/var/lib/t0-trading/spool
+      - ${T0_SHADOW_JOURNAL_DIR}:/var/lib/t0-trading/shadow
     cpus: 0.5
     mem_limit: 512m
     stop_grace_period: 30s

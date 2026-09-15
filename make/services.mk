@@ -13,7 +13,10 @@ AIRFLOW_COMPOSE_CONFIG := AIRFLOW_DATABASE_PASSWORD=unused AIRFLOW_FERNET_KEY=un
 LIGHTDASH_COMPOSE_CONFIG := AWS_REGION=ap-southeast-1 LIGHTDASH_DATABASE_PASSWORD=unused LIGHTDASH_IMAGE=lightdash:local LIGHTDASH_S3_BUCKET=validation LIGHTDASH_SECRET=unused-unused-unused-unused-unused-unused LIGHTDASH_SITE_URL=https://analytics.tgblab.io.vn $(LIGHTDASH_COMPOSE)
 CLOUDFLARE_COMPOSE_CONFIG := CLOUDFLARE_IMAGE=$(CLOUDFLARE_CONNECTOR_IMAGE) CLOUDFLARE_TUNNEL_TOKEN_FILE=/dev/null LOCAL_GID=0 $(CLOUDFLARE_COMPOSE)
 NETDATA_COMPOSE_CONFIG := NETDATA_CONFIG_SHA256=validation NETDATA_HOSTNAME=validation-host NETDATA_IMAGE=$(NETDATA_IMAGE) NETDATA_POSTGRES_PGPASS='*:*:*:lakehouse_monitor:validation' $(NETDATA_COMPOSE)
-T0_TRADING_COMPOSE_CONFIG := T0_LANDING_URI=s3://validation/landing $(T0_TRADING_COMPOSE)
+T0_TRADING_COMPOSE_CONFIG := AWS_IDENTITY_DIR=/tmp/validation LAKEHOUSE_ENVIRONMENT=dev \
+	LOCAL_UID=0 T0_LANDING_URI=s3://validation/landing \
+	T0_STREAM_SPOOL_DIR=/tmp/validation T0_SHADOW_JOURNAL_DIR=/tmp/validation \
+	$(T0_TRADING_COMPOSE)
 
 .PHONY: metadata-postgres-secrets-init metadata-postgres-up metadata-postgres-down metadata-postgres-logs \
 	metadata-postgres-backup metadata-postgres-restore \

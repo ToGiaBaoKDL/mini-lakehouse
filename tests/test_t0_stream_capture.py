@@ -1,7 +1,7 @@
 import gzip
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -86,6 +86,26 @@ class _Stop:
         return False
 
 
+class _Observer:
+    def __init__(self) -> None:
+        self.connection: tuple[str, datetime] | None = None
+        self.envelopes = []
+        self.advanced_at: list[datetime] = []
+        self.disconnection: tuple[datetime, bool] | None = None
+
+    def connected(self, stream_session_id: str, connected_at: datetime) -> None:
+        self.connection = (stream_session_id, connected_at)
+
+    def ingest(self, envelopes: Sequence[Any]) -> None:
+        self.envelopes.extend(envelopes)
+
+    def advance(self, observed_at: datetime) -> None:
+        self.advanced_at.append(observed_at)
+
+    def disconnected(self, disconnected_at: datetime, *, unavailable: bool) -> None:
+        self.disconnection = (disconnected_at, unavailable)
+
+
 @dataclass
 class _Trade:
     symbol: str
@@ -134,6 +154,7 @@ def test_stream_capture_publishes_batches_and_one_terminal_manifest(tmp_path: Pa
     timer = _Timer()
     stream = _Stream(timer)
     ready: list[bool] = []
+    observer = _Observer()
 
     manifest_uri = capture_stream(
         stream,
@@ -151,12 +172,17 @@ def test_stream_capture_publishes_batches_and_one_terminal_manifest(tmp_path: Pa
         session_id="session-1",
         on_ready=lambda: ready.append(True),
         spool=CaptureSpool(tmp_path, max_bytes=1024 * 1024),
+        observer=observer,
     )
 
     assert manifest_uri.startswith(f"s3://landing/root/{SSI_STREAM_RAW_PREFIX}/")
     assert stream.is_connected is False
     assert stream.pings >= 2
     assert ready == [True]
+    assert observer.connection == ("session-1", timer.epoch)
+    assert [envelope.receive_sequence for envelope in observer.envelopes] == [1, 2]
+    assert observer.advanced_at
+    assert observer.disconnection == (timer.clock(), False)
     assert not any(tmp_path.rglob("*"))
     manifest_key = manifest_uri.removeprefix("s3://landing/root/")
     manifest = json.loads(store.objects[manifest_key])

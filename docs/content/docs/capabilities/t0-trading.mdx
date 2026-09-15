@@ -253,6 +253,19 @@ capture and policy produces byte-identical output. These records remain shadow r
 notification routing, user acknowledgement, inventory checks, and broker execution belong to later
 advisory and live lifecycles.
 
+The scheduled capture container also writes a local shadow journal from the receipt-ordered queue,
+outside the SSI SDK callback. Its clock stays one feature cadence behind receipt time to avoid racing
+callback delivery. A reconnect is recorded as `CAPTURE_GAP` through the configured warm-up period.
+During processing, the file remains `.jsonl.partial`. A bounded shutdown publishes the journal and
+then a sidecar `.manifest.json` as its commit marker only when capture began before the first decision
+clock, every configured clock was evaluated, and every observed stream session has a terminal S3
+capture manifest for the same trade date. The sidecar owns policy lineage, session lineage, counts,
+and the journal checksum; consumers ignore partial files and a `.jsonl` without its manifest. Shadow
+initialization, processing, or reporting errors disable only the journal; immutable raw capture
+remains the primary workload and continues independently. The local journal is parity evidence, not
+a serving database or notification queue. Completed local artifacts are retained for 14 days and
+partial artifacts for three days; cleanup runs before the scheduled capture opens a new journal.
+
 dbt exposes `analytics_trading.fct_trading_backtest_observations` as a safe-by-default view. It
 inner joins the current passed certification, eligible snapshots, their normalized windows, and
 eligible outcomes using their existing immutable lineage. The view does not rederive market state,

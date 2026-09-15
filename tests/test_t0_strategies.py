@@ -25,6 +25,26 @@ def _policies():
     )
 
 
+def _permissive_decision_policy():
+    policy = load_configuration(CONFIGURATION).resolve_decisions(TRADE_DATE)
+    return policy.model_copy(
+        update={
+            "rules": tuple(
+                rule.model_copy(
+                    update={
+                        "buy_minimum_strength": Decimal("0.10"),
+                        "sell_minimum_strength": Decimal("0.10"),
+                    }
+                )
+                for rule in policy.rules
+            ),
+            "maximum_spread_bps": Decimal(200),
+            "maximum_trade_age_seconds": Decimal(60),
+            "maximum_quote_age_seconds": Decimal(60),
+        }
+    )
+
+
 def _window(
     seconds: int,
     *,
@@ -370,24 +390,8 @@ def test_walk_forward_uses_training_quantiles_and_explicit_purge_sessions() -> N
 
 
 def test_shadow_decisions_are_thresholded_rate_limited_and_order_independent() -> None:
-    configuration = load_configuration(CONFIGURATION)
     market, outcome_policy, strategy_policy = _policies()
-    decision_policy = configuration.resolve_decisions(TRADE_DATE).model_copy(
-        update={
-            "rules": tuple(
-                rule.model_copy(
-                    update={
-                        "buy_minimum_strength": Decimal("0.10"),
-                        "sell_minimum_strength": Decimal("0.10"),
-                    }
-                )
-                for rule in configuration.resolve_decisions(TRADE_DATE).rules
-            ),
-            "maximum_spread_bps": Decimal(200),
-            "maximum_trade_age_seconds": Decimal(60),
-            "maximum_quote_age_seconds": Decimal(60),
-        }
-    )
+    decision_policy = _permissive_decision_policy()
     first_snapshots = (_snapshot("VIC"), _snapshot("VHM"))
     second_at = DECISION_AT + timedelta(seconds=5)
     second_snapshots = (
@@ -440,3 +444,34 @@ def test_shadow_decisions_fail_closed_on_feature_and_risk_gates() -> None:
     assert next(decision for decision in vhm if decision.strategy == "relative_value").reasons == (
         "SCORE_UNAVAILABLE",
     )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    (
+        ("spread_bps", Decimal(201), "SPREAD_LIMIT"),
+        ("trade_age_seconds", Decimal(61), "TRADE_AGE_LIMIT"),
+        ("quote_age_seconds", Decimal(61), "QUOTE_AGE_LIMIT"),
+    ),
+)
+def test_shadow_decisions_fail_closed_on_each_market_risk_limit(
+    field: str,
+    value: Decimal,
+    reason: str,
+) -> None:
+    market, outcome_policy, strategy_policy = _policies()
+    decision_policy = _permissive_decision_policy()
+    snapshots = tuple(
+        _snapshot(symbol).model_copy(update={field: value}) for symbol in ("VIC", "VHM")
+    )
+
+    decisions = DecisionEngine(
+        market,
+        strategy_policy,
+        outcome_policy,
+        decision_policy,
+    ).decisions(snapshots)
+
+    assert len(decisions) == 6
+    assert all(decision.action == "ABSTAIN" for decision in decisions)
+    assert all(decision.reasons == (reason,) for decision in decisions)

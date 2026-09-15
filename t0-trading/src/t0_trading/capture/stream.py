@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import gzip
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager, redirect_stdout
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -11,7 +11,7 @@ from io import StringIO
 from queue import Empty, Full, Queue
 from threading import Event, Lock
 from time import monotonic
-from typing import Any, cast
+from typing import Any, Protocol, cast
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -36,6 +36,18 @@ class StreamCaptureError(RuntimeError):
         super().__init__(f"SSI stream capture ended as {disconnect_kind}")
         self.disconnect_kind = disconnect_kind
         self.manifest_uri = manifest_uri
+
+
+class StreamObserver(Protocol):
+    """Non-callback consumer of receipt-ordered evidence and connection state."""
+
+    def connected(self, stream_session_id: str, connected_at: datetime) -> None: ...
+
+    def ingest(self, envelopes: Sequence[StreamEnvelope]) -> None: ...
+
+    def advance(self, observed_at: datetime) -> None: ...
+
+    def disconnected(self, disconnected_at: datetime, *, unavailable: bool) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,6 +240,7 @@ def capture_stream(
     session_id: str | None = None,
     on_ready: Callable[[], None] | None = None,
     spool: CaptureSpool | None = None,
+    observer: StreamObserver | None = None,
 ) -> str:
     """Capture one bounded SDK connection and return its terminal manifest URI."""
     stop = stop or Event()
@@ -241,6 +254,8 @@ def capture_stream(
     client.connect()
 
     connected_at = clock().astimezone(UTC)
+    if observer is not None:
+        observer.connected(session_id, connected_at)
     receiver.mark_connected()
     session_prefix = (
         f"{SSI_STREAM_RAW_PREFIX}/trade_date="
@@ -256,12 +271,16 @@ def capture_stream(
     ready = False
 
     def drain() -> None:
+        observed: list[StreamEnvelope] = []
         while True:
             try:
                 message = queue.get_nowait()
             except Empty:
-                return
+                break
             buffered.append(message)
+            observed.append(message)
+        if observer is not None and observed:
+            observer.ingest(observed)
 
     def flush(*, force: bool = False) -> None:
         nonlocal last_flush_tick
@@ -293,6 +312,8 @@ def capture_stream(
                 client.wait(timeout=0.25)
                 now = timer()
                 drain()
+                if observer is not None:
+                    observer.advance(clock())
                 if len(buffered) >= options.batch_size or (
                     buffered and now - last_flush_tick >= options.flush_seconds
                 ):
@@ -341,6 +362,12 @@ def capture_stream(
         disconnect_kind = "capture_error"
         failure_type = type(error).__name__
 
+    if observer is not None:
+        observer.disconnected(
+            disconnected_at,
+            unavailable=disconnect_kind not in {"completed", "shutdown"},
+        )
+
     message_count = sum(cast(int, batch["message_count"]) for batch in batches)
     manifest_key = f"{session_prefix}/manifest.json"
     manifest: dict[str, object] = {
@@ -385,6 +412,7 @@ def capture_stream_resilient(
     on_unavailable: Callable[[], None] | None = None,
     on_retry: Callable[[Exception, float], None] | None = None,
     spool: CaptureSpool | None = None,
+    observer: StreamObserver | None = None,
 ) -> tuple[str, ...]:
     """Reconnect and resubscribe through fresh SDK contexts until the bounded window ends."""
     stop = stop or Event()
@@ -406,6 +434,7 @@ def capture_stream_resilient(
                         timer=timer,
                         on_ready=on_ready,
                         spool=spool,
+                        observer=observer,
                     )
                 )
         except Exception as error:
