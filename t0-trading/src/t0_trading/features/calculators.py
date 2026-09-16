@@ -99,9 +99,7 @@ def window_values(
         )
 
     volume = sum(trade.quantity for trade in trades)
-    signed_volume = sum(
-        trade.quantity if trade.side == "BUY" else -trade.quantity for trade in trades
-    )
+    signed_volume = sum(trade.signed_quantity for trade in trades)
     traded_value = sum((trade.price * trade.quantity for trade in trades), Decimal(0))
     vwap = (traded_value / volume).quantize(PRICE_QUANTUM, rounding=ROUND_HALF_UP)
     price_return_bps: Decimal | None = None

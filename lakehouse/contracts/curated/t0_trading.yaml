@@ -80,9 +80,9 @@ tables:
       - {field_id: 7, name: trade_count, data_type: long, required: true, description: Executable trade observations in the window.}
       - {field_id: 8, name: quote_change_count, data_type: long, required: true, description: Complete quote transitions in the window.}
       - {field_id: 9, name: trade_volume, data_type: long, required: true, description: Matched share quantity in the window.}
-      - {field_id: 10, name: signed_trade_volume, data_type: long, required: true, description: Buyer-aggressed minus seller-aggressed quantity.}
+      - {field_id: 10, name: signed_trade_volume, data_type: long, required: true, description: Buyer-aggressed minus seller-aggressed quantity; unclassified executions contribute zero.}
       - {field_id: 11, name: trade_volume_per_second, data_type: decimal, precision: 24, scale: 8, required: false, description: Matched share quantity normalized by configured window duration.}
-      - {field_id: 12, name: trade_volume_imbalance, data_type: decimal, precision: 10, scale: 8, required: false, description: Signed volume divided by total matched volume.}
+      - {field_id: 12, name: trade_volume_imbalance, data_type: decimal, precision: 10, scale: 8, required: false, description: "Signed classified volume divided by all matched volume, including unclassified executions."}
       - {field_id: 13, name: level_one_order_flow_imbalance, data_type: long, required: true, description: Cont-style best-level order-flow imbalance across quote transitions.}
       - {field_id: 14, name: price_return_bps, data_type: decimal, precision: 18, scale: 4, required: false, description: First-to-last matched-price return in basis points.}
       - {field_id: 15, name: realized_volatility_bps, data_type: decimal, precision: 18, scale: 4, required: false, description: Root sum of squared adjacent trade returns in basis points.}

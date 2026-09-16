@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from t0_trading.configuration import load_configuration
 from t0_trading.market import MarketState, StreamEnvelope, replay
-from t0_trading.market.events import AuctionObservation, MarketEventError, QuoteSnapshot
+from t0_trading.market.events import AuctionObservation, MarketEventError, QuoteSnapshot, Trade
 from t0_trading.market.state import (
     LATE_TRADE,
     SEQUENCE_GAP,
@@ -161,6 +161,36 @@ def test_auction_observation_does_not_create_a_trade_bar() -> None:
         )
         == ()
     )
+
+
+def test_unclassified_auction_match_is_preserved_without_inventing_an_aggressor() -> None:
+    state = MarketState(_configuration())
+    first = _trade(1, "2026/09/04 09:15:00", 100, 100, "U").model_copy(
+        update={"received_at": datetime(2026, 9, 4, 2, 15, 1, tzinfo=UTC)}
+    )
+    second = _trade(2, "2026/09/04 09:15:10", 101, 50, "B", total_volume=150).model_copy(
+        update={"received_at": datetime(2026, 9, 4, 2, 15, 11, tzinfo=UTC)}
+    )
+
+    update = state.apply(first)
+    state.apply(second)
+    bars = state.advance(
+        datetime(2026, 9, 4, 2, 16, tzinfo=UTC),
+        available_at=datetime(2026, 9, 4, 2, 16, tzinfo=UTC),
+    )
+
+    assert isinstance(update.event, Trade)
+    assert update.event.side is None
+    assert update.event.signed_quantity == 0
+    assert len(bars) == 1
+    assert (bars[0].volume, bars[0].buy_volume, bars[0].sell_volume) == (150, 50, 0)
+
+
+def test_unknown_provider_trade_side_is_rejected() -> None:
+    state = MarketState(_configuration())
+
+    with pytest.raises(MarketEventError, match="neither a trade nor an auction observation"):
+        state.apply(_trade(1, "2026/09/04 09:00:05", 100, 10, "X"))
 
 
 def test_quote_completeness_and_freshness_fail_closed() -> None:

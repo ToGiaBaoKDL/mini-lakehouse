@@ -108,7 +108,7 @@ tables:
       - {field_id: 8, name: processed_at, data_type: timestamptz, required: true, description: UTC normalization completion time.}
       - {field_id: 9, name: price, data_type: decimal, precision: 18, scale: 0, required: true, description: Matched price in VND.}
       - {field_id: 10, name: quantity, data_type: long, required: true, description: Matched share quantity.}
-      - {field_id: 11, name: aggressor_side, data_type: string, required: false, description: Normalized SSI aggressor side.}
+      - {field_id: 11, name: aggressor_side, data_type: string, required: false, description: Normalized BUY or SELL aggressor side; null when SSI reports an unclassified execution such as an auction match.}
       - {field_id: 12, name: cumulative_volume, data_type: long, required: false, description: Provider cumulative matched quantity.}
       - {field_id: 13, name: cumulative_value, data_type: decimal, precision: 24, scale: 0, required: false, description: Provider cumulative turnover in VND.}
       - {field_id: 14, name: message_sha256, data_type: string, required: true, description: Immutable lineage and duplicate fingerprint.}

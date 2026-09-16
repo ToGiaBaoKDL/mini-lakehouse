@@ -89,7 +89,7 @@ class _OpenBar:
         self.trade_count += 1
         if trade.side == "BUY":
             self.buy_volume += trade.quantity
-        else:
+        elif trade.side == "SELL":
             self.sell_volume += trade.quantity
 
     def close(self, available_at: datetime) -> Bar:

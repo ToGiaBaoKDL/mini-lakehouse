@@ -23,7 +23,9 @@ from t0_trading.features import (
     decision_times,
     replay_features,
 )
+from t0_trading.features.calculators import window_values
 from t0_trading.market import StreamEnvelope
+from t0_trading.market.events import EventPosition, Trade
 
 CONFIGURATION = Path("t0-trading/config/trading.yaml")
 TRADE_DATE = date(2026, 9, 4)
@@ -304,6 +306,40 @@ def test_feature_snapshot_has_exact_book_flow_momentum_and_liquidity_values() ->
     assert window.last_price_to_vwap_bps == Decimal("36.5408")
     assert len(snapshot.sha256) == 64
     assert snapshot.sha256 == hashlib.sha256(snapshot.canonical_bytes()).hexdigest()
+
+
+def test_unclassified_execution_contributes_to_market_activity_but_not_signed_flow() -> None:
+    observed_at = _received(9, 15, 1)
+    trades = (
+        Trade(
+            position=EventPosition("session-1", 1),
+            symbol="VIC",
+            event_time=observed_at,
+            received_at=observed_at,
+            price=Decimal(100),
+            quantity=100,
+            side=None,
+            cumulative_volume=100,
+        ),
+        Trade(
+            position=EventPosition("session-1", 2),
+            symbol="VIC",
+            event_time=observed_at + timedelta(seconds=1),
+            received_at=observed_at + timedelta(seconds=1),
+            price=Decimal(101),
+            quantity=20,
+            side="BUY",
+            cumulative_volume=120,
+        ),
+    )
+
+    window = window_values(window_seconds=30, trades=trades, book_flows=())
+
+    assert window.trade_count == 2
+    assert window.trade_volume == 120
+    assert window.signed_trade_volume == 20
+    assert window.trade_volume_imbalance == Decimal("0.16666667")
+    assert window.vwap == Decimal("100.16666667")
 
 
 def test_live_clock_and_full_replay_emit_identical_point_in_time_snapshots() -> None:

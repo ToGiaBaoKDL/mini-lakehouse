@@ -63,7 +63,7 @@ def _trade_view(spark: SparkSession, capture: StreamSessionReader) -> None:
         CREATE OR REPLACE TEMP VIEW ssi_stream_trade_classified AS
         SELECT candidates.*,
             CASE
-                WHEN price > 0 AND quantity > 0 AND raw_side IN ('B', 'S')
+                WHEN price > 0 AND quantity > 0 AND raw_side IN ('B', 'S', 'U')
                      AND cumulative_volume >= quantity THEN 'EXECUTABLE'
                 WHEN price = 0 AND quantity = 0 AND raw_side = 'U' THEN 'AUCTION_STATE'
             END AS record_kind
@@ -88,7 +88,7 @@ def _trade_view(spark: SparkSession, capture: StreamSessionReader) -> None:
         CREATE OR REPLACE TEMP VIEW ssi_stream_trade_rows AS
         SELECT stream_session_id, receive_sequence, symbol, trade_date, event_time,
             received_at, available_at, processed_at, price, quantity,
-            CASE raw_side WHEN 'B' THEN 'BUY' ELSE 'SELL' END AS aggressor_side,
+            CASE raw_side WHEN 'B' THEN 'BUY' WHEN 'S' THEN 'SELL' END AS aggressor_side,
             cumulative_volume, cumulative_value, message_sha256
         FROM ssi_stream_trade_classified
         WHERE record_kind = 'EXECUTABLE'

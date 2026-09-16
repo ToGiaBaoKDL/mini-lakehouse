@@ -214,7 +214,8 @@ def test_market_data_stream_replay_separates_auction_state_from_executable_trade
         encoding="utf-8"
     )
 
-    assert "price > 0 AND quantity > 0 AND raw_side IN ('B', 'S')" in curated
+    assert "price > 0 AND quantity > 0 AND raw_side IN ('B', 'S', 'U')" in curated
     assert "WHEN price = 0 AND quantity = 0 AND raw_side = 'U' THEN 'AUCTION_STATE'" in curated
+    assert "WHEN 'S' THEN 'SELL' END AS aggressor_side" in curated
     assert "OR cumulative_volume IS NULL OR record_kind IS NULL" in curated
     assert "WHERE record_kind = 'EXECUTABLE'" in curated

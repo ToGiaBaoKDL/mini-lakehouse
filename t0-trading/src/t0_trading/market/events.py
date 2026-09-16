@@ -17,6 +17,12 @@ from t0_trading.identity import sha256
 MARKET_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 _TRADE_ADAPTER = TypeAdapter(TradeMessage)
 _QUOTE_ADAPTER = TypeAdapter(QuoteMessage)
+AggressorSide = Literal["BUY", "SELL"]
+_PROVIDER_AGGRESSOR_SIDES: dict[str, AggressorSide | None] = {
+    "B": "BUY",
+    "S": "SELL",
+    "U": None,
+}
 
 
 class MarketEventError(ValueError):
@@ -59,8 +65,17 @@ class Trade:
     received_at: datetime
     price: Decimal
     quantity: int
-    side: Literal["BUY", "SELL"]
+    side: AggressorSide | None
     cumulative_volume: int
+
+    @property
+    def signed_quantity(self) -> int:
+        """Preserve unclassified executions without inventing an aggressor."""
+        if self.side == "BUY":
+            return self.quantity
+        if self.side == "SELL":
+            return -self.quantity
+        return 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,14 +187,7 @@ def decode_event(
                     received_at=envelope.received_at,
                 )
             raw_side = payload.side.upper()
-            side: Literal["BUY", "SELL"] | None
-            if raw_side == "B":
-                side = "BUY"
-            elif raw_side == "S":
-                side = "SELL"
-            else:
-                side = None
-            if price <= 0 or payload.quantity <= 0 or side is None:
+            if price <= 0 or payload.quantity <= 0 or raw_side not in _PROVIDER_AGGRESSOR_SIDES:
                 raise MarketEventError("TradeMessage is neither a trade nor an auction observation")
             if payload.total_volume < payload.quantity:
                 raise MarketEventError("cumulative trade volume is smaller than trade quantity")
@@ -190,7 +198,7 @@ def decode_event(
                 received_at=envelope.received_at,
                 price=price,
                 quantity=payload.quantity,
-                side=side,
+                side=_PROVIDER_AGGRESSOR_SIDES[raw_side],
                 cumulative_volume=payload.total_volume,
             )
         if envelope.message_type == "QuoteMessage":
