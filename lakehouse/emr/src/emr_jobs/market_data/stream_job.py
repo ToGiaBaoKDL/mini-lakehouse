@@ -14,6 +14,7 @@ from emr_jobs.market_data.stream_capture import discover_captures, load_capture
 from emr_jobs.market_data.stream_curated import publish as publish_curated
 from emr_jobs.market_data.stream_landing import publish as publish_landing
 from emr_jobs.t0_trading.certifications import publish as publish_certification
+from emr_jobs.t0_trading.decisions import publish as publish_decisions
 from emr_jobs.t0_trading.features import publish as publish_features
 from emr_jobs.t0_trading.outcomes import publish as publish_outcomes
 
@@ -33,6 +34,8 @@ def run(
     trading = parse_configuration(read_bytes(trading_config_uri).decode())
     configuration = trading.resolve(trade_date)
     outcome_policy = trading.resolve_outcomes(trade_date)
+    strategy_policy = trading.resolve_strategies(trade_date)
+    decision_policy = trading.resolve_decisions(trade_date)
     configure_logging("ssi_market_data_stream", source_date)
     s3 = client()
     manifest_uris = discover_captures(
@@ -120,6 +123,20 @@ def run(
         logger.info(
             "Published {} deterministic outcome labels from {} SSI Stream segment(s)",
             outcome_audit.label_count,
+            len(feature_capture.sessions),
+        )
+        decisions = publish_decisions(
+            spark,
+            product=t0_trading,
+            snapshots=snapshots,
+            configuration=configuration,
+            strategy_policy=strategy_policy,
+            outcome_policy=outcome_policy,
+            decision_policy=decision_policy,
+        )
+        logger.info(
+            "Published {} deterministic shadow decisions from {} SSI Stream segment(s)",
+            len(decisions),
             len(feature_capture.sessions),
         )
     finally:

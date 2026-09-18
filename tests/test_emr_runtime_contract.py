@@ -159,18 +159,24 @@ def test_market_data_stream_materializes_features_with_the_shared_t0_core() -> N
     )
     features = Path("lakehouse/emr/src/emr_jobs/t0_trading/features.py").read_text(encoding="utf-8")
     outcomes = Path("lakehouse/emr/src/emr_jobs/t0_trading/outcomes.py").read_text(encoding="utf-8")
+    decisions = Path("lakehouse/emr/src/emr_jobs/t0_trading/decisions.py").read_text(
+        encoding="utf-8"
+    )
     image = Path("lakehouse/emr/Dockerfile").read_text(encoding="utf-8")
 
     assert 'curated_product("t0_trading")' in job
     assert "parse_configuration" in job
     assert "resolve_outcomes" in job
+    assert "resolve_strategies" in job
+    assert "resolve_decisions" in job
     assert "trading_config_uri" in job
     assert "certify_market_day" in job
     assert "covers_trading_window" not in job
     assert job.index("publish_landing(") < job.index("publish_certification(")
     assert job.index("publish_certification(") < job.index("publish_features(")
     assert job.index("publish_features(") < job.index("publish_outcomes(")
-    assert job.index('certification.status != "passed"') < job.index("publish_outcomes(")
+    assert job.index("publish_outcomes(") < job.index("publish_decisions(")
+    assert job.index('certification.status != "passed"') < job.index("publish_decisions(")
     assert 'certification.status != "passed"' in job
     assert 'product.table("market_day_certifications")' in certifications
     assert "source.manifest_count < target.manifest_count" in certifications
@@ -184,6 +190,11 @@ def test_market_data_stream_materializes_features_with_the_shared_t0_core() -> N
     assert "outcome_sha256" in outcomes
     assert outcomes.count("require_compatible(") == 1
     assert outcomes.count("insert_missing(") == 1
+    assert 'product.table("shadow_decisions")' in decisions
+    assert "replay_decisions" in decisions
+    assert "decision.sha256" in decisions
+    assert decisions.count("require_compatible(") == 1
+    assert decisions.count("insert_missing(") == 1
     assert "snapshot.sha256" in features
     immutable = Path("lakehouse/emr/src/emr_jobs/t0_trading/iceberg.py").read_text(encoding="utf-8")
     landing_reader = Path("lakehouse/emr/src/emr_jobs/t0_trading/landing.py").read_text(

@@ -282,14 +282,20 @@ def test_feature_audit_reports_safe_aws_failure_details(monkeypatch: Any) -> Non
     def client(*_args: object, **_kwargs: object) -> object:
         return object()
 
+    def manifest_uris(*_args: object, **_kwargs: object) -> tuple[str, ...]:
+        return ("s3://landing/stream/manifest.json",)
+
     monkeypatch.setattr("t0_trading.cli.boto3.client", client)
+    monkeypatch.setattr("t0_trading.cli.stream_manifest_uris", manifest_uris)
     monkeypatch.setattr("t0_trading.cli.StreamSessionReader.from_uri", denied)
     result = CliRunner().invoke(
         app,
         [
             "audit-features",
-            "--manifest-uri",
-            "s3://landing/stream/manifest.json",
+            "--trade-date",
+            "2026-09-17",
+            "--landing-uri",
+            "s3://landing",
         ],
     )
 
@@ -313,14 +319,20 @@ def test_outcome_audit_reports_safe_aws_failure_details(monkeypatch: Any) -> Non
     def client(*_args: object, **_kwargs: object) -> object:
         return object()
 
+    def manifest_uris(*_args: object, **_kwargs: object) -> tuple[str, ...]:
+        return ("s3://landing/stream/manifest.json",)
+
     monkeypatch.setattr("t0_trading.cli.boto3.client", client)
+    monkeypatch.setattr("t0_trading.cli.stream_manifest_uris", manifest_uris)
     monkeypatch.setattr("t0_trading.cli.StreamSessionReader.from_uri", denied)
     result = CliRunner().invoke(
         app,
         [
             "audit-outcomes",
-            "--manifest-uri",
-            "s3://landing/stream/manifest.json",
+            "--trade-date",
+            "2026-09-17",
+            "--landing-uri",
+            "s3://landing",
         ],
     )
 

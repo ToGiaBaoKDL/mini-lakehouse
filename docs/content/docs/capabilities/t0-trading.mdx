@@ -102,19 +102,21 @@ instant cannot alter that decision's features. The engine retains only the large
 window per symbol; it does not introduce a dataframe runtime or generic feature-store abstraction
 for this two-symbol hot path.
 
-A terminal session can be audited locally without publishing snapshots or creating another S3
-artifact. The stable JSON report reconciles every configured decision key exactly once and
+A certified market day can be audited locally without publishing snapshots or creating another S3
+artifact. The command discovers and certifies all reconnect segments before replay. Its stable JSON
+report reconciles every configured decision key exactly once and
 summarizes eligible coverage, fail-closed reasons, full-clock null rates, and numeric distributions
 from eligible snapshots by symbol, session, and window:
 
 ```bash
 AWS_PROFILE=tgbao-dev uv run --project t0-trading t0-trading audit-features \
-  --manifest-uri 's3://<landing-bucket>/stream/ssi_fastconnect_stream/raw/trade_date=<date>/session=<uuid>/manifest.json' \
+  --trade-date YYYY-MM-DD \
+  --landing-uri s3://<landing-bucket> \
   --output /tmp/t0-feature-audit.json
 ```
 
-The audit exhausts the lazy session reader, so the end of the continuous feature clock cannot skip
-terminal batch, checksum, or sequence validation for closing-auction messages.
+The audit exhausts the logical-day reader, so the end of the continuous feature clock cannot skip
+terminal batch, checksum, sequence, or reconnect-gap validation for closing-auction messages.
 
 The scheduled stream publication uses that same engine after the certified landing merge. EMR
 loads the `trading.yaml` artifact from its own immutable code release, orders the complete landing
@@ -128,11 +130,14 @@ by `curated_t0_trading`:
 - `feature_windows` has one child row per configured trailing window, avoiding hard-coded
   `30s`/`60s`/`300s` columns as later effective versions add or remove windows;
 - `outcome_labels` has one immutable conditional Top-3 markout per outcome policy, feature
-  snapshot, action, and horizon.
+  snapshot, action, and horizon;
+- `shadow_decisions` has one immutable strategy decision per decision policy and feature snapshot,
+  including score lineage, applied threshold, action, and structured abstention reasons. It is
+  reconstructed research evidence, not proof of notification delivery or order execution.
 
 All snapshots, including deliberate abstentions during warm-up or sparse trading, are retained for
 leakage-safe research. `processed_at` records replay publication time, while `available_at` remains
-the original decision instant. The capture service cannot write either Iceberg table; EMR remains
+the original decision instant. The capture service cannot write these Iceberg tables; EMR remains
 the sole landing and curated mutation owner.
 
 This core has no S3, database, notification, or broker side effects. Replay invokes it explicitly;
@@ -164,7 +169,8 @@ publishing either dataset:
 
 ```bash
 AWS_PROFILE=tgbao-dev uv run --project t0-trading t0-trading audit-outcomes \
-  --manifest-uri s3://<landing-bucket>/stream/ssi_fastconnect_stream/raw/trade_date=YYYY-MM-DD/session=<uuid>/manifest.json \
+  --trade-date YYYY-MM-DD \
+  --landing-uri s3://<landing-bucket> \
   --output /tmp/t0-outcome-audit.json
 ```
 
@@ -201,7 +207,8 @@ policy exists, and it does not choose thresholds from the evaluated session.
 
 ```bash
 AWS_PROFILE=tgbao-dev uv run --project t0-trading t0-trading audit-strategies \
-  --manifest-uri s3://<landing-bucket>/stream/ssi_fastconnect_stream/raw/trade_date=YYYY-MM-DD/session=<uuid>/manifest.json \
+  --trade-date YYYY-MM-DD \
+  --landing-uri s3://<landing-bucket> \
   --output /tmp/t0-strategy-audit.json
 ```
 
@@ -217,8 +224,9 @@ silently mixed into a smaller fold.
 
 ```bash
 AWS_PROFILE=tgbao-dev uv run --project t0-trading t0-trading audit-walk-forward \
-  --manifest-uri s3://<landing-bucket>/stream/ssi_fastconnect_stream/raw/trade_date=<date-1>/session=<uuid>/manifest.json \
-  --manifest-uri s3://<landing-bucket>/stream/ssi_fastconnect_stream/raw/trade_date=<date-2>/session=<uuid>/manifest.json \
+  --trade-date YYYY-MM-DD \
+  --trade-date YYYY-MM-DD \
+  --landing-uri s3://<landing-bucket> \
   --output /tmp/t0-walk-forward-audit.json
 ```
 

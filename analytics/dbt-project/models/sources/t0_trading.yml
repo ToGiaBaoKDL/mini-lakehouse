@@ -88,3 +88,27 @@ sources:
                     values: [BUY, SELL]
           - {name: horizon_seconds, data_tests: [not_null]}
           - {name: outcome_sha256, data_tests: [not_null, unique]}
+
+      - name: shadow_decisions
+        description: Deterministic reconstructed shadow decisions from certified feature snapshots; not evidence of notification delivery or order execution.
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [decision_configuration_sha256, feature_snapshot_sha256, strategy]
+        columns:
+          - {name: decision_configuration_sha256, data_tests: [not_null]}
+          - name: feature_snapshot_sha256
+            data_tests:
+              - not_null
+              - relationships:
+                  arguments:
+                    to: source('t0_trading', 'feature_snapshots')
+                    field: snapshot_sha256
+          - {name: strategy, data_tests: [not_null]}
+          - name: action
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: [BUY, SELL, ABSTAIN]
+          - {name: decision_sha256, data_tests: [not_null, unique]}

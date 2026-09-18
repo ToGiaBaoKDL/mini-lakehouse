@@ -121,8 +121,9 @@ def _emit_market_day_certification(certification: MarketDayCertification) -> Non
         raise typer.Exit(code=INELIGIBLE_EXIT_CODE)
 
 
-def _replay_feature_session(
-    manifest_uri: str,
+def _replay_feature_day(
+    trade_date: date,
+    landing_uri: str,
     region: str,
     config: Path,
 ) -> tuple[
@@ -131,15 +132,12 @@ def _replay_feature_session(
     tuple[FeatureSnapshot, ...],
     FeatureAuditReport,
 ]:
-    """Read, replay, and validate one complete feature session without retaining raw input."""
-    reader = StreamSessionReader.from_uri(
-        boto3.client("s3", region_name=region),
-        manifest_uri,
-    )
+    """Certify and replay one logical market day without retaining raw input."""
     configuration = load_configuration(config)
-    version = configuration.resolve(reader.trade_date)
-    certification, _ = certify_market_day((reader,), version, trade_date=reader.trade_date)
-    reader = select_feature_capture((reader,), certification)
+    version = configuration.resolve(trade_date)
+    readers = _stream_day_readers(trade_date, landing_uri, region)
+    certification, _ = certify_market_day(readers, version, trade_date=trade_date)
+    reader = select_feature_capture(readers, certification)
     snapshots, report = _replay_feature_capture(reader, configuration)
     return reader, configuration, snapshots, report
 
@@ -159,8 +157,9 @@ def _replay_feature_capture(
     return snapshots, report
 
 
-def _replay_outcome_session(
-    manifest_uri: str,
+def _replay_outcome_day(
+    trade_date: date,
+    landing_uri: str,
     region: str,
     config: Path,
 ) -> tuple[
@@ -169,7 +168,9 @@ def _replay_outcome_session(
     tuple[FeatureSnapshot, ...],
     tuple[OutcomeLabel, ...],
 ]:
-    reader, configuration, snapshots, _ = _replay_feature_session(manifest_uri, region, config)
+    reader, configuration, snapshots, _ = _replay_feature_day(
+        trade_date, landing_uri, region, config
+    )
     version = configuration.resolve(reader.trade_date)
     policy = configuration.resolve_outcomes(reader.trade_date)
     labels = label_outcomes(
@@ -182,8 +183,9 @@ def _replay_outcome_session(
     return reader, configuration, snapshots, labels
 
 
-def _replay_strategy_session(
-    manifest_uri: str,
+def _replay_strategy_day(
+    trade_date: date,
+    landing_uri: str,
     region: str,
     config: Path,
 ) -> tuple[
@@ -192,7 +194,9 @@ def _replay_strategy_session(
     tuple[StrategyScore, ...],
     tuple[OutcomeLabel, ...],
 ]:
-    reader, configuration, snapshots, labels = _replay_outcome_session(manifest_uri, region, config)
+    reader, configuration, snapshots, labels = _replay_outcome_day(
+        trade_date, landing_uri, region, config
+    )
     scores = score_features(
         snapshots,
         configuration.resolve(reader.trade_date),
@@ -554,10 +558,11 @@ def reconcile_stream_command(
 
 
 def audit_features_command(
-    manifest_uri: Annotated[
+    trade_date: Annotated[
         str,
-        typer.Option(help="Terminal SSI Stream manifest S3 URI."),
+        typer.Option(help="Certified exchange-local trade date in YYYY-MM-DD format."),
     ],
+    landing_uri: Annotated[str, typer.Option(help="Landing S3 root URI.")],
     region: Annotated[str, typer.Option(help="AWS region containing the landing bucket.")] = (
         "ap-southeast-1"
     ),
@@ -569,9 +574,10 @@ def audit_features_command(
         typer.Option(help="Optional local JSON path; stdout is always emitted."),
     ] = None,
 ) -> None:
-    """Replay and summarize one terminal session without publishing feature data."""
+    """Replay and summarize one certified market day without publishing feature data."""
+    parsed_trade_date = _parse_trade_date(trade_date)
     try:
-        _, _, _, report = _replay_feature_session(manifest_uri, region, config)
+        _, _, _, report = _replay_feature_day(parsed_trade_date, landing_uri, region, config)
     except (StreamCaptureReadError, TradingConfigurationError, ValueError) as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error
@@ -582,10 +588,11 @@ def audit_features_command(
 
 
 def audit_outcomes_command(
-    manifest_uri: Annotated[
+    trade_date: Annotated[
         str,
-        typer.Option(help="Terminal SSI Stream manifest S3 URI."),
+        typer.Option(help="Certified exchange-local trade date in YYYY-MM-DD format."),
     ],
+    landing_uri: Annotated[str, typer.Option(help="Landing S3 root URI.")],
     region: Annotated[str, typer.Option(help="AWS region containing the landing bucket.")] = (
         "ap-southeast-1"
     ),
@@ -597,10 +604,11 @@ def audit_outcomes_command(
         typer.Option(help="Optional local JSON path; stdout is always emitted."),
     ] = None,
 ) -> None:
-    """Replay, label, and summarize one terminal session without publishing outcomes."""
+    """Replay, label, and summarize one certified day without publishing outcomes."""
+    parsed_trade_date = _parse_trade_date(trade_date)
     try:
-        reader, configuration, snapshots, labels = _replay_outcome_session(
-            manifest_uri, region, config
+        reader, configuration, snapshots, labels = _replay_outcome_day(
+            parsed_trade_date, landing_uri, region, config
         )
         version = configuration.resolve(reader.trade_date)
         policy = configuration.resolve_outcomes(reader.trade_date)
@@ -621,10 +629,11 @@ def audit_outcomes_command(
 
 
 def audit_strategies_command(
-    manifest_uri: Annotated[
+    trade_date: Annotated[
         str,
-        typer.Option(help="Terminal SSI Stream manifest S3 URI."),
+        typer.Option(help="Certified exchange-local trade date in YYYY-MM-DD format."),
     ],
+    landing_uri: Annotated[str, typer.Option(help="Landing S3 root URI.")],
     region: Annotated[str, typer.Option(help="AWS region containing the landing bucket.")] = (
         "ap-southeast-1"
     ),
@@ -636,10 +645,11 @@ def audit_strategies_command(
         typer.Option(help="Optional local JSON path; stdout is always emitted."),
     ] = None,
 ) -> None:
-    """Replay threshold-free strategy scores against gross conditional outcomes."""
+    """Replay one certified day of scores against gross conditional outcomes."""
+    parsed_trade_date = _parse_trade_date(trade_date)
     try:
-        reader, configuration, scores, labels = _replay_strategy_session(
-            manifest_uri, region, config
+        reader, configuration, scores, labels = _replay_strategy_day(
+            parsed_trade_date, landing_uri, region, config
         )
         strategy_policy = configuration.resolve_strategies(reader.trade_date)
         outcome_policy = configuration.resolve_outcomes(reader.trade_date)
@@ -660,10 +670,11 @@ def audit_strategies_command(
 
 
 def audit_walk_forward_command(
-    manifest_uri: Annotated[
+    trade_date: Annotated[
         list[str],
-        typer.Option(help="Terminal SSI Stream manifest S3 URI; repeat for each session."),
+        typer.Option(help="Certified date in YYYY-MM-DD format; repeat for each market day."),
     ],
+    landing_uri: Annotated[str, typer.Option(help="Landing S3 root URI.")],
     region: Annotated[str, typer.Option(help="AWS region containing the landing bucket.")] = (
         "ap-southeast-1"
     ),
@@ -679,14 +690,17 @@ def audit_walk_forward_command(
     try:
         sessions: dict[date, tuple[tuple[StrategyScore, ...], tuple[OutcomeLabel, ...]]] = {}
         configuration: TradingConfiguration | None = None
-        for uri in manifest_uri:
-            reader, loaded, scores, labels = _replay_strategy_session(uri, region, config)
-            if reader.trade_date in sessions:
-                raise ValueError("walk-forward manifests must have unique trade dates")
+        for value in trade_date:
+            parsed_trade_date = _parse_trade_date(value)
+            _, loaded, scores, labels = _replay_strategy_day(
+                parsed_trade_date, landing_uri, region, config
+            )
+            if parsed_trade_date in sessions:
+                raise ValueError("walk-forward trade dates must be unique")
             configuration = loaded
-            sessions[reader.trade_date] = (scores, labels)
+            sessions[parsed_trade_date] = (scores, labels)
         if configuration is None:
-            raise ValueError("walk-forward evaluation requires manifests")
+            raise ValueError("walk-forward evaluation requires trade dates")
         first_date = min(sessions)
         report = evaluate_walk_forward(
             sessions,
@@ -723,16 +737,10 @@ def journal_decisions_command(
     """Replay one certified day into an offline journal using the shadow decision engine."""
     parsed_trade_date = _parse_trade_date(trade_date)
     try:
-        configuration = load_configuration(config)
-        version = configuration.resolve(parsed_trade_date)
-        readers = _stream_day_readers(parsed_trade_date, landing_uri, region)
-        certification, _ = certify_market_day(
-            readers,
-            version,
-            trade_date=parsed_trade_date,
+        capture, configuration, snapshots, _ = _replay_feature_day(
+            parsed_trade_date, landing_uri, region, config
         )
-        capture = select_feature_capture(readers, certification)
-        snapshots, _ = _replay_feature_capture(capture, configuration)
+        version = configuration.resolve(capture.trade_date)
         decisions = replay_decisions(
             snapshots,
             version,
