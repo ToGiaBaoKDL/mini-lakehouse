@@ -1,0 +1,38 @@
+chartConfig:
+  config:
+    eChartsConfig:
+      series:
+        - color: "#E8590C"
+          encode:
+            xRef:
+              field: fct_trading_shadow_decision_outcomes_strategy
+            yRef:
+              field: fct_trading_shadow_decision_outcomes_average_eligible_gross_return_bps
+          name: Mean eligible gross markout (bps)
+          type: bar
+      yAxis:
+        - name: Basis points (bps)
+    layout:
+      xField: fct_trading_shadow_decision_outcomes_strategy
+      yField:
+        - fct_trading_shadow_decision_outcomes_average_eligible_gross_return_bps
+  type: cartesian
+contentType: chart
+dashboardSlug: trading-shadow-decisions
+metricQuery:
+  dimensions:
+    - fct_trading_shadow_decision_outcomes_strategy
+  exploreName: fct_trading_shadow_decision_outcomes
+  filters: {}
+  limit: 10
+  metrics:
+    - fct_trading_shadow_decision_outcomes_average_eligible_gross_return_bps
+  sorts:
+    - descending: true
+      fieldId: fct_trading_shadow_decision_outcomes_average_eligible_gross_return_bps
+  tableCalculations: []
+name: Mean gross markout by strategy
+slug: trading-shadow-return-by-strategy
+spaceSlug: trading
+tableName: fct_trading_shadow_decision_outcomes
+version: 1

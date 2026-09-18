@@ -1,0 +1,22 @@
+chartConfig:
+  config:
+    label: Mean eligible gross markout (bps)
+    selectedField: fct_trading_shadow_decision_outcomes_average_eligible_gross_return_bps
+    showBigNumberLabel: true
+  type: big_number
+contentType: chart
+dashboardSlug: trading-shadow-decisions
+metricQuery:
+  dimensions: []
+  exploreName: fct_trading_shadow_decision_outcomes
+  filters: {}
+  limit: 1
+  metrics:
+    - fct_trading_shadow_decision_outcomes_average_eligible_gross_return_bps
+  sorts: []
+  tableCalculations: []
+name: Mean eligible gross markout
+slug: trading-shadow-average-gross-return
+spaceSlug: trading
+tableName: fct_trading_shadow_decision_outcomes
+version: 1

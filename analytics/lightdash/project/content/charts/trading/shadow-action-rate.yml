@@ -1,0 +1,22 @@
+chartConfig:
+  config:
+    label: Action rate (%)
+    selectedField: fct_trading_shadow_decision_outcomes_action_rate_pct
+    showBigNumberLabel: true
+  type: big_number
+contentType: chart
+dashboardSlug: trading-shadow-decisions
+metricQuery:
+  dimensions: []
+  exploreName: fct_trading_shadow_decision_outcomes
+  filters: {}
+  limit: 1
+  metrics:
+    - fct_trading_shadow_decision_outcomes_action_rate_pct
+  sorts: []
+  tableCalculations: []
+name: Action rate
+slug: trading-shadow-action-rate
+spaceSlug: trading
+tableName: fct_trading_shadow_decision_outcomes
+version: 1

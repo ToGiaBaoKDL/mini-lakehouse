@@ -101,3 +101,30 @@ models:
       - {name: outcome_reasons_json, description: Canonical outcome abstention reasons., data_type: varchar}
       - {name: processed_at, description: UTC durable outcome materialization time., data_type: timestamp}
       - {name: outcome_sha256, description: Canonical complete outcome label fingerprint., data_type: varchar}
+
+  - name: stg_trading__shadow_decisions
+    description: Analytics-facing projection of deterministic reconstructed shadow decisions.
+    columns:
+      - {name: schema_version, description: Shadow decision record contract version., data_type: bigint}
+      - {name: decision_version, description: Deterministic decision policy version., data_type: varchar}
+      - {name: decision_configuration_sha256, description: Exact decision policy fingerprint., data_type: varchar}
+      - {name: strategy, description: Deterministic strategy evaluated for the feature snapshot., data_type: varchar}
+      - {name: strategy_version, description: Deterministic score policy version., data_type: varchar}
+      - {name: strategy_configuration_sha256, description: Exact strategy policy fingerprint., data_type: varchar}
+      - {name: outcome_version, description: Referenced execution and markout policy version., data_type: varchar}
+      - {name: outcome_configuration_sha256, description: Exact referenced outcome policy fingerprint., data_type: varchar}
+      - {name: feature_version, description: Parent deterministic feature formula version., data_type: varchar}
+      - {name: feature_configuration_sha256, description: Exact parent feature configuration fingerprint., data_type: varchar}
+      - {name: feature_snapshot_sha256, description: Immutable parent feature snapshot fingerprint., data_type: varchar}
+      - {name: strategy_score_sha256, description: Immutable strategy score fingerprint when available., data_type: varchar}
+      - {name: symbol, description: Normalized security symbol., data_type: varchar}
+      - {name: trade_date, description: Exchange-local trading date., data_type: date}
+      - {name: decision_at, description: UTC point-in-time feature evaluation boundary., data_type: timestamp}
+      - {name: market_session, description: Exchange session containing the decision., data_type: varchar}
+      - {name: horizon_seconds, description: Outcome horizon selected by the decision rule., data_type: bigint}
+      - {name: signed_score, description: Directional score from minus one to one when available., data_type: "decimal(10,8)"}
+      - {name: minimum_strength, description: Direction-specific threshold applied to a non-zero score., data_type: "decimal(10,8)"}
+      - {name: action, description: Deterministic BUY, SELL or ABSTAIN decision., data_type: varchar}
+      - {name: decision_reasons, description: Structured ordered abstention reasons., data_type: "array(varchar)"}
+      - {name: processed_at, description: UTC durable decision materialization time., data_type: timestamp}
+      - {name: decision_sha256, description: Canonical complete shadow decision fingerprint., data_type: varchar}

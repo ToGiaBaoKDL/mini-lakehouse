@@ -1,0 +1,22 @@
+chartConfig:
+  config:
+    label: Positive gross markouts (%)
+    selectedField: fct_trading_shadow_decision_outcomes_positive_gross_markout_rate_pct
+    showBigNumberLabel: true
+  type: big_number
+contentType: chart
+dashboardSlug: trading-shadow-decisions
+metricQuery:
+  dimensions: []
+  exploreName: fct_trading_shadow_decision_outcomes
+  filters: {}
+  limit: 1
+  metrics:
+    - fct_trading_shadow_decision_outcomes_positive_gross_markout_rate_pct
+  sorts: []
+  tableCalculations: []
+name: Positive gross markouts
+slug: trading-shadow-positive-markout-rate
+spaceSlug: trading
+tableName: fct_trading_shadow_decision_outcomes
+version: 1

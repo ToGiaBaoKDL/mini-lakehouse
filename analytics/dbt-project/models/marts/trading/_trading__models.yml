@@ -155,3 +155,189 @@ models:
       - {name: certification_evaluated_at, description: UTC time the current evidence set was certified., data_type: timestamp, data_tests: [not_null]}
       - {name: feature_processed_at, description: UTC durable feature materialization time., data_type: timestamp, data_tests: [not_null]}
       - {name: outcome_processed_at, description: UTC durable outcome materialization time., data_type: timestamp, data_tests: [not_null]}
+
+  - name: fct_trading_shadow_decision_outcomes
+    description: One deterministic shadow decision with its matching conditional outcome when actionable, restricted to currently certified market days.
+    config:
+      meta:
+        default_time_dimension:
+          field: decision_at
+          interval: DAY
+        label: Shadow decision outcomes
+        metrics:
+          abstain_decision_count:
+            description: Distinct deterministic decisions that abstained before notification or execution.
+            label: Abstentions
+            sql: |
+              COUNT(DISTINCT CASE
+                  WHEN NOT ${TABLE}.is_actionable THEN ${TABLE}.decision_sha256
+              END)
+            type: number
+          action_rate_pct:
+            description: Share of distinct deterministic decisions that emitted BUY or SELL rather than ABSTAIN.
+            label: Action rate (%)
+            round: 1
+            sql: |
+              100.0
+              * COUNT(DISTINCT CASE
+                  WHEN ${TABLE}.is_actionable THEN ${TABLE}.decision_sha256
+              END)
+              / NULLIF(COUNT(DISTINCT ${TABLE}.decision_sha256), 0)
+            type: number
+          actionable_decision_count:
+            description: Distinct deterministic BUY and SELL decisions.
+            label: Actionable decisions
+            sql: |
+              COUNT(DISTINCT CASE
+                  WHEN ${TABLE}.is_actionable THEN ${TABLE}.decision_sha256
+              END)
+            type: number
+          eligible_outcome_coverage_pct:
+            description: Share of actionable decisions with a fully eligible conditional execution markout.
+            label: Eligible outcome coverage (%)
+            round: 1
+            sql: |
+              100.0
+              * COUNT(DISTINCT CASE
+                  WHEN ${TABLE}.is_actionable AND ${TABLE}.has_eligible_outcome
+                      THEN ${TABLE}.decision_sha256
+              END)
+              / NULLIF(COUNT(DISTINCT CASE
+                  WHEN ${TABLE}.is_actionable THEN ${TABLE}.decision_sha256
+              END), 0)
+            type: number
+          positive_gross_markout_rate_pct:
+            description: Share of eligible actionable decisions whose gross conditional markout is above zero before fees and taxes.
+            label: Positive gross markouts (%)
+            round: 1
+            sql: |
+              100.0
+              * COUNT(DISTINCT CASE
+                  WHEN ${TABLE}.has_positive_gross_markout THEN ${TABLE}.decision_sha256
+              END)
+              / NULLIF(COUNT(DISTINCT CASE
+                  WHEN ${TABLE}.has_eligible_outcome THEN ${TABLE}.decision_sha256
+              END), 0)
+            type: number
+        primary_key: [decision_configuration_sha256, feature_snapshot_sha256, strategy]
+    data_tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: (is_actionable and has_outcome_label) or (not is_actionable and not has_outcome_label)
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [decision_configuration_sha256, feature_snapshot_sha256, strategy]
+    columns:
+      - {name: trade_date, description: Exchange-local date of the certified market session., data_type: date, data_tests: [not_null]}
+      - name: symbol
+        description: Normalized security symbol.
+        data_type: varchar
+        data_tests: [not_null]
+        config:
+          meta:
+            dimension:
+              label: Symbol
+              type: string
+      - name: decision_at
+        description: UTC point-in-time feature evaluation boundary.
+        data_type: timestamp
+        data_tests: [not_null]
+        config:
+          meta:
+            dimension:
+              label: Decision time
+              time_intervals: [MINUTE, HOUR, DAY, WEEK, MONTH]
+              type: timestamp
+      - {name: market_session, description: Exchange session containing the decision., data_type: varchar, data_tests: [not_null]}
+      - name: strategy
+        description: Deterministic strategy evaluated for this decision.
+        data_type: varchar
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [momentum, order_flow, relative_value]
+        config:
+          meta:
+            dimension:
+              label: Strategy
+              type: string
+      - name: action
+        description: Deterministic BUY, SELL or ABSTAIN decision.
+        data_type: varchar
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [BUY, SELL, ABSTAIN]
+        config:
+          meta:
+            dimension:
+              label: Action
+              type: string
+      - name: horizon_seconds
+        description: Conditional outcome horizon selected by the decision rule.
+        data_type: bigint
+        data_tests: [not_null]
+        config:
+          meta:
+            dimension:
+              label: Horizon (seconds)
+              type: number
+      - {name: signed_score, description: Directional score from minus one to one when available., data_type: "decimal(10,8)"}
+      - {name: minimum_strength, description: Direction-specific threshold applied to a non-zero score., data_type: "decimal(10,8)"}
+      - {name: is_actionable, description: Whether the decision emitted BUY or SELL rather than ABSTAIN., data_type: boolean, data_tests: [not_null]}
+      - name: decision_reason_set
+        description: Ordered comma-separated abstention reasons; null for actionable decisions.
+        data_type: varchar
+        config:
+          meta:
+            dimension:
+              label: Abstention reasons
+              type: string
+      - {name: decision_version, description: Deterministic decision policy version., data_type: varchar, data_tests: [not_null]}
+      - {name: decision_configuration_sha256, description: Exact decision policy fingerprint., data_type: varchar, data_tests: [not_null]}
+      - {name: strategy_version, description: Deterministic score policy version., data_type: varchar, data_tests: [not_null]}
+      - {name: strategy_configuration_sha256, description: Exact strategy policy fingerprint., data_type: varchar, data_tests: [not_null]}
+      - {name: outcome_version, description: Referenced execution and markout policy version., data_type: varchar, data_tests: [not_null]}
+      - {name: outcome_configuration_sha256, description: Exact referenced outcome policy fingerprint., data_type: varchar, data_tests: [not_null]}
+      - {name: feature_version, description: Parent deterministic feature formula version., data_type: varchar, data_tests: [not_null]}
+      - {name: feature_configuration_sha256, description: Exact parent feature configuration fingerprint., data_type: varchar, data_tests: [not_null]}
+      - {name: feature_snapshot_sha256, description: Immutable parent feature snapshot fingerprint., data_type: varchar, data_tests: [not_null]}
+      - {name: strategy_score_sha256, description: Immutable strategy score fingerprint when available., data_type: varchar}
+      - name: decision_sha256
+        description: Canonical complete shadow decision fingerprint.
+        data_type: varchar
+        data_tests: [not_null, unique]
+        config:
+          meta:
+            metrics:
+              decision_count:
+                description: Distinct deterministic shadow decisions.
+                label: Decisions
+                type: count_distinct
+      - {name: has_outcome_label, description: Whether an actionable decision found its exact immutable outcome row., data_type: boolean, data_tests: [not_null]}
+      - {name: has_eligible_outcome, description: Whether the matched conditional execution markout passed every quality gate., data_type: boolean, data_tests: [not_null]}
+      - {name: has_positive_gross_markout, description: Whether the eligible gross conditional markout is above zero., data_type: boolean, data_tests: [not_null]}
+      - name: eligible_gross_return_bps
+        description: Gross conditional markout in basis points when eligible; null otherwise.
+        data_type: "decimal(18,4)"
+        config:
+          meta:
+            metrics:
+              average_eligible_gross_return_bps:
+                description: Equal-weight mean gross markout for eligible actionable decisions before fees and taxes.
+                label: Mean eligible gross markout (bps)
+                round: 2
+                type: average
+      - {name: order_quantity, description: Shares simulated through the visible Top-3 book for an actionable decision., data_type: bigint}
+      - {name: entry_at, description: UTC simulated entry instant after configured latency., data_type: timestamp}
+      - {name: horizon_at, description: UTC conditional markout instant., data_type: timestamp}
+      - {name: entry_vwap, description: Simulated visible-book entry VWAP in VND., data_type: "decimal(24,8)"}
+      - {name: horizon_vwap, description: Simulated opposing-side horizon VWAP in VND., data_type: "decimal(24,8)"}
+      - {name: outcome_reasons_json, description: Canonical reasons when the conditional outcome is ineligible., data_type: varchar}
+      - {name: outcome_sha256, description: Canonical complete conditional outcome fingerprint for an actionable decision., data_type: varchar}
+      - {name: evidence_sha256, description: Fingerprint of the certified immutable manifest evidence set., data_type: varchar, data_tests: [not_null]}
+      - {name: certification_evaluated_at, description: UTC time the current evidence set was certified., data_type: timestamp, data_tests: [not_null]}
+      - {name: decision_processed_at, description: UTC durable decision materialization time., data_type: timestamp, data_tests: [not_null]}
+      - {name: outcome_processed_at, description: UTC durable outcome materialization time for actionable decisions., data_type: timestamp}

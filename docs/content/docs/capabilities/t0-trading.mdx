@@ -292,6 +292,13 @@ eligible outcomes using their existing immutable lineage. The view does not rede
 features, coverage, or returns, and failed certifications disappear immediately without an
 incremental-delete repair path.
 
+`analytics_trading.fct_trading_shadow_decision_outcomes` keeps one row per deterministic decision
+and left joins its exact policy, snapshot, direction, and horizon to the conditional outcome. This
+preserves ABSTAIN decisions and failed outcome-quality gates instead of silently selecting only
+successful simulations. The Lightdash shadow-decision dashboard separates action rate, eligible
+outcome coverage, positive gross markouts, and mean eligible gross return so missing markouts are
+never treated as zero returns.
+
 The bounded stream command subscribes to aggregate symbol data and one-minute intervals for
 `VIC,VHM`. SDK callbacks only serialize into a bounded in-memory queue; the main process writes
 content-addressed gzip micro-batches every 30 seconds or 500 messages, whichever comes first, so S3

@@ -1,0 +1,41 @@
+chartConfig:
+  config:
+    eChartsConfig:
+      series:
+        - color: "#868E96"
+          encode:
+            xRef:
+              field: fct_trading_shadow_decision_outcomes_decision_reason_set
+            yRef:
+              field: fct_trading_shadow_decision_outcomes_abstain_decision_count
+          name: Abstentions
+          type: bar
+      yAxis:
+        - min: "0"
+          minInterval: 1
+          name: Abstentions
+    layout:
+      flipAxes: true
+      xField: fct_trading_shadow_decision_outcomes_decision_reason_set
+      yField:
+        - fct_trading_shadow_decision_outcomes_abstain_decision_count
+  type: cartesian
+contentType: chart
+dashboardSlug: trading-shadow-decisions
+metricQuery:
+  dimensions:
+    - fct_trading_shadow_decision_outcomes_decision_reason_set
+  exploreName: fct_trading_shadow_decision_outcomes
+  filters: {}
+  limit: 10
+  metrics:
+    - fct_trading_shadow_decision_outcomes_abstain_decision_count
+  sorts:
+    - descending: true
+      fieldId: fct_trading_shadow_decision_outcomes_abstain_decision_count
+  tableCalculations: []
+name: Abstentions by reason
+slug: trading-shadow-abstentions-by-reason
+spaceSlug: trading
+tableName: fct_trading_shadow_decision_outcomes
+version: 1
