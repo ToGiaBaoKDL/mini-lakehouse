@@ -1,0 +1,89 @@
+spec_version: 1
+version: 1.0.0
+lifecycle: active
+name: customer_transactions
+description: Canonical posted customer transaction facts available to governed analytical products.
+kind: table
+layer: silver
+domain: payments
+owner:
+  team: payments-data
+  contact: payments-data@example.com
+write_owner: silver-payments-writer
+grain: One row per posted transaction version.
+primary_key: [transaction_id, source_version]
+schema:
+  fields:
+    - name: transaction_id
+      logical_type: string
+      required: true
+      description: Stable transaction identifier assigned by the source system.
+      classification: internal
+    - name: source_version
+      logical_type: integer
+      required: true
+      description: Monotonic source version used for deterministic change ordering.
+    - name: customer_id
+      logical_type: string
+      required: true
+      description: Stable customer identifier used for governed domain joins.
+      classification: confidential
+    - name: posted_at
+      logical_type: timestamp
+      timezone: UTC
+      required: true
+      description: Business timestamp at which the transaction became posted.
+    - name: available_at
+      logical_type: timestamp
+      timezone: UTC
+      required: true
+      description: Earliest timestamp at which the platform could observe this version.
+    - name: amount
+      logical_type: decimal
+      precision: 20
+      scale: 2
+      required: true
+      description: Signed transaction amount expressed in the declared currency.
+      semantic_type: monetary_amount
+      unit: source_currency
+    - name: currency
+      logical_type: string
+      required: true
+      description: ISO 4217 transaction currency code.
+upstreams: [bronze_core_banking.transaction_changes]
+event_time_field: posted_at
+available_time_field: available_at
+classification: confidential
+compatibility:
+  mode: backward
+  minimum_deprecation_days: 30
+service_level:
+  tier: standard
+  freshness:
+    warn_after_minutes: 30
+    error_after_minutes: 120
+  availability_percent: 99.5
+  completeness_percent: 99.9
+retention:
+  class: canonical
+  minimum_days: 2555
+  legal_hold: false
+recovery:
+  strategy: replay
+  source_of_truth: true
+  rpo_minutes: 60
+  rto_minutes: 240
+consumers: [finance_reporting, customer_analytics, risk_models]
+quality_gates:
+  - name: primary_key_unique
+    dimension: uniqueness
+    severity: blocking
+    expectation: Transaction identifier and source version are unique within the product.
+  - name: posted_source_reconciliation
+    dimension: reconciliation
+    severity: blocking
+    expectation: Published posted transaction counts and amounts reconcile to the source interval.
+  - name: availability_after_event
+    dimension: point_in_time
+    severity: blocking
+    expectation: Availability time is not earlier than the source event time.

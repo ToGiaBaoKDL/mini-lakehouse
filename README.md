@@ -19,6 +19,7 @@ Read the canonical documentation at
 | `ocr-engine/` | Local OCR CLI and Modal GPU runtime |
 | `arxiv-lens/` | Read-only ArXiv and OCR inspection |
 | `docs/` | Fumadocs source and static documentation deployment |
+| `templates/` | Portable enterprise data-platform contracts, gates, capabilities, and runbooks |
 
 ```bash
 make help

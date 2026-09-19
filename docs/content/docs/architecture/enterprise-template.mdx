@@ -1,0 +1,23 @@
+---
+title: Enterprise platform template
+description: A portable, contract-first standard for delivering and operating modern data platforms.
+---
+
+The repository includes a vendor-neutral enterprise data platform template under
+`templates/enterprise-data-platform/`. It is intended to be reused when starting or modernizing a
+company data platform without copying Mini Lakehouse's cloud-specific implementation.
+
+The template defines:
+
+- durable Raw, Bronze, Silver, Gold, and replaceable serving boundaries;
+- machine-validatable data-product and publication contracts;
+- evidence-based delivery gates from specification through operation;
+- optional batch, CDC, streaming, machine-learning, and data-sharing capabilities;
+- backfill, schema-change, cutover, incident, and disaster-recovery runbooks.
+
+It intentionally contains no Databricks, Snowflake, ClickHouse, or cloud profile. An adopting
+organization first implements one concrete platform against the portable contract. Vendor mappings
+are introduced only when a second implementation creates a real abstraction requirement.
+
+The template is validated as part of `make check`. Begin with its `README.md`, instantiate one data
+product contract, and prove one source-to-product publication before expanding the platform.

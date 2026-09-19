@@ -1,0 +1,36 @@
+spec_version: 1
+publication_id: pub:customer_transactions:2026-09-19
+product: customer_transactions
+logical_interval:
+  start: "2026-09-18T17:00:00Z"
+  end: "2026-09-19T17:00:00Z"
+status: published
+inputs:
+  - kind: table_snapshot
+    identifier: bronze_core_banking.transaction_changes
+    version: "918273645"
+    record_count: 50231
+output:
+  kind: table_snapshot
+  identifier: silver_payments.customer_transactions
+  version: "1123581321"
+  checksum: sha256:19a53f1c7e62f935c7d675dbb13ad6fd291376bca113435f5726c6be10a0b124
+  record_count: 50198
+contract_version: 1.0.0
+artifact:
+  repository: example/data-platform
+  revision: 8f74e1a6b8d3c92f17b5ab451750cf5c02e971a1
+  image_digest: sha256:7dd31bf1fcf4aebac93eb76855d980907010481e8c13a6f2100c767560b81a22
+publisher:
+  identity: silver-payments-writer
+  execution_id: run:2026-09-19:customer-transactions
+quality_results:
+  - gate: primary_key_unique
+    outcome: passed
+    observed: 50198
+    expected: 50198
+  - gate: posted_source_reconciliation
+    outcome: passed
+    detail: Excluded 33 source rows whose business state was not posted.
+started_at: "2026-09-19T17:05:00Z"
+completed_at: "2026-09-19T17:08:42Z"

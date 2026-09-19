@@ -1,0 +1,253 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: urn:enterprise-data-platform:data-product:1
+title: Enterprise data product contract
+type: object
+additionalProperties: false
+required:
+  - spec_version
+  - version
+  - lifecycle
+  - name
+  - description
+  - kind
+  - layer
+  - domain
+  - owner
+  - write_owner
+  - grain
+  - primary_key
+  - schema
+  - upstreams
+  - classification
+  - compatibility
+  - service_level
+  - retention
+  - recovery
+  - quality_gates
+properties:
+  spec_version:
+    const: 1
+  version:
+    type: string
+    pattern: ^[0-9]+\.[0-9]+\.[0-9]+$
+  lifecycle:
+    enum: [proposed, active, deprecated, retired]
+  name:
+    type: string
+    pattern: ^[a-z][a-z0-9_]{2,127}$
+  description:
+    type: string
+    minLength: 20
+  kind:
+    enum: [object_collection, table, view, stream, feature_set]
+  layer:
+    enum: [raw, bronze, silver, gold]
+  domain:
+    type: string
+    pattern: ^[a-z][a-z0-9_-]{1,63}$
+  owner:
+    type: object
+    additionalProperties: false
+    required: [team, contact]
+    properties:
+      team:
+        type: string
+        pattern: ^[a-z][a-z0-9_-]{1,63}$
+      contact:
+        type: string
+        minLength: 3
+  write_owner:
+    type: string
+    pattern: ^[a-z][a-z0-9_-]{1,127}$
+  grain:
+    type: string
+    minLength: 10
+  primary_key:
+    type: array
+    minItems: 1
+    uniqueItems: true
+    items:
+      type: string
+      pattern: ^[a-z][a-z0-9_]{0,127}$
+  schema:
+    type: object
+    additionalProperties: false
+    required: [fields]
+    properties:
+      fields:
+        type: array
+        minItems: 1
+        items:
+          type: object
+          additionalProperties: false
+          required: [name, logical_type, required, description]
+          properties:
+            name:
+              type: string
+              pattern: ^[a-z][a-z0-9_]{0,127}$
+            logical_type:
+              enum: [string, boolean, integer, decimal, double, date, timestamp, binary, json]
+            precision:
+              type: integer
+              minimum: 1
+              maximum: 38
+            scale:
+              type: integer
+              minimum: 0
+              maximum: 38
+            timezone:
+              type: string
+              minLength: 1
+            required:
+              type: boolean
+            description:
+              type: string
+              minLength: 10
+            semantic_type:
+              type: string
+              minLength: 2
+            unit:
+              type: string
+              minLength: 1
+            classification:
+              enum: [public, internal, confidential, restricted]
+          allOf:
+            - if:
+                properties:
+                  logical_type: {const: decimal}
+                required: [logical_type]
+              then:
+                required: [precision, scale]
+            - if:
+                properties:
+                  logical_type: {const: timestamp}
+                required: [logical_type]
+              then:
+                required: [timezone]
+  upstreams:
+    type: array
+    uniqueItems: true
+    items:
+      type: string
+      minLength: 3
+  event_time_field:
+    type: string
+    pattern: ^[a-z][a-z0-9_]{0,127}$
+  available_time_field:
+    type: string
+    pattern: ^[a-z][a-z0-9_]{0,127}$
+  classification:
+    enum: [public, internal, confidential, restricted]
+  compatibility:
+    type: object
+    additionalProperties: false
+    required: [mode, minimum_deprecation_days]
+    properties:
+      mode:
+        enum: [backward, full, none]
+      minimum_deprecation_days:
+        type: integer
+        minimum: 0
+  deprecation:
+    type: object
+    additionalProperties: false
+    required: [sunset_date]
+    properties:
+      sunset_date:
+        type: string
+        format: date
+      replacement:
+        type: string
+        minLength: 3
+  service_level:
+    type: object
+    additionalProperties: false
+    required: [tier, freshness, availability_percent, completeness_percent]
+    properties:
+      tier:
+        enum: [critical, standard, best_effort]
+      freshness:
+        type: object
+        additionalProperties: false
+        required: [warn_after_minutes, error_after_minutes]
+        properties:
+          warn_after_minutes:
+            type: integer
+            minimum: 1
+          error_after_minutes:
+            type: integer
+            minimum: 1
+      availability_percent:
+        type: number
+        minimum: 0
+        maximum: 100
+      completeness_percent:
+        type: number
+        minimum: 0
+        maximum: 100
+  retention:
+    type: object
+    additionalProperties: false
+    required: [class, minimum_days, legal_hold]
+    properties:
+      class:
+        enum: [transient, replay_evidence, operational, canonical, regulatory]
+      minimum_days:
+        type: integer
+        minimum: 0
+      legal_hold:
+        type: boolean
+  recovery:
+    type: object
+    additionalProperties: false
+    required: [strategy, source_of_truth, rpo_minutes, rto_minutes]
+    properties:
+      strategy:
+        enum: [replay, recompute, restore, not_recoverable]
+      source_of_truth:
+        type: boolean
+      rpo_minutes:
+        type: integer
+        minimum: 0
+      rto_minutes:
+        type: integer
+        minimum: 0
+  consumers:
+    type: array
+    uniqueItems: true
+    items:
+      type: string
+      minLength: 2
+  quality_gates:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      additionalProperties: false
+      required: [name, dimension, severity, expectation]
+      properties:
+        name:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{2,127}$
+        dimension:
+          enum:
+            - schema
+            - completeness
+            - uniqueness
+            - validity
+            - consistency
+            - timeliness
+            - reconciliation
+            - point_in_time
+        severity:
+          enum: [blocking, warning]
+        expectation:
+          type: string
+          minLength: 10
+allOf:
+  - if:
+      properties:
+        lifecycle: {const: deprecated}
+      required: [lifecycle]
+    then:
+      required: [deprecation]

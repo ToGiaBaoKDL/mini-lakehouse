@@ -27,7 +27,7 @@ include make/services.mk
 include make/data.mk
 include make/docs.mk
 
-.PHONY: help preflight lakehouse-validate lightdash-validate netdata-validate lint test compose-validate check
+.PHONY: help preflight lakehouse-validate enterprise-template-validate lightdash-validate netdata-validate lint test compose-validate check
 
 help: ## Show available commands.
 	@awk 'BEGIN {FS = ":.*## "; printf "Usage: make <target>\n\nTargets:\n"} /^[a-zA-Z0-9_-]+:.*## / {printf "  %-28s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -40,6 +40,12 @@ preflight: ## Verify local tools required by service operations.
 
 lakehouse-validate: ## Validate settings and YAML contracts without AWS I/O.
 	uv run --package lakehouse --extra cli python -m lakehouse.validate
+
+enterprise-template-validate: ## Validate the portable enterprise data-platform examples.
+	uv run python templates/enterprise-data-platform/validate.py data-product \
+		templates/enterprise-data-platform/contracts/examples/customer-transactions.yaml
+	uv run python templates/enterprise-data-platform/validate.py publication \
+		templates/enterprise-data-platform/contracts/examples/customer-transactions-publication.yaml
 
 lightdash-validate: ## Validate managed Lightdash content with the pinned CLI.
 	@test "$$(lightdash --version | sed -n '1p')" = "$(LIGHTDASH_CLI_VERSION)" || { \
@@ -128,6 +134,7 @@ check: ## Run the complete local quality gate.
 	uv lock --check --project lakehouse/emr
 	uv lock --check --directory ocr-engine/modal
 	$(MAKE) lakehouse-validate
+	$(MAKE) enterprise-template-validate
 	$(MAKE) dbt-validate
 	$(MAKE) lightdash-validate
 	$(MAKE) docs-check

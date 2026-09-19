@@ -1,0 +1,82 @@
+version: 1
+gates:
+  - id: specified
+    purpose: Establish an owned and testable data-product interface before implementation.
+    required_evidence:
+      - approved_data_product_contract
+      - named_business_and_technical_owners
+      - source_authority_and_consumer_inventory
+      - classification_and_residency_review
+      - logical_grain_key_and_time_semantics
+      - service_level_retention_and_recovery_policy
+    blocks_on:
+      - missing_owner
+      - ambiguous_grain_or_key
+      - unknown_sensitive_data
+      - competing_source_of_truth
+
+  - id: implementation_ready
+    purpose: Prove the implementation has deterministic boundaries before shared deployment.
+    requires: [specified]
+    required_evidence:
+      - immutable_artifact_revision
+      - single_writer_and_reconciler_map
+      - logical_interval_and_idempotency_tests
+      - schema_compatibility_result
+      - least_privilege_policy_tests
+      - operational_metrics_and_structured_logs
+    blocks_on:
+      - wall_clock_selected_business_input
+      - implicit_schema_evolution
+      - shared_human_or_admin_runtime_identity
+      - unbounded_retry_or_parallelism
+
+  - id: release_ready
+    purpose: Demonstrate that the candidate can publish correct data and be reversed safely.
+    requires: [implementation_ready]
+    required_evidence:
+      - representative_volume_test
+      - blocking_quality_gate_results
+      - source_to_output_reconciliation
+      - rerun_and_duplicate_delivery_test
+      - bounded_backfill_dry_run
+      - rollback_and_recovery_test
+      - performance_and_cost_baseline
+    blocks_on:
+      - unreconciled_counts_or_control_totals
+      - failed_blocking_quality_gate
+      - non_idempotent_rerun
+      - missing_rollback_path
+
+  - id: production_ready
+    purpose: Authorize consumer-visible publication and ongoing support.
+    requires: [release_ready]
+    required_evidence:
+      - production_identity_and_access_review
+      - immutable_promotion_and_deployment_record
+      - publication_record
+      - data_and_service_slo_alert_routes
+      - owned_runbooks
+      - consumer_acceptance
+    blocks_on:
+      - mutable_or_unverified_artifact
+      - missing_on_call_owner
+      - missing_publication_evidence
+      - consumer_reads_private_or_physical_storage
+
+  - id: operable
+    purpose: Verify the product remains supportable after initial release.
+    requires: [production_ready]
+    required_evidence:
+      - service_level_history
+      - access_and_consumer_review
+      - cost_and_capacity_review
+      - successful_restore_or_replay_drill
+      - lineage_and_impact_review
+      - deprecation_or_continuation_decision
+    blocks_on:
+      - missed_slo_without_owned_action
+      - recovery_objective_not_demonstrated
+      - unknown_active_consumers
+      - unowned_cost_growth
+
