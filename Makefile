@@ -45,7 +45,31 @@ enterprise-template-validate: ## Validate the portable enterprise data-platform 
 	uv run python templates/enterprise-data-platform/validate.py data-product \
 		templates/enterprise-data-platform/contracts/examples/customer-transactions.yaml
 	uv run python templates/enterprise-data-platform/validate.py publication \
+		--product-contract templates/enterprise-data-platform/contracts/examples/customer-transactions.yaml \
 		templates/enterprise-data-platform/contracts/examples/customer-transactions-publication.yaml
+	uv run python templates/enterprise-data-platform/validate.py data-product \
+		templates/enterprise-data-platform/contracts/examples/customer-transaction-daily.yaml
+	uv run python templates/enterprise-data-platform/validate.py publication-set \
+		--product-contract templates/enterprise-data-platform/contracts/examples/customer-transactions.yaml \
+		--product-contract templates/enterprise-data-platform/contracts/examples/customer-transaction-daily.yaml \
+		--member-publication templates/enterprise-data-platform/contracts/examples/customer-transactions-certified.yaml \
+		--member-publication templates/enterprise-data-platform/contracts/examples/customer-transaction-daily-certified.yaml \
+		templates/enterprise-data-platform/contracts/examples/customer-transactions-set.yaml
+	uv run python templates/enterprise-data-platform/validate.py eligible-intervals \
+		templates/enterprise-data-platform/contracts/examples/posted-transactions-intervals.yaml
+	uv run python templates/enterprise-data-platform/measure.py \
+		--product customer_transactions \
+		--product-contract templates/enterprise-data-platform/contracts/examples/customer-transactions.yaml \
+		--eligible-intervals templates/enterprise-data-platform/contracts/examples/posted-transactions-intervals.yaml \
+		--publication templates/enterprise-data-platform/contracts/examples/customer-transactions-publication.yaml
+	uv run python templates/enterprise-data-platform/measure.py \
+		--product customer_transaction_daily \
+		--product-contract templates/enterprise-data-platform/contracts/examples/customer-transactions.yaml \
+		--product-contract templates/enterprise-data-platform/contracts/examples/customer-transaction-daily.yaml \
+		--eligible-intervals templates/enterprise-data-platform/contracts/examples/posted-transactions-intervals.yaml \
+		--publication templates/enterprise-data-platform/contracts/examples/customer-transactions-certified.yaml \
+		--publication templates/enterprise-data-platform/contracts/examples/customer-transaction-daily-certified.yaml \
+		--publication-set templates/enterprise-data-platform/contracts/examples/customer-transactions-set.yaml
 
 lightdash-validate: ## Validate managed Lightdash content with the pinned CLI.
 	@test "$$(lightdash --version | sed -n '1p')" = "$(LIGHTDASH_CLI_VERSION)" || { \

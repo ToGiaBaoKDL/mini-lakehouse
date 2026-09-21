@@ -1,0 +1,16 @@
+spec_version: 1
+set_id: set:payments:2026-09-19
+logical_interval:
+  start: "2026-09-18T17:00:00Z"
+  end: "2026-09-19T17:00:00Z"
+members:
+  - product: customer_transactions
+    publication_id: cert:customer_transactions:2026-09-19
+    contract_version: 1.0.0
+  - product: customer_transaction_daily
+    publication_id: cert:customer_transaction_daily:2026-09-19
+    contract_version: 1.0.0
+publisher:
+  identity: payments-publication-coordinator
+  execution_id: run:2026-09-19:payments-set
+published_at: "2026-09-19T17:09:30Z"

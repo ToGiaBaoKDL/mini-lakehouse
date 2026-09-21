@@ -41,9 +41,10 @@ Validation produces durable evidence tied to the proposed artifact revision.
 ## 5. Published
 
 Promote the same immutable artifact. Validate inputs before mutation, write atomically or through a
-staged commit, run blocking gates, and emit a publication record. Only `certified` or `published`
-outputs are consumer-visible. A successful compute job with failed or missing evidence is not a
-successful publication.
+staged commit, run every declared gate, and emit a publication record bound to the exact product
+contract. `certified` output is not consumer-visible; only a `published` product or publication-set
+pointer exposes its pinned version. A successful compute job with failed or missing evidence is
+not a successful publication. Follow `publication.md` for the state and visibility protocol.
 
 ## 6. Operated
 
@@ -68,4 +69,3 @@ and audit evidence according to policy.
 | Runtime/platform replacement | parallel reconciliation plus cutover and rollback evidence |
 
 The machine-readable requirements for these stages are in `readiness-gates.yaml`.
-

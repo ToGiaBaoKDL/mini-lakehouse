@@ -28,6 +28,16 @@ boundaries:
 Small systems may combine physical storage or compute steps. They must not combine ownership,
 quality, or publication semantics.
 
+The required behavior at the Bronze-to-Silver boundary is defined in `delivery/curation.md`.
+Security controls, deterministic CDC state, type and time normalization, nested-data modeling,
+domain enrichment, and table-format publication are selected by source and product requirements;
+none is an unconditional transformation applied to every dataset.
+
+One contract describes one consumer-visible dataset, not an arbitrary bundle of physical tables.
+The publication and SLO protocols are defined in `delivery/publication.md` and `delivery/slo.md`.
+Several datasets may share one consistent visibility point through a publication set, but a
+table-format commit alone does not provide that visibility guarantee.
+
 ## Platform planes
 
 ```text
@@ -119,4 +129,3 @@ become a ticket queue for ordinary product delivery.
 The evidence required to move from idea to production is defined in `delivery/`. Optional runtime
 behavior is defined in `capabilities/`. High-risk operations follow `operations/` rather than
 ad-hoc commands.
-

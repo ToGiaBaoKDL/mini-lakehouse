@@ -1,0 +1,52 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: urn:enterprise-data-platform:publication-set:1
+title: Atomic visibility record for a consistent set of certified products
+type: object
+additionalProperties: false
+required:
+  - spec_version
+  - set_id
+  - logical_interval
+  - members
+  - publisher
+  - published_at
+properties:
+  spec_version:
+    const: 1
+  set_id:
+    type: string
+    pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]{7,191}$
+  logical_interval:
+    type: object
+    additionalProperties: false
+    required: [start, end]
+    properties:
+      start: {type: string, format: date-time}
+      end: {type: string, format: date-time}
+  members:
+    type: array
+    minItems: 2
+    items:
+      type: object
+      additionalProperties: false
+      required: [product, publication_id, contract_version]
+      properties:
+        product:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{2,127}$
+        publication_id:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._:-]{7,191}$
+        contract_version:
+          type: string
+          pattern: ^[0-9]+\.[0-9]+\.[0-9]+$
+  publisher:
+    type: object
+    additionalProperties: false
+    required: [identity, execution_id]
+    properties:
+      identity: {type: string, minLength: 3}
+      execution_id: {type: string, minLength: 3}
+  published_at:
+    type: string
+    format: date-time

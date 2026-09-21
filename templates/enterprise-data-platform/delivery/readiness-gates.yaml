@@ -8,7 +8,9 @@ gates:
       - source_authority_and_consumer_inventory
       - classification_and_residency_review
       - logical_grain_key_and_time_semantics
+      - field_classification_and_protection_policy
       - service_level_retention_and_recovery_policy
+      - versioned_eligible_interval_schedule_and_sli_definitions
     blocks_on:
       - missing_owner
       - ambiguous_grain_or_key
@@ -23,6 +25,8 @@ gates:
       - single_writer_and_reconciler_map
       - logical_interval_and_idempotency_tests
       - schema_compatibility_result
+      - contract_kind_and_output_reference_validation
+      - deterministic_dedup_delete_and_type_mapping_tests
       - least_privilege_policy_tests
       - operational_metrics_and_structured_logs
     blocks_on:
@@ -37,7 +41,10 @@ gates:
     required_evidence:
       - representative_volume_test
       - blocking_quality_gate_results
+      - all_declared_gates_reconciled_to_product_contract
+      - quality_control_evidence_bound_to_output_version
       - source_to_output_reconciliation
+      - sensitive_data_and_denied_access_tests
       - rerun_and_duplicate_delivery_test
       - bounded_backfill_dry_run
       - rollback_and_recovery_test
@@ -55,6 +62,8 @@ gates:
       - production_identity_and_access_review
       - immutable_promotion_and_deployment_record
       - publication_record
+      - consumer_visibility_or_publication_set_test
+      - certified_output_snapshot_and_policy_mapping
       - data_and_service_slo_alert_routes
       - owned_runbooks
       - consumer_acceptance
@@ -69,6 +78,7 @@ gates:
     requires: [production_ready]
     required_evidence:
       - service_level_history
+      - eligible_interval_sli_and_error_budget_history
       - access_and_consumer_review
       - cost_and_capacity_review
       - successful_restore_or_replay_drill
@@ -79,4 +89,3 @@ gates:
       - recovery_objective_not_demonstrated
       - unknown_active_consumers
       - unowned_cost_growth
-

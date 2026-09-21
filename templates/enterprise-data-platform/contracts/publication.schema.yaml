@@ -73,13 +73,22 @@ properties:
     items:
       type: object
       additionalProperties: false
-      required: [gate, outcome]
+      required: [gate, outcome, control_ref, evidence_ref]
       properties:
         gate:
           type: string
           minLength: 3
         outcome:
           enum: [passed, warned, failed]
+        control_ref:
+          type: string
+          minLength: 3
+        evidence_ref:
+          type: string
+          minLength: 3
+        evaluated_output_version:
+          type: string
+          minLength: 1
         observed:
           type: [number, integer, string, boolean, "null"]
         expected:
@@ -89,6 +98,8 @@ properties:
   started_at:
     $ref: "#/$defs/timestamp"
   completed_at:
+    $ref: "#/$defs/timestamp"
+  published_at:
     $ref: "#/$defs/timestamp"
   failure:
     type: object
@@ -110,6 +121,18 @@ allOf:
       required: [status]
     then:
       required: [output]
+    else:
+      not:
+        required: [output]
+  - if:
+      properties:
+        status: {const: published}
+      required: [status]
+    then:
+      required: [published_at]
+    else:
+      not:
+        required: [published_at]
   - if:
       properties:
         status: {enum: [rejected, quarantined]}
@@ -126,7 +149,7 @@ $defs:
     required: [kind, identifier, version]
     properties:
       kind:
-        enum: [source_watermark, raw_manifest, object_manifest, table_snapshot, stream_position]
+        enum: [source_watermark, raw_manifest, object_manifest, table_snapshot, stream_position, view_revision]
       identifier:
         type: string
         minLength: 3

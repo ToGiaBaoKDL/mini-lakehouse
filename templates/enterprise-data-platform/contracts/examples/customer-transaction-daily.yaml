@@ -1,0 +1,82 @@
+spec_version: 1
+version: 1.0.0
+lifecycle: active
+name: customer_transaction_daily
+description: Daily posted transaction totals by business date and currency.
+kind: table
+layer: gold
+domain: payments
+owner:
+  team: payments-data
+  contact: payments-data@example.com
+write_owner: gold-payments-writer
+grain: One row per business date and currency.
+primary_key: [business_date, currency]
+schema:
+  fields:
+    - name: business_date
+      logical_type: date
+      required: true
+      description: Exchange-local transaction business date.
+    - name: currency
+      logical_type: string
+      required: true
+      description: ISO 4217 transaction currency code.
+    - name: posted_transaction_count
+      logical_type: integer
+      required: true
+      description: Count of posted transactions in the group.
+    - name: amount_total
+      logical_type: decimal
+      precision: 24
+      scale: 2
+      required: true
+      description: Signed sum of posted transaction amounts.
+      semantic_type: monetary_amount
+      unit: source_currency
+    - name: available_at
+      logical_type: timestamp
+      timezone: UTC
+      required: true
+      description: Earliest time the complete daily group became available.
+upstreams: [silver_payments.customer_transactions]
+available_time_field: available_at
+classification: internal
+compatibility:
+  mode: backward
+  minimum_deprecation_days: 30
+service_level:
+  tier: standard
+  measurement:
+    rolling_window_days: 28
+    eligible_intervals_ref: schedules/posted-transactions-daily-v1
+    empty_interval_policy: publish_empty
+    completeness_gate: daily_source_reconciliation
+    completeness_unit: posted_transaction
+  freshness:
+    warn_after_minutes: 30
+    error_after_minutes: 120
+  availability_percent: 99.5
+  completeness_percent: 99.9
+retention:
+  class: canonical
+  minimum_days: 365
+  legal_hold: false
+recovery:
+  strategy: recompute
+  source_of_truth: false
+  rpo_minutes: 60
+  rto_minutes: 240
+consumers: [finance_reporting]
+quality_gates:
+  - name: daily_key_unique
+    dimension: uniqueness
+    severity: blocking
+    expectation: Business date and currency are unique within the daily product.
+    control_ref: controls/customer-transaction-daily-key-v1
+  - name: daily_source_reconciliation
+    dimension: reconciliation
+    severity: blocking
+    expectation: Daily count and signed amount reconcile to the certified transaction snapshot.
+    control_ref: controls/customer-transaction-daily-reconciliation-v1
+    unit: posted_transaction

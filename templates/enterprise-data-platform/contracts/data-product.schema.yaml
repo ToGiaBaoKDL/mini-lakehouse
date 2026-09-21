@@ -15,8 +15,6 @@ required:
   - owner
   - write_owner
   - grain
-  - primary_key
-  - schema
   - upstreams
   - classification
   - compatibility
@@ -69,6 +67,26 @@ properties:
     items:
       type: string
       pattern: ^[a-z][a-z0-9_]{0,127}$
+  object_contract:
+    type: object
+    additionalProperties: false
+    required: [format, identity]
+    properties:
+      format:
+        enum: [avro, binary, csv, json, jsonl, parquet, other]
+      identity:
+        type: string
+        minLength: 10
+      schema_ref:
+        type: string
+        minLength: 3
+    allOf:
+      - if:
+          properties:
+            format: {enum: [avro, csv, json, jsonl, parquet]}
+          required: [format]
+        then:
+          required: [schema_ref]
   schema:
     type: object
     additionalProperties: false
@@ -111,6 +129,18 @@ properties:
               minLength: 1
             classification:
               enum: [public, internal, confidential, restricted]
+            protection:
+              type: object
+              additionalProperties: false
+              required: [category, representation, policy_ref]
+              properties:
+                category:
+                  enum: [direct_identifier, quasi_identifier, payment_card, financial, other_sensitive]
+                representation:
+                  enum: [restricted_cleartext, keyed_pseudonym, token, masked, encrypted, aggregated]
+                policy_ref:
+                  type: string
+                  minLength: 3
           allOf:
             - if:
                 properties:
@@ -162,10 +192,29 @@ properties:
   service_level:
     type: object
     additionalProperties: false
-    required: [tier, freshness, availability_percent, completeness_percent]
+    required: [tier, measurement, freshness, availability_percent, completeness_percent]
     properties:
       tier:
         enum: [critical, standard, best_effort]
+      measurement:
+        type: object
+        additionalProperties: false
+        required: [rolling_window_days, eligible_intervals_ref, empty_interval_policy, completeness_gate, completeness_unit]
+        properties:
+          rolling_window_days:
+            type: integer
+            minimum: 1
+          eligible_intervals_ref:
+            type: string
+            minLength: 3
+          empty_interval_policy:
+            enum: [publish_empty, skip_with_evidence]
+          completeness_gate:
+            type: string
+            pattern: ^[a-z][a-z0-9_]{2,127}$
+          completeness_unit:
+            type: string
+            pattern: ^[a-z][a-z0-9_]{1,63}$
       freshness:
         type: object
         additionalProperties: false
@@ -224,7 +273,7 @@ properties:
     items:
       type: object
       additionalProperties: false
-      required: [name, dimension, severity, expectation]
+      required: [name, dimension, severity, expectation, control_ref]
       properties:
         name:
           type: string
@@ -244,7 +293,33 @@ properties:
         expectation:
           type: string
           minLength: 10
+        control_ref:
+          type: string
+          minLength: 3
+        unit:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{1,63}$
 allOf:
+  - if:
+      properties:
+        kind: {const: object_collection}
+      required: [kind]
+    then:
+      required: [object_contract]
+      not:
+        anyOf:
+          - required: [primary_key]
+          - required: [schema]
+    else:
+      required: [primary_key, schema]
+      not:
+        required: [object_contract]
+  - if:
+      properties:
+        kind: {enum: [stream, feature_set]}
+      required: [kind]
+    then:
+      required: [event_time_field, available_time_field]
   - if:
       properties:
         lifecycle: {const: deprecated}

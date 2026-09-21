@@ -26,8 +26,12 @@ schema:
     - name: customer_id
       logical_type: string
       required: true
-      description: Stable customer identifier used for governed domain joins.
+      description: Stable governed customer pseudonym used for approved domain joins.
       classification: confidential
+      protection:
+        category: direct_identifier
+        representation: keyed_pseudonym
+        policy_ref: privacy/customer-identifier-v1
     - name: posted_at
       logical_type: timestamp
       timezone: UTC
@@ -59,6 +63,12 @@ compatibility:
   minimum_deprecation_days: 30
 service_level:
   tier: standard
+  measurement:
+    rolling_window_days: 28
+    eligible_intervals_ref: schedules/posted-transactions-daily-v1
+    empty_interval_policy: publish_empty
+    completeness_gate: posted_source_reconciliation
+    completeness_unit: posted_transaction
   freshness:
     warn_after_minutes: 30
     error_after_minutes: 120
@@ -79,11 +89,15 @@ quality_gates:
     dimension: uniqueness
     severity: blocking
     expectation: Transaction identifier and source version are unique within the product.
+    control_ref: controls/customer-transactions-key-v1
   - name: posted_source_reconciliation
     dimension: reconciliation
     severity: blocking
     expectation: Published posted transaction counts and amounts reconcile to the source interval.
+    control_ref: controls/customer-transactions-reconciliation-v1
+    unit: posted_transaction
   - name: availability_after_event
     dimension: point_in_time
     severity: blocking
     expectation: Availability time is not earlier than the source event time.
+    control_ref: controls/customer-transactions-availability-v1

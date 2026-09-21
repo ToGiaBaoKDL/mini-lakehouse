@@ -1,0 +1,37 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: urn:enterprise-data-platform:eligible-intervals:1
+title: Versioned eligible interval and source-control evidence for one SLO window
+type: object
+additionalProperties: false
+required: [spec_version, schedule_ref, unit, as_of, intervals]
+properties:
+  spec_version:
+    const: 1
+  schedule_ref:
+    type: string
+    minLength: 3
+  unit:
+    type: string
+    pattern: ^[a-z][a-z0-9_]{1,63}$
+  as_of:
+    type: string
+    format: date-time
+  intervals:
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required: [start, end, expected_units]
+      properties:
+        start: {type: string, format: date-time}
+        end: {type: string, format: date-time}
+        expected_units: {type: integer, minimum: 0}
+        empty_evidence:
+          type: object
+          additionalProperties: false
+          required: [kind, identifier, version]
+          properties:
+            kind:
+              enum: [raw_manifest, object_manifest, source_watermark]
+            identifier: {type: string, minLength: 3}
+            version: {type: string, minLength: 1}

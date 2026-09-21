@@ -1,0 +1,8 @@
+spec_version: 1
+schedule_ref: schedules/posted-transactions-daily-v1
+unit: posted_transaction
+as_of: "2026-09-20T17:00:00Z"
+intervals:
+  - start: "2026-09-18T17:00:00Z"
+    end: "2026-09-19T17:00:00Z"
+    expected_units: 50198

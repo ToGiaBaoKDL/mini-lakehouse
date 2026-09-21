@@ -13,8 +13,8 @@ tools, map them to these contracts, and keep business logic with the owning data
 | Path | Purpose |
 | --- | --- |
 | `architecture.md` | Platform invariants, planes, layers, ownership, and deployment boundary |
-| `contracts/` | Machine-validatable data-product and publication interfaces |
-| `delivery/` | Product lifecycle and evidence required to pass each readiness gate |
+| `contracts/` | Machine-validatable product, publication, and publication-set interfaces |
+| `delivery/` | Product lifecycle, curation, publication, SLOs, and readiness evidence |
 | `capabilities/` | Optional workload contracts selected by a measured requirement |
 | `operations/` | Reusable procedures for high-risk production operations |
 
@@ -28,10 +28,11 @@ part of its portable contracts.
    current failure modes.
 2. Record platform decisions and map logical storage, catalog, identity, compute, orchestration,
    and observability boundaries to one concrete implementation.
-3. Create one data-product contract per published dataset from
+3. Create one data-product contract per consumer-visible dataset from
    `contracts/examples/customer-transactions.yaml`.
-4. Implement one thin source-to-product path and emit a publication record compatible with
-   `contracts/publication.schema.yaml`.
+4. Implement one thin source-to-product path following `delivery/curation.md` and
+   `delivery/publication.md`. If several datasets need one consistent cut, publish their certified
+   versions through a publication set rather than assuming a cross-table transaction.
 5. Prove idempotency, reconciliation, least privilege, rollback, and recovery before adding more
    sources or infrastructure.
 6. Enable only the capability contracts required by actual latency, scale, compliance, sharing,
@@ -48,13 +49,27 @@ it.
 
 The contracts use JSON Schema Draft 2020-12. The reference validator adds semantic checks that JSON
 Schema cannot express cleanly, including key/field references, classification strength, threshold
-ordering, unique quality gates, interval chronology, and terminal publication quality.
+ordering, SLO gate references, interval chronology, and whether every blocking gate passed. A
+publication is validated together with its exact product contract. `measure.py` calculates the
+declared SLOs from versioned eligible intervals and consumer-visible publication evidence.
 
 ```bash
 uv run python templates/enterprise-data-platform/validate.py data-product \
   templates/enterprise-data-platform/contracts/examples/customer-transactions.yaml
 uv run python templates/enterprise-data-platform/validate.py publication \
+  --product-contract templates/enterprise-data-platform/contracts/examples/customer-transactions.yaml \
   templates/enterprise-data-platform/contracts/examples/customer-transactions-publication.yaml
+uv run python templates/enterprise-data-platform/validate.py publication-set \
+  --product-contract templates/enterprise-data-platform/contracts/examples/customer-transactions.yaml \
+  --product-contract templates/enterprise-data-platform/contracts/examples/customer-transaction-daily.yaml \
+  --member-publication templates/enterprise-data-platform/contracts/examples/customer-transactions-certified.yaml \
+  --member-publication templates/enterprise-data-platform/contracts/examples/customer-transaction-daily-certified.yaml \
+  templates/enterprise-data-platform/contracts/examples/customer-transactions-set.yaml
+uv run python templates/enterprise-data-platform/measure.py \
+  --product customer_transactions \
+  --product-contract templates/enterprise-data-platform/contracts/examples/customer-transactions.yaml \
+  --eligible-intervals templates/enterprise-data-platform/contracts/examples/posted-transactions-intervals.yaml \
+  --publication templates/enterprise-data-platform/contracts/examples/customer-transactions-publication.yaml
 ```
 
 An adopting platform may replace this CLI with another Draft 2020-12 implementation, but it must
@@ -69,6 +84,8 @@ The template is adopted only when:
 - production uses short-lived workload identities and one writer per published dataset;
 - reruns and bounded backfills are deterministic;
 - publication evidence identifies exact inputs, output version, code artifact, and quality result;
+- publication gates are reconciled with the product contract and SLOs are measured from consumer
+  visibility over a versioned eligible-interval schedule;
 - an operator has successfully exercised rollback and recovery procedures;
 - ownership, SLO, lineage, classification, cost, and consumer impact can be answered without
   reading pipeline implementation code.

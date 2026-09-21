@@ -42,6 +42,7 @@ include = [
     "ocr-engine/src",
     "t0-trading/src",
     "templates/enterprise-data-platform/validate.py",
+    "templates/enterprise-data-platform/measure.py",
     "tests",
 ]
 exclude = ["analytics/dbt-project", ".venv"]

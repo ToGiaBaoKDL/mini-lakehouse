@@ -1,0 +1,41 @@
+spec_version: 1
+publication_id: cert:customer_transaction_daily:2026-09-19
+product: customer_transaction_daily
+logical_interval:
+  start: "2026-09-18T17:00:00Z"
+  end: "2026-09-19T17:00:00Z"
+status: certified
+inputs:
+  - kind: table_snapshot
+    identifier: silver_payments.customer_transactions
+    version: "1123581321"
+    record_count: 50198
+output:
+  kind: table_snapshot
+  identifier: gold_payments.customer_transaction_daily
+  version: "3141592653"
+  record_count: 2
+contract_version: 1.0.0
+artifact:
+  repository: example/data-platform
+  revision: 8f74e1a6b8d3c92f17b5ab451750cf5c02e971a1
+publisher:
+  identity: gold-payments-writer
+  execution_id: run:2026-09-19:customer-transaction-daily
+quality_results:
+  - gate: daily_key_unique
+    outcome: passed
+    control_ref: controls/customer-transaction-daily-key-v1
+    evidence_ref: evidence/customer-transaction-daily/2026-09-19/daily-key-unique
+    evaluated_output_version: "3141592653"
+    observed: 2
+    expected: 2
+  - gate: daily_source_reconciliation
+    outcome: passed
+    control_ref: controls/customer-transaction-daily-reconciliation-v1
+    evidence_ref: evidence/customer-transaction-daily/2026-09-19/source-reconciliation
+    evaluated_output_version: "3141592653"
+    observed: 50198
+    expected: 50198
+started_at: "2026-09-19T17:08:43Z"
+completed_at: "2026-09-19T17:09:14Z"
