@@ -1,4 +1,7 @@
 schema_version: 1
+capture:
+  symbols: [VIC, VHM]
+  indices: [VNINDEX, VN30, VNREAL]
 outcomes:
   - version: top3-taker-markout-v1
     effective_from: 2026-08-27
@@ -23,6 +26,17 @@ strategy_evaluations:
     minimum_training_sessions: 20
     validation_sessions: 5
     purge_sessions: 1
+contexts:
+  - version: decision-context-v1
+    effective_from: 2026-08-27
+    effective_to: null
+    zone_lookback_seconds: 900
+    zone_minimum_observations: 12
+    zone_tolerance_bps: "20"
+    market_windows_seconds: [60, 300]
+    index_stale_after_seconds: 30
+    trend_threshold_bps: "10"
+    high_volatility_threshold_bps: "20"
 decisions:
   - version: microstructure-decisions-v1
     effective_from: 2026-08-27

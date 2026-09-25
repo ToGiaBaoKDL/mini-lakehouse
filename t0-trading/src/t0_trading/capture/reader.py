@@ -91,9 +91,10 @@ class StreamBatch(_StrictModel):
 
 
 class StreamManifest(_StrictModel):
-    schema_version: Literal[1]
+    schema_version: Literal[1, 2]
     stream_session_id: str = Field(min_length=1)
     symbols: tuple[str, ...]
+    indices: tuple[str, ...] = ()
     connected_at: datetime
     disconnected_at: datetime
     disconnect_kind: StreamDisconnectKind
@@ -133,6 +134,14 @@ class StreamManifest(_StrictModel):
             or any(not symbol or symbol != symbol.strip().upper() for symbol in self.symbols)
         ):
             raise ValueError("symbols must contain unique uppercase identifiers")
+        if (
+            len(self.indices) != len(set(self.indices))
+            or any(not index or index != index.strip().upper() for index in self.indices)
+            or set(self.symbols) & set(self.indices)
+            or (self.schema_version == 1 and self.indices)
+            or (self.schema_version == 2 and not self.indices)
+        ):
+            raise ValueError("indices do not match the stream manifest schema")
         if not self.connected_at <= self.disconnected_at <= self.published_at:
             raise ValueError("terminal timestamps are not ordered")
         if (self.heartbeat_count == 0) != (self.last_heartbeat_at is None):
@@ -170,7 +179,6 @@ class StreamManifest(_StrictModel):
 
 
 class _CapturedRow(StreamEnvelope):
-    subscription_context: Literal["symbols"]
     provider_topic: None
     api_version: str
     sdk_version: str
@@ -304,7 +312,15 @@ class StreamSessionReader:
                     or row.receive_sequence != expected_sequence
                     or row.api_version != self.manifest.api_version
                     or row.sdk_version != self.manifest.sdk_version
-                    or (row.symbol is not None and row.symbol not in self.manifest.symbols)
+                    or (
+                        row.subscription_context == "symbols"
+                        and row.symbol is not None
+                        and row.symbol not in self.manifest.symbols
+                    )
+                    or (
+                        row.subscription_context == "indices"
+                        and row.symbol not in self.manifest.indices
+                    )
                     or not self.manifest.connected_at
                     <= row.received_at
                     <= self.manifest.disconnected_at
@@ -402,6 +418,7 @@ class StreamDayReader:
         if any(
             reader.trade_date != first.trade_date
             or reader.manifest.symbols != first.manifest.symbols
+            or getattr(reader.manifest, "indices", ()) != getattr(first.manifest, "indices", ())
             or reader.manifest.api_version != first.manifest.api_version
             or reader.manifest.sdk_version != first.manifest.sdk_version
             for reader in ordered[1:]
@@ -413,6 +430,7 @@ class StreamDayReader:
         self.sessions = ordered
         self.trade_date = first.trade_date
         self.symbols = first.manifest.symbols
+        self.indices = getattr(first.manifest, "indices", ())
 
     @property
     def stream_session_ids(self) -> tuple[str, ...]:

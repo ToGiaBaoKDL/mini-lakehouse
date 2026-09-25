@@ -50,6 +50,15 @@ class _EffectiveVersion(_StrictModel):
 _EffectiveVersionT = TypeVar("_EffectiveVersionT", bound=_EffectiveVersion)
 
 
+def _require_identifiers(name: str, values: tuple[str, ...]) -> None:
+    if (
+        not values
+        or len(values) != len(set(values))
+        or any(not value or value != value.strip().upper() for value in values)
+    ):
+        raise ValueError(f"{name} must contain unique uppercase identifiers")
+
+
 def _validate_effective_versions(values: tuple[_EffectiveVersion, ...], label: str) -> None:
     ordered = sorted(values, key=lambda item: item.effective_from)
     if not ordered or tuple(ordered) != values:
@@ -117,12 +126,7 @@ class MarketConfiguration(_StrictModel):
         except ZoneInfoNotFoundError as error:
             raise ValueError(f"unknown market timezone: {self.timezone}") from error
         for name, values in (("symbols", self.symbols), ("indices", self.indices)):
-            if (
-                not values
-                or len(values) != len(set(values))
-                or any(not value or value != value.strip().upper() for value in values)
-            ):
-                raise ValueError(f"{name} must contain unique uppercase identifiers")
+            _require_identifiers(name, values)
         if 60 % self.bar_interval_seconds != 0 and self.bar_interval_seconds % 60 != 0:
             raise ValueError("bar_interval_seconds must align to a minute boundary")
         session_times = (
@@ -146,6 +150,21 @@ class MarketConfiguration(_StrictModel):
 class DataQualityConfiguration(_StrictModel):
     trade_stale_after_seconds: int = Field(ge=1)
     quote_stale_after_seconds: int = Field(ge=1)
+
+
+class CaptureConfiguration(_StrictModel):
+    """Operational evidence scope, independent from decision requirements."""
+
+    symbols: tuple[str, ...]
+    indices: tuple[str, ...]
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> CaptureConfiguration:
+        for name, values in (("symbols", self.symbols), ("indices", self.indices)):
+            _require_identifiers(f"capture {name}", values)
+        if set(self.symbols) & set(self.indices):
+            raise ValueError("capture symbols and indices must be disjoint")
+        return self
 
 
 DecisionSessionName = Literal[
@@ -249,6 +268,27 @@ class StrategyEvaluationVersion(_EffectiveVersion):
     purge_sessions: int = Field(ge=1)
 
 
+class ContextVersion(_EffectiveVersion):
+    """Point-in-time zone and broad-market research assumptions."""
+
+    zone_lookback_seconds: int = Field(ge=60, le=86_400)
+    zone_minimum_observations: int = Field(ge=2)
+    zone_tolerance_bps: Decimal = Field(gt=0)
+    market_windows_seconds: tuple[int, int]
+    index_stale_after_seconds: int = Field(ge=1, le=900)
+    trend_threshold_bps: Decimal = Field(gt=0)
+    high_volatility_threshold_bps: Decimal = Field(gt=0)
+
+    @model_validator(mode="after")
+    def validate_context(self) -> ContextVersion:
+        if tuple(sorted(set(self.market_windows_seconds))) != self.market_windows_seconds or any(
+            window < 1 or window > self.zone_lookback_seconds
+            for window in self.market_windows_seconds
+        ):
+            raise ValueError("context market windows must be unique ascending lookback bounds")
+        return self
+
+
 class DecisionRule(_StrictModel):
     """One directional threshold and evaluation horizon for a research score."""
 
@@ -284,10 +324,12 @@ class TradingVersion(_EffectiveVersion):
 
 class TradingConfiguration(_StrictModel):
     schema_version: int = Field(ge=1)
+    capture: CaptureConfiguration
     versions: tuple[TradingVersion, ...]
     outcomes: tuple[OutcomeVersion, ...]
     strategies: tuple[StrategyVersion, ...]
     strategy_evaluations: tuple[StrategyEvaluationVersion, ...]
+    contexts: tuple[ContextVersion, ...]
     decisions: tuple[DecisionVersion, ...]
 
     @model_validator(mode="after")
@@ -296,6 +338,7 @@ class TradingConfiguration(_StrictModel):
         _validate_effective_versions(self.outcomes, "outcome")
         _validate_effective_versions(self.strategies, "strategy")
         _validate_effective_versions(self.strategy_evaluations, "strategy evaluation")
+        _validate_effective_versions(self.contexts, "context")
         _validate_effective_versions(self.decisions, "decision")
         strategy_versions = {version.version for version in self.strategies}
         outcome_versions = {version.version for version in self.outcomes}
@@ -312,6 +355,17 @@ class TradingConfiguration(_StrictModel):
     def resolve(self, value: date) -> TradingVersion:
         return _resolve_effective(self.versions, value, "configuration")
 
+    def capture_scope(self, value: date) -> CaptureConfiguration:
+        """Return a scope proven to cover the effective decision universe."""
+        market = self.resolve(value).market
+        if not set(market.symbols).issubset(self.capture.symbols) or not set(
+            market.indices
+        ).issubset(self.capture.indices):
+            raise TradingConfigurationError(
+                f"capture scope does not cover the decision universe for {value.isoformat()}"
+            )
+        return self.capture
+
     def resolve_outcomes(self, value: date) -> OutcomeVersion:
         return _resolve_effective(self.outcomes, value, "outcome")
 
@@ -320,6 +374,9 @@ class TradingConfiguration(_StrictModel):
 
     def resolve_strategy_evaluation(self, value: date) -> StrategyEvaluationVersion:
         return _resolve_effective(self.strategy_evaluations, value, "strategy evaluation")
+
+    def resolve_context(self, value: date) -> ContextVersion:
+        return _resolve_effective(self.contexts, value, "context")
 
     def resolve_decisions(self, value: date) -> DecisionVersion:
         return _resolve_effective(self.decisions, value, "decision")

@@ -24,7 +24,7 @@ with DAG(
     dag_id="etl_emr_ingest_market_data_stream",
     description="Certify and publish one SSI Stream trade-date partition.",
     schedule=CronPartitionTimetable(
-        "0 21 * * 1-5",
+        "0 17 * * 1-5",
         timezone=LOCAL_TIMEZONE,
         run_immediately=False,
         key_format="%Y-%m-%d",

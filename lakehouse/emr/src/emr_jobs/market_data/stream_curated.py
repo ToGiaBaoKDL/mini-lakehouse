@@ -56,6 +56,7 @@ def _trade_view(spark: SparkSession, capture: StreamSessionReader) -> None:
             lower(get_json_object(message_json, '$.type')) AS provider_type
         FROM ssi_stream_messages
         WHERE message_type = 'TradeMessage'
+          AND subscription_context = 'symbols'
         """
     )
     spark.sql(
@@ -125,6 +126,7 @@ def _quote_views(spark: SparkSession, capture: StreamSessionReader) -> DataFrame
             lower(get_json_object(message_json, '$.type')) AS provider_type
         FROM ssi_stream_messages
         WHERE message_type = 'QuoteMessage'
+          AND subscription_context = 'symbols'
         """
     ).cache()
     quotes.createOrReplaceTempView("ssi_stream_quote_values")
@@ -312,6 +314,97 @@ def _merge_quotes(spark: SparkSession, snapshots: str, levels: str) -> None:
     )
 
 
+def _index_view(spark: SparkSession, capture: StreamSessionReader) -> DataFrame:
+    indices = spark.sql(
+        """
+            SELECT
+                sha2(concat_ws('|', stream_session_id, cast(receive_sequence AS string),
+                    message_sha256), 256) AS index_snapshot_id,
+                upper(get_json_object(message_json, '$.symbol')) AS index_code,
+                to_date(get_json_object(message_json, '$.trading_time'),
+                    'yyyy/MM/dd HH:mm:ss') AS trade_date,
+                to_utc_timestamp(
+                    to_timestamp(get_json_object(message_json, '$.trading_time'),
+                        'yyyy/MM/dd HH:mm:ss'),
+                    'Asia/Ho_Chi_Minh'
+                ) AS event_time,
+                'ssi_stream_index' AS source_kind,
+                try_cast(get_json_object(message_json, '$.price') AS decimal(18, 6))
+                    AS index_value,
+                CAST(NULL AS decimal(18, 6)) AS point_change,
+                CAST(NULL AS decimal(18, 8)) AS percent_change,
+                CAST(NULL AS bigint) AS advancing_count,
+                CAST(NULL AS bigint) AS declining_count,
+                CAST(NULL AS bigint) AS unchanged_count,
+                CAST(NULL AS bigint) AS ceiling_count,
+                CAST(NULL AS bigint) AS floor_count,
+                try_cast(get_json_object(message_json, '$.total_volume') AS bigint)
+                    AS matched_volume,
+                CAST(NULL AS decimal(24, 0)) AS matched_value,
+                received_at AS available_at,
+                current_timestamp() AS processed_at,
+                message_sha256 AS source_record_sha256,
+                received_at,
+                lower(get_json_object(message_json, '$.type')) AS provider_type
+            FROM ssi_stream_messages
+            WHERE message_type = 'TradeMessage'
+              AND subscription_context = 'indices'
+            """
+    ).cache()
+    index_in_scope = (
+        F.col("index_code").isin(*capture.manifest.indices)
+        if capture.manifest.indices
+        else F.lit(False)
+    )
+    invalid = indices.filter(
+        F.col("index_snapshot_id").isNull()
+        | F.col("index_code").isNull()
+        | ~index_in_scope
+        | F.col("trade_date").isNull()
+        | (F.col("trade_date") != F.lit(capture.trade_date))
+        | F.col("event_time").isNull()
+        | F.col("received_at").isNull()
+        | (F.col("received_at") < F.col("event_time"))
+        | F.col("index_value").isNull()
+        | (F.col("index_value") <= F.lit(0))
+        | F.col("source_record_sha256").isNull()
+        | F.col("provider_type").isNull()
+        | (F.col("provider_type") != F.lit("trade"))
+    ).count()
+    if invalid:
+        indices.unpersist()
+        raise RuntimeError("SSI Stream index normalization produced invalid values")
+    indices.drop("received_at", "provider_type").createOrReplaceTempView(
+        "ssi_stream_index_candidates"
+    )
+    return indices
+
+
+def _merge_indices(spark: SparkSession, target: str) -> None:
+    conflict = spark.sql(
+        f"""
+        SELECT 1
+        FROM ssi_stream_index_candidates source
+        JOIN {target} target USING (index_snapshot_id)
+        WHERE target.source_record_sha256 != source.source_record_sha256
+           OR target.index_code != source.index_code
+           OR target.event_time != source.event_time
+           OR target.index_value != source.index_value
+        LIMIT 1
+        """
+    ).count()
+    if conflict:
+        raise RuntimeError("Immutable SSI Stream index-snapshot conflict")
+    spark.sql(
+        f"""
+        MERGE INTO {target} target
+        USING ssi_stream_index_candidates source
+        ON target.index_snapshot_id = source.index_snapshot_id
+        WHEN NOT MATCHED THEN INSERT *
+        """
+    )
+
+
 def publish(
     spark: SparkSession,
     *,
@@ -322,6 +415,7 @@ def publish(
     _capture_view(spark, landing_table=landing_table, capture=capture)
     _trade_view(spark, capture)
     quotes = _quote_views(spark, capture)
+    indices = _index_view(spark, capture)
     try:
         _merge_ticks(spark, qualified_name(product.table_identifier("trade_ticks")))
         _merge_quotes(
@@ -329,5 +423,7 @@ def publish(
             qualified_name(product.table_identifier("quote_snapshots")),
             qualified_name(product.table_identifier("quote_levels")),
         )
+        _merge_indices(spark, qualified_name(product.table_identifier("index_snapshots")))
     finally:
         quotes.unpersist()
+        indices.unpersist()

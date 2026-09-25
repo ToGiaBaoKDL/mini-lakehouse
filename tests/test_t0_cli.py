@@ -2,7 +2,7 @@ import json
 from datetime import date, timedelta
 from typing import Any
 
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, EndpointConnectionError
 from t0_trading.cli import app
 from t0_trading.market.reconciliation import MarketDayCertification
 from t0_trading.trading_dates import TradingDateError
@@ -22,6 +22,7 @@ def test_cli_help_and_validation_do_not_initialize_aws(monkeypatch: Any) -> None
     assert "audit-features" in help_result.stdout
     assert "audit-outcomes" in help_result.stdout
     assert "audit-strategies" in help_result.stdout
+    assert "audit-buy-first-baselines" in help_result.stdout
     assert "audit-walk-forward" in help_result.stdout
     assert "journal-decisions" in help_result.stdout
     assert "audit-shadow-journal" in help_result.stdout
@@ -73,6 +74,27 @@ def test_cli_help_and_validation_do_not_initialize_aws(monkeypatch: Any) -> None
     )
     assert future.exit_code == 2
     assert "current market" in future.output
+
+
+def test_buy_first_audit_sanitizes_transport_failure(monkeypatch: Any) -> None:
+    def unavailable(*_args: object, **_kwargs: object) -> None:
+        raise EndpointConnectionError(endpoint_url="https://internal.invalid")
+
+    monkeypatch.setattr("t0_trading.cli._replay_outcome_day", unavailable)
+    result = CliRunner().invoke(
+        app,
+        [
+            "audit-buy-first-baselines",
+            "--trade-date",
+            "2026-09-21",
+            "--landing-uri",
+            "s3://landing/root",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "EndpointConnectionError" in result.output
+    assert "internal.invalid" not in result.output
 
 
 def test_validate_stream_day_skips_an_unobserved_trading_date(monkeypatch: Any) -> None:

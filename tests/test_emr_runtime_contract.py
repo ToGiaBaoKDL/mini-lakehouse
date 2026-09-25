@@ -137,7 +137,7 @@ def test_market_data_stream_replay_uses_verified_sdk_models_and_top_three_quotes
     assert "StreamSessionReader.from_uri" in capture
     assert "stream_manifest_uris" in capture
     assert not Path("lakehouse/emr/src/emr_jobs/market_data/stream_manifest.py").exists()
-    assert '"trade_ticks", "quote_snapshots", "quote_levels"' in job
+    assert '"index_snapshots"' in job
     assert 'F.sha2("message_json", 256)' in landing
     assert "duplicate_keys" in landing
     assert "batch_count_mismatches" in landing
@@ -150,6 +150,28 @@ def test_market_data_stream_replay_uses_verified_sdk_models_and_top_three_quotes
     assert "IntervalMessage" not in curated
     assert "ForeignRoomMessage" not in curated
     assert "WHEN NOT MATCHED THEN INSERT *" in curated
+
+
+def test_market_data_stream_routes_mixed_symbol_and_index_capture() -> None:
+    landing = Path("lakehouse/emr/src/emr_jobs/market_data/stream_landing.py").read_text(
+        encoding="utf-8"
+    )
+    curated = Path("lakehouse/emr/src/emr_jobs/market_data/stream_curated.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'F.col("subscription_context") == F.lit("symbols")' in landing
+    assert 'F.col("subscription_context") == F.lit("indices")' in landing
+    assert 'F.col("symbol").isin(*manifest.symbols)' in landing
+    assert 'F.col("symbol").isin(*manifest.indices)' in landing
+    assert "(symbol_scope & ~symbol_in_scope) | (index_scope & ~index_in_scope)" in landing
+
+    assert curated.count("subscription_context = 'symbols'") == 2
+    assert "subscription_context = 'indices'" in curated
+    assert "ssi_stream_index_candidates" in curated
+    assert "'ssi_stream_index' AS source_kind" in curated
+    assert 'product.table_identifier("index_snapshots")' in curated
+    assert "SSI Stream index normalization produced invalid values" in curated
 
 
 def test_market_data_stream_materializes_features_with_the_shared_t0_core() -> None:

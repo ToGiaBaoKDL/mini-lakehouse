@@ -27,7 +27,7 @@ MARKET_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 @dataclass(frozen=True, slots=True)
 class CertificationOptions:
     symbols: tuple[str, ...] = ("VIC", "VHM")
-    indices: tuple[str, ...] = ("VNINDEX", "VN30")
+    indices: tuple[str, ...] = ("VNINDEX", "VN30", "VNREAL")
     history_days: int = 10
     page_size: int = 5
     stream_seconds: float = 15

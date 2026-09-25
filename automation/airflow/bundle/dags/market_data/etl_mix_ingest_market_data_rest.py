@@ -21,7 +21,7 @@ with DAG(
     dag_id="etl_mix_ingest_market_data_rest",
     description="Capture one SSI REST trade date and publish reconciled Iceberg tables.",
     schedule=CronPartitionTimetable(
-        "0 21 * * 1-5",
+        "0 17 * * 1-5",
         timezone=LOCAL_TIMEZONE,
         run_immediately=False,
         key_format="%Y-%m-%d",

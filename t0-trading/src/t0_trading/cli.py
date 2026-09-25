@@ -14,8 +14,8 @@ from zoneinfo import ZoneInfo
 
 import boto3
 import typer
-from botocore.exceptions import ClientError
-from pydantic import BaseModel
+from botocore.exceptions import BotoCoreError, ClientError
+from pydantic import BaseModel, ValidationError
 from ssi_sdk import Data
 
 from t0_trading.capture import MAX_STREAM_BATCH_MESSAGES
@@ -35,6 +35,7 @@ from t0_trading.configuration import (
     TradingConfigurationError,
     load_configuration,
 )
+from t0_trading.context import build_decision_contexts
 from t0_trading.credentials import CredentialError, load_credentials
 from t0_trading.decisions import (
     DECISION_ACTIONS,
@@ -60,12 +61,16 @@ from t0_trading.market.reconciliation import (
 )
 from t0_trading.outcomes import OutcomeLabel, build_outcome_audit, label_outcomes
 from t0_trading.provider import authenticated, market_stream
+from t0_trading.simulation import SimulationRequest, simulate_cycles
+from t0_trading.simulation.presets import public_vndirect_dta_costs
 from t0_trading.strategy import (
     StrategyScore,
     evaluate_scores,
     evaluate_walk_forward,
     score_features,
 )
+from t0_trading.strategy.baseline_audit import evaluate_buy_first_baselines
+from t0_trading.strategy.baselines import score_buy_first_baselines
 from t0_trading.trading_dates import TradingDateError, require_observed_trade_date
 
 MARKET_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
@@ -240,9 +245,11 @@ def check_config(
     try:
         configuration = load_configuration(config)
         version = configuration.resolve(selected_date)
+        capture_scope = configuration.capture_scope(selected_date)
         outcomes = configuration.resolve_outcomes(selected_date)
         strategies = configuration.resolve_strategies(selected_date)
         strategy_evaluation = configuration.resolve_strategy_evaluation(selected_date)
+        context = configuration.resolve_context(selected_date)
         decisions = configuration.resolve_decisions(selected_date)
     except TradingConfigurationError as error:
         typer.echo(str(error), err=True)
@@ -251,6 +258,8 @@ def check_config(
         json.dumps(
             {
                 "configuration_sha256": configuration.sha256,
+                "capture_indices": capture_scope.indices,
+                "capture_symbols": capture_scope.symbols,
                 "effective_date": selected_date.isoformat(),
                 "outcome_version": outcomes.version,
                 "outcome_version_sha256": outcomes.sha256,
@@ -258,6 +267,8 @@ def check_config(
                 "strategy_version_sha256": strategies.sha256,
                 "strategy_evaluation_version": strategy_evaluation.version,
                 "strategy_evaluation_version_sha256": strategy_evaluation.sha256,
+                "context_version": context.version,
+                "context_version_sha256": context.sha256,
                 "decision_version": decisions.version,
                 "decision_version_sha256": decisions.sha256,
                 "version": version.version,
@@ -282,7 +293,9 @@ def certify(
         "ap-southeast-1"
     ),
     symbols: Annotated[str, typer.Option(help="Comma-separated stock symbols.")] = "VIC,VHM",
-    indices: Annotated[str, typer.Option(help="Comma-separated market indices.")] = "VNINDEX,VN30",
+    indices: Annotated[str, typer.Option(help="Comma-separated market indices.")] = (
+        "VNINDEX,VN30,VNREAL"
+    ),
     history_days: Annotated[int, typer.Option(min=1, max=366)] = 10,
     page_size: Annotated[int, typer.Option(min=1, max=1000)] = 5,
     stream_seconds: Annotated[float, typer.Option(min=0, max=1800)] = 15,
@@ -352,9 +365,10 @@ def capture_rest_command(
     environment = os.environ.get("LAKEHOUSE_ENVIRONMENT", "dev")
     effective_secret_id = secret_id or f"lakehouse/{environment}/t0-trading/ssi"
     try:
-        # Capture scope follows the deployed configuration. The requested trade date is
-        # source lineage, not a request to apply historical strategy policy.
-        version = load_configuration(config).resolve(datetime.now(MARKET_TIMEZONE).date())
+        # Capture is an operational evidence concern. The requested trade date is source
+        # lineage, while the deployed scope must still cover today's decision universe.
+        configuration = load_configuration(config)
+        capture_scope = configuration.capture_scope(datetime.now(MARKET_TIMEZONE).date())
         credentials = load_credentials(effective_secret_id, region)
         store = S3CaptureStore(boto3.client("s3", region_name=region), landing_uri)
         with authenticated(credentials) as auth, Data(auth) as data:
@@ -368,8 +382,8 @@ def capture_rest_command(
                 RestCaptureOptions(
                     trade_date=parsed_trade_date,
                     job_token=job_token,
-                    symbols=version.market.symbols,
-                    indices=version.market.indices,
+                    symbols=capture_scope.symbols,
+                    indices=capture_scope.indices,
                     page_size=page_size,
                 ),
             )
@@ -423,8 +437,10 @@ def capture_stream_command(
         trade_date = datetime.now(MARKET_TIMEZONE).date()
         configuration = load_configuration(config)
         version = configuration.resolve(trade_date)
+        capture_scope = configuration.capture_scope(trade_date)
         options = StreamCaptureOptions(
-            symbols=version.market.symbols,
+            symbols=capture_scope.symbols,
+            indices=capture_scope.indices,
             duration_seconds=duration_seconds,
             heartbeat_seconds=heartbeat_seconds,
             stale_after_seconds=stale_after_seconds,
@@ -669,6 +685,55 @@ def audit_strategies_command(
     _emit_model(report, output)
 
 
+def audit_buy_first_baselines_command(
+    trade_date: Annotated[
+        str,
+        typer.Option(help="Certified exchange-local trade date in YYYY-MM-DD format."),
+    ],
+    landing_uri: Annotated[str, typer.Option(help="Landing S3 root URI.")],
+    region: Annotated[str, typer.Option(help="AWS region containing the landing bucket.")] = (
+        "ap-southeast-1"
+    ),
+    config: Annotated[Path, typer.Option(help="Versioned non-secret trading YAML.")] = (
+        DEFAULT_TRADING_CONFIG
+    ),
+    output: Annotated[
+        Path | None,
+        typer.Option(help="Optional local JSON report path; stdout is always emitted."),
+    ] = None,
+) -> None:
+    """Audit three buy-first brief baselines; never emit a live signal."""
+    parsed_trade_date = _parse_trade_date(trade_date)
+    try:
+        reader, configuration, snapshots, labels = _replay_outcome_day(
+            parsed_trade_date, landing_uri, region, config
+        )
+        contexts = build_decision_contexts(
+            snapshots,
+            reader.envelopes(),
+            configuration.resolve(parsed_trade_date),
+            configuration.resolve_context(parsed_trade_date),
+        )
+        candidates = score_buy_first_baselines(snapshots, contexts)
+        costs = public_vndirect_dta_costs(
+            reader.trade_date,
+            checked_at=datetime(2026, 9, 22, tzinfo=UTC),
+        )
+        report = evaluate_buy_first_baselines(
+            candidates,
+            labels,
+            costs,
+            capture_evidence_sha256=reader.evidence_sha256,
+        )
+    except (StreamCaptureReadError, TradingConfigurationError, ValueError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+    except (CaptureStoreUnavailable, BotoCoreError) as error:
+        typer.echo(f"SSI buy-first baseline audit failed: {_safe_error(error)}", err=True)
+        raise typer.Exit(code=1) from None
+    _emit_model(report, output)
+
+
 def audit_walk_forward_command(
     trade_date: Annotated[
         list[str],
@@ -772,6 +837,28 @@ def journal_decisions_command(
             sort_keys=True,
         )
     )
+
+
+def simulate_cycles_command(
+    input_file: Annotated[
+        Path,
+        typer.Option("--input", help="Local JSON with account, costs, marks, and selected cycles."),
+    ],
+    output: Annotated[
+        Path | None,
+        typer.Option(help="Optional local JSON report path; stdout is always emitted."),
+    ] = None,
+) -> None:
+    """Evaluate selected T0 cycles offline; never send an alert or an order."""
+    try:
+        request = SimulationRequest.model_validate_json(input_file.read_text(encoding="utf-8"))
+        report = simulate_cycles(request)
+    except (OSError, ValidationError, ValueError) as error:
+        typer.echo(f"T0 cycle simulation rejected: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    _emit_model(report, output)
+    if report.status == "INCOMPLETE":
+        raise typer.Exit(code=INELIGIBLE_EXIT_CODE)
 
 
 def audit_shadow_journal_command(
@@ -927,8 +1014,10 @@ app.command("reconcile-stream")(reconcile_stream_command)
 app.command("audit-features")(audit_features_command)
 app.command("audit-outcomes")(audit_outcomes_command)
 app.command("audit-strategies")(audit_strategies_command)
+app.command("audit-buy-first-baselines")(audit_buy_first_baselines_command)
 app.command("audit-walk-forward")(audit_walk_forward_command)
 app.command("journal-decisions")(journal_decisions_command)
+app.command("simulate-cycles")(simulate_cycles_command)
 app.command("audit-shadow-journal")(audit_shadow_journal_command)
 app.command("validate-stream-day")(validate_stream_day_command)
 app.command("certify-stream-day")(certify_stream_day_command)

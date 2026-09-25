@@ -190,7 +190,7 @@ def test_market_data_rest_dag_keeps_capture_and_publication_bounded() -> None:
     dag = _dag(_bag(), "etl_mix_ingest_market_data_rest")
 
     assert isinstance(dag.timetable, CronPartitionTimetable)
-    assert dag.timetable.expression == "0 21 * * 1-5"
+    assert dag.timetable.expression == "0 17 * * 1-5"
     assert dag.timetable.key_format == "%Y-%m-%d"
     assert dag.max_active_runs == 1
     assert not dag.params
@@ -221,7 +221,7 @@ def test_market_data_stream_dag_publishes_evidence_before_eligibility_enforcemen
     dag = _dag(_bag(), "etl_emr_ingest_market_data_stream")
 
     assert isinstance(dag.timetable, CronPartitionTimetable)
-    assert dag.timetable.expression == "0 21 * * 1-5"
+    assert dag.timetable.expression == "0 17 * * 1-5"
     assert dag.timetable.key_format == "%Y-%m-%d"
     assert dag.max_active_runs == 1
     assert not dag.params

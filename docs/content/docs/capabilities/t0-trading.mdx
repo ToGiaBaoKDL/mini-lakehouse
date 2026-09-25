@@ -67,6 +67,12 @@ SHA-256 identity. Decision thresholds are isolated from feature, score, outcome,
 identities. The initial thresholds are explicitly provisional shadow settings derived from an
 in-sample score profile; they cannot authorize advisory or live execution.
 
+The top-level `capture` scope is operational evidence policy, not a model input. It currently
+captures `VIC`, `VHM`, `VNINDEX`, `VN30`, and `VNREAL`; every effective market version must be
+covered by that scope. The effective market version keeps `VNINDEX` and `VN30` as the required
+regime inputs, so missing optional `VNREAL` evidence cannot turn the regime into `UNKNOWN`.
+Changing the capture scope therefore does not change an existing feature-configuration identity.
+
 The side-effect-free `t0_trading.market` package owns three boundaries: decoding persisted SDK
 messages into the certified event subset, deterministic market-state transitions, and ordered
 replay through those same transitions. It maintains bounded latest trade/Top-3 quote state and
@@ -184,11 +190,70 @@ directional asymmetry and visible-book crossing cost explicit without inventing 
 `BUY` measures a marketable buy followed by a conditional bid-side markout; `SELL` measures a sale
 of already-settled inventory followed by a conditional ask-side repurchase. These are gross
 research markouts, not claimed broker fills or executable round trips. They neither bypass Vietnam
-settlement constraints nor include an invented commission or tax schedule. Net PnL and portfolio
-eligibility remain unavailable until an account-specific, effective-dated cost and inventory policy
-is certified. For a certified day, EMR publishes the complete label matrix with quote-sequence
+settlement constraints nor include an invented commission or tax schedule. Operational Net PnL and
+portfolio eligibility remain unavailable until account-specific cost and inventory inputs are
+verified and prospective execution is measured. For a certified day, EMR publishes the complete label matrix with quote-sequence
 lineage, structured abstention reasons, and a canonical fingerprint. It remains research data and
 is not consumed by signal generation.
+
+## Offline T0 cycle simulation
+
+The research-only `t0_trading.simulation` package adds deterministic cash and inventory accounting
+without changing capture, curated tables, or the shadow decision clock. It accepts a single-day
+`SimulationRequest` containing an explicitly selected set of exact decision/outcome pairs, a
+timestamped manual account snapshot, per-symbol closing marks, effective-dated VND cost assumptions,
+and explicit risk limits. The caller owns candidate arbitration and supplies one `SelectionRecord`
+per selected decision from a decision-only journal, timestamped after the decision but before its
+simulated entry. The simulator checks identity and priority and rejects two candidates for the same
+symbol and decision clock. The source digest and timestamp are supplied evidence, **not** proof
+that an external journal was committed before outcomes existed. Promotion requires an independently
+immutable journal and a completeness audit of the candidate universe. The request also supplies
+the lot size; a quantity outside the lot is rejected before accounting.
+
+For `BUY_LOW_SELL_OLD`, the first leg consumes cash and the later sale consumes previously settled
+shares. For `SELL_HIGH_BUY_BACK`, the first leg consumes settled shares and the later repurchase
+creates shares bought today. Both paths preserve `core_min_qty`; bought-today shares are never
+reused as settled inventory. Commission and sell tax apply to their respective legs, while optional
+extra slippage is added **after** the visible Top-3 VWAP, so spread crossing is not charged twice.
+Sale proceeds enter `pending_sale_proceeds_vnd`, not spendable cash. Without an `AdvancePolicy`, a
+sell-first buyback must use existing cash. An explicitly configured advance may fund buys only
+against unadvanced pending proceeds after projected interest through the supplied settlement date.
+The input `account.cash_vnd` must therefore be settled available cash, not a broker-app buying-power
+figure that already includes pending sales or financing.
+The report exposes cash, receivables, advance principal, and financing cost separately; aggregate
+Net T0 Alpha deducts financing cost. This is an estimate, not confirmation that the account has
+enabled the advance service.
+The report compares the same initial holdings under HOLD and HOLD+T0, with Net T0 Alpha equal to
+the incremental portfolio P&L of completed cycles. It carries an input fingerprint and one `cycle_id`
+per selected decision. An unfillable exit leaves the account open and withholds aggregate Net T0
+Alpha rather than inventing a repurchase or sale. Account `start_price` and the closing mark only
+value the common HOLD inventory; they do not create synthetic opening or closing fills.
+
+```bash
+uv run --project t0-trading t0-trading simulate-cycles \
+  --input /path/to/selected-cycle-request.json \
+  --output /tmp/t0-cycle-report.json
+```
+
+The JSON contract is `SimulationRequest` in `t0_trading.simulation.model`; it requires the full
+immutable `StrategyDecision` and `OutcomeLabel` records, not bare prices or a profit estimate.
+`COMPLETE` means the accounting reconciles, **not** that a strategy passed research or is ready
+for a user alert. For the confirmed VNDIRECT DTA account, `public_vndirect_dta_costs` provides an
+explicit `PUBLIC_SCHEDULE_ASSUMPTION`: 10 bps online brokerage on each side and 10 bps tax on sales,
+based on the [DTA schedule](https://www.vndirect.com.vn/bieu-phi-tai-khoan-da/) and
+[VNDIRECT tax guidance](https://support.vndirect.com.vn/hc/vi/articles/14623187438873).
+Pages checked on 2026-09-22 do not prove the account's negotiated rate or an earlier historical
+rate. Any additional tax treatment of dividend or bonus shares is outside this ordinary-sale
+scenario. `fee_provenance_recorded` means a source and check timestamp were provided, not that the
+tariff was independently verified. Likewise, `selection_reference_recorded` means selection
+references were supplied, not independently authenticated. The public
+[sale-proceeds advance page](https://www.vndirect.com.vn/dich-vu-chung-khoan/san-pham-dich-vu/margin/ung-truoc-tien-ban-uttb/)
+shows 3.7 bps per calendar day; this is a separate, opt-in assumption. An incomplete report is
+emitted and the CLI exits with the data-quality code. Current outcome labels still use the
+configured 500 ms research-latency scenario and 100-share marketable Top-3 book walk, not observed
+human response times or broker fills. A separate, measured manual-latency policy and prospective
+paper journal remain mandatory before any promotion decision. Tick/price-limit validation and
+passive-order queue or partial-fill simulation are not inferred from aggregate Top-3 VWAP labels.
 
 ## Offline strategy scores
 
@@ -198,6 +263,105 @@ flow, normalized order flow and book imbalance, and a symmetric VIC/VHM relative
 score is bounded to `[-1, 1]`, uses exact decimal arithmetic, and carries the feature snapshot and
 effective strategy-policy fingerprints. Its sign selects the matching conditional BUY or SELL
 outcome only for evaluation; it is not an order, signal, or execution instruction.
+
+### Buy-first brief baselines
+
+The separate `strategy.baselines` research path does not alter the deployed shadow decision policy.
+It evaluates the three hypotheses from the project brief for BUY-first cycles only. Baseline v2
+joins a separately versioned, immutable `DecisionContext` at the exact feature clock:
+
+- Mean Reversion requires a below-VWAP price stretch, proximity to support, and a matching reversal
+  confirmation. Its zone is the support/resistance range over prior eligible snapshots in the
+  configured trailing window; the current clock and future pivots cannot define their own zone.
+- Momentum/Pullback requires positive 60/300-second trend strength and either a controlled
+  30-second pullback with positive trade flow or 30-second reacceleration. These are intentionally
+  minimal baseline proxies, not tuned final thresholds.
+- VIC–VHM Relative requires target underperformance, a prior disjoint 30-second peer move followed
+  by target recovery, and positive broad-market confirmation. The lagged move is a baseline proxy,
+  not a fitted rolling leader model. Positive VN30 and VNINDEX returns confirm the candidate only
+  when both index streams are fresh and have complete point-in-time lookback windows.
+
+The same context classifies `TREND_UP`, `TREND_DOWN`, `RANGE`, or `HIGH_VOLATILITY` from the two
+index streams. Missing, stale, or insufficient index history produces `UNKNOWN` with explicit
+reasons; it is never replaced with an end-of-day index summary. Context policy, source feature
+history, index stream position, and the resulting snapshot each carry independent hashes. Regime
+performance is reported as a segment, not used as a threshold tuned on the evaluated sessions.
+
+Every feature clock emits all three group states and either a research candidate or an explicit
+abstention. Scoring reads only feature snapshots at or before the decision clock; the outcome is
+joined later using the immutable snapshot hash. The audit selects the first candidate after a
+cooldown equal to the longest outcome horizon, independently for each strategy and symbol, so
+overlapping five-second clocks are not counted as separate trades. It reports group availability,
+raw and non-overlapping candidate counts, outcome coverage, gross markout, and conditional net
+markout after the public DTA fee/tax assumption:
+
+```bash
+AWS_PROFILE=tgbao-dev uv run --project t0-trading t0-trading audit-buy-first-baselines \
+  --trade-date YYYY-MM-DD \
+  --landing-uri s3://<landing-bucket> \
+  --output /tmp/t0-buy-first-baselines-YYYY-MM-DD.json
+```
+
+The public DTA schedule was checked on 2026-09-22; applying it to an earlier date is explicitly a
+historical research assumption. Even the fee-adjusted result is a **conditional Top-3 markout**, not
+portfolio Net T0 Alpha: the baseline audit does not arbitrate simultaneous strategies, reserve
+cash, enforce core inventory, observe broker fills, or prove that the brief's missing regime/news
+groups were available. It must not be promoted to Telegram or manual trade guidance on this report
+alone.
+
+#### Stage-1 baseline check (baseline v2, 2026-09-25)
+
+The point-in-time replay covers all 15 completed, certified sessions from 2026-09-04 through
+2026-09-24; the active 2026-09-25 capture is excluded. Each session produced 2,698 decision clocks.
+Counts below are non-overlapping BUY-first candidates across VIC and VHM at the 300-second horizon.
+Means are weighted by eligible outcomes, not by session; net includes the stated public DTA fee/tax
+assumption and zero additional slippage beyond the visible Top-3 VWAP.
+
+| Baseline          | Candidates | Eligible outcomes | Mean gross |   Mean net |    VIC net |    VHM net |
+| ----------------- | ---------: | ----------------: | ---------: | ---------: | ---------: | ---------: |
+| Mean Reversion    |        365 |               347 |  -9.14 bps | -39.08 bps | -39.57 bps | -38.48 bps |
+| Momentum/Pullback |        568 |               529 |  -4.71 bps | -34.67 bps | -32.07 bps | -37.52 bps |
+| VIC–VHM Relative  |          0 |                 0 |        N/A |        N/A |        N/A |        N/A |
+
+The reconstructed point-in-time zone is available on 90.63% of symbol clocks. Requiring it does
+not rescue Mean Reversion: gross markout is already negative before fees. Momentum/Pullback is also
+gross-negative. Both evaluable baselines are net-negative at 30, 60, and 300 seconds, for both
+symbols; all 30 evaluable session-by-baseline pooled 300-second averages are net-negative.
+
+All historical manifests predate index subscription and therefore classify every clock as
+`UNKNOWN`: broad-market confirmation has zero availability and VIC–VHM Relative correctly emits no
+candidate. This is an **insufficient-evidence result**, not a failed Relative or regime hypothesis.
+An end-of-day VN30/VNINDEX backfill would introduce look-ahead and is not accepted. The first fully
+contextual validation window starts only after a manifest-v2 collector is deployed and records the
+two index streams contemporaneously.
+
+There are 15 completed sessions, fewer than the existing walk-forward policy's minimum of 26
+(20 training + one purged + five validation), so this is **not** an out-of-sample profitability
+claim. Execution/inventory feasibility is also not established.
+
+**Stage-1 decision: NO-GO for alerts or trading.** The baseline-v2 implementation and current-data
+hypotheses are now reproducibly checked. Mean Reversion and Momentum/Pullback fail the conditional
+gross and fee-adjusted gates; Relative and regime remain fail-closed pending genuine index-stream
+evidence. Do not tune thresholds on these sessions and call the result validated. Collect at least
+the predeclared sample and run a purged walk-forward test before choosing Stage-2 limits.
+
+#### Historical baseline-v1 check (superseded, 2026-09-22)
+
+The replay covers the 12 completed, certified sessions from 2026-09-04 through 2026-09-21;
+2026-09-22 is still an active capture day and is excluded. Counts below are non-overlapping
+BUY-first candidates across VIC and VHM at the 300-second horizon. Means are weighted by
+eligible outcomes, not by session; net includes the stated public DTA fee/tax assumption and
+zero additional slippage beyond the visible Top-3 VWAP.
+
+| Baseline          | Candidates | Eligible outcomes | Mean gross |   Mean net |    VIC net |    VHM net |
+| ----------------- | ---------: | ----------------: | ---------: | ---------: | ---------: | ---------: |
+| Mean Reversion    |        390 |               371 |  -8.37 bps | -38.31 bps | -36.32 bps | -40.62 bps |
+| Momentum/Pullback |        460 |               430 |  -4.66 bps | -34.61 bps | -31.30 bps | -38.05 bps |
+| VIC–VHM Relative  |        315 |               299 |  -2.80 bps | -32.76 bps | -32.58 bps | -32.97 bps |
+
+This older result did not enforce the now-mandatory zone or market-confirmation groups and is kept
+only as an audit trail. It must not be compared causally with baseline v2 because the date ranges
+also differ.
 
 Strategy configuration is effective-versioned independently from market features and outcome
 assumptions. The evaluator requires exact score-to-label lineage and reports directed-score rate,
@@ -300,7 +464,12 @@ outcome coverage, positive gross markouts, and mean eligible gross return so mis
 never treated as zero returns.
 
 The bounded stream command subscribes to aggregate symbol data and one-minute intervals for
-`VIC,VHM`. SDK callbacks only serialize into a bounded in-memory queue; the main process writes
+`VIC,VHM`, plus the captured `VNINDEX,VN30,VNREAL` index stream. Stream manifest v2 records symbols and
+indices as disjoint scopes, while replay remains backward compatible with symbol-only v1 manifests.
+Landing validates each non-null identifier against its declared scope. Curated replay routes only
+symbol-scoped trades and quotes into security tables; index-scoped trade observations are published
+idempotently to `index_snapshots` with their receipt-time lineage. SDK callbacks only serialize
+into a bounded in-memory queue; the main process writes
 content-addressed gzip micro-batches every 30 seconds or 500 messages, whichever comes first, so S3
 latency cannot block the WebSocket receive thread. Each
 terminal session manifest owns batch/object checksums, sequence bounds, heartbeat health, and the
@@ -311,7 +480,8 @@ The deployed canary established the concrete callback shapes used by replay:
 
 | SDK callback         | Certified shape                                                     | Replay destination                                                                   |
 | -------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `TradeMessage`       | Symbol, provider time, price, quantity, side, and cumulative volume | Executable matches go to `trade_ticks`; auction-state observations remain in landing |
+| `TradeMessage`       | Symbol, provider time, price, quantity, side, and cumulative volume | Symbol-scoped executable matches go to `trade_ticks`; auction state stays in landing |
+| Index `TradeMessage` | Index code, provider time, value, and cumulative market volume      | Index-scoped observations go to `index_snapshots`                                    |
 | `QuoteMessage`       | Ten price/quantity slots with the advertised Top 3 populated        | `quote_snapshots` and `quote_levels`                                                 |
 | `IntervalMessage`    | Provider one-minute OHLCV observation                               | Landing evidence for later reconciliation                                            |
 | `ForeignRoomMessage` | Cumulative foreign flow and room observation                        | Landing evidence; not a final daily fact                                             |
@@ -335,7 +505,7 @@ partial sessions that cannot pass full-session certification.
 
 ## Bounded publication
 
-The `etl_mix_ingest_market_data_rest` DAG uses Airflow 3's daily partition timetable at 21:00 Monday
+The `etl_mix_ingest_market_data_rest` DAG uses Airflow 3's daily partition timetable at 17:00 Monday
 through Friday in `Asia/Ho_Chi_Minh`. Its partition key is the exact exchange-local trade date used
 by capture and publication. Historical ranges use Airflow's native Backfill action; there is no
 date Param, resolver task, or separate backfill DAG.
@@ -387,11 +557,11 @@ meaningful resource saving.
 
 The timer excludes weekends but does not pretend to know ad-hoc HOSE holidays. Until a structured
 exchange-calendar source is certified, a weekday holiday is captured conservatively: SDK
-heartbeats and acknowledgements remain as immutable raw evidence. The 21:00 certification uses SSI's
+heartbeats and acknowledgements remain as immutable raw evidence. The 17:00 certification uses SSI's
 exact-date history and skips lakehouse publication, so it cannot create synthetic landing or curated
 facts for that date.
 
-At 21:00 Monday through Friday, `etl_emr_ingest_market_data_stream` first runs a bounded manifest
+At 17:00 Monday through Friday, `etl_emr_ingest_market_data_stream` first runs a bounded manifest
 validation task. It uses SSI's exact-date history through the official SDK as the trading-day gate;
 an unobserved date exits with the shared Airflow skip code. For an observed date it discovers every
 direct terminal manifest and validates its immutable lineage before submitting EMR.

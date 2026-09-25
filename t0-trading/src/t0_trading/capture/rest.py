@@ -23,7 +23,7 @@ class RestCaptureOptions:
     trade_date: date
     job_token: str
     symbols: tuple[str, ...] = ("VIC", "VHM")
-    indices: tuple[str, ...] = ("VNINDEX", "VN30")
+    indices: tuple[str, ...] = ("VNINDEX", "VN30", "VNREAL")
     page_size: int = 1000
     max_pages: int = 10
 

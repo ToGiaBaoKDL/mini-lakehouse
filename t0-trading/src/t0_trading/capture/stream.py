@@ -53,6 +53,7 @@ class StreamObserver(Protocol):
 @dataclass(frozen=True, slots=True)
 class StreamCaptureOptions:
     symbols: tuple[str, ...] = ("VIC", "VHM")
+    indices: tuple[str, ...] = ()
     duration_seconds: float = 600
     heartbeat_seconds: float = 30
     stale_after_seconds: float = 90
@@ -61,12 +62,15 @@ class StreamCaptureOptions:
     queue_size: int = 10_000
 
     def __post_init__(self) -> None:
-        if (
-            not self.symbols
-            or len(self.symbols) != len(set(self.symbols))
-            or any(not symbol or symbol != symbol.strip().upper() for symbol in self.symbols)
-        ):
-            raise ValueError("symbols must contain unique uppercase identifiers")
+        for label, values in (("symbols", self.symbols), ("indices", self.indices)):
+            if (
+                (label == "symbols" and not values)
+                or len(values) != len(set(values))
+                or any(not value or value != value.strip().upper() for value in values)
+            ):
+                raise ValueError(f"{label} must contain unique uppercase identifiers")
+        if set(self.symbols) & set(self.indices):
+            raise ValueError("symbols and indices must be disjoint")
         if self.duration_seconds <= 0:
             raise ValueError("duration_seconds must be positive")
         if self.heartbeat_seconds <= 0:
@@ -101,11 +105,13 @@ class _Receiver:
         messages: Queue[StreamEnvelope],
         *,
         session_id: str,
+        indices: frozenset[str],
         clock: Callable[[], datetime],
         timer: Callable[[], float],
     ) -> None:
         self._messages = messages
         self._session_id = session_id
+        self._indices = indices
         self._clock = clock
         self._timer = timer
         self._lock = Lock()
@@ -129,6 +135,11 @@ class _Receiver:
                         receive_sequence=sequence,
                         received_at=received_at,
                         message_type=type(message).__name__,
+                        subscription_context=(
+                            "indices"
+                            if _text_field(message, "symbol") in self._indices
+                            else "symbols"
+                        ),
                         symbol=_text_field(message, "symbol"),
                         source_time_text=_text_field(
                             message, "trading_time", "interval_time", "trading_date"
@@ -168,7 +179,7 @@ def _row(message: StreamEnvelope) -> dict[str, object]:
         "stream_session_id": message.stream_session_id,
         "receive_sequence": message.receive_sequence,
         "message_type": message.message_type,
-        "subscription_context": "symbols",
+        "subscription_context": message.subscription_context,
         "provider_topic": None,
         "symbol": message.symbol,
         "source_time_text": message.source_time_text,
@@ -248,7 +259,13 @@ def capture_stream(
     if spool is not None:
         spool.drain(store, defer_unavailable=True)
     queue: Queue[StreamEnvelope] = Queue(maxsize=options.queue_size)
-    receiver = _Receiver(queue, session_id=session_id, clock=clock, timer=timer)
+    receiver = _Receiver(
+        queue,
+        session_id=session_id,
+        indices=frozenset(options.indices),
+        clock=clock,
+        timer=timer,
+    )
     client.on_data = receiver.record
     client.on_heartbeat = receiver.heartbeat
     client.connect()
@@ -307,6 +324,8 @@ def capture_stream(
         with redirect_stdout(StringIO()):
             client.subscribe_symbol(list(options.symbols))
             client.subscribe_symbol_ohlcv(list(options.symbols), interval=Timeframe.MINUTE_1)
+            if options.indices:
+                client.subscribe_index(list(options.indices))
             client.ping()
             while True:
                 client.wait(timeout=0.25)
@@ -378,7 +397,7 @@ def capture_stream(
     message_count = sum(cast(int, batch["message_count"]) for batch in batches)
     manifest_key = f"{session_prefix}/manifest.json"
     manifest: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": 2 if options.indices else 1,
         "stream_session_id": session_id,
         "symbols": list(options.symbols),
         "connected_at": connected_at.isoformat(),
@@ -397,6 +416,8 @@ def capture_stream(
         "error_type": failure_type,
         "published_at": clock().astimezone(UTC).isoformat(),
     }
+    if options.indices:
+        manifest["indices"] = list(options.indices)
     if spool is None:
         store.put_json(manifest_key, manifest)
     else:

@@ -3,6 +3,7 @@ import json
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from t0_trading.configuration import load_configuration
@@ -28,6 +29,7 @@ def _envelope(
     *,
     received_at: datetime | None = None,
     session: str = "session-1",
+    subscription_context: Literal["symbols", "indices"] = "symbols",
 ) -> StreamEnvelope:
     message_json = json.dumps(payload, separators=(",", ":"), sort_keys=True)
     raw_symbol = payload.get("symbol")
@@ -36,12 +38,36 @@ def _envelope(
         stream_session_id=session,
         receive_sequence=sequence,
         message_type=message_type,
+        subscription_context=subscription_context,
         symbol=raw_symbol if isinstance(raw_symbol, str) else None,
         source_time_text=raw_source_time if isinstance(raw_source_time, str) else None,
         received_at=received_at or datetime(2026, 9, 4, 2, 0, sequence, tzinfo=UTC),
         message_json=message_json,
         message_sha256=hashlib.sha256(message_json.encode()).hexdigest(),
     )
+
+
+def test_captured_optional_index_does_not_enter_symbol_book_state() -> None:
+    state = MarketState(_configuration())
+    update = state.apply(
+        _envelope(
+            1,
+            "TradeMessage",
+            {
+                "type": "trade",
+                "symbol": "VNREAL",
+                "trading_time": "2026/09/04 09:00:05",
+                "price": 1000,
+                "quantity": 0,
+                "side": "U",
+                "total_volume": 0,
+            },
+            subscription_context="indices",
+        )
+    )
+
+    assert update.event is None
+    assert update.issues == ()
 
 
 def _trade(

@@ -203,6 +203,10 @@ class MarketState:
         issues = self._sequence_issues(envelope)
         if SEQUENCE_REGRESSION in issues or RECEIPT_TIME_REGRESSION in issues:
             return MarketUpdate(event=None, issues=issues)
+        # Captured indices may be a superset of the regime inputs. Their declared scope,
+        # rather than a hard-coded identifier list, keeps them out of symbol book state.
+        if envelope.subscription_context == "indices":
+            return MarketUpdate(event=None, issues=issues)
         event = decode_event(
             envelope,
             quote_depth=self.configuration.market.quote_depth,

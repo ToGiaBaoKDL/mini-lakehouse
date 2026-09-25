@@ -83,7 +83,7 @@ without putting them in Terraform state.
 The T0 handoff is `.secrets/dev/t0-trading/ssi.json`. Its canonical payload contains exactly
 `version`, `client_id`, `api_key`, and `api_secret`. After applying AWS infrastructure, initialize
 the dedicated database with `infra/runtime/postgres/deploy t0_trading`. The REST and stream replay
-DAGs use exchange-local daily partitions and run at 21:00 Monday through Friday. Component-owned
+DAGs use exchange-local daily partitions and run at 17:00 Monday through Friday. Component-owned
 systemd timers run the non-restarting OCI stream container inside its weekday capture window; image
 deployment recreates it and converges that scheduled state. Signal generation and execution remain
 disabled until their later delivery gates pass. Stream replay verifies the date through SSI,

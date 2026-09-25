@@ -17,6 +17,9 @@ def test_trading_configuration_is_strict_effective_dated_and_stable() -> None:
     configuration = load_configuration(CONFIGURATION)
     version = configuration.resolve(date(2026, 9, 5))
 
+    assert configuration.capture.symbols == ("VIC", "VHM")
+    assert configuration.capture.indices == ("VNINDEX", "VN30", "VNREAL")
+    assert configuration.capture_scope(date(2026, 9, 5)) == configuration.capture
     assert version.version == "market-state-v1"
     assert version.market.symbols == ("VIC", "VHM")
     assert version.market.indices == ("VNINDEX", "VN30")
@@ -46,6 +49,12 @@ def test_trading_configuration_is_strict_effective_dated_and_stable() -> None:
     assert evaluation.minimum_training_sessions == 20
     assert evaluation.validation_sessions == 5
     assert evaluation.purge_sessions == 1
+    context = configuration.resolve_context(date(2026, 9, 5))
+    assert context.version == "decision-context-v1"
+    assert context.zone_lookback_seconds == 900
+    assert context.market_windows_seconds == (60, 300)
+    assert context.zone_tolerance_bps == Decimal(20)
+    assert len(context.sha256) == 64
     decisions = configuration.resolve_decisions(date(2026, 9, 5))
     assert decisions.version == "microstructure-decisions-v1"
     assert decisions.strategy_version == strategies.version
@@ -101,6 +110,35 @@ def test_outcome_assumptions_do_not_change_feature_configuration_identity() -> N
     )
 
 
+def test_capture_scope_has_independent_operational_identity() -> None:
+    original = load_configuration(CONFIGURATION)
+    changed = parse_configuration(
+        CONFIGURATION.read_text(encoding="utf-8").replace(
+            "indices: [VNINDEX, VN30, VNREAL]",
+            "indices: [VNINDEX, VN30, VNREAL, VNFIN]",
+            1,
+        )
+    )
+    effective_date = date(2026, 9, 5)
+
+    assert changed.capture.indices == ("VNINDEX", "VN30", "VNREAL", "VNFIN")
+    assert changed.resolve(effective_date).sha256 == original.resolve(effective_date).sha256
+    assert changed.sha256 != original.sha256
+
+
+def test_capture_scope_must_cover_effective_decision_requirements() -> None:
+    configuration = parse_configuration(
+        CONFIGURATION.read_text(encoding="utf-8").replace(
+            "indices: [VNINDEX, VN30, VNREAL]",
+            "indices: [VNINDEX, VNREAL]",
+            1,
+        )
+    )
+
+    with pytest.raises(TradingConfigurationError, match="does not cover"):
+        configuration.capture_scope(date(2026, 9, 5))
+
+
 def test_strategy_assumptions_have_an_independent_identity() -> None:
     original = load_configuration(CONFIGURATION)
     changed = parse_configuration(
@@ -119,6 +157,27 @@ def test_strategy_assumptions_have_an_independent_identity() -> None:
     assert (
         changed.resolve_strategies(effective_date).sha256
         != original.resolve_strategies(effective_date).sha256
+    )
+
+
+def test_context_assumptions_have_an_independent_identity() -> None:
+    original = load_configuration(CONFIGURATION)
+    changed = parse_configuration(
+        CONFIGURATION.read_text(encoding="utf-8").replace(
+            'zone_tolerance_bps: "20"',
+            'zone_tolerance_bps: "25"',
+        )
+    )
+    effective_date = date(2026, 9, 5)
+
+    assert changed.resolve(effective_date).sha256 == original.resolve(effective_date).sha256
+    assert (
+        changed.resolve_strategies(effective_date).sha256
+        == original.resolve_strategies(effective_date).sha256
+    )
+    assert (
+        changed.resolve_context(effective_date).sha256
+        != original.resolve_context(effective_date).sha256
     )
 
 

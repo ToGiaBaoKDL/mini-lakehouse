@@ -158,7 +158,7 @@ tables:
     primary_key: [index_snapshot_id]
     columns:
       - {field_id: 1, name: index_snapshot_id, data_type: string, required: true, description: Deterministic identifier from immutable lineage.}
-      - {field_id: 2, name: index_code, data_type: string, required: true, description: Normalized VN30 or VNINDEX identifier.}
+      - {field_id: 2, name: index_code, data_type: string, required: true, description: Normalized configured market-index identifier.}
       - {field_id: 3, name: trade_date, data_type: date, required: true, description: Exchange-local trading date.}
       - {field_id: 4, name: event_time, data_type: timestamptz, required: false, description: Provider event time normalized to UTC; absent for date-grained REST summaries.}
       - {field_id: 5, name: source_kind, data_type: string, required: true, description: Historical REST or certified stream origin.}

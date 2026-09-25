@@ -59,7 +59,12 @@ def run(
         *(source.table_identifier(table.key) for table in source.tables),
         *(
             market_data.table_identifier(key)
-            for key in ("trade_ticks", "quote_snapshots", "quote_levels")
+            for key in (
+                "trade_ticks",
+                "quote_snapshots",
+                "quote_levels",
+                "index_snapshots",
+            )
         ),
         *(t0_trading.table_identifier(table.key) for table in t0_trading.tables),
     )
