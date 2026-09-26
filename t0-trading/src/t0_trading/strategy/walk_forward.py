@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from t0_trading.configuration import (
     STRATEGY_NAMES,
+    EvaluationTier,
     OutcomeVersion,
     StrategyEvaluationVersion,
     StrategyName,
@@ -103,8 +104,9 @@ class WalkForwardReport(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     evaluation_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    evaluation_tier: EvaluationTier
     evaluation_configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     strategy_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
     strategy_configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -342,6 +344,7 @@ def evaluate_walk_forward(
 
     return WalkForwardReport(
         evaluation_version=evaluation_policy.version,
+        evaluation_tier=evaluation_policy.tier,
         evaluation_configuration_sha256=evaluation_policy.sha256,
         strategy_version=strategy_policy.version,
         strategy_configuration_sha256=strategy_policy.sha256,

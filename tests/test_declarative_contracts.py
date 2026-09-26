@@ -105,6 +105,7 @@ def test_market_data_contracts_are_ssi_only_replayable_and_conformed() -> None:
         "securities",
         "daily_security_summaries",
         "intraday_bars_1m",
+        "index_bars_1m",
         "trade_ticks",
         "quote_snapshots",
         "quote_levels",

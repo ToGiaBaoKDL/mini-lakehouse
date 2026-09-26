@@ -16,7 +16,9 @@ from emr_jobs.market_data.stream_landing import publish as publish_landing
 from emr_jobs.t0_trading.certifications import publish as publish_certification
 from emr_jobs.t0_trading.decisions import publish as publish_decisions
 from emr_jobs.t0_trading.features import publish as publish_features
+from emr_jobs.t0_trading.landing import envelopes
 from emr_jobs.t0_trading.outcomes import publish as publish_outcomes
+from emr_jobs.t0_trading.research import publish as publish_research
 
 
 def run(
@@ -36,6 +38,7 @@ def run(
     outcome_policy = trading.resolve_outcomes(trade_date)
     strategy_policy = trading.resolve_strategies(trade_date)
     decision_policy = trading.resolve_decisions(trade_date)
+    context_policy = trading.resolve_context(trade_date)
     configure_logging("ssi_market_data_stream", source_date)
     s3 = client()
     manifest_uris = discover_captures(
@@ -64,6 +67,8 @@ def run(
                 "quote_snapshots",
                 "quote_levels",
                 "index_snapshots",
+                "index_bars_1m",
+                "market_status_events",
             )
         ),
         *(t0_trading.table_identifier(table.key) for table in t0_trading.tables),
@@ -115,7 +120,7 @@ def run(
             feature_audit.snapshot_count,
             len(feature_capture.sessions),
         )
-        outcome_audit = publish_outcomes(
+        labels, outcome_audit = publish_outcomes(
             spark,
             landing_table=landing_table,
             product=t0_trading,
@@ -129,6 +134,23 @@ def run(
             "Published {} deterministic outcome labels from {} SSI Stream segment(s)",
             outcome_audit.label_count,
             len(feature_capture.sessions),
+        )
+        contexts, candidates, baseline_audit = publish_research(
+            spark,
+            market_product=market_data,
+            product=t0_trading,
+            snapshots=snapshots,
+            labels=labels,
+            stream_envelopes=envelopes(spark, landing_table=landing_table, capture=feature_capture),
+            configuration=configuration,
+            context_policy=context_policy,
+            capture_evidence_sha256=feature_capture.evidence_sha256,
+        )
+        logger.info(
+            "Published {} contexts, {} buy-first candidates, and {} evaluations",
+            len(contexts),
+            len(candidates),
+            len(baseline_audit.evaluations) + len(baseline_audit.regime_evaluations),
         )
         decisions = publish_decisions(
             spark,

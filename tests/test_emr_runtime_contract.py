@@ -164,7 +164,9 @@ def test_market_data_stream_routes_mixed_symbol_and_index_capture() -> None:
     assert 'F.col("subscription_context") == F.lit("indices")' in landing
     assert 'F.col("symbol").isin(*manifest.symbols)' in landing
     assert 'F.col("symbol").isin(*manifest.indices)' in landing
-    assert "(symbol_scope & ~symbol_in_scope) | (index_scope & ~index_in_scope)" in landing
+    assert "(symbol_scope & ~symbol_in_scope)" in landing
+    assert "(index_scope & ~index_in_scope)" in landing
+    assert "(market_scope & ~market_in_scope)" in landing
 
     assert curated.count("subscription_context = 'symbols'") == 2
     assert "subscription_context = 'indices'" in curated
@@ -172,6 +174,10 @@ def test_market_data_stream_routes_mixed_symbol_and_index_capture() -> None:
     assert "'ssi_stream_index' AS source_kind" in curated
     assert 'product.table_identifier("index_snapshots")' in curated
     assert "SSI Stream index normalization produced invalid values" in curated
+    assert "subscription_context = 'markets'" in curated
+    assert "ssi_stream_market_status_candidates" in curated
+    assert "SSI Stream market-status trading date is invalid" in curated
+    assert 'product.table_identifier("market_status_events")' in curated
 
 
 def test_market_data_stream_materializes_features_with_the_shared_t0_core() -> None:
@@ -181,6 +187,7 @@ def test_market_data_stream_materializes_features_with_the_shared_t0_core() -> N
     )
     features = Path("lakehouse/emr/src/emr_jobs/t0_trading/features.py").read_text(encoding="utf-8")
     outcomes = Path("lakehouse/emr/src/emr_jobs/t0_trading/outcomes.py").read_text(encoding="utf-8")
+    research = Path("lakehouse/emr/src/emr_jobs/t0_trading/research.py").read_text(encoding="utf-8")
     decisions = Path("lakehouse/emr/src/emr_jobs/t0_trading/decisions.py").read_text(
         encoding="utf-8"
     )
@@ -197,7 +204,8 @@ def test_market_data_stream_materializes_features_with_the_shared_t0_core() -> N
     assert job.index("publish_landing(") < job.index("publish_certification(")
     assert job.index("publish_certification(") < job.index("publish_features(")
     assert job.index("publish_features(") < job.index("publish_outcomes(")
-    assert job.index("publish_outcomes(") < job.index("publish_decisions(")
+    assert job.index("publish_outcomes(") < job.index("publish_research(")
+    assert job.index("publish_research(") < job.index("publish_decisions(")
     assert job.index('certification.status != "passed"') < job.index("publish_decisions(")
     assert 'certification.status != "passed"' in job
     assert 'product.table("market_day_certifications")' in certifications
@@ -212,6 +220,32 @@ def test_market_data_stream_materializes_features_with_the_shared_t0_core() -> N
     assert "outcome_sha256" in outcomes
     assert outcomes.count("require_compatible(") == 1
     assert outcomes.count("insert_missing(") == 1
+    assert "build_decision_contexts" in research
+    assert "build_decision_contexts_from_observations" in research
+    assert "score_buy_first_baselines" in research
+    assert "evaluate_buy_first_baselines" in research
+    assert 'table="decision_contexts"' in research
+    assert 'table="strategy_candidates"' in research
+    assert 'table="strategy_evaluations"' in research
+    research_publication = research.split("def publish(", maxsplit=1)[1]
+    assert research.count("require_compatible(") == 1
+    assert research_publication.count("_prepare(") == 3
+    assert research_publication.count("insert_missing(") == 3
+    assert research_publication.rfind("_prepare(") < research_publication.find("insert_missing(")
+    assert (
+        research_publication.find(
+            'view="t0_decision_context_candidates"',
+            research_publication.find("insert_missing("),
+        )
+        < research_publication.find(
+            'view="t0_strategy_candidate_candidates"',
+            research_publication.find("insert_missing("),
+        )
+        < research_publication.find(
+            'view="t0_strategy_evaluation_candidates"',
+            research_publication.find("insert_missing("),
+        )
+    )
     assert 'product.table("shadow_decisions")' in decisions
     assert "replay_decisions" in decisions
     assert "decision.sha256" in decisions
@@ -224,6 +258,8 @@ def test_market_data_stream_materializes_features_with_the_shared_t0_core() -> N
     )
     assert "WHEN NOT MATCHED THEN INSERT *" in immutable
     assert 'orderBy("received_at", "stream_session_id", "receive_sequence")' in landing_reader
+    assert landing_reader.count('"subscription_context"') == 1
+    assert "subscription_context=_subscription_context(row.subscription_context)" in landing_reader
     publication = features.split("def publish(", maxsplit=1)[1]
     assert publication.count("require_compatible(") == 2
     assert publication.count("insert_missing(") == 2

@@ -21,10 +21,30 @@ from t0_trading.capture.stream import (
     capture_stream_resilient,
 )
 from t0_trading.identity import canonical_json, sha256
+from t0_trading.provider import MarketStream
 
 
 def test_stream_capture_defaults_bound_flush_latency_to_thirty_seconds() -> None:
     assert StreamCaptureOptions().flush_seconds == 30
+
+
+def test_market_stream_owns_the_pinned_sdk_status_subscription_boundary() -> None:
+    class _Service:
+        def __init__(self) -> None:
+            self.request: Any = None
+
+        def _subscribe(self, request: Any) -> None:
+            self.request = request
+
+    service = _Service()
+
+    MarketStream(service).subscribe_market_status(["HOSE"])
+
+    assert service.request.to_dict() == {
+        "method": "subscribe",
+        "channel": "DATA",
+        "topics": ["market.HOSE"],
+    }
 
 
 def test_stream_capture_rejects_unreadable_batch_sizes() -> None:
@@ -113,6 +133,13 @@ class _Trade:
     price: int
 
 
+@dataclass
+class MarketStatusMessage:
+    market: str
+    status: str
+    trading_date: str
+
+
 class _Stream:
     def __init__(self, timer: _Timer, *, heartbeat: bool = True) -> None:
         self.timer = timer
@@ -159,6 +186,17 @@ class _IndexStream(_Stream):
         if first:
             self.on_data(_Trade("VN30", "09:00:02", 1200))
             self.on_data(_Trade("VNREAL", "09:00:03", 950))
+
+
+class _MarketStream(_IndexStream):
+    def subscribe_market_status(self, markets: list[str]) -> None:
+        assert markets == ["HOSE"]
+
+    def wait(self, timeout: float | None = None) -> None:
+        first = not self._emitted
+        super().wait(timeout)
+        if first:
+            self.on_data(MarketStatusMessage("HOSE", "LO", "03/09/2026"))
 
 
 def test_stream_capture_publishes_batches_and_one_terminal_manifest(tmp_path: Path) -> None:
@@ -243,6 +281,38 @@ def test_stream_capture_versions_and_scopes_index_evidence() -> None:
         "indices",
         "indices",
     ]
+
+
+def test_stream_capture_versions_and_scopes_market_status_evidence() -> None:
+    store = _Store()
+    timer = _Timer()
+    manifest_uri = capture_stream(
+        _MarketStream(timer),
+        store,
+        StreamCaptureOptions(
+            indices=("VNINDEX", "VN30", "VNREAL"),
+            markets=("HOSE",),
+            duration_seconds=1,
+            heartbeat_seconds=0.25,
+            stale_after_seconds=0.75,
+            flush_seconds=0.5,
+            batch_size=8,
+            queue_size=10,
+        ),
+        clock=timer.clock,
+        timer=timer.tick,
+        session_id="market-session",
+    )
+
+    manifest = json.loads(store.objects[manifest_uri.removeprefix("s3://landing/root/")])
+    assert manifest["schema_version"] == 3
+    assert manifest["markets"] == ["HOSE"]
+    body = store.objects[manifest["batches"][0]["object_key"]]
+    rows = [json.loads(line) for line in gzip.decompress(body).splitlines()]
+    status = rows[-1]
+    assert status["message_type"] == "MarketStatusMessage"
+    assert status["subscription_context"] == "markets"
+    assert status["symbol"] == "HOSE"
 
 
 def test_stream_capture_fails_closed_when_heartbeats_are_stale() -> None:

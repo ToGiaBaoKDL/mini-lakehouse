@@ -54,6 +54,7 @@ class StreamObserver(Protocol):
 class StreamCaptureOptions:
     symbols: tuple[str, ...] = ("VIC", "VHM")
     indices: tuple[str, ...] = ()
+    markets: tuple[str, ...] = ()
     duration_seconds: float = 600
     heartbeat_seconds: float = 30
     stale_after_seconds: float = 90
@@ -62,7 +63,11 @@ class StreamCaptureOptions:
     queue_size: int = 10_000
 
     def __post_init__(self) -> None:
-        for label, values in (("symbols", self.symbols), ("indices", self.indices)):
+        for label, values in (
+            ("symbols", self.symbols),
+            ("indices", self.indices),
+            ("markets", self.markets),
+        ):
             if (
                 (label == "symbols" and not values)
                 or len(values) != len(set(values))
@@ -106,12 +111,14 @@ class _Receiver:
         *,
         session_id: str,
         indices: frozenset[str],
+        markets: frozenset[str],
         clock: Callable[[], datetime],
         timer: Callable[[], float],
     ) -> None:
         self._messages = messages
         self._session_id = session_id
         self._indices = indices
+        self._markets = markets
         self._clock = clock
         self._timer = timer
         self._lock = Lock()
@@ -127,6 +134,8 @@ class _Receiver:
             received_at = self._clock().astimezone(UTC)
             public = public_value(message)
             message_json = canonical_json(public).decode("utf-8")
+            message_type = type(message).__name__
+            identifier = _text_field(message, "symbol", "market")
             with self._lock:
                 sequence = self._next_sequence
                 self._messages.put_nowait(
@@ -134,13 +143,15 @@ class _Receiver:
                         stream_session_id=self._session_id,
                         receive_sequence=sequence,
                         received_at=received_at,
-                        message_type=type(message).__name__,
+                        message_type=message_type,
                         subscription_context=(
-                            "indices"
-                            if _text_field(message, "symbol") in self._indices
+                            "markets"
+                            if message_type == "MarketStatusMessage" and identifier in self._markets
+                            else "indices"
+                            if identifier in self._indices
                             else "symbols"
                         ),
-                        symbol=_text_field(message, "symbol"),
+                        symbol=identifier,
                         source_time_text=_text_field(
                             message, "trading_time", "interval_time", "trading_date"
                         ),
@@ -263,6 +274,7 @@ def capture_stream(
         queue,
         session_id=session_id,
         indices=frozenset(options.indices),
+        markets=frozenset(options.markets),
         clock=clock,
         timer=timer,
     )
@@ -326,6 +338,8 @@ def capture_stream(
             client.subscribe_symbol_ohlcv(list(options.symbols), interval=Timeframe.MINUTE_1)
             if options.indices:
                 client.subscribe_index(list(options.indices))
+            if options.markets:
+                client.subscribe_market_status(list(options.markets))
             client.ping()
             while True:
                 client.wait(timeout=0.25)
@@ -397,7 +411,7 @@ def capture_stream(
     message_count = sum(cast(int, batch["message_count"]) for batch in batches)
     manifest_key = f"{session_prefix}/manifest.json"
     manifest: dict[str, object] = {
-        "schema_version": 2 if options.indices else 1,
+        "schema_version": 3 if options.markets else 2 if options.indices else 1,
         "stream_session_id": session_id,
         "symbols": list(options.symbols),
         "connected_at": connected_at.isoformat(),
@@ -418,6 +432,8 @@ def capture_stream(
     }
     if options.indices:
         manifest["indices"] = list(options.indices)
+    if options.markets:
+        manifest["markets"] = list(options.markets)
     if spool is None:
         store.put_json(manifest_key, manifest)
     else:

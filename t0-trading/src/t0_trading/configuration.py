@@ -115,6 +115,7 @@ class MarketConfiguration(_StrictModel):
     timezone: str
     symbols: tuple[str, ...]
     indices: tuple[str, ...]
+    status_markets: tuple[str, ...]
     quote_depth: int = Field(ge=1, le=10)
     bar_interval_seconds: int = Field(ge=1)
     sessions: SessionScheduleConfiguration
@@ -125,7 +126,11 @@ class MarketConfiguration(_StrictModel):
             ZoneInfo(self.timezone)
         except ZoneInfoNotFoundError as error:
             raise ValueError(f"unknown market timezone: {self.timezone}") from error
-        for name, values in (("symbols", self.symbols), ("indices", self.indices)):
+        for name, values in (
+            ("symbols", self.symbols),
+            ("indices", self.indices),
+            ("status_markets", self.status_markets),
+        ):
             _require_identifiers(name, values)
         if 60 % self.bar_interval_seconds != 0 and self.bar_interval_seconds % 60 != 0:
             raise ValueError("bar_interval_seconds must align to a minute boundary")
@@ -157,10 +162,15 @@ class CaptureConfiguration(_StrictModel):
 
     symbols: tuple[str, ...]
     indices: tuple[str, ...]
+    markets: tuple[str, ...]
 
     @model_validator(mode="after")
     def validate_scope(self) -> CaptureConfiguration:
-        for name, values in (("symbols", self.symbols), ("indices", self.indices)):
+        for name, values in (
+            ("symbols", self.symbols),
+            ("indices", self.indices),
+            ("markets", self.markets),
+        ):
             _require_identifiers(f"capture {name}", values)
         if set(self.symbols) & set(self.indices):
             raise ValueError("capture symbols and indices must be disjoint")
@@ -176,6 +186,7 @@ DecisionSessionName = Literal[
 
 StrategyName = Literal["momentum", "order_flow", "relative_value"]
 STRATEGY_NAMES: tuple[StrategyName, ...] = ("momentum", "order_flow", "relative_value")
+EvaluationTier = Literal["EXPLORATORY", "PROMOTION"]
 
 _SESSION_ORDER: tuple[DecisionSessionName, ...] = (
     "opening_auction",
@@ -262,9 +273,19 @@ class StrategyVersion(_EffectiveVersion):
 class StrategyEvaluationVersion(_EffectiveVersion):
     """Effective sampling policy for out-of-sample strategy evaluation."""
 
+    tier: EvaluationTier
     score_bucket_count: int = Field(ge=2, le=20)
     minimum_training_sessions: int = Field(ge=2)
     validation_sessions: int = Field(ge=1)
+    purge_sessions: int = Field(ge=1)
+
+
+class BaselineEvaluationVersion(_EffectiveVersion):
+    """Session isolation policy for fixed, buy-first baseline hypotheses."""
+
+    tier: EvaluationTier
+    development_sessions: int = Field(ge=2)
+    holdout_sessions: int = Field(ge=1)
     purge_sessions: int = Field(ge=1)
 
 
@@ -276,6 +297,9 @@ class ContextVersion(_EffectiveVersion):
     zone_tolerance_bps: Decimal = Field(gt=0)
     market_windows_seconds: tuple[int, int]
     index_stale_after_seconds: int = Field(ge=1, le=900)
+    historical_proxy_interval_seconds: int = Field(ge=1, le=900)
+    historical_proxy_stale_after_seconds: int = Field(ge=1, le=900)
+    tradable_market_statuses: tuple[str, ...]
     trend_threshold_bps: Decimal = Field(gt=0)
     high_volatility_threshold_bps: Decimal = Field(gt=0)
 
@@ -286,6 +310,11 @@ class ContextVersion(_EffectiveVersion):
             for window in self.market_windows_seconds
         ):
             raise ValueError("context market windows must be unique ascending lookback bounds")
+        if self.historical_proxy_stale_after_seconds < self.historical_proxy_interval_seconds:
+            raise ValueError(
+                "historical proxy staleness must cover its conservative availability delay"
+            )
+        _require_identifiers("tradable_market_statuses", self.tradable_market_statuses)
         return self
 
 
@@ -329,6 +358,7 @@ class TradingConfiguration(_StrictModel):
     outcomes: tuple[OutcomeVersion, ...]
     strategies: tuple[StrategyVersion, ...]
     strategy_evaluations: tuple[StrategyEvaluationVersion, ...]
+    baseline_evaluations: tuple[BaselineEvaluationVersion, ...]
     contexts: tuple[ContextVersion, ...]
     decisions: tuple[DecisionVersion, ...]
 
@@ -337,7 +367,35 @@ class TradingConfiguration(_StrictModel):
         _validate_effective_versions(self.versions, "configuration")
         _validate_effective_versions(self.outcomes, "outcome")
         _validate_effective_versions(self.strategies, "strategy")
-        _validate_effective_versions(self.strategy_evaluations, "strategy evaluation")
+        for tier in ("EXPLORATORY", "PROMOTION"):
+            _validate_effective_versions(
+                tuple(item for item in self.strategy_evaluations if item.tier == tier),
+                f"{tier.lower()} strategy evaluation",
+            )
+        if (
+            tuple(
+                sorted(self.strategy_evaluations, key=lambda item: (item.tier, item.effective_from))
+            )
+            != self.strategy_evaluations
+        ):
+            raise ValueError(
+                "strategy evaluation versions must be ordered by tier and effective_from"
+            )
+        if len({item.version for item in self.strategy_evaluations}) != len(
+            self.strategy_evaluations
+        ):
+            raise ValueError("strategy evaluation version names must be globally unique")
+        for tier in ("EXPLORATORY", "PROMOTION"):
+            _validate_effective_versions(
+                tuple(item for item in self.baseline_evaluations if item.tier == tier),
+                f"{tier.lower()} baseline evaluation",
+            )
+        if tuple(
+            sorted(self.baseline_evaluations, key=lambda item: (item.tier, item.effective_from))
+        ) != self.baseline_evaluations or len(
+            {item.version for item in self.baseline_evaluations}
+        ) != len(self.baseline_evaluations):
+            raise ValueError("baseline evaluation versions must be unique and canonically ordered")
         _validate_effective_versions(self.contexts, "context")
         _validate_effective_versions(self.decisions, "decision")
         strategy_versions = {version.version for version in self.strategies}
@@ -358,9 +416,11 @@ class TradingConfiguration(_StrictModel):
     def capture_scope(self, value: date) -> CaptureConfiguration:
         """Return a scope proven to cover the effective decision universe."""
         market = self.resolve(value).market
-        if not set(market.symbols).issubset(self.capture.symbols) or not set(
-            market.indices
-        ).issubset(self.capture.indices):
+        if (
+            not set(market.symbols).issubset(self.capture.symbols)
+            or not set(market.indices).issubset(self.capture.indices)
+            or not set(market.status_markets).issubset(self.capture.markets)
+        ):
             raise TradingConfigurationError(
                 f"capture scope does not cover the decision universe for {value.isoformat()}"
             )
@@ -372,11 +432,30 @@ class TradingConfiguration(_StrictModel):
     def resolve_strategies(self, value: date) -> StrategyVersion:
         return _resolve_effective(self.strategies, value, "strategy")
 
-    def resolve_strategy_evaluation(self, value: date) -> StrategyEvaluationVersion:
-        return _resolve_effective(self.strategy_evaluations, value, "strategy evaluation")
+    def resolve_strategy_evaluation(
+        self,
+        value: date,
+        tier: EvaluationTier = "PROMOTION",
+    ) -> StrategyEvaluationVersion:
+        return _resolve_effective(
+            tuple(item for item in self.strategy_evaluations if item.tier == tier),
+            value,
+            f"{tier.lower()} strategy evaluation",
+        )
 
     def resolve_context(self, value: date) -> ContextVersion:
         return _resolve_effective(self.contexts, value, "context")
+
+    def resolve_baseline_evaluation(
+        self,
+        value: date,
+        tier: EvaluationTier = "PROMOTION",
+    ) -> BaselineEvaluationVersion:
+        return _resolve_effective(
+            tuple(item for item in self.baseline_evaluations if item.tier == tier),
+            value,
+            f"{tier.lower()} baseline evaluation",
+        )
 
     def resolve_decisions(self, value: date) -> DecisionVersion:
         return _resolve_effective(self.decisions, value, "decision")

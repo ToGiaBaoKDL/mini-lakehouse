@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from typing import Literal
 
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
@@ -15,6 +16,17 @@ def _utc(value: object) -> datetime:
     if not isinstance(value, datetime):
         raise RuntimeError("SSI Stream landing timestamp is invalid")
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _subscription_context(value: object) -> Literal["symbols", "indices", "markets"]:
+    # Pre-context capture rows are symbol subscriptions by construction.
+    if value is None or value == "symbols":
+        return "symbols"
+    if value == "indices":
+        return "indices"
+    if value == "markets":
+        return "markets"
+    raise RuntimeError("SSI Stream landing subscription context is invalid")
 
 
 def envelopes(
@@ -33,6 +45,7 @@ def envelopes(
             "stream_session_id",
             "receive_sequence",
             "message_type",
+            "subscription_context",
             "symbol",
             "source_time_text",
             "received_at",
@@ -51,6 +64,7 @@ def envelopes(
             stream_session_id=row.stream_session_id,
             receive_sequence=row.receive_sequence,
             message_type=row.message_type,
+            subscription_context=_subscription_context(row.subscription_context),
             symbol=row.symbol,
             source_time_text=row.source_time_text,
             received_at=_utc(row.received_at),

@@ -37,6 +37,8 @@ class RestCaptureOptions:
                 not value or value != value.strip().upper() for value in values
             ):
                 raise ValueError(f"{label} must contain unique uppercase identifiers")
+        if set(self.symbols) & set(self.indices):
+            raise ValueError("symbols and indices must be disjoint")
         if self.page_size < 1 or self.page_size > 1000:
             raise ValueError("page_size must be between 1 and 1000")
         if self.max_pages < 1:
@@ -292,15 +294,38 @@ def capture_rest(
         )
     )
     for index in options.indices:
-        requests.append(
-            _Request(
-                "get_index_summary_historical",
-                {"index": index, "trading_date": day},
-                lambda _page, index=index: _records(
-                    market.get_index_summary_historical(index, day)
+        requests.extend(
+            [
+                _Request(
+                    "get_ohlc_1minute_historical",
+                    {
+                        "symbol": index,
+                        "from_date": day_start,
+                        "to_date": day_end,
+                        "page_size": options.page_size,
+                    },
+                    lambda page, index=index: _records(
+                        market.get_ohlc_1minute_historical(
+                            index,
+                            day_start,
+                            day_end,
+                            page=page,
+                            size=options.page_size,
+                        )
+                    ),
+                    index,
+                    options.page_size,
+                    options.max_pages,
                 ),
-                index,
-            )
+                _Request(
+                    "get_index_summary_historical",
+                    {"index": index, "trading_date": day},
+                    lambda _page, index=index: _records(
+                        market.get_index_summary_historical(index, day)
+                    ),
+                    index,
+                ),
+            ]
         )
 
     request_manifests = [

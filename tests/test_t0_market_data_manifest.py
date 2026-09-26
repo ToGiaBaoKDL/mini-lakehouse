@@ -147,7 +147,7 @@ def test_bounded_scope_must_match_every_requested_symbol_and_index(
         *("get_securities_info",) * 2,
         *("get_securities_summary_historical",) * 2,
         *("get_ohlc_1day_historical",) * 2,
-        *("get_ohlc_1minute_historical",) * 2,
+        *("get_ohlc_1minute_historical",) * 4,
         "get_master_data_historical",
         *("get_index_summary_historical",) * 2,
     )

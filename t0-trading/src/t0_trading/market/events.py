@@ -37,7 +37,7 @@ class StreamEnvelope(BaseModel):
     stream_session_id: str = Field(min_length=1)
     receive_sequence: int = Field(ge=1)
     message_type: str = Field(min_length=1)
-    subscription_context: Literal["symbols", "indices"] = "symbols"
+    subscription_context: Literal["symbols", "indices", "markets"] = "symbols"
     symbol: str | None
     source_time_text: str | None
     received_at: datetime

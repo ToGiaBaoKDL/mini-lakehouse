@@ -11,6 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from t0_trading.identity import canonical_json, sha256
 
 MarketRegime = Literal["TREND_UP", "TREND_DOWN", "RANGE", "HIGH_VOLATILITY", "UNKNOWN"]
+ContextDataMode = Literal["LIVE", "HISTORICAL_PROXY"]
+IndexSourceKind = Literal["ssi_stream_trade", "ssi_rest_index_1m_historical"]
+MarketStatusSourceKind = Literal["ssi_stream_market_status", "configured_market_calendar"]
 
 
 class _StrictModel(BaseModel):
@@ -63,6 +66,8 @@ class IndexContext(_StrictModel):
     index: str
     value: Decimal | None = Field(default=None, gt=0)
     age_seconds: Decimal | None = Field(default=None, ge=0)
+    source_kind: IndexSourceKind | None = None
+    source_record_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     stream_session_id: str | None = Field(default=None, min_length=1)
     receive_sequence: int | None = Field(default=None, ge=1)
     windows: tuple[MarketWindowContext, ...]
@@ -72,9 +77,15 @@ class IndexContext(_StrictModel):
     def validate_index(self) -> IndexContext:
         if self.index != self.index.strip().upper():
             raise ValueError("index identifier must be uppercase")
-        lineage = (self.value, self.age_seconds, self.stream_session_id, self.receive_sequence)
+        lineage = (self.value, self.age_seconds, self.source_kind, self.source_record_sha256)
         if any(value is None for value in lineage) and any(value is not None for value in lineage):
             raise ValueError("index value lineage must be wholly present or absent")
+        if (self.stream_session_id is None) != (self.receive_sequence is None):
+            raise ValueError("index stream position must be wholly present or absent")
+        if self.source_kind == "ssi_stream_trade" and self.stream_session_id is None:
+            raise ValueError("live index context requires stream position lineage")
+        if self.source_kind != "ssi_stream_trade" and self.stream_session_id is not None:
+            raise ValueError("historical index context cannot carry stream position lineage")
         if tuple(window.window_seconds for window in self.windows) != tuple(
             sorted({window.window_seconds for window in self.windows})
         ):
@@ -88,17 +99,52 @@ class IndexContext(_StrictModel):
         return not self.reasons
 
 
+class MarketStatusContext(_StrictModel):
+    market: str
+    status: str | None = None
+    age_seconds: Decimal | None = Field(default=None, ge=0)
+    is_tradable: bool = False
+    source_kind: MarketStatusSourceKind | None = None
+    source_record_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    stream_session_id: str | None = Field(default=None, min_length=1)
+    receive_sequence: int | None = Field(default=None, ge=1)
+    reasons: tuple[str, ...]
+
+    @model_validator(mode="after")
+    def validate_status(self) -> MarketStatusContext:
+        if self.market != self.market.strip().upper() or not self.market:
+            raise ValueError("market-status market must be uppercase")
+        if self.status is not None and self.status != self.status.strip().upper():
+            raise ValueError("market status must be uppercase")
+        lineage = (self.status, self.age_seconds, self.source_kind, self.source_record_sha256)
+        if any(value is None for value in lineage) and any(value is not None for value in lineage):
+            raise ValueError("market-status lineage must be wholly present or absent")
+        if (self.stream_session_id is None) != (self.receive_sequence is None):
+            raise ValueError("market-status stream position must be wholly present or absent")
+        if self.source_kind == "ssi_stream_market_status" and self.stream_session_id is None:
+            raise ValueError("live market status requires stream position lineage")
+        if self.source_kind != "ssi_stream_market_status" and self.stream_session_id is not None:
+            raise ValueError("calendar market status cannot carry stream position lineage")
+        if self.is_tradable != (not self.reasons):
+            raise ValueError("market-status tradability must match its reasons")
+        if tuple(dict.fromkeys(self.reasons)) != self.reasons:
+            raise ValueError("market-status reasons must be unique")
+        return self
+
+
 class DecisionContext(_StrictModel):
     """Context known at one decision clock; never reconstructed from future outcomes."""
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[3] = 3
     context_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
     context_configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     feature_configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    data_mode: ContextDataMode
     trade_date: date
     decision_at: datetime
     zones: tuple[ZoneContext, ...]
     indices: tuple[IndexContext, ...]
+    market_statuses: tuple[MarketStatusContext, ...]
     market_confirmation_strength: Decimal | None = Field(default=None, ge=0, le=1)
     regime: MarketRegime
     reasons: tuple[str, ...]
@@ -120,6 +166,10 @@ class DecisionContext(_StrictModel):
             sorted({item.index for item in self.indices})
         ):
             raise ValueError("context indices must be unique and sorted")
+        if tuple(item.market for item in self.market_statuses) != tuple(
+            sorted({item.market for item in self.market_statuses})
+        ):
+            raise ValueError("market statuses must be unique and sorted")
         if tuple(dict.fromkeys(self.reasons)) != self.reasons:
             raise ValueError("context reasons must be unique")
         if self.regime == "UNKNOWN" and not self.reasons:

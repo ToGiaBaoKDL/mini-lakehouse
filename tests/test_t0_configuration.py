@@ -45,15 +45,29 @@ def test_trading_configuration_is_strict_effective_dated_and_stable() -> None:
     assert strategies.relative_value_symbols == ("VIC", "VHM")
     evaluation = configuration.resolve_strategy_evaluation(date(2026, 9, 5))
     assert evaluation.version == "purged-walk-forward-v1"
+    assert evaluation.tier == "PROMOTION"
     assert evaluation.score_bucket_count == 5
     assert evaluation.minimum_training_sessions == 20
     assert evaluation.validation_sessions == 5
     assert evaluation.purge_sessions == 1
+    exploratory = configuration.resolve_strategy_evaluation(date(2026, 9, 5), "EXPLORATORY")
+    assert exploratory.version == "exploratory-purged-holdout-v1"
+    assert exploratory.minimum_training_sessions == 10
+    assert exploratory.validation_sessions == 5
+    assert exploratory.purge_sessions == 1
+    baseline = configuration.resolve_baseline_evaluation(date(2026, 9, 5), "EXPLORATORY")
+    assert baseline.version == "exploratory-baseline-holdout-v1"
+    assert baseline.development_sessions == 10
+    assert baseline.purge_sessions == 1
+    assert baseline.holdout_sessions == 5
     context = configuration.resolve_context(date(2026, 9, 5))
-    assert context.version == "decision-context-v1"
+    assert context.version == "decision-context-v3"
     assert context.zone_lookback_seconds == 900
     assert context.market_windows_seconds == (60, 300)
     assert context.zone_tolerance_bps == Decimal(20)
+    assert context.historical_proxy_interval_seconds == 60
+    assert context.historical_proxy_stale_after_seconds == 65
+    assert context.tradable_market_statuses == ("LO", "OPEN", "CONTINUOUS")
     assert len(context.sha256) == 64
     decisions = configuration.resolve_decisions(date(2026, 9, 5))
     assert decisions.version == "microstructure-decisions-v1"

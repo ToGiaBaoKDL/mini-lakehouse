@@ -64,7 +64,7 @@ def require_bounded_scope(capture: CaptureRun) -> None:
             "get_securities_info": len(capture.symbols),
             "get_securities_summary_historical": len(capture.symbols),
             "get_ohlc_1day_historical": len(capture.symbols),
-            "get_ohlc_1minute_historical": len(capture.symbols),
+            "get_ohlc_1minute_historical": len(capture.symbols) + len(capture.indices),
             "get_master_data_historical": 1,
             "get_index_summary_historical": len(capture.indices),
         }
@@ -98,6 +98,7 @@ def load_capture(uri: str, expected_trade_date: str, raw_object_prefix: str) -> 
     if (
         not symbols
         or not indices
+        or set(symbols) & set(indices)
         or any(
             not isinstance(item, str) or not item or item != item.strip().upper()
             for item in (*symbols, *indices)

@@ -12,15 +12,16 @@ broker orders.
 
 The capability uses `ssi-sdk` 3.2.1 for authentication, Data REST calls, streaming connections, and
 subscriptions. Stream capture sends periodic SDK-owned heartbeat pings and fails closed when their
-responses become stale. Application code does not reproduce SSI endpoints, WebSocket topics, retry
-logic, or protocol messages. Certification uses only the Data and Stream DATA clients.
+responses become stale. Application code does not reproduce SSI endpoints, retry logic, or protocol
+messages. The pinned SDK recognizes `market.*` messages but omits a public market-status subscription
+helper, so one narrow adapter owns that documented topic boundary. Certification uses only the Data
+and Stream DATA clients.
 
-In the pinned SDK, `subscribe_board` is a convenience subscription for board-wide trade, quote,
-and foreign-room topics; it is not a market-calendar or session-status API. A successful
-subscription acknowledgement without business messages therefore cannot distinguish an exchange
-holiday from a quiet feed or provider outage. Continuous consumers must fail closed on stale data,
-while completed-date REST publication continues to use the independently observed trading-date
-resolver.
+In the pinned SDK, `subscribe_board` remains a convenience subscription for board-wide trade, quote,
+and foreign-room topics. Market phase is captured separately from the official `market.HOSE`
+stream. A successful subscription acknowledgement without business messages still cannot prove an
+exchange trading date, so completed-date REST publication continues to use the independently
+observed trading-date resolver.
 
 Terraform owns the empty SSI and PostgreSQL secret containers, an immutable ECR repository, and a
 dedicated Roles Anywhere identity. The capture runtime can read only the SSI credential and landing
@@ -42,18 +43,21 @@ sequences remain integers. Live and historical bars converge into one table thro
 revision lineage.
 
 `market_status_events` and `corporate_actions` are structured facts, not news or sentiment feeds.
-Their tables remain empty until an official structured source is certified; the implementation will
-not scrape prose or construct an undocumented SSI subscription to populate them.
+Market-level status now has an official stream writer. Symbol-level SSI `F` security status is not
+exposed by pinned `ssi-sdk` 3.2.1, so symbol halt/suspension remains protected by the existing
+trade/quote freshness abstention rather than being misrepresented as a certified status event.
+Corporate actions remain empty until an official structured source is certified.
 
 The physical tables intentionally use one table per durable grain, not one table per engine:
 
-| Tables                                                                          | State                            | Reason                                                                                                               |
-| ------------------------------------------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| REST `records`, `request_publications`                                          | Active in bounded publication    | Immutable records and one terminal request marker are different grains.                                              |
-| `securities`, `daily_security_summaries`, `intraday_bars_1m`, `index_snapshots` | Active in bounded publication    | Current certified REST normalization output.                                                                         |
-| Stream `messages`, `sessions`                                                   | Active in manifest-scoped replay | Message lineage and terminal connection-session completeness are the two durable grains.                             |
-| `trade_ticks`, `quote_snapshots`, `quote_levels`                                | Active in manifest-scoped replay | Quotes use a parent snapshot plus one-to-many levels; ticks retain receive order.                                    |
-| `market_status_events`, `corporate_actions`                                     | Deferred                         | Required for fail-closed gates and adjusted replay, but have no writer until their structured sources are certified. |
+| Tables                                                                          | State                            | Reason                                                                                    |
+| ------------------------------------------------------------------------------- | -------------------------------- | ----------------------------------------------------------------------------------------- |
+| REST `records`, `request_publications`                                          | Active in bounded publication    | Immutable records and one terminal request marker are different grains.                   |
+| `securities`, `daily_security_summaries`, `intraday_bars_1m`, `index_snapshots` | Active in bounded publication    | Current certified REST normalization output.                                              |
+| Stream `messages`, `sessions`                                                   | Active in manifest-scoped replay | Message lineage and terminal connection-session completeness are the two durable grains.  |
+| `trade_ticks`, `quote_snapshots`, `quote_levels`                                | Active in manifest-scoped replay | Quotes use a parent snapshot plus one-to-many levels; ticks retain receive order.         |
+| `market_status_events`                                                          | Active in manifest-scoped replay | Official market-phase transitions feed the point-in-time fail-closed context gate.        |
+| `corporate_actions`                                                             | Deferred                         | Required for adjusted replay, but has no writer until its structured source is certified. |
 
 Each bounded EMR job requires only the landing and curated tables that it writes. Deferred
 contracts do not add a runtime branch, generic repository, or empty application service.
@@ -137,6 +141,13 @@ by `curated_t0_trading`:
   `30s`/`60s`/`300s` columns as later effective versions add or remove windows;
 - `outcome_labels` has one immutable conditional Top-3 markout per outcome policy, feature
   snapshot, action, and horizon;
+- `decision_contexts` stores the versioned zone, index-window, market-confirmation, and regime
+  result at each feature clock. `data_mode` distinguishes genuine `LIVE` evidence from an explicit
+  completed-day `HISTORICAL_PROXY`;
+- `strategy_candidates` stores the complete buy-first candidate/abstention matrix, including every
+  evidence group, block reason, and feature/context fingerprint;
+- `strategy_evaluations` stores overall and regime-sliced conditional gross and public-DTA-cost
+  results with capture, feature, context, outcome, and cost-policy lineage;
 - `shadow_decisions` has one immutable strategy decision per decision policy and feature snapshot,
   including score lineage, applied threshold, action, and structured abstention reasons. It is
   reconstructed research evidence, not proof of notification delivery or order execution.
@@ -267,7 +278,7 @@ outcome only for evaluation; it is not an order, signal, or execution instructio
 ### Buy-first brief baselines
 
 The separate `strategy.baselines` research path does not alter the deployed shadow decision policy.
-It evaluates the three hypotheses from the project brief for BUY-first cycles only. Baseline v2
+It evaluates the three hypotheses from the project brief for BUY-first cycles only. Baseline v3
 joins a separately versioned, immutable `DecisionContext` at the exact feature clock:
 
 - Mean Reversion requires a below-VWAP price stretch, proximity to support, and a matching reversal
@@ -281,11 +292,23 @@ joins a separately versioned, immutable `DecisionContext` at the exact feature c
   not a fitted rolling leader model. Positive VN30 and VNINDEX returns confirm the candidate only
   when both index streams are fresh and have complete point-in-time lookback windows.
 
-The same context classifies `TREND_UP`, `TREND_DOWN`, `RANGE`, or `HIGH_VOLATILITY` from the two
-index streams. Missing, stale, or insufficient index history produces `UNKNOWN` with explicit
-reasons; it is never replaced with an end-of-day index summary. Context policy, source feature
-history, index stream position, and the resulting snapshot each carry independent hashes. Regime
-performance is reported as a segment, not used as a threshold tuned on the evaluated sessions.
+The same context classifies `TREND_UP`, `TREND_DOWN`, `RANGE`, or `HIGH_VOLATILITY` from VNINDEX and
+VN30. Live publication prefers index stream observations. For pre-index-stream dates, research replay
+may use completed-day one-minute REST bars, but records `HISTORICAL_PROXY` and the original REST
+record hash on every context; it never presents those bars as contemporaneously received stream
+evidence. A REST close is conservatively exposed only after one complete configured bar interval;
+both that delay and its staleness grace are versioned in the context-policy hash. Missing, stale, or
+insufficient history produces `UNKNOWN` with explicit reasons. A daily
+index summary is never expanded into synthetic intraday observations. Context policy, source feature
+history, source lineage, and the resulting snapshot each carry independent hashes. Regime performance
+is reported as a segment, not used as a threshold tuned on the evaluated sessions.
+
+Live context also requires the latest received HOSE market phase to be one of the versioned
+tradable statuses. Market status is a transition state and remains effective until another
+transition; it is not incorrectly expired by a telemetry TTL. Missing status, `BREAK`, `HALT`, or
+another disallowed phase makes the context `UNKNOWN` and blocks all three baselines before candidate
+selection. Historical proxy analysis records a separate configured-calendar source and never claims
+that it observed a live status transition.
 
 Every feature clock emits all three group states and either a research candidate or an explicit
 abstention. Scoring reads only feature snapshots at or before the decision clock; the outcome is
@@ -328,12 +351,12 @@ not rescue Mean Reversion: gross markout is already negative before fees. Moment
 gross-negative. Both evaluable baselines are net-negative at 30, 60, and 300 seconds, for both
 symbols; all 30 evaluable session-by-baseline pooled 300-second averages are net-negative.
 
-All historical manifests predate index subscription and therefore classify every clock as
-`UNKNOWN`: broad-market confirmation has zero availability and VIC–VHM Relative correctly emits no
-candidate. This is an **insufficient-evidence result**, not a failed Relative or regime hypothesis.
-An end-of-day VN30/VNINDEX backfill would introduce look-ahead and is not accepted. The first fully
-contextual validation window starts only after a manifest-v2 collector is deployed and records the
-two index streams contemporaneously.
+At the time of this report, all historical manifests predated index subscription and therefore every
+clock was `UNKNOWN`: broad-market confirmation had zero availability and VIC–VHM Relative correctly
+emitted no candidate. This remains an **insufficient-evidence result**, not a failed Relative or
+regime hypothesis. The later historical one-minute REST path can support explicitly exploratory
+proxy analysis; it does not retroactively turn those dates into live-stream evidence. Prospective
+promotion evidence still starts only when the collector records both index streams contemporaneously.
 
 There are 15 completed sessions, fewer than the existing walk-forward policy's minimum of 26
 (20 training + one purged + five validation), so this is **not** an out-of-sample profitability
@@ -376,28 +399,46 @@ AWS_PROFILE=tgbao-dev uv run --project t0-trading t0-trading audit-strategies \
   --output /tmp/t0-strategy-audit.json
 ```
 
-The separate `strategy_evaluations` policy defines five score-strength buckets, 20 minimum
-training sessions, five-session validation blocks, and a one-session purge gap. Keeping this policy
-outside the strategy definition means changing the sampling design cannot change an existing
-score's identity. Each expanding fold learns nearest-rank bucket boundaries from absolute directed
-scores on training dates only, excludes the immediately preceding purge date, and evaluates complete
-future validation blocks. Quantiles are fitted separately per strategy and BUY/SELL direction so one
-side cannot conceal the other. Tied boundaries remain visible as empty buckets instead of being
-adjusted using validation data. Incomplete trailing blocks are reported as pending rather than
-silently mixed into a smaller fold.
+The legacy microstructure scores retain their separate `strategy_evaluations` bucket policy. The
+fixed buy-first formulas now use `baseline_evaluations`: `EXPLORATORY` requires ten development
+sessions, one purged session, and five untouched holdout sessions, while `PROMOTION` requires
+20 + 1 + 5. Keeping these policies outside the formula definition means changing sampling design
+cannot change an existing candidate's identity.
+Each report records its tier and exact policy hash. Each expanding fold learns nearest-rank bucket
+boundaries from absolute directed scores on training dates only, excludes the immediately preceding
+purge date, and evaluates complete future validation blocks. Quantiles are fitted separately per
+strategy and BUY/SELL direction so one side cannot conceal the other. Tied boundaries remain visible
+as empty buckets instead of being adjusted using validation data. Incomplete trailing blocks are
+reported as pending rather than silently mixed into a smaller fold.
 
 ```bash
 AWS_PROFILE=tgbao-dev uv run --project t0-trading t0-trading audit-walk-forward \
   --trade-date YYYY-MM-DD \
   --trade-date YYYY-MM-DD \
   --landing-uri s3://<landing-bucket> \
+  --evaluation-tier EXPLORATORY \
   --output /tmp/t0-walk-forward-audit.json
 ```
 
-The command requires at least 26 certified sessions under the initial policy. Reports contain only
+The exploratory command requires 16 certified sessions; omitting the tier keeps the 26-session
+production-promotion policy. Reports contain only
 out-of-sample gross markouts per fold, strategy, horizon, and bucket. They carry feature, strategy,
 outcome, and evaluation fingerprints and contain no runtime timestamp, so identical immutable inputs
 produce the same report hash.
+
+Daily baseline audits can be evaluated without routing them through the old `StrategyScore` bucket
+path:
+
+```bash
+uv run --project t0-trading t0-trading audit-baseline-walk-forward \
+  --report-file /tmp/t0-buy-first-baselines-YYYY-MM-DD.json \
+  --report-file /tmp/t0-buy-first-baselines-YYYY-MM-DD.json \
+  --evaluation-tier EXPLORATORY \
+  --output /tmp/t0-baseline-walk-forward.json
+```
+
+The formulas are frozen before holdout evaluation; development dates are not silently used to tune
+them. An exploratory report always carries `promotion_eligible=false` and can promote only to shadow.
 
 ## Offline and shadow decisions
 
@@ -425,14 +466,16 @@ capture and policy produces byte-identical output. These records remain shadow r
 notification routing, user acknowledgement, inventory checks, and broker execution belong to later
 advisory and live lifecycles.
 
-The scheduled capture container also writes a local shadow journal from the receipt-ordered queue,
+The scheduled capture container also writes local decision and baseline-candidate journals from the receipt-ordered queue,
 outside the SSI SDK callback. Its clock stays one feature cadence behind receipt time to avoid racing
 callback delivery. A reconnect is recorded as `CAPTURE_GAP` through the configured warm-up period.
 During processing, the file remains `.jsonl.partial`. A bounded shutdown publishes the journal and
 then a sidecar `.manifest.json` as its commit marker only when capture began before the first decision
 clock, every configured clock was evaluated, and every observed stream session has a terminal S3
-capture manifest for the same trade date. The sidecar owns policy lineage, session lineage, counts,
-and the journal checksum; consumers ignore partial files and a `.jsonl` without its manifest. Shadow
+capture manifest for the same trade date. The sidecar owns decision, context, baseline, session,
+count, and checksum lineage; consumers ignore partial files or journals without the manifest. The
+`.candidates.jsonl` artifact contains all three baseline outcomes—including abstentions—for every
+symbol and clock. Shadow
 initialization, processing, or reporting errors disable only the journal; immutable raw capture
 remains the primary workload and continues independently. The local journal is parity evidence, not
 a serving database or notification queue. Completed local artifacts are retained for 14 days and
@@ -464,8 +507,9 @@ outcome coverage, positive gross markouts, and mean eligible gross return so mis
 never treated as zero returns.
 
 The bounded stream command subscribes to aggregate symbol data and one-minute intervals for
-`VIC,VHM`, plus the captured `VNINDEX,VN30,VNREAL` index stream. Stream manifest v2 records symbols and
-indices as disjoint scopes, while replay remains backward compatible with symbol-only v1 manifests.
+`VIC,VHM`, plus the captured `VNINDEX,VN30,VNREAL` index stream and HOSE market-status transitions.
+Stream manifest v3 records symbol, index, and market scopes, while replay remains backward compatible
+with v1/v2 manifests.
 Landing validates each non-null identifier against its declared scope. Curated replay routes only
 symbol-scoped trades and quotes into security tables; index-scoped trade observations are published
 idempotently to `index_snapshots` with their receipt-time lineage. SDK callbacks only serialize
@@ -478,14 +522,15 @@ batch-publication table would repeat the same fact and is intentionally absent.
 
 The deployed canary established the concrete callback shapes used by replay:
 
-| SDK callback         | Certified shape                                                     | Replay destination                                                                   |
-| -------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `TradeMessage`       | Symbol, provider time, price, quantity, side, and cumulative volume | Symbol-scoped executable matches go to `trade_ticks`; auction state stays in landing |
-| Index `TradeMessage` | Index code, provider time, value, and cumulative market volume      | Index-scoped observations go to `index_snapshots`                                    |
-| `QuoteMessage`       | Ten price/quantity slots with the advertised Top 3 populated        | `quote_snapshots` and `quote_levels`                                                 |
-| `IntervalMessage`    | Provider one-minute OHLCV observation                               | Landing evidence for later reconciliation                                            |
-| `ForeignRoomMessage` | Cumulative foreign flow and room observation                        | Landing evidence; not a final daily fact                                             |
-| `dict`               | DATA-channel subscription acknowledgement                           | Landing evidence only                                                                |
+| SDK callback          | Certified shape                                                     | Replay destination                                                                   |
+| --------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `TradeMessage`        | Symbol, provider time, price, quantity, side, and cumulative volume | Symbol-scoped executable matches go to `trade_ticks`; auction state stays in landing |
+| Index `TradeMessage`  | Index code, provider time, value, and cumulative market volume      | Index-scoped observations go to `index_snapshots`                                    |
+| `QuoteMessage`        | Ten price/quantity slots with the advertised Top 3 populated        | `quote_snapshots` and `quote_levels`                                                 |
+| `IntervalMessage`     | Provider one-minute OHLCV observation                               | Landing evidence for later reconciliation                                            |
+| `ForeignRoomMessage`  | Cumulative foreign flow and room observation                        | Landing evidence; not a final daily fact                                             |
+| `MarketStatusMessage` | HOSE phase and provider trading date                                | `market_status_events` and the live fail-closed context gate                         |
+| `dict`                | DATA-channel subscription acknowledgement                           | Landing evidence only                                                                |
 
 Replay does not turn interval observations into authoritative bars or partial foreign-room updates
 into final daily summaries. Completed-day REST bars remain the published authoritative path. A
@@ -648,8 +693,9 @@ provider behavior remains a visible gate. Generated reports are disposable local
 not committed.
 
 The REST scope includes one completed trading date of SDK-auto-paginated master data for reference,
-floor, and ceiling prices; current and historical one-minute bars; security summaries; and index
-context. Bounded capture uses the SDK aggregate symbol subscription for trades, quotes, and
+floor, and ceiling prices; security and index one-minute bars; security summaries; and daily index
+context. Index bars are stored separately as `index_bars_1m` with decimal index precision and
+`ssi_rest_index_1m_historical` provenance. Bounded capture uses the SDK aggregate symbol subscription for trades, quotes, and
 foreign-room updates plus the SDK one-minute interval subscription. Certification separately probes
 the index subscription. Provider interval bars remain reconciliation evidence; deterministic bars
 built from captured trades are now certified by the explicit full-session report before any future

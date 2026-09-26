@@ -14,7 +14,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from t0_trading.context import DecisionContext, MarketRegime
+from t0_trading.context import ContextDataMode, DecisionContext, MarketRegime
 from t0_trading.features import FeatureSnapshot, WindowFeatures
 from t0_trading.identity import canonical_json, sha256
 from t0_trading.market.session import MarketSession
@@ -39,7 +39,7 @@ BASELINE_GROUP_NAMES: dict[BaselineName, tuple[str, str, str]] = {
         "market_confirmation",
     ),
 }
-BASELINE_VERSION = "buy-first-baselines-v2"
+BASELINE_VERSION = "buy-first-baselines-v3"
 
 _ZERO = Decimal(0)
 _ONE = Decimal(1)
@@ -65,8 +65,8 @@ class BaselineCandidate(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal[2] = 2
-    baseline_version: Literal["buy-first-baselines-v2"] = BASELINE_VERSION
+    schema_version: Literal[3] = 3
+    baseline_version: Literal["buy-first-baselines-v3"] = BASELINE_VERSION
     strategy: BaselineName
     symbol: str
     trade_date: date
@@ -76,6 +76,7 @@ class BaselineCandidate(BaseModel):
     context_snapshot_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     context_version: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]*$")
     context_configuration_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    context_data_mode: ContextDataMode | None = None
     market_regime: MarketRegime = "UNKNOWN"
     groups: tuple[GroupEvidence, GroupEvidence, GroupEvidence]
     strength: Decimal = Field(ge=0, le=1)
@@ -104,6 +105,7 @@ class BaselineCandidate(BaseModel):
             self.context_snapshot_sha256,
             self.context_version,
             self.context_configuration_sha256,
+            self.context_data_mode,
         )
         if any(value is None for value in context_lineage) and any(
             value is not None for value in context_lineage
@@ -218,6 +220,7 @@ def _build(
         context_configuration_sha256=(
             context.context_configuration_sha256 if context is not None else None
         ),
+        context_data_mode=context.data_mode if context is not None else None,
         market_regime=context.regime if context is not None else "UNKNOWN",
         groups=groups,  # type: ignore[arg-type]
         strength=strength,
@@ -362,6 +365,9 @@ def score_buy_first_baselines(
             else "not_continuous_session"
             if snapshot.market_session
             not in (MarketSession.CONTINUOUS_AM, MarketSession.CONTINUOUS_PM)
+            else "market_status_ineligible"
+            if context is not None
+            and any(not status.is_tradable for status in context.market_statuses)
             else None
         )
         if block is not None:

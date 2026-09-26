@@ -3,18 +3,22 @@
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
+from t0_trading.configuration import load_configuration
 from t0_trading.features import FeatureSnapshot, WindowFeatures
 from t0_trading.market.session import MarketSession
 from t0_trading.numeric import basis_points
 from t0_trading.outcomes import OutcomeLabel
 from t0_trading.simulation.model import CostPolicy
 from t0_trading.strategy.baseline_audit import evaluate_buy_first_baselines
+from t0_trading.strategy.baseline_walk_forward import evaluate_baseline_walk_forward
 from t0_trading.strategy.baselines import BaselineCandidate, score_buy_first_baselines
 
 TRADE_DATE = date(2026, 9, 21)
 DECISION_AT = datetime(2026, 9, 21, 2, 30, tzinfo=UTC)
+CONFIGURATION = "t0-trading/config/trading.yaml"
 
 
 def _window(seconds: int, movement: str, flow: str, *, stretch: str) -> WindowFeatures:
@@ -231,3 +235,39 @@ def test_baseline_audit_preserves_missing_coverage_and_conditional_net_loss() ->
 
     with pytest.raises(ValueError, match="cover every candidate horizon"):
         evaluate_buy_first_baselines(candidates, labels[:-1], _costs())
+
+
+def test_baseline_walk_forward_uses_its_own_purged_exploratory_policy() -> None:
+    vic = _snapshot("VIC")
+    vic_again = _snapshot("VIC", DECISION_AT + timedelta(seconds=5))
+    vhm = _snapshot("VHM", long_return="60")
+    lagged_vhm = _snapshot("VHM", DECISION_AT - timedelta(seconds=30), long_return="60")
+    daily = evaluate_buy_first_baselines(
+        score_buy_first_baselines((vic, vic_again, vhm, lagged_vhm)),
+        tuple(_label(snapshot) for snapshot in (vic, vic_again, vhm, lagged_vhm)),
+        _costs(),
+    ).model_copy(
+        update={
+            "context_version": "decision-context-v3",
+            "context_configuration_sha256": "c" * 64,
+            "context_data_mode": "HISTORICAL_PROXY",
+        }
+    )
+    dates = tuple(TRADE_DATE + timedelta(days=offset) for offset in range(16))
+    sessions = {
+        trade_date: daily.model_copy(update={"trade_date": trade_date}) for trade_date in dates
+    }
+    configuration = load_configuration(Path(CONFIGURATION))
+    policy = configuration.resolve_baseline_evaluation(dates[0], "EXPLORATORY")
+
+    report = evaluate_baseline_walk_forward(sessions, policy)
+
+    assert report.evaluation_tier == "EXPLORATORY"
+    assert report.promotion_eligible is False
+    assert len(report.folds) == 1
+    assert report.folds[0].development_dates == dates[:10]
+    assert report.folds[0].purged_dates == dates[10:11]
+    assert report.folds[0].holdout_dates == dates[11:]
+    assert report.pending_dates == ()
+    with pytest.raises(ValueError, match="at least 16"):
+        evaluate_baseline_walk_forward(dict(tuple(sessions.items())[:-1]), policy)

@@ -134,7 +134,8 @@ def test_rest_capture_is_immutable_scoped_and_idempotent() -> None:
     assert manifest["trade_date"] == "2026-08-26"
     assert manifest["symbols"] == ["VIC", "VHM"]
     assert manifest["indices"] == ["VNINDEX", "VN30"]
-    assert len(manifest["requests"]) == 11
+    assert len(manifest["requests"]) == 13
+    assert sum(call[0] == "minute" for call in market.calls) == 4
     serialized = json.dumps(manifest)
     assert "manual__2026-08-27" not in serialized
 

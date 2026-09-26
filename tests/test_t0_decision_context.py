@@ -6,8 +6,13 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
 from t0_trading.configuration import load_configuration
-from t0_trading.context import build_decision_contexts
+from t0_trading.context import (
+    IndexObservation,
+    build_decision_contexts,
+    build_decision_contexts_from_observations,
+)
 from t0_trading.features import FeatureSnapshot, WindowFeatures
 from t0_trading.market.events import StreamEnvelope
 from t0_trading.market.session import MarketSession
@@ -107,10 +112,28 @@ def _indices() -> tuple[StreamEnvelope, ...]:
         ("VN30", DECISION_AT - timedelta(seconds=1), "1203"),
         ("VNINDEX", DECISION_AT - timedelta(seconds=1), "1002"),
     )
-    return tuple(
-        _index_tick(sequence, index, at, value)
-        for sequence, (index, at, value) in enumerate(observations, start=1)
+    status_payload = {
+        "market": "HOSE",
+        "status": "LO",
+        "trading_date": TRADE_DATE.strftime("%d/%m/%Y"),
+    }
+    status_json = json.dumps(status_payload, separators=(",", ":"), sort_keys=True)
+    status = StreamEnvelope(
+        stream_session_id="session-1",
+        receive_sequence=1,
+        message_type="MarketStatusMessage",
+        subscription_context="markets",
+        symbol="HOSE",
+        source_time_text=status_payload["trading_date"],
+        received_at=DECISION_AT - timedelta(seconds=400),
+        message_json=status_json,
+        message_sha256=hashlib.sha256(status_json.encode()).hexdigest(),
     )
+    indices = tuple(
+        _index_tick(sequence, index, at, value)
+        for sequence, (index, at, value) in enumerate(observations, start=2)
+    )
+    return (status, *indices)
 
 
 def test_context_adds_certified_zone_market_confirmation_and_regime() -> None:
@@ -149,6 +172,7 @@ def test_context_adds_certified_zone_market_confirmation_and_regime() -> None:
     assert mean.groups[1].status == "MATCH"
     assert relative.groups[2].status == "MATCH"
     assert mean.market_regime == "TREND_UP"
+    assert mean.context_data_mode == "LIVE"
     assert mean.context_snapshot_sha256 == current.sha256
 
 
@@ -165,7 +189,11 @@ def test_context_ignores_future_index_ticks_and_fails_closed_without_indices() -
     missing = build_decision_contexts(snapshots, (), version, policy)[-1]
     assert missing.regime == "UNKNOWN"
     assert missing.market_confirmation_strength is None
-    assert missing.reasons == ("VN30_MISSING_INDEX", "VNINDEX_MISSING_INDEX")
+    assert missing.reasons == (
+        "VN30_MISSING_INDEX",
+        "VNINDEX_MISSING_INDEX",
+        "HOSE_MISSING_MARKET_STATUS",
+    )
     assert all(zone.is_available for zone in missing.zones)
     candidates = score_buy_first_baselines(
         snapshots, build_decision_contexts(snapshots, (), version, policy)
@@ -177,4 +205,171 @@ def test_context_ignores_future_index_ticks_and_fails_closed_without_indices() -
         and item.decision_at == DECISION_AT
         and item.strategy == "vic_vhm_relative"
     )
-    assert relative.block_reasons == ("required_group_unavailable",)
+    assert relative.block_reasons == ("market_status_ineligible",)
+
+
+def test_market_halt_is_point_in_time_and_blocks_every_baseline() -> None:
+    configuration = load_configuration(CONFIGURATION)
+    version = configuration.resolve(TRADE_DATE)
+    policy = configuration.resolve_context(TRADE_DATE)
+    evidence = list(_indices())
+    payload = {
+        "market": "HOSE",
+        "status": "HALT",
+        "trading_date": TRADE_DATE.strftime("%d/%m/%Y"),
+    }
+    message_json = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+    evidence[0] = evidence[0].model_copy(
+        update={
+            "message_json": message_json,
+            "message_sha256": hashlib.sha256(message_json.encode()).hexdigest(),
+        }
+    )
+
+    contexts = build_decision_contexts(_snapshots(), evidence, version, policy)
+    current = contexts[-1]
+    candidates = score_buy_first_baselines(_snapshots(), contexts)
+
+    assert current.regime == "UNKNOWN"
+    assert current.reasons == ("HOSE_MARKET_NOT_TRADABLE",)
+    assert current.market_statuses[0].status == "HALT"
+    assert all(item.block_reasons == ("market_status_ineligible",) for item in candidates)
+
+
+def test_historical_index_context_is_explicit_and_never_claims_stream_lineage() -> None:
+    configuration = load_configuration(CONFIGURATION)
+    version = configuration.resolve(TRADE_DATE)
+    observations = tuple(
+        IndexObservation(
+            index=index,
+            value=Decimal(value),
+            observed_at=at,
+            source_kind="ssi_rest_index_1m_historical",
+            source_record_sha256=hashlib.sha256(
+                f"{index}|{at.isoformat()}|{value}".encode()
+            ).hexdigest(),
+        )
+        for at, index, value in sorted(
+            (
+                (DECISION_AT - timedelta(seconds=301), "VNINDEX", "1000"),
+                (DECISION_AT - timedelta(seconds=301), "VN30", "1200"),
+                (DECISION_AT - timedelta(seconds=61), "VNINDEX", "1001"),
+                (DECISION_AT - timedelta(seconds=61), "VN30", "1201"),
+                (DECISION_AT - timedelta(seconds=1), "VNINDEX", "1002"),
+                (DECISION_AT - timedelta(seconds=1), "VN30", "1203"),
+            )
+        )
+    )
+
+    context = build_decision_contexts_from_observations(
+        _snapshots(),
+        observations,
+        version,
+        configuration.resolve_context(TRADE_DATE),
+        data_mode="HISTORICAL_PROXY",
+    )[-1]
+
+    assert context.data_mode == "HISTORICAL_PROXY"
+    assert context.regime == "TREND_UP"
+    assert all(item.source_kind == "ssi_rest_index_1m_historical" for item in context.indices)
+    assert all(item.stream_session_id is None for item in context.indices)
+    candidates = score_buy_first_baselines(_snapshots(), (context,))
+    assert all(
+        item.context_data_mode == "HISTORICAL_PROXY"
+        for item in candidates
+        if item.decision_at == DECISION_AT
+    )
+
+
+def test_historical_index_context_uses_its_versioned_staleness_boundary() -> None:
+    configuration = load_configuration(CONFIGURATION)
+    version = configuration.resolve(TRADE_DATE)
+    policy = configuration.resolve_context(TRADE_DATE)
+    observations = tuple(
+        IndexObservation(
+            index=index,
+            value=Decimal(value),
+            observed_at=at,
+            source_kind="ssi_rest_index_1m_historical",
+            source_record_sha256=hashlib.sha256(
+                f"{index}|{at.isoformat()}|{value}".encode()
+            ).hexdigest(),
+        )
+        for at, index, value in sorted(
+            (
+                (DECISION_AT - timedelta(seconds=366), "VNINDEX", "1000"),
+                (DECISION_AT - timedelta(seconds=366), "VN30", "1200"),
+                (DECISION_AT - timedelta(seconds=66), "VNINDEX", "1001"),
+                (DECISION_AT - timedelta(seconds=66), "VN30", "1201"),
+            )
+        )
+    )
+
+    context = build_decision_contexts_from_observations(
+        _snapshots(),
+        observations,
+        version,
+        policy,
+        data_mode="HISTORICAL_PROXY",
+    )[-1]
+
+    assert context.regime == "UNKNOWN"
+    assert all("STALE_INDEX" in item.reasons for item in context.indices)
+
+
+def test_index_windows_do_not_bridge_a_stale_reference_gap() -> None:
+    configuration = load_configuration(CONFIGURATION)
+    version = configuration.resolve(TRADE_DATE)
+    policy = configuration.resolve_context(TRADE_DATE)
+    observations = tuple(
+        IndexObservation(
+            index=index,
+            value=Decimal(value),
+            observed_at=at,
+            source_kind="ssi_rest_index_1m_historical",
+            source_record_sha256=hashlib.sha256(
+                f"{index}|{at.isoformat()}|{value}".encode()
+            ).hexdigest(),
+        )
+        for at, index, value in sorted(
+            (
+                (DECISION_AT - timedelta(minutes=90), "VNINDEX", "1000"),
+                (DECISION_AT - timedelta(minutes=90), "VN30", "1200"),
+                (DECISION_AT - timedelta(seconds=1), "VNINDEX", "1010"),
+                (DECISION_AT - timedelta(seconds=1), "VN30", "1210"),
+            )
+        )
+    )
+
+    context = build_decision_contexts_from_observations(
+        _snapshots(),
+        observations,
+        version,
+        policy,
+        data_mode="HISTORICAL_PROXY",
+    )[-1]
+
+    assert context.regime == "UNKNOWN"
+    assert all(item.windows == () for item in context.indices)
+    assert all("INSUFFICIENT_INDEX_HISTORY" in item.reasons for item in context.indices)
+
+
+def test_context_mode_cannot_mislabel_historical_observations_as_live() -> None:
+    configuration = load_configuration(CONFIGURATION)
+    version = configuration.resolve(TRADE_DATE)
+    observation = IndexObservation(
+        index="VNINDEX",
+        value=Decimal("1000"),
+        observed_at=DECISION_AT - timedelta(seconds=1),
+        source_kind="ssi_rest_index_1m_historical",
+        source_record_sha256="0" * 64,
+    )
+
+    with pytest.raises(ValueError, match="source does not match context data mode"):
+        build_decision_contexts_from_observations(
+            _snapshots(),
+            (observation,),
+            version,
+            configuration.resolve_context(TRADE_DATE),
+            data_mode="LIVE",
+        )

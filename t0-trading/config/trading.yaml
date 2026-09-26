@@ -2,6 +2,7 @@ schema_version: 1
 capture:
   symbols: [VIC, VHM]
   indices: [VNINDEX, VN30, VNREAL]
+  markets: [HOSE]
 outcomes:
   - version: top3-taker-markout-v1
     effective_from: 2026-08-27
@@ -19,15 +20,39 @@ strategies:
     relative_value_window_seconds: 300
     relative_value_symbols: [VIC, VHM]
 strategy_evaluations:
+  - version: exploratory-purged-holdout-v1
+    tier: EXPLORATORY
+    effective_from: 2026-08-27
+    effective_to: null
+    score_bucket_count: 5
+    minimum_training_sessions: 10
+    validation_sessions: 5
+    purge_sessions: 1
   - version: purged-walk-forward-v1
+    tier: PROMOTION
     effective_from: 2026-08-27
     effective_to: null
     score_bucket_count: 5
     minimum_training_sessions: 20
     validation_sessions: 5
     purge_sessions: 1
+baseline_evaluations:
+  - version: exploratory-baseline-holdout-v1
+    tier: EXPLORATORY
+    effective_from: 2026-08-27
+    effective_to: null
+    development_sessions: 10
+    purge_sessions: 1
+    holdout_sessions: 5
+  - version: promotion-baseline-holdout-v1
+    tier: PROMOTION
+    effective_from: 2026-08-27
+    effective_to: null
+    development_sessions: 20
+    purge_sessions: 1
+    holdout_sessions: 5
 contexts:
-  - version: decision-context-v1
+  - version: decision-context-v3
     effective_from: 2026-08-27
     effective_to: null
     zone_lookback_seconds: 900
@@ -35,6 +60,11 @@ contexts:
     zone_tolerance_bps: "20"
     market_windows_seconds: [60, 300]
     index_stale_after_seconds: 30
+    # Historical bars are exposed only after one complete interval; the small grace
+    # prevents scheduler jitter from classifying the latest closed bar as stale.
+    historical_proxy_interval_seconds: 60
+    historical_proxy_stale_after_seconds: 65
+    tradable_market_statuses: [LO, OPEN, CONTINUOUS]
     trend_threshold_bps: "10"
     high_volatility_threshold_bps: "20"
 decisions:
@@ -69,6 +99,7 @@ versions:
       timezone: Asia/Ho_Chi_Minh
       symbols: [VIC, VHM]
       indices: [VNINDEX, VN30]
+      status_markets: [HOSE]
       quote_depth: 3
       bar_interval_seconds: 60
       sessions:

@@ -1,9 +1,11 @@
 """Broker-specific research assumptions kept outside generic accounting contracts."""
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from t0_trading.simulation.model import CostPolicy
+
+PUBLIC_VNDIRECT_DTA_CHECKED_AT = datetime(2026, 9, 22, tzinfo=UTC)
 
 
 def public_vndirect_dta_costs(

@@ -31,6 +31,7 @@ from t0_trading.capture.store import CaptureStoreUnavailable, S3CaptureStore
 from t0_trading.capture.stream import StreamCaptureOptions, capture_stream_resilient
 from t0_trading.certification import CertificationOptions, run_certification
 from t0_trading.configuration import (
+    EvaluationTier,
     TradingConfiguration,
     TradingConfigurationError,
     load_configuration,
@@ -62,14 +63,24 @@ from t0_trading.market.reconciliation import (
 from t0_trading.outcomes import OutcomeLabel, build_outcome_audit, label_outcomes
 from t0_trading.provider import authenticated, market_stream
 from t0_trading.simulation import SimulationRequest, simulate_cycles
-from t0_trading.simulation.presets import public_vndirect_dta_costs
+from t0_trading.simulation.presets import (
+    PUBLIC_VNDIRECT_DTA_CHECKED_AT,
+    public_vndirect_dta_costs,
+)
 from t0_trading.strategy import (
     StrategyScore,
     evaluate_scores,
     evaluate_walk_forward,
     score_features,
 )
-from t0_trading.strategy.baseline_audit import evaluate_buy_first_baselines
+from t0_trading.strategy.baseline_audit import (
+    BaselineAuditReport,
+    evaluate_buy_first_baselines,
+)
+from t0_trading.strategy.baseline_walk_forward import (
+    BaselineWalkForwardReport,
+    evaluate_baseline_walk_forward,
+)
 from t0_trading.strategy.baselines import score_buy_first_baselines
 from t0_trading.trading_dates import TradingDateError, require_observed_trade_date
 
@@ -248,7 +259,10 @@ def check_config(
         capture_scope = configuration.capture_scope(selected_date)
         outcomes = configuration.resolve_outcomes(selected_date)
         strategies = configuration.resolve_strategies(selected_date)
-        strategy_evaluation = configuration.resolve_strategy_evaluation(selected_date)
+        exploratory_evaluation = configuration.resolve_strategy_evaluation(
+            selected_date, "EXPLORATORY"
+        )
+        strategy_evaluation = configuration.resolve_strategy_evaluation(selected_date, "PROMOTION")
         context = configuration.resolve_context(selected_date)
         decisions = configuration.resolve_decisions(selected_date)
     except TradingConfigurationError as error:
@@ -267,6 +281,8 @@ def check_config(
                 "strategy_version_sha256": strategies.sha256,
                 "strategy_evaluation_version": strategy_evaluation.version,
                 "strategy_evaluation_version_sha256": strategy_evaluation.sha256,
+                "exploratory_evaluation_version": exploratory_evaluation.version,
+                "exploratory_evaluation_version_sha256": exploratory_evaluation.sha256,
                 "context_version": context.version,
                 "context_version_sha256": context.sha256,
                 "decision_version": decisions.version,
@@ -441,6 +457,7 @@ def capture_stream_command(
         options = StreamCaptureOptions(
             symbols=capture_scope.symbols,
             indices=capture_scope.indices,
+            markets=capture_scope.markets,
             duration_seconds=duration_seconds,
             heartbeat_seconds=heartbeat_seconds,
             stale_after_seconds=stale_after_seconds,
@@ -479,6 +496,7 @@ def capture_stream_command(
                     configuration.resolve_strategies(trade_date),
                     configuration.resolve_outcomes(trade_date),
                     configuration.resolve_decisions(trade_date),
+                    configuration.resolve_context(trade_date),
                     on_error=lambda error: typer.echo(
                         f"T0 shadow journal disabled ({type(error).__name__})",
                         err=True,
@@ -717,7 +735,7 @@ def audit_buy_first_baselines_command(
         candidates = score_buy_first_baselines(snapshots, contexts)
         costs = public_vndirect_dta_costs(
             reader.trade_date,
-            checked_at=datetime(2026, 9, 22, tzinfo=UTC),
+            checked_at=PUBLIC_VNDIRECT_DTA_CHECKED_AT,
         )
         report = evaluate_buy_first_baselines(
             candidates,
@@ -750,6 +768,10 @@ def audit_walk_forward_command(
         Path | None,
         typer.Option(help="Optional local JSON path; stdout is always emitted."),
     ] = None,
+    evaluation_tier: Annotated[
+        EvaluationTier,
+        typer.Option(help="EXPLORATORY research gate or PROMOTION production gate."),
+    ] = "PROMOTION",
 ) -> None:
     """Evaluate training-derived score buckets on purged future session folds."""
     try:
@@ -771,7 +793,7 @@ def audit_walk_forward_command(
             sessions,
             configuration.resolve_strategies(first_date),
             configuration.resolve_outcomes(first_date),
-            configuration.resolve_strategy_evaluation(first_date),
+            configuration.resolve_strategy_evaluation(first_date, evaluation_tier),
         )
     except (StreamCaptureReadError, TradingConfigurationError, ValueError) as error:
         typer.echo(str(error), err=True)
@@ -780,6 +802,45 @@ def audit_walk_forward_command(
         typer.echo(f"SSI walk-forward audit failed: {_safe_error(error)}", err=True)
         raise typer.Exit(code=1) from None
     _emit_model(report, output)
+
+
+def audit_baseline_walk_forward_command(
+    report_file: Annotated[
+        list[Path],
+        typer.Option(help="Daily BaselineAuditReport JSON; repeat in any date order."),
+    ],
+    config: Annotated[Path, typer.Option(help="Versioned non-secret trading YAML.")] = (
+        DEFAULT_TRADING_CONFIG
+    ),
+    output: Annotated[
+        Path | None,
+        typer.Option(help="Optional local JSON path; stdout is always emitted."),
+    ] = None,
+    evaluation_tier: Annotated[
+        EvaluationTier,
+        typer.Option(help="EXPLORATORY shadow gate or PROMOTION evidence gate."),
+    ] = "EXPLORATORY",
+) -> None:
+    """Evaluate fixed baseline formulas on purged, untouched future sessions."""
+    try:
+        configuration = load_configuration(config)
+        sessions: dict[date, BaselineAuditReport] = {}
+        for path in report_file:
+            report = BaselineAuditReport.model_validate_json(path.read_bytes())
+            if report.trade_date in sessions:
+                raise ValueError("baseline audit report dates must be unique")
+            sessions[report.trade_date] = report
+        if not sessions:
+            raise ValueError("baseline walk-forward requires daily audit reports")
+        first_date = min(sessions)
+        result: BaselineWalkForwardReport = evaluate_baseline_walk_forward(
+            sessions,
+            configuration.resolve_baseline_evaluation(first_date, evaluation_tier),
+        )
+    except (OSError, TradingConfigurationError, ValidationError, ValueError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+    _emit_model(result, output)
 
 
 def journal_decisions_command(
@@ -1016,6 +1077,7 @@ app.command("audit-outcomes")(audit_outcomes_command)
 app.command("audit-strategies")(audit_strategies_command)
 app.command("audit-buy-first-baselines")(audit_buy_first_baselines_command)
 app.command("audit-walk-forward")(audit_walk_forward_command)
+app.command("audit-baseline-walk-forward")(audit_baseline_walk_forward_command)
 app.command("journal-decisions")(journal_decisions_command)
 app.command("simulate-cycles")(simulate_cycles_command)
 app.command("audit-shadow-journal")(audit_shadow_journal_command)

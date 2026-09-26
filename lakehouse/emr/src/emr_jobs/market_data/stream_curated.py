@@ -405,6 +405,92 @@ def _merge_indices(spark: SparkSession, target: str) -> None:
     )
 
 
+def _market_status_view(spark: SparkSession, capture: StreamSessionReader) -> None:
+    outside_scope = (
+        f"exchange NOT IN ({','.join(repr(item) for item in capture.manifest.markets)})"
+        if capture.manifest.markets
+        else "true"
+    )
+    invalid_source = spark.sql(
+        f"""
+        SELECT 1 FROM ssi_stream_messages
+        WHERE message_type = 'MarketStatusMessage'
+          AND subscription_context = 'markets'
+          AND (
+            coalesce(
+                to_date(get_json_object(message_json, '$.trading_date'), 'dd/MM/yyyy'),
+                to_date(get_json_object(message_json, '$.trading_date'), 'yyyy-MM-dd'),
+                to_date(get_json_object(message_json, '$.trading_date'), 'yyyyMMdd')
+            ) IS NULL
+            OR coalesce(
+                to_date(get_json_object(message_json, '$.trading_date'), 'dd/MM/yyyy'),
+                to_date(get_json_object(message_json, '$.trading_date'), 'yyyy-MM-dd'),
+                to_date(get_json_object(message_json, '$.trading_date'), 'yyyyMMdd')
+            ) != DATE '{capture.trade_date}'
+          )
+        LIMIT 1
+        """
+    ).count()
+    if invalid_source:
+        raise RuntimeError("SSI Stream market-status trading date is invalid")
+    spark.sql(
+        f"""
+        CREATE OR REPLACE TEMP VIEW ssi_stream_market_status_candidates AS
+        SELECT
+            sha2(concat_ws('|', stream_session_id, cast(receive_sequence AS string),
+                message_sha256), 256) AS market_status_event_id,
+            upper(get_json_object(message_json, '$.market')) AS exchange,
+            CAST(NULL AS string) AS symbol,
+            DATE '{capture.trade_date}' AS trade_date,
+            received_at AS event_time,
+            upper(trim(get_json_object(message_json, '$.status'))) AS status,
+            'ssi_stream_market_status' AS source_kind,
+            received_at,
+            received_at AS available_at,
+            current_timestamp() AS processed_at,
+            message_sha256 AS source_record_sha256
+        FROM ssi_stream_messages
+        WHERE message_type = 'MarketStatusMessage'
+          AND subscription_context = 'markets'
+        """
+    )
+    invalid = spark.sql(
+        f"""
+        SELECT 1 FROM ssi_stream_market_status_candidates
+        WHERE market_status_event_id IS NULL OR exchange IS NULL OR status IS NULL OR status = ''
+           OR {outside_scope}
+           OR trade_date != DATE '{capture.trade_date}' OR received_at IS NULL
+           OR source_record_sha256 IS NULL
+        LIMIT 1
+        """
+    ).count()
+    if invalid:
+        raise RuntimeError("SSI Stream market-status normalization produced invalid values")
+
+
+def _merge_market_statuses(spark: SparkSession, target: str) -> None:
+    conflict = spark.sql(
+        f"""
+        SELECT 1
+        FROM ssi_stream_market_status_candidates source
+        JOIN {target} target USING (market_status_event_id)
+        WHERE target.source_record_sha256 != source.source_record_sha256
+           OR target.exchange != source.exchange OR target.status != source.status
+        LIMIT 1
+        """
+    ).count()
+    if conflict:
+        raise RuntimeError("Immutable SSI Stream market-status conflict")
+    spark.sql(
+        f"""
+        MERGE INTO {target} target
+        USING ssi_stream_market_status_candidates source
+        ON target.market_status_event_id = source.market_status_event_id
+        WHEN NOT MATCHED THEN INSERT *
+        """
+    )
+
+
 def publish(
     spark: SparkSession,
     *,
@@ -416,6 +502,7 @@ def publish(
     _trade_view(spark, capture)
     quotes = _quote_views(spark, capture)
     indices = _index_view(spark, capture)
+    _market_status_view(spark, capture)
     try:
         _merge_ticks(spark, qualified_name(product.table_identifier("trade_ticks")))
         _merge_quotes(
@@ -424,6 +511,10 @@ def publish(
             qualified_name(product.table_identifier("quote_levels")),
         )
         _merge_indices(spark, qualified_name(product.table_identifier("index_snapshots")))
+        _merge_market_statuses(
+            spark,
+            qualified_name(product.table_identifier("market_status_events")),
+        )
     finally:
         quotes.unpersist()
         indices.unpersist()

@@ -89,6 +89,67 @@ sources:
           - {name: horizon_seconds, data_tests: [not_null]}
           - {name: outcome_sha256, data_tests: [not_null, unique]}
 
+      - name: decision_contexts
+        description: Versioned point-in-time zone, broad-market confirmation, and regime context for each feature clock.
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [context_configuration_sha256, feature_configuration_sha256, decision_at, data_mode]
+        columns:
+          - {name: context_configuration_sha256, data_tests: [not_null]}
+          - {name: feature_configuration_sha256, data_tests: [not_null]}
+          - {name: decision_at, data_tests: [not_null]}
+          - name: data_mode
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: [LIVE, HISTORICAL_PROXY]
+          - {name: context_sha256, data_tests: [not_null, unique]}
+          - {name: market_statuses_json, data_tests: [not_null]}
+
+      - name: strategy_candidates
+        description: Complete buy-first baseline candidate and abstention matrix with feature and context lineage; never an order intent.
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [baseline_version, strategy, symbol, decision_at, context_snapshot_sha256, context_data_mode]
+        columns:
+          - {name: baseline_version, data_tests: [not_null]}
+          - {name: strategy, data_tests: [not_null]}
+          - {name: symbol, data_tests: [not_null]}
+          - {name: decision_at, data_tests: [not_null]}
+          - {name: context_snapshot_sha256, data_tests: [not_null]}
+          - {name: context_data_mode, data_tests: [not_null]}
+          - name: feature_snapshot_sha256
+            data_tests:
+              - not_null
+              - relationships:
+                  arguments:
+                    to: source('t0_trading', 'feature_snapshots')
+                    field: snapshot_sha256
+          - {name: candidate_sha256, data_tests: [not_null, unique]}
+
+      - name: strategy_evaluations
+        description: Gross and public-fee-adjusted conditional baseline results, including explicit regime slices.
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [baseline_version, trade_date, evaluation_scope, regime, strategy, symbol, horizon_seconds, feature_configuration_sha256, context_configuration_sha256, context_data_mode, outcome_configuration_sha256, cost_policy_sha256]
+        columns:
+          - {name: audit_sha256, data_tests: [not_null]}
+          - name: evaluation_scope
+            data_tests:
+              - not_null
+              - accepted_values:
+                  arguments:
+                    values: [OVERALL, REGIME]
+          - {name: strategy, data_tests: [not_null]}
+          - {name: symbol, data_tests: [not_null]}
+          - {name: horizon_seconds, data_tests: [not_null]}
+          - {name: regime, data_tests: [not_null]}
+          - {name: context_data_mode, data_tests: [not_null]}
+
       - name: shadow_decisions
         description: Deterministic reconstructed shadow decisions from certified feature snapshots; not evidence of notification delivery or order execution.
         data_tests:

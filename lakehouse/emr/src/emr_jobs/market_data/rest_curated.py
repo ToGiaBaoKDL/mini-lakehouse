@@ -17,6 +17,12 @@ def _capture_view(
         [(item.request_id,) for item in capture.requests], "request_id string"
     )
     request_ids.createOrReplaceTempView("ssi_capture_request_ids")
+    spark.createDataFrame(
+        [(symbol,) for symbol in capture.symbols], "symbol string"
+    ).createOrReplaceTempView("ssi_capture_symbols")
+    spark.createDataFrame(
+        [(index,) for index in capture.indices], "index_code string"
+    ).createOrReplaceTempView("ssi_capture_indices")
     spark.sql(
         f"""
         CREATE OR REPLACE TEMP VIEW ssi_capture_records AS
@@ -52,7 +58,7 @@ def _validate_scope(spark: SparkSession, capture: CaptureRun) -> None:
     if (
         summary != expected_symbols
         or daily != expected_symbols
-        or minute != expected_symbols
+        or minute != expected_symbols | expected_indices
         or master != expected_symbols
     ):
         raise RuntimeError("SSI completed-day stock scope is incomplete")
@@ -215,7 +221,7 @@ def _market_views(spark: SparkSession, source_date: str) -> None:
     )
     spark.sql(
         f"""
-        CREATE OR REPLACE TEMP VIEW ssi_minute_ohlc AS
+        CREATE OR REPLACE TEMP VIEW ssi_minute_ohlc_raw AS
         SELECT
             symbol,
             trade_date,
@@ -237,13 +243,13 @@ def _market_views(spark: SparkSession, source_date: str) -> None:
                         'yyyy/MM/dd HH:mm:ss'),
                     'Asia/Ho_Chi_Minh'
                 ) AS bar_start,
-                try_cast(get_json_object(record_json, '$.open_price') AS decimal(18, 0))
+                try_cast(get_json_object(record_json, '$.open_price') AS decimal(18, 6))
                     AS open_price,
-                try_cast(get_json_object(record_json, '$.high_price') AS decimal(18, 0))
+                try_cast(get_json_object(record_json, '$.high_price') AS decimal(18, 6))
                     AS high_price,
-                try_cast(get_json_object(record_json, '$.low_price') AS decimal(18, 0))
+                try_cast(get_json_object(record_json, '$.low_price') AS decimal(18, 6))
                     AS low_price,
-                try_cast(get_json_object(record_json, '$.close_price') AS decimal(18, 0))
+                try_cast(get_json_object(record_json, '$.close_price') AS decimal(18, 6))
                     AS close_price,
                 try_cast(get_json_object(record_json, '$.volume') AS bigint) AS volume,
                 try_cast(get_json_object(record_json, '$.value') AS decimal(24, 0)) AS value,
@@ -262,6 +268,44 @@ def _market_views(spark: SparkSession, source_date: str) -> None:
             AND coalesce(volume, 0) = 0
             AND coalesce(value, 0) = 0
         )
+        """
+    )
+    spark.sql(
+        """
+        CREATE OR REPLACE TEMP VIEW ssi_minute_ohlc AS
+        SELECT
+            raw.symbol,
+            raw.trade_date,
+            raw.bar_start,
+            CAST(raw.open_price AS decimal(18, 0)) AS open_price,
+            CAST(raw.high_price AS decimal(18, 0)) AS high_price,
+            CAST(raw.low_price AS decimal(18, 0)) AS low_price,
+            CAST(raw.close_price AS decimal(18, 0)) AS close_price,
+            raw.volume,
+            raw.value,
+            raw.received_at,
+            raw.record_sha256
+        FROM ssi_minute_ohlc_raw raw
+        JOIN ssi_capture_symbols scope USING (symbol)
+        """
+    )
+    spark.sql(
+        """
+        CREATE OR REPLACE TEMP VIEW ssi_index_minute_ohlc AS
+        SELECT
+            raw.symbol AS index_code,
+            raw.trade_date,
+            raw.bar_start,
+            raw.open_price AS open_value,
+            raw.high_price AS high_value,
+            raw.low_price AS low_value,
+            raw.close_price AS close_value,
+            raw.volume,
+            raw.value,
+            raw.received_at,
+            raw.record_sha256
+        FROM ssi_minute_ohlc_raw raw
+        JOIN ssi_capture_indices scope ON scope.index_code = raw.symbol
         """
     )
     spark.sql(
@@ -349,9 +393,15 @@ def _validate_market_data(spark: SparkSession, capture: CaptureRun) -> None:
                 != {len(capture.symbols)}
            OR (SELECT count(DISTINCT symbol) FROM ssi_minute_ohlc)
                 != {len(capture.symbols)}
+           OR (SELECT count(DISTINCT index_code) FROM ssi_index_minute_ohlc)
+                != {len(capture.indices)}
            OR EXISTS (
                 SELECT 1 FROM ssi_minute_ohlc
                 GROUP BY symbol, bar_start HAVING count(*) > 1
+           )
+           OR EXISTS (
+                SELECT 1 FROM ssi_index_minute_ohlc
+                GROUP BY index_code, bar_start HAVING count(*) > 1
            )
         """
     ).count()
@@ -382,6 +432,21 @@ def _validate_market_data(spark: SparkSession, capture: CaptureRun) -> None:
     ).count()
     if invalid:
         raise RuntimeError("SSI OHLC normalization produced invalid values")
+    invalid_index = spark.sql(
+        """
+        SELECT 1 FROM ssi_index_minute_ohlc
+        WHERE index_code IS NULL OR trade_date IS NULL OR bar_start IS NULL
+           OR open_value IS NULL OR high_value IS NULL
+           OR low_value IS NULL OR close_value IS NULL
+           OR open_value <= 0 OR high_value <= 0 OR low_value <= 0 OR close_value <= 0
+           OR volume < 0 OR value < 0
+           OR high_value < greatest(open_value, low_value, close_value)
+           OR low_value > least(open_value, high_value, close_value)
+        LIMIT 1
+        """
+    ).count()
+    if invalid_index:
+        raise RuntimeError("SSI index OHLC normalization produced invalid values")
     invalid_reference = spark.sql(
         """
         SELECT 1 FROM ssi_master_data
@@ -600,6 +665,61 @@ def _publish_bars(spark: SparkSession, target: str) -> None:
     spark.sql(f"INSERT INTO {target} SELECT * FROM ssi_bars_new")
 
 
+def _publish_index_bars(spark: SparkSession, target: str) -> None:
+    spark.sql(
+        """
+        CREATE OR REPLACE TEMP VIEW ssi_index_bar_candidates AS
+        SELECT
+            index_code,
+            trade_date,
+            bar_start,
+            'ssi_rest_index_1m_historical' AS source_kind,
+            open_value,
+            high_value,
+            low_value,
+            close_value,
+            volume,
+            value,
+            received_at AS available_at,
+            current_timestamp() AS processed_at,
+            true AS is_final,
+            record_sha256 AS source_record_sha256
+        FROM ssi_index_minute_ohlc
+        """
+    )
+    spark.sql(
+        f"""
+        CREATE OR REPLACE TEMP VIEW ssi_index_bars_new AS
+        SELECT
+            candidate.index_code,
+            candidate.trade_date,
+            candidate.bar_start,
+            coalesce(revisions.max_revision + 1, 0) AS revision,
+            candidate.source_kind,
+            candidate.open_value,
+            candidate.high_value,
+            candidate.low_value,
+            candidate.close_value,
+            candidate.volume,
+            candidate.value,
+            candidate.available_at,
+            candidate.processed_at,
+            candidate.is_final,
+            candidate.source_record_sha256
+        FROM ssi_index_bar_candidates candidate
+        LEFT JOIN (
+            SELECT index_code, bar_start, max(revision) AS max_revision
+            FROM {target} GROUP BY index_code, bar_start
+        ) revisions USING (index_code, bar_start)
+        LEFT ANTI JOIN {target} existing
+          ON existing.index_code = candidate.index_code
+         AND existing.bar_start = candidate.bar_start
+         AND existing.source_record_sha256 = candidate.source_record_sha256
+        """
+    )
+    spark.sql(f"INSERT INTO {target} SELECT * FROM ssi_index_bars_new")
+
+
 def _publish_indices(
     spark: SparkSession,
     target: str,
@@ -697,6 +817,10 @@ def publish(
     _publish_bars(
         spark,
         qualified_name(product.table_identifier("intraday_bars_1m")),
+    )
+    _publish_index_bars(
+        spark,
+        qualified_name(product.table_identifier("index_bars_1m")),
     )
     _publish_indices(
         spark,

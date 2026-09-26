@@ -91,10 +91,11 @@ class StreamBatch(_StrictModel):
 
 
 class StreamManifest(_StrictModel):
-    schema_version: Literal[1, 2]
+    schema_version: Literal[1, 2, 3]
     stream_session_id: str = Field(min_length=1)
     symbols: tuple[str, ...]
     indices: tuple[str, ...] = ()
+    markets: tuple[str, ...] = ()
     connected_at: datetime
     disconnected_at: datetime
     disconnect_kind: StreamDisconnectKind
@@ -134,14 +135,21 @@ class StreamManifest(_StrictModel):
             or any(not symbol or symbol != symbol.strip().upper() for symbol in self.symbols)
         ):
             raise ValueError("symbols must contain unique uppercase identifiers")
-        if (
+        invalid_indices = (
             len(self.indices) != len(set(self.indices))
             or any(not index or index != index.strip().upper() for index in self.indices)
             or set(self.symbols) & set(self.indices)
-            or (self.schema_version == 1 and self.indices)
-            or (self.schema_version == 2 and not self.indices)
-        ):
-            raise ValueError("indices do not match the stream manifest schema")
+        )
+        invalid_markets = len(self.markets) != len(set(self.markets)) or any(
+            not market or market != market.strip().upper() for market in self.markets
+        )
+        invalid_schema_scope = (
+            (self.schema_version == 1 and bool(self.indices or self.markets))
+            or (self.schema_version == 2 and (not self.indices or bool(self.markets)))
+            or (self.schema_version == 3 and not self.markets)
+        )
+        if invalid_indices or invalid_markets or invalid_schema_scope:
+            raise ValueError("subscription scopes do not match the stream manifest schema")
         if not self.connected_at <= self.disconnected_at <= self.published_at:
             raise ValueError("terminal timestamps are not ordered")
         if (self.heartbeat_count == 0) != (self.last_heartbeat_at is None):
@@ -321,6 +329,10 @@ class StreamSessionReader:
                         row.subscription_context == "indices"
                         and row.symbol not in self.manifest.indices
                     )
+                    or (
+                        row.subscription_context == "markets"
+                        and row.symbol not in self.manifest.markets
+                    )
                     or not self.manifest.connected_at
                     <= row.received_at
                     <= self.manifest.disconnected_at
@@ -419,6 +431,7 @@ class StreamDayReader:
             reader.trade_date != first.trade_date
             or reader.manifest.symbols != first.manifest.symbols
             or getattr(reader.manifest, "indices", ()) != getattr(first.manifest, "indices", ())
+            or getattr(reader.manifest, "markets", ()) != getattr(first.manifest, "markets", ())
             or reader.manifest.api_version != first.manifest.api_version
             or reader.manifest.sdk_version != first.manifest.sdk_version
             for reader in ordered[1:]
@@ -431,6 +444,7 @@ class StreamDayReader:
         self.trade_date = first.trade_date
         self.symbols = first.manifest.symbols
         self.indices = getattr(first.manifest, "indices", ())
+        self.markets = getattr(first.manifest, "markets", ())
 
     @property
     def stream_session_ids(self) -> tuple[str, ...]:

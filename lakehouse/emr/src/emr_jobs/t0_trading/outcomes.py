@@ -76,7 +76,7 @@ def publish(
     policy: OutcomeVersion,
     snapshots: Sequence[FeatureSnapshot],
     gaps: Sequence[StreamGap] = (),
-) -> OutcomeAuditReport:
+) -> tuple[tuple[OutcomeLabel, ...], OutcomeAuditReport]:
     """Quality-gate and idempotently publish one complete outcome matrix."""
     labels = label_outcomes(
         snapshots,
@@ -114,4 +114,4 @@ def publish(
         target=target,
         keys=contract.primary_key,
     )
-    return audit
+    return labels, audit

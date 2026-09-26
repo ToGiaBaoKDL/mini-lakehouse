@@ -410,6 +410,7 @@ def test_shadow_journal_matches_multi_segment_replay_and_commits_manifest(
         loaded.resolve_strategies(TRADE_DATE),
         loaded.resolve_outcomes(TRADE_DATE),
         loaded.resolve_decisions(TRADE_DATE),
+        loaded.resolve_context(TRADE_DATE),
     )
     journal.connected("session-1", _received(9, 0, 0))
     for envelope in first_segment:
@@ -444,6 +445,10 @@ def test_shadow_journal_matches_multi_segment_replay_and_commits_manifest(
     assert manifest.stream_session_ids == ("session-1", "session-2")
     assert manifest.decision_count == len(expected)
     assert manifest.journal_sha256 == journal.journal_sha256
+    candidate_body = journal.candidate_output.read_bytes()
+    assert len(candidate_body.splitlines()) == manifest.candidate_count
+    assert manifest.candidate_count == manifest.expected_candidate_count
+    assert manifest.candidate_sha256 == hashlib.sha256(candidate_body).hexdigest()
     assert journal.manifest is not None
     assert manifest.sha256 == journal.manifest.sha256
     assert any("CAPTURE_GAP" in decision.reasons for decision in expected)
@@ -476,6 +481,7 @@ def test_shadow_journal_requires_every_decision_clock_and_terminal_manifest(
         loaded.resolve_strategies(TRADE_DATE),
         loaded.resolve_outcomes(TRADE_DATE),
         loaded.resolve_decisions(TRADE_DATE),
+        loaded.resolve_context(TRADE_DATE),
     )
     journal.connected("session-1", _received(9, 0, 0))
     journal.close(completed_at, capture_manifests)
@@ -503,6 +509,7 @@ def test_shadow_journal_fails_closed_without_raising_into_capture(tmp_path: Path
         loaded.resolve_strategies(TRADE_DATE),
         loaded.resolve_outcomes(TRADE_DATE),
         loaded.resolve_decisions(TRADE_DATE),
+        loaded.resolve_context(TRADE_DATE),
         on_error=failing_error_callback,
     )
 
@@ -529,6 +536,7 @@ def test_shadow_journal_initialization_failure_leaves_no_artifact(tmp_path: Path
             loaded.resolve_strategies(TRADE_DATE),
             loaded.resolve_outcomes(TRADE_DATE),
             invalid_policy,
+            loaded.resolve_context(TRADE_DATE),
         )
 
     assert not any(tmp_path.iterdir())
@@ -543,6 +551,7 @@ def test_shadow_journal_rejects_a_late_first_connection(tmp_path: Path) -> None:
         loaded.resolve_strategies(TRADE_DATE),
         loaded.resolve_outcomes(TRADE_DATE),
         loaded.resolve_decisions(TRADE_DATE),
+        loaded.resolve_context(TRADE_DATE),
     )
 
     journal.connected("session-1", _received(9, 15, 6))

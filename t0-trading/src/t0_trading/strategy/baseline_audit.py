@@ -9,7 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from t0_trading.context import MarketRegime
+from t0_trading.context import ContextDataMode, MarketRegime
 from t0_trading.identity import canonical_json, sha256
 from t0_trading.numeric import basis_points, rate, ratio
 from t0_trading.outcomes import OutcomeLabel
@@ -112,7 +112,7 @@ class BaselineAuditReport(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal[2] = 2
+    schema_version: Literal[3] = 3
     baseline_version: str
     trade_date: date
     capture_evidence_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
@@ -120,6 +120,7 @@ class BaselineAuditReport(BaseModel):
     feature_configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     context_version: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]*$")
     context_configuration_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    context_data_mode: ContextDataMode | None = None
     outcome_version: str
     outcome_configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     cost_policy: CostPolicy
@@ -133,7 +134,14 @@ class BaselineAuditReport(BaseModel):
 
     @model_validator(mode="after")
     def validate_policy_identity(self) -> BaselineAuditReport:
-        if (self.context_version is None) != (self.context_configuration_sha256 is None):
+        context_lineage = (
+            self.context_version,
+            self.context_configuration_sha256,
+            self.context_data_mode,
+        )
+        if any(value is None for value in context_lineage) and any(
+            value is not None for value in context_lineage
+        ):
             raise ValueError("baseline context lineage must be wholly present or absent")
         if (
             any(count < 0 for count in self.context_regime_counts.values())
@@ -238,8 +246,13 @@ def evaluate_buy_first_baselines(
             raise ValueError("baseline observations disagree on decision context")
     if any(item.baseline_version != candidates[0].baseline_version for item in candidates):
         raise ValueError("baseline versions are inconsistent")
-    context_lineages = {
-        (item.context_version, item.context_configuration_sha256) for item in candidates
+    context_lineages: set[tuple[str | None, str | None, ContextDataMode | None]] = {
+        (
+            item.context_version,
+            item.context_configuration_sha256,
+            item.context_data_mode,
+        )
+        for item in candidates
     }
     if len(context_lineages) != 1:
         raise ValueError("baseline context lineages are inconsistent")
@@ -353,7 +366,7 @@ def evaluate_buy_first_baselines(
                     )
     outcome_version, outcome_sha = next(iter(outcome_lineages))
     feature_version, feature_sha = next(iter(feature_lineages))
-    context_version, context_sha = next(iter(context_lineages))
+    context_version, context_sha, context_data_mode = next(iter(context_lineages))
     regime_counts: dict[MarketRegime, int] = {}
     for _, regime in decision_contexts.values():
         regime_counts[regime] = regime_counts.get(regime, 0) + 1
@@ -365,6 +378,7 @@ def evaluate_buy_first_baselines(
         feature_configuration_sha256=feature_sha,
         context_version=context_version,
         context_configuration_sha256=context_sha,
+        context_data_mode=context_data_mode,
         outcome_version=outcome_version,
         outcome_configuration_sha256=outcome_sha,
         cost_policy=costs,

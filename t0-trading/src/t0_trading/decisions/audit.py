@@ -13,11 +13,17 @@ from pydantic import BaseModel, ConfigDict, Field
 from t0_trading.capture.reader import StreamDayReader, StreamSessionReader
 from t0_trading.capture.store import CaptureStoreUnavailable
 from t0_trading.configuration import TradingConfiguration
+from t0_trading.context import build_decision_contexts
 from t0_trading.decisions.engine import replay_decisions
 from t0_trading.decisions.model import DECISION_ACTIONS, DecisionAction
 from t0_trading.decisions.shadow import ShadowJournalManifest
 from t0_trading.features import decision_times, replay_features
 from t0_trading.identity import sha256
+from t0_trading.strategy.baselines import (
+    BASELINE_NAMES,
+    BASELINE_VERSION,
+    score_buy_first_baselines,
+)
 
 
 class ShadowJournalAuditError(RuntimeError):
@@ -40,6 +46,8 @@ class ShadowJournalAuditReport(BaseModel):
     action_counts: dict[DecisionAction, int]
     manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     journal_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    candidate_count: int = Field(ge=1)
+    candidate_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 def _load_manifest(path: Path) -> tuple[ShadowJournalManifest, bytes]:
@@ -81,11 +89,18 @@ def audit_shadow_journal(
         raise ShadowJournalAuditError(
             "shadow decision journal checksum does not match its manifest"
         )
+    candidate_path = manifest_path.with_name(manifest.candidate_file)
+    candidate_sha256 = _journal_digest(candidate_path)
+    if candidate_sha256 != manifest.candidate_sha256:
+        raise ShadowJournalAuditError(
+            "shadow candidate journal checksum does not match its manifest"
+        )
 
     version = configuration.resolve(manifest.trade_date)
     strategy_policy = configuration.resolve_strategies(manifest.trade_date)
     outcome_policy = configuration.resolve_outcomes(manifest.trade_date)
     decision_policy = configuration.resolve_decisions(manifest.trade_date)
+    context_policy = configuration.resolve_context(manifest.trade_date)
     observed_lineage = (
         manifest.configuration_version,
         manifest.configuration_sha256,
@@ -96,6 +111,9 @@ def audit_shadow_journal(
         manifest.outcome_configuration_sha256,
         manifest.decision_version,
         manifest.decision_configuration_sha256,
+        manifest.context_version,
+        manifest.context_configuration_sha256,
+        manifest.baseline_version,
     )
     expected_lineage = (
         version.version,
@@ -107,17 +125,22 @@ def audit_shadow_journal(
         outcome_policy.sha256,
         decision_policy.version,
         decision_policy.sha256,
+        context_policy.version,
+        context_policy.sha256,
+        BASELINE_VERSION,
     )
     if observed_lineage != expected_lineage:
         raise ShadowJournalAuditError("shadow journal policy lineage does not match configuration")
 
     schedule = tuple(decision_times(version, manifest.trade_date))
     expected_count = len(schedule) * len(version.market.symbols) * len(decision_policy.rules)
+    expected_candidate_count = len(schedule) * len(version.market.symbols) * len(BASELINE_NAMES)
     if (
         not schedule
         or manifest.first_connected_at > schedule[0]
         or manifest.completed_at < schedule[-1]
         or manifest.expected_decision_count != expected_count
+        or manifest.expected_candidate_count != expected_candidate_count
     ):
         raise ShadowJournalAuditError("shadow journal decision-clock coverage is inconsistent")
 
@@ -158,6 +181,13 @@ def audit_shadow_journal(
         outcome_policy,
         decision_policy,
     )
+    contexts = build_decision_contexts(
+        snapshots,
+        capture.envelopes(),
+        version,
+        context_policy,
+    )
+    candidates = score_buy_first_baselines(snapshots, contexts)
     action_counts = Counter(decision.action for decision in decisions)
     replay_counts = {action: action_counts[action] for action in DECISION_ACTIONS}
     if len(decisions) != manifest.decision_count or replay_counts != manifest.action_counts:
@@ -173,6 +203,18 @@ def audit_shadow_journal(
     except OSError as error:
         raise ShadowJournalAuditError("shadow decision journal cannot be read") from error
 
+    if len(candidates) != manifest.candidate_count:
+        raise ShadowJournalAuditError("shadow candidate summary differs from replay")
+    try:
+        with candidate_path.open("rb") as journal:
+            for candidate in candidates:
+                if journal.readline() != candidate.canonical_bytes() + b"\n":
+                    raise ShadowJournalAuditError("shadow candidate journal differs from replay")
+            if journal.read(1):
+                raise ShadowJournalAuditError("shadow candidate journal contains trailing records")
+    except OSError as error:
+        raise ShadowJournalAuditError("shadow candidate journal cannot be read") from error
+
     return ShadowJournalAuditReport(
         trade_date=manifest.trade_date,
         stream_session_ids=manifest.stream_session_ids,
@@ -183,4 +225,6 @@ def audit_shadow_journal(
         action_counts=manifest.action_counts,
         manifest_sha256=sha256(manifest_body),
         journal_sha256=journal_sha256,
+        candidate_count=manifest.candidate_count,
+        candidate_sha256=candidate_sha256,
     )

@@ -74,6 +74,7 @@ def _artifacts(tmp_path: Path) -> tuple[Path, TradingConfiguration, _SessionRead
         configuration.resolve_strategies(TRADE_DATE),
         configuration.resolve_outcomes(TRADE_DATE),
         configuration.resolve_decisions(TRADE_DATE),
+        configuration.resolve_context(TRADE_DATE),
     )
     journal.connected(SESSION_ID, connected_at)
     journal.close(disconnected_at, (MANIFEST_URI,))
