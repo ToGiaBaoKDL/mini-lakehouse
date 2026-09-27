@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 capture:
   symbols: [VIC, VHM]
   indices: [VNINDEX, VN30, VNREAL]
@@ -11,31 +11,6 @@ outcomes:
     order_quantity: 100
     # Explicit research assumption, not measured SSI order-routing latency.
     execution_latency_milliseconds: 500
-strategies:
-  - version: microstructure-scores-v1
-    effective_from: 2026-08-27
-    effective_to: null
-    momentum_window_seconds: 60
-    order_flow_window_seconds: 30
-    relative_value_window_seconds: 300
-    relative_value_symbols: [VIC, VHM]
-strategy_evaluations:
-  - version: exploratory-purged-holdout-v1
-    tier: EXPLORATORY
-    effective_from: 2026-08-27
-    effective_to: null
-    score_bucket_count: 5
-    minimum_training_sessions: 10
-    validation_sessions: 5
-    purge_sessions: 1
-  - version: purged-walk-forward-v1
-    tier: PROMOTION
-    effective_from: 2026-08-27
-    effective_to: null
-    score_bucket_count: 5
-    minimum_training_sessions: 20
-    validation_sessions: 5
-    purge_sessions: 1
 baseline_evaluations:
   - version: exploratory-baseline-holdout-v1
     tier: EXPLORATORY
@@ -51,6 +26,27 @@ baseline_evaluations:
     development_sessions: 20
     purge_sessions: 1
     holdout_sessions: 5
+candidate_arbitrations:
+  - version: buy-first-candidate-arbitration-v1
+    # Declared prospectively. Never apply this outcome-informed ordering to older sessions.
+    effective_from: 2026-09-28
+    effective_to: null
+    candidate_version: buy-first-baselines-v3
+    cooldown_seconds: 300
+    maximum_selections_per_clock: 2
+    rules:
+      - strategy: vic_vhm_relative
+        priority: 0
+        minimum_strength: "0"
+        horizon_seconds: 300
+      - strategy: momentum_pullback
+        priority: 1
+        minimum_strength: "0"
+        horizon_seconds: 300
+      - strategy: mean_reversion
+        priority: 2
+        minimum_strength: "0"
+        horizon_seconds: 300
 contexts:
   - version: decision-context-v3
     effective_from: 2026-08-27
@@ -67,30 +63,6 @@ contexts:
     tradable_market_statuses: [LO, OPEN, CONTINUOUS]
     trend_threshold_bps: "10"
     high_volatility_threshold_bps: "20"
-decisions:
-  - version: microstructure-decisions-v1
-    effective_from: 2026-08-27
-    effective_to: null
-    strategy_version: microstructure-scores-v1
-    outcome_version: top3-taker-markout-v1
-    # Provisional in-sample q80 thresholds. Shadow-only until purged walk-forward validates them.
-    rules:
-      - strategy: momentum
-        horizon_seconds: 60
-        buy_minimum_strength: "0.68"
-        sell_minimum_strength: "0.69"
-      - strategy: order_flow
-        horizon_seconds: 300
-        buy_minimum_strength: "0.41"
-        sell_minimum_strength: "0.43"
-      - strategy: relative_value
-        horizon_seconds: 300
-        buy_minimum_strength: "0.37"
-        sell_minimum_strength: "0.37"
-    maximum_spread_bps: "25"
-    maximum_trade_age_seconds: "30"
-    maximum_quote_age_seconds: "5"
-    cooldown_seconds: 60
 versions:
   - version: market-state-v1
     effective_from: 2026-08-27

@@ -7,12 +7,12 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from t0_trading.configuration import TradingConfiguration, load_configuration
-from t0_trading.decisions import (
-    ShadowDecisionJournal,
-    ShadowJournalAuditError,
+from t0_trading.arbitration import (
+    ShadowArbitrationAuditError,
+    ShadowArbitrationJournal,
     audit_shadow_journal,
 )
+from t0_trading.configuration import TradingConfiguration, load_configuration
 from t0_trading.identity import canonical_json, sha256
 from t0_trading.market import StreamEnvelope
 
@@ -43,7 +43,10 @@ def _configuration() -> TradingConfiguration:
             ),
         }
     )
-    return loaded.model_copy(update={"versions": (short,)})
+    arbitration = loaded.candidate_arbitrations[0].model_copy(update={"effective_from": TRADE_DATE})
+    return loaded.model_copy(
+        update={"versions": (short,), "candidate_arbitrations": (arbitration,)}
+    )
 
 
 @dataclass(frozen=True)
@@ -66,15 +69,13 @@ def _artifacts(tmp_path: Path) -> tuple[Path, TradingConfiguration, _SessionRead
     version = configuration.resolve(TRADE_DATE)
     connected_at = _received(9, 0)
     disconnected_at = _received(9, 21)
-    output = tmp_path / "shadow.jsonl"
-    journal = ShadowDecisionJournal(
+    output = tmp_path / "shadow.arbitrations.jsonl"
+    journal = ShadowArbitrationJournal(
         output,
         TRADE_DATE,
         version,
-        configuration.resolve_strategies(TRADE_DATE),
-        configuration.resolve_outcomes(TRADE_DATE),
-        configuration.resolve_decisions(TRADE_DATE),
         configuration.resolve_context(TRADE_DATE),
+        configuration.resolve_candidate_arbitration(TRADE_DATE),
     )
     journal.connected(SESSION_ID, connected_at)
     journal.close(disconnected_at, (MANIFEST_URI,))
@@ -102,7 +103,7 @@ def _use_capture(monkeypatch: pytest.MonkeyPatch, reader: _SessionReader) -> Non
         return reader
 
     monkeypatch.setattr(
-        "t0_trading.decisions.audit.StreamSessionReader.from_uri",
+        "t0_trading.arbitration.audit.StreamSessionReader.from_uri",
         from_uri,
     )
 
@@ -122,8 +123,7 @@ def test_shadow_journal_audit_proves_local_output_against_replay(
     assert report.capture_evidence_sha256 == sha256(canonical_json(["a" * 64]))
     assert report.capture_message_count == 0
     assert report.gap_count == 0
-    assert report.decision_count == sum(report.action_counts.values())
-    assert report.action_counts == {"BUY": 0, "SELL": 0, "ABSTAIN": report.decision_count}
+    assert report.arbitration_count == report.candidate_count
 
 
 def test_shadow_journal_audit_rejects_local_checksum_drift(
@@ -132,11 +132,11 @@ def test_shadow_journal_audit_rejects_local_checksum_drift(
 ) -> None:
     manifest_path, configuration, reader = _artifacts(tmp_path)
     _use_capture(monkeypatch, reader)
-    journal_path = manifest_path.with_name("shadow.jsonl")
+    journal_path = manifest_path.with_name("shadow.arbitrations.jsonl")
     with journal_path.open("ab") as journal:
         journal.write(b"{}\n")
 
-    with pytest.raises(ShadowJournalAuditError, match="checksum"):
+    with pytest.raises(ShadowArbitrationAuditError, match="checksum"):
         audit_shadow_journal(manifest_path, object(), configuration)
 
 
@@ -146,14 +146,14 @@ def test_shadow_journal_audit_rejects_rehashed_content_that_differs_from_replay(
 ) -> None:
     manifest_path, configuration, reader = _artifacts(tmp_path)
     _use_capture(monkeypatch, reader)
-    journal_path = manifest_path.with_name("shadow.jsonl")
+    journal_path = manifest_path.with_name("shadow.arbitrations.jsonl")
     with journal_path.open("ab") as journal:
         journal.write(b"{}\n")
     manifest = json.loads(manifest_path.read_bytes())
-    manifest["journal_sha256"] = sha256(journal_path.read_bytes())
+    manifest["arbitration_sha256"] = sha256(journal_path.read_bytes())
     manifest_path.write_bytes(canonical_json(manifest))
 
-    with pytest.raises(ShadowJournalAuditError, match="trailing records"):
+    with pytest.raises(ShadowArbitrationAuditError, match="trailing records"):
         audit_shadow_journal(manifest_path, object(), configuration)
 
 
@@ -165,7 +165,7 @@ def test_shadow_journal_audit_rejects_capture_lineage_drift(
     reader.manifest.stream_session_id = "6c60f055-e8cc-432a-b1d7-5cbabbd2b7c4"
     _use_capture(monkeypatch, reader)
 
-    with pytest.raises(ShadowJournalAuditError, match="capture lineage"):
+    with pytest.raises(ShadowArbitrationAuditError, match="capture lineage"):
         audit_shadow_journal(manifest_path, object(), configuration)
 
 
@@ -177,10 +177,10 @@ def test_shadow_journal_audit_rejects_noncanonical_or_stale_lineage(
     _use_capture(monkeypatch, reader)
     manifest_path.write_bytes(manifest_path.read_bytes() + b"\n")
 
-    with pytest.raises(ShadowJournalAuditError, match="not canonical"):
+    with pytest.raises(ShadowArbitrationAuditError, match="not canonical"):
         audit_shadow_journal(manifest_path, object(), configuration)
 
     manifest_path, configuration, reader = _artifacts(tmp_path / "stale")
     _use_capture(monkeypatch, reader)
-    with pytest.raises(ShadowJournalAuditError, match="policy lineage"):
+    with pytest.raises(ShadowArbitrationAuditError, match="policy lineage"):
         audit_shadow_journal(manifest_path, object(), load_configuration(CONFIGURATION))

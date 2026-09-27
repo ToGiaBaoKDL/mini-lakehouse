@@ -1,8 +1,7 @@
 """Buy-first research baselines from certified, point-in-time feature snapshots.
 
-These are deliberately separate from the deployed microstructure shadow decisions.
-The three hypotheses in the VIC/VHM brief can be audited without changing today's
-capture policy, sending an alert, or pretending that missing news/market context exists.
+The three hypotheses in the VIC/VHM brief can be audited without changing the
+capture policy, sending an alert, or pretending that missing context exists.
 """
 
 from __future__ import annotations

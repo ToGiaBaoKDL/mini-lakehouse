@@ -177,28 +177,6 @@ def test_trading_backtest_mart_reuses_certified_curated_facts() -> None:
     assert "type: average_distinct" in metadata
 
 
-def test_trading_shadow_mart_preserves_decisions_and_reuses_outcomes() -> None:
-    sql = (DBT_PROJECT / "models/marts/trading/fct_trading_shadow_decision_outcomes.sql").read_text(
-        encoding="utf-8"
-    )
-    metadata = (DBT_PROJECT / "models/marts/trading/_trading__models.yml").read_text(
-        encoding="utf-8"
-    )
-
-    assert "where status = 'passed'" in sql
-    assert "ref('stg_trading__shadow_decisions')" in sql
-    assert "ref('stg_trading__outcome_labels')" in sql
-    assert "left join outcomes" in sql
-    assert "decisions.action = outcomes.action" in sql
-    assert "decisions.horizon_seconds = outcomes.horizon_seconds" in sql
-    assert "case when outcomes.is_eligible then outcomes.gross_return_bps end" in sql
-    assert "trade_ticks" not in sql
-    assert "quote_snapshots" not in sql
-    assert "eligible_outcome_coverage_pct" in metadata
-    assert "positive_gross_markout_rate_pct" in metadata
-    assert "type: average" in metadata
-
-
 def test_every_dbt_model_and_column_is_documented() -> None:
     documented_models: dict[str, dict[str, object]] = {}
     for path in (DBT_PROJECT / "models").rglob("*__models.yml"):

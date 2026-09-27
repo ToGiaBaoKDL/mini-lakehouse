@@ -9,9 +9,10 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from t0_trading.decisions import StrategyDecision
+from t0_trading.arbitration import CandidateArbitration
 from t0_trading.identity import canonical_json, sha256
 from t0_trading.outcomes import OutcomeLabel
+from t0_trading.strategy.baselines import BaselineCandidate
 
 _MARKET_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 
@@ -76,11 +77,10 @@ class AdvancePolicy(_StrictModel):
     source: str = Field(min_length=1)
 
 
-class SelectionRecord(_StrictModel):
-    """A decision-only selection recorded before its conditional outcome entry."""
+class SelectionEvidence(_StrictModel):
+    """Operational evidence that a deterministic arbitration was recorded before entry."""
 
-    decision_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    priority: int = Field(ge=0)
+    arbitration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     selected_at: datetime
     source: str = Field(min_length=1)
     source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -156,40 +156,57 @@ class ClosingMark(_StrictModel):
         return _utc(value)
 
 
-class CycleProposal(_StrictModel):
-    """One explicitly selected decision and its exact conditional outcome."""
+class ArbitratedCycleProposal(_StrictModel):
+    """One selected buy-first candidate and its exact conditional outcome."""
 
-    priority: int = Field(ge=0)
-    decision: StrategyDecision
+    candidate: BaselineCandidate
+    arbitration: CandidateArbitration
     outcome: OutcomeLabel
 
     @model_validator(mode="after")
-    def validate_lineage(self) -> CycleProposal:
-        decision, outcome = self.decision, self.outcome
-        if decision.action == "ABSTAIN":
-            raise ValueError("cycle proposal requires an actionable decision")
+    def validate_lineage(self) -> ArbitratedCycleProposal:
+        candidate, arbitration, outcome = self.candidate, self.arbitration, self.outcome
         if (
-            decision.outcome_version != outcome.outcome_version
-            or decision.outcome_configuration_sha256 != outcome.outcome_configuration_sha256
-            or decision.feature_version != outcome.feature_version
-            or decision.feature_configuration_sha256 != outcome.feature_configuration_sha256
-            or decision.feature_snapshot_sha256 != outcome.feature_snapshot_sha256
-            or decision.symbol != outcome.symbol
-            or decision.trade_date != outcome.trade_date
-            or decision.decision_at != outcome.decision_at
-            or decision.action != outcome.action
-            or decision.horizon_seconds != outcome.horizon_seconds
+            not candidate.is_candidate
+            or arbitration.status != "SELECTED"
+            or arbitration.candidate_version != candidate.baseline_version
+            or arbitration.candidate_sha256 != candidate.sha256
+            or arbitration.strategy != candidate.strategy
+            or arbitration.symbol != candidate.symbol
+            or arbitration.trade_date != candidate.trade_date
+            or arbitration.decision_at != candidate.decision_at
+            or arbitration.strength != candidate.strength
+            or arbitration.selected_candidate_sha256 != candidate.sha256
         ):
-            raise ValueError("cycle proposal decision and outcome lineage do not match")
+            raise ValueError("cycle proposal candidate and arbitration lineage do not match")
+        if (
+            outcome.feature_snapshot_sha256 != candidate.feature_snapshot_sha256
+            or outcome.symbol != candidate.symbol
+            or outcome.trade_date != candidate.trade_date
+            or outcome.decision_at != candidate.decision_at
+            or outcome.action != arbitration.action
+            or outcome.horizon_seconds != arbitration.horizon_seconds
+        ):
+            raise ValueError("cycle proposal arbitration and outcome lineage do not match")
         if outcome.reasons and outcome.entry_vwap is not None and outcome.horizon_vwap is not None:
-            raise ValueError("actionable decision cannot use an ineligible priced outcome")
+            raise ValueError("selected candidate cannot use an ineligible priced outcome")
         return self
+
+    @property
+    def priority(self) -> int:
+        if self.arbitration.priority is None:
+            raise ValueError("selected arbitration is missing priority")
+        return self.arbitration.priority
+
+    @property
+    def cycle_id(self) -> str:
+        return self.arbitration.sha256
 
 
 class SimulationRequest(_StrictModel):
-    """One exchange-local day; proposals must already be strategy-arbitrated."""
+    """One exchange-local day of explicitly arbitrated buy-first proposals."""
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     trade_date: date
     account: AccountSnapshot
     costs: CostPolicy
@@ -197,8 +214,8 @@ class SimulationRequest(_StrictModel):
     risk: RiskLimits
     lot_size: int = Field(ge=1)
     closing_marks: tuple[ClosingMark, ...]
-    selection_records: tuple[SelectionRecord, ...]
-    proposals: tuple[CycleProposal, ...]
+    selection_evidence: tuple[SelectionEvidence, ...]
+    proposals: tuple[ArbitratedCycleProposal, ...]
 
     @model_validator(mode="before")
     @classmethod
@@ -240,36 +257,36 @@ class SimulationRequest(_StrictModel):
             for mark in self.closing_marks
         ):
             raise ValueError("closing marks must follow the same-day account snapshot")
-        decisions = [proposal.decision for proposal in self.proposals]
-        if len({decision.sha256 for decision in decisions}) != len(decisions) or len(
-            {(decision.symbol, decision.decision_at) for decision in decisions}
-        ) != len(decisions):
-            raise ValueError("proposals must have unique decisions and symbol clocks")
+        arbitrations = [proposal.arbitration for proposal in self.proposals]
+        if len({item.sha256 for item in arbitrations}) != len(arbitrations) or len(
+            {(item.symbol, item.decision_at) for item in arbitrations}
+        ) != len(arbitrations):
+            raise ValueError("proposals must have unique arbitrations and symbol clocks")
         if len({(item.outcome.entry_at, item.priority) for item in self.proposals}) != len(
             self.proposals
         ):
             raise ValueError("simultaneous proposals require unique explicit priorities")
-        selections = {item.decision_sha256: item for item in self.selection_records}
-        if len(selections) != len(self.selection_records) or set(selections) != {
-            decision.sha256 for decision in decisions
+        selections = {item.arbitration_sha256: item for item in self.selection_evidence}
+        if len(selections) != len(self.selection_evidence) or set(selections) != {
+            item.sha256 for item in arbitrations
         }:
-            raise ValueError("selection records must cover selected decisions exactly once")
+            raise ValueError("selection evidence must cover selected arbitrations exactly once")
         if any(
-            (selection := selections[proposal.decision.sha256]).priority != proposal.priority
-            or not (
-                proposal.decision.decision_at <= selection.selected_at < proposal.outcome.entry_at
+            not (
+                proposal.candidate.decision_at
+                <= selections[proposal.arbitration.sha256].selected_at
+                < proposal.outcome.entry_at
             )
             for proposal in self.proposals
         ):
-            raise ValueError("selection must match priority and precede outcome entry")
+            raise ValueError("selection evidence must precede outcome entry")
         if any(
-            decision.trade_date != self.trade_date
-            or decision.symbol not in symbols
-            or decision.decision_at <= self.account.as_of
-            or proposal.outcome.entry_at >= marks[decision.symbol].as_of
-            or proposal.outcome.horizon_at > marks[decision.symbol].as_of
+            proposal.candidate.trade_date != self.trade_date
+            or proposal.candidate.symbol not in symbols
+            or proposal.candidate.decision_at <= self.account.as_of
+            or proposal.outcome.entry_at >= marks[proposal.candidate.symbol].as_of
+            or proposal.outcome.horizon_at > marks[proposal.candidate.symbol].as_of
             for proposal in self.proposals
-            for decision in (proposal.decision,)
         ):
             raise ValueError("proposal or outcome falls outside account and closing-mark window")
         return self
@@ -287,7 +304,7 @@ class CycleResult(_StrictModel):
     outcome_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     symbol: str
     strategy: str
-    action: Literal["BUY", "SELL"]
+    action: Literal["BUY"]
     quantity: int = Field(ge=1)
     entry_at: datetime
     horizon_at: datetime
@@ -311,7 +328,7 @@ class EndPosition(_StrictModel):
 class SimulationReport(_StrictModel):
     """Complete means reconstructable, never approved or profitable."""
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     trade_date: date
     request_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     fee_provenance_recorded: bool

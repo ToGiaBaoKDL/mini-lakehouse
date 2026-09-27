@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import signal
-from collections import Counter
 from datetime import UTC, date, datetime
 from pathlib import Path
 from threading import Event
@@ -18,6 +17,12 @@ from botocore.exceptions import BotoCoreError, ClientError
 from pydantic import BaseModel, ValidationError
 from ssi_sdk import Data
 
+from t0_trading.arbitration import (
+    ShadowArbitrationAuditError,
+    ShadowArbitrationJournal,
+    audit_shadow_journal,
+    prune_shadow_journals,
+)
 from t0_trading.capture import MAX_STREAM_BATCH_MESSAGES
 from t0_trading.capture.reader import (
     StreamCaptureReadError,
@@ -38,21 +43,12 @@ from t0_trading.configuration import (
 )
 from t0_trading.context import build_decision_contexts
 from t0_trading.credentials import CredentialError, load_credentials
-from t0_trading.decisions import (
-    DECISION_ACTIONS,
-    ShadowDecisionJournal,
-    ShadowJournalAuditError,
-    audit_shadow_journal,
-    prune_shadow_journals,
-    replay_decisions,
-)
 from t0_trading.features import (
     FeatureAuditReport,
     FeatureSnapshot,
     build_feature_audit,
     replay_features,
 )
-from t0_trading.identity import sha256
 from t0_trading.market.reconciliation import (
     MarketDayCertification,
     ReconciliationReport,
@@ -66,12 +62,6 @@ from t0_trading.simulation import SimulationRequest, simulate_cycles
 from t0_trading.simulation.presets import (
     PUBLIC_VNDIRECT_DTA_CHECKED_AT,
     public_vndirect_dta_costs,
-)
-from t0_trading.strategy import (
-    StrategyScore,
-    evaluate_scores,
-    evaluate_walk_forward,
-    score_features,
 )
 from t0_trading.strategy.baseline_audit import (
     BaselineAuditReport,
@@ -199,28 +189,6 @@ def _replay_outcome_day(
     return reader, configuration, snapshots, labels
 
 
-def _replay_strategy_day(
-    trade_date: date,
-    landing_uri: str,
-    region: str,
-    config: Path,
-) -> tuple[
-    StreamDayReader,
-    TradingConfiguration,
-    tuple[StrategyScore, ...],
-    tuple[OutcomeLabel, ...],
-]:
-    reader, configuration, snapshots, labels = _replay_outcome_day(
-        trade_date, landing_uri, region, config
-    )
-    scores = score_features(
-        snapshots,
-        configuration.resolve(reader.trade_date),
-        configuration.resolve_strategies(reader.trade_date),
-    )
-    return reader, configuration, scores, labels
-
-
 def _stream_day_readers(
     trade_date: date,
     landing_uri: str,
@@ -258,13 +226,12 @@ def check_config(
         version = configuration.resolve(selected_date)
         capture_scope = configuration.capture_scope(selected_date)
         outcomes = configuration.resolve_outcomes(selected_date)
-        strategies = configuration.resolve_strategies(selected_date)
-        exploratory_evaluation = configuration.resolve_strategy_evaluation(
+        exploratory_evaluation = configuration.resolve_baseline_evaluation(
             selected_date, "EXPLORATORY"
         )
-        strategy_evaluation = configuration.resolve_strategy_evaluation(selected_date, "PROMOTION")
+        promotion_evaluation = configuration.resolve_baseline_evaluation(selected_date, "PROMOTION")
         context = configuration.resolve_context(selected_date)
-        decisions = configuration.resolve_decisions(selected_date)
+        arbitration = configuration.resolve_candidate_arbitration(selected_date)
     except TradingConfigurationError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error
@@ -277,16 +244,14 @@ def check_config(
                 "effective_date": selected_date.isoformat(),
                 "outcome_version": outcomes.version,
                 "outcome_version_sha256": outcomes.sha256,
-                "strategy_version": strategies.version,
-                "strategy_version_sha256": strategies.sha256,
-                "strategy_evaluation_version": strategy_evaluation.version,
-                "strategy_evaluation_version_sha256": strategy_evaluation.sha256,
+                "promotion_evaluation_version": promotion_evaluation.version,
+                "promotion_evaluation_version_sha256": promotion_evaluation.sha256,
                 "exploratory_evaluation_version": exploratory_evaluation.version,
                 "exploratory_evaluation_version_sha256": exploratory_evaluation.sha256,
                 "context_version": context.version,
                 "context_version_sha256": context.sha256,
-                "decision_version": decisions.version,
-                "decision_version_sha256": decisions.sha256,
+                "arbitration_version": arbitration.version if arbitration else None,
+                "arbitration_version_sha256": arbitration.sha256 if arbitration else None,
                 "version": version.version,
                 "version_sha256": version.sha256,
             },
@@ -439,7 +404,9 @@ def capture_stream_command(
     spool_max_bytes: Annotated[int, typer.Option(min=1)] = 268_435_456,
     shadow_journal_dir: Annotated[
         Path | None,
-        typer.Option(help="Optional persistent directory for local shadow decision journals."),
+        typer.Option(
+            help="Optional persistent directory for local candidate arbitration journals."
+        ),
     ] = None,
     ready_file: Annotated[
         Path | None,
@@ -476,7 +443,7 @@ def capture_stream_command(
         signum: signal.signal(signum, lambda _signum, _frame: stop.set())
         for signum in (signal.SIGINT, signal.SIGTERM)
     }
-    journal: ShadowDecisionJournal | None = None
+    journal: ShadowArbitrationJournal | None = None
     capture_completed = False
     try:
         credentials = load_credentials(effective_secret_id, region)
@@ -486,22 +453,23 @@ def capture_stream_command(
             try:
                 started_at = datetime.now(UTC)
                 prune_shadow_journals(shadow_journal_dir, observed_at=started_at)
-                output = shadow_journal_dir / (
-                    f"{trade_date.isoformat()}T{started_at.strftime('%H%M%S.%fZ')}.jsonl"
-                )
-                journal = ShadowDecisionJournal(
-                    output,
-                    trade_date,
-                    version,
-                    configuration.resolve_strategies(trade_date),
-                    configuration.resolve_outcomes(trade_date),
-                    configuration.resolve_decisions(trade_date),
-                    configuration.resolve_context(trade_date),
-                    on_error=lambda error: typer.echo(
-                        f"T0 shadow journal disabled ({type(error).__name__})",
-                        err=True,
-                    ),
-                )
+                arbitration = configuration.resolve_candidate_arbitration(trade_date)
+                if arbitration is not None:
+                    output = shadow_journal_dir / (
+                        f"{trade_date.isoformat()}T{started_at.strftime('%H%M%S.%fZ')}"
+                        ".arbitrations.jsonl"
+                    )
+                    journal = ShadowArbitrationJournal(
+                        output,
+                        trade_date,
+                        version,
+                        configuration.resolve_context(trade_date),
+                        arbitration,
+                        on_error=lambda error: typer.echo(
+                            f"T0 shadow journal disabled ({type(error).__name__})",
+                            err=True,
+                        ),
+                    )
             except (OSError, ValueError) as error:
                 typer.echo(
                     f"T0 shadow journal unavailable ({type(error).__name__})",
@@ -537,13 +505,13 @@ def capture_stream_command(
             journal.abort()
         for signum, handler in previous_handlers.items():
             signal.signal(signum, handler)
-    if journal is not None and journal.journal_sha256 is not None:
+    if journal is not None and journal.arbitration_sha256 is not None:
         typer.echo(
             json.dumps(
                 {
-                    "action_counts": journal.action_counts,
-                    "decision_count": journal.decision_count,
-                    "journal_sha256": journal.journal_sha256,
+                    "arbitration_count": journal.arbitration_count,
+                    "arbitration_sha256": journal.arbitration_sha256,
+                    "candidate_count": journal.candidate_count,
                     "manifest": str(journal.manifest_output),
                     "manifest_sha256": journal.manifest.sha256 if journal.manifest else None,
                     "output": str(journal.output),
@@ -662,47 +630,6 @@ def audit_outcomes_command(
     _emit_model(report, output)
 
 
-def audit_strategies_command(
-    trade_date: Annotated[
-        str,
-        typer.Option(help="Certified exchange-local trade date in YYYY-MM-DD format."),
-    ],
-    landing_uri: Annotated[str, typer.Option(help="Landing S3 root URI.")],
-    region: Annotated[str, typer.Option(help="AWS region containing the landing bucket.")] = (
-        "ap-southeast-1"
-    ),
-    config: Annotated[Path, typer.Option(help="Versioned non-secret trading YAML.")] = (
-        DEFAULT_TRADING_CONFIG
-    ),
-    output: Annotated[
-        Path | None,
-        typer.Option(help="Optional local JSON path; stdout is always emitted."),
-    ] = None,
-) -> None:
-    """Replay one certified day of scores against gross conditional outcomes."""
-    parsed_trade_date = _parse_trade_date(trade_date)
-    try:
-        reader, configuration, scores, labels = _replay_strategy_day(
-            parsed_trade_date, landing_uri, region, config
-        )
-        strategy_policy = configuration.resolve_strategies(reader.trade_date)
-        outcome_policy = configuration.resolve_outcomes(reader.trade_date)
-        report = evaluate_scores(
-            scores,
-            labels,
-            strategy_policy,
-            outcome_policy,
-            trade_date=reader.trade_date,
-        )
-    except (StreamCaptureReadError, TradingConfigurationError, ValueError) as error:
-        typer.echo(str(error), err=True)
-        raise typer.Exit(code=1) from error
-    except (CaptureStoreUnavailable, ClientError) as error:
-        typer.echo(f"SSI strategy audit failed: {_safe_error(error)}", err=True)
-        raise typer.Exit(code=1) from None
-    _emit_model(report, output)
-
-
 def audit_buy_first_baselines_command(
     trade_date: Annotated[
         str,
@@ -752,58 +679,6 @@ def audit_buy_first_baselines_command(
     _emit_model(report, output)
 
 
-def audit_walk_forward_command(
-    trade_date: Annotated[
-        list[str],
-        typer.Option(help="Certified date in YYYY-MM-DD format; repeat for each market day."),
-    ],
-    landing_uri: Annotated[str, typer.Option(help="Landing S3 root URI.")],
-    region: Annotated[str, typer.Option(help="AWS region containing the landing bucket.")] = (
-        "ap-southeast-1"
-    ),
-    config: Annotated[Path, typer.Option(help="Versioned non-secret trading YAML.")] = (
-        DEFAULT_TRADING_CONFIG
-    ),
-    output: Annotated[
-        Path | None,
-        typer.Option(help="Optional local JSON path; stdout is always emitted."),
-    ] = None,
-    evaluation_tier: Annotated[
-        EvaluationTier,
-        typer.Option(help="EXPLORATORY research gate or PROMOTION production gate."),
-    ] = "PROMOTION",
-) -> None:
-    """Evaluate training-derived score buckets on purged future session folds."""
-    try:
-        sessions: dict[date, tuple[tuple[StrategyScore, ...], tuple[OutcomeLabel, ...]]] = {}
-        configuration: TradingConfiguration | None = None
-        for value in trade_date:
-            parsed_trade_date = _parse_trade_date(value)
-            _, loaded, scores, labels = _replay_strategy_day(
-                parsed_trade_date, landing_uri, region, config
-            )
-            if parsed_trade_date in sessions:
-                raise ValueError("walk-forward trade dates must be unique")
-            configuration = loaded
-            sessions[parsed_trade_date] = (scores, labels)
-        if configuration is None:
-            raise ValueError("walk-forward evaluation requires trade dates")
-        first_date = min(sessions)
-        report = evaluate_walk_forward(
-            sessions,
-            configuration.resolve_strategies(first_date),
-            configuration.resolve_outcomes(first_date),
-            configuration.resolve_strategy_evaluation(first_date, evaluation_tier),
-        )
-    except (StreamCaptureReadError, TradingConfigurationError, ValueError) as error:
-        typer.echo(str(error), err=True)
-        raise typer.Exit(code=1) from error
-    except (CaptureStoreUnavailable, ClientError) as error:
-        typer.echo(f"SSI walk-forward audit failed: {_safe_error(error)}", err=True)
-        raise typer.Exit(code=1) from None
-    _emit_model(report, output)
-
-
 def audit_baseline_walk_forward_command(
     report_file: Annotated[
         list[Path],
@@ -841,63 +716,6 @@ def audit_baseline_walk_forward_command(
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error
     _emit_model(result, output)
-
-
-def journal_decisions_command(
-    trade_date: Annotated[
-        str,
-        typer.Option(help="Certified exchange-local trade date in YYYY-MM-DD format."),
-    ],
-    landing_uri: Annotated[str, typer.Option(help="Landing S3 root URI.")],
-    output: Annotated[
-        Path,
-        typer.Option(help="Local deterministic JSON Lines decision journal path."),
-    ],
-    region: Annotated[str, typer.Option(help="AWS region containing the landing bucket.")] = (
-        "ap-southeast-1"
-    ),
-    config: Annotated[Path, typer.Option(help="Versioned non-secret trading YAML.")] = (
-        DEFAULT_TRADING_CONFIG
-    ),
-) -> None:
-    """Replay one certified day into an offline journal using the shadow decision engine."""
-    parsed_trade_date = _parse_trade_date(trade_date)
-    try:
-        capture, configuration, snapshots, _ = _replay_feature_day(
-            parsed_trade_date, landing_uri, region, config
-        )
-        version = configuration.resolve(capture.trade_date)
-        decisions = replay_decisions(
-            snapshots,
-            version,
-            configuration.resolve_strategies(parsed_trade_date),
-            configuration.resolve_outcomes(parsed_trade_date),
-            configuration.resolve_decisions(parsed_trade_date),
-        )
-    except (StreamCaptureReadError, TradingConfigurationError, ValueError) as error:
-        typer.echo(str(error), err=True)
-        raise typer.Exit(code=1) from error
-    except (CaptureStoreUnavailable, ClientError) as error:
-        typer.echo(f"SSI decision journal failed: {_safe_error(error)}", err=True)
-        raise typer.Exit(code=1) from None
-
-    body = b"".join(decision.canonical_bytes() + b"\n" for decision in decisions)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_bytes(body)
-    action_counts = Counter(decision.action for decision in decisions)
-    typer.echo(
-        json.dumps(
-            {
-                "action_counts": {action: action_counts[action] for action in DECISION_ACTIONS},
-                "decision_count": len(decisions),
-                "journal_sha256": sha256(body),
-                "output": str(output),
-                "trade_date": parsed_trade_date.isoformat(),
-            },
-            separators=(",", ":"),
-            sort_keys=True,
-        )
-    )
 
 
 def simulate_cycles_command(
@@ -952,7 +770,7 @@ def audit_shadow_journal_command(
             load_configuration(config),
         )
     except (
-        ShadowJournalAuditError,
+        ShadowArbitrationAuditError,
         StreamCaptureReadError,
         TradingConfigurationError,
         ValueError,
@@ -1074,11 +892,8 @@ app.command("capture-stream")(capture_stream_command)
 app.command("reconcile-stream")(reconcile_stream_command)
 app.command("audit-features")(audit_features_command)
 app.command("audit-outcomes")(audit_outcomes_command)
-app.command("audit-strategies")(audit_strategies_command)
 app.command("audit-buy-first-baselines")(audit_buy_first_baselines_command)
-app.command("audit-walk-forward")(audit_walk_forward_command)
 app.command("audit-baseline-walk-forward")(audit_baseline_walk_forward_command)
-app.command("journal-decisions")(journal_decisions_command)
 app.command("simulate-cycles")(simulate_cycles_command)
 app.command("audit-shadow-journal")(audit_shadow_journal_command)
 app.command("validate-stream-day")(validate_stream_day_command)

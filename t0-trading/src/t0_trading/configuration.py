@@ -184,8 +184,6 @@ DecisionSessionName = Literal[
     "closing_auction",
 ]
 
-StrategyName = Literal["momentum", "order_flow", "relative_value"]
-STRATEGY_NAMES: tuple[StrategyName, ...] = ("momentum", "order_flow", "relative_value")
 EvaluationTier = Literal["EXPLORATORY", "PROMOTION"]
 
 _SESSION_ORDER: tuple[DecisionSessionName, ...] = (
@@ -253,33 +251,6 @@ class OutcomeVersion(_EffectiveVersion):
         return self
 
 
-class StrategyVersion(_EffectiveVersion):
-    """Effective structural inputs for deterministic research scores."""
-
-    momentum_window_seconds: int = Field(ge=1)
-    order_flow_window_seconds: int = Field(ge=1)
-    relative_value_window_seconds: int = Field(ge=1)
-    relative_value_symbols: tuple[str, str]
-
-    @model_validator(mode="after")
-    def validate_strategies(self) -> StrategyVersion:
-        if len(set(self.relative_value_symbols)) != 2 or any(
-            not symbol or symbol != symbol.strip().upper() for symbol in self.relative_value_symbols
-        ):
-            raise ValueError("relative_value_symbols must contain two unique uppercase symbols")
-        return self
-
-
-class StrategyEvaluationVersion(_EffectiveVersion):
-    """Effective sampling policy for out-of-sample strategy evaluation."""
-
-    tier: EvaluationTier
-    score_bucket_count: int = Field(ge=2, le=20)
-    minimum_training_sessions: int = Field(ge=2)
-    validation_sessions: int = Field(ge=1)
-    purge_sessions: int = Field(ge=1)
-
-
 class BaselineEvaluationVersion(_EffectiveVersion):
     """Session isolation policy for fixed, buy-first baseline hypotheses."""
 
@@ -287,6 +258,36 @@ class BaselineEvaluationVersion(_EffectiveVersion):
     development_sessions: int = Field(ge=2)
     holdout_sessions: int = Field(ge=1)
     purge_sessions: int = Field(ge=1)
+
+
+class CandidateArbitrationRule(_StrictModel):
+    """Configured strategy precedence; the engine contains no strategy names."""
+
+    strategy: str = Field(pattern=r"^[a-z0-9][a-z0-9_]*$")
+    priority: int = Field(ge=0)
+    minimum_strength: Decimal = Field(ge=0, le=1)
+    horizon_seconds: int = Field(ge=1, le=86_400)
+
+
+class CandidateArbitrationVersion(_EffectiveVersion):
+    """Prospective, outcome-blind policy for selecting research candidates."""
+
+    candidate_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    cooldown_seconds: int = Field(ge=0, le=86_400)
+    maximum_selections_per_clock: int = Field(ge=1)
+    rules: tuple[CandidateArbitrationRule, ...]
+
+    @model_validator(mode="after")
+    def validate_rules(self) -> CandidateArbitrationVersion:
+        strategies = tuple(rule.strategy for rule in self.rules)
+        priorities = tuple(rule.priority for rule in self.rules)
+        if not strategies or len(set(strategies)) != len(strategies):
+            raise ValueError("candidate arbitration strategies must be unique and non-empty")
+        if tuple(sorted(priorities)) != tuple(range(len(priorities))):
+            raise ValueError("candidate arbitration priorities must be contiguous from zero")
+        if self.cooldown_seconds < max(rule.horizon_seconds for rule in self.rules):
+            raise ValueError("candidate arbitration cooldown must cover every selected horizon")
+        return self
 
 
 class ContextVersion(_EffectiveVersion):
@@ -318,33 +319,6 @@ class ContextVersion(_EffectiveVersion):
         return self
 
 
-class DecisionRule(_StrictModel):
-    """One directional threshold and evaluation horizon for a research score."""
-
-    strategy: StrategyName
-    horizon_seconds: int = Field(ge=1)
-    buy_minimum_strength: Decimal = Field(gt=0, le=1)
-    sell_minimum_strength: Decimal = Field(gt=0, le=1)
-
-
-class DecisionVersion(_EffectiveVersion):
-    """Effective shadow-decision policy, independent from score calculation."""
-
-    strategy_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
-    outcome_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
-    rules: tuple[DecisionRule, ...]
-    maximum_spread_bps: Decimal = Field(gt=0)
-    maximum_trade_age_seconds: Decimal = Field(gt=0)
-    maximum_quote_age_seconds: Decimal = Field(gt=0)
-    cooldown_seconds: int = Field(ge=0, le=86_400)
-
-    @model_validator(mode="after")
-    def validate_decisions(self) -> DecisionVersion:
-        if tuple(rule.strategy for rule in self.rules) != STRATEGY_NAMES:
-            raise ValueError("decision rules must cover every strategy once in canonical order")
-        return self
-
-
 class TradingVersion(_EffectiveVersion):
     market: MarketConfiguration
     data_quality: DataQualityConfiguration
@@ -352,39 +326,18 @@ class TradingVersion(_EffectiveVersion):
 
 
 class TradingConfiguration(_StrictModel):
-    schema_version: int = Field(ge=1)
+    schema_version: Literal[2] = 2
     capture: CaptureConfiguration
     versions: tuple[TradingVersion, ...]
     outcomes: tuple[OutcomeVersion, ...]
-    strategies: tuple[StrategyVersion, ...]
-    strategy_evaluations: tuple[StrategyEvaluationVersion, ...]
     baseline_evaluations: tuple[BaselineEvaluationVersion, ...]
+    candidate_arbitrations: tuple[CandidateArbitrationVersion, ...]
     contexts: tuple[ContextVersion, ...]
-    decisions: tuple[DecisionVersion, ...]
 
     @model_validator(mode="after")
     def validate_versions(self) -> TradingConfiguration:
         _validate_effective_versions(self.versions, "configuration")
         _validate_effective_versions(self.outcomes, "outcome")
-        _validate_effective_versions(self.strategies, "strategy")
-        for tier in ("EXPLORATORY", "PROMOTION"):
-            _validate_effective_versions(
-                tuple(item for item in self.strategy_evaluations if item.tier == tier),
-                f"{tier.lower()} strategy evaluation",
-            )
-        if (
-            tuple(
-                sorted(self.strategy_evaluations, key=lambda item: (item.tier, item.effective_from))
-            )
-            != self.strategy_evaluations
-        ):
-            raise ValueError(
-                "strategy evaluation versions must be ordered by tier and effective_from"
-            )
-        if len({item.version for item in self.strategy_evaluations}) != len(
-            self.strategy_evaluations
-        ):
-            raise ValueError("strategy evaluation version names must be globally unique")
         for tier in ("EXPLORATORY", "PROMOTION"):
             _validate_effective_versions(
                 tuple(item for item in self.baseline_evaluations if item.tier == tier),
@@ -396,18 +349,26 @@ class TradingConfiguration(_StrictModel):
             {item.version for item in self.baseline_evaluations}
         ) != len(self.baseline_evaluations):
             raise ValueError("baseline evaluation versions must be unique and canonically ordered")
+        _validate_effective_versions(self.candidate_arbitrations, "candidate arbitration")
         _validate_effective_versions(self.contexts, "context")
-        _validate_effective_versions(self.decisions, "decision")
-        strategy_versions = {version.version for version in self.strategies}
-        outcome_versions = {version.version for version in self.outcomes}
-        if any(
-            decision.strategy_version not in strategy_versions
-            or decision.outcome_version not in outcome_versions
-            for decision in self.decisions
-        ):
-            raise ValueError(
-                "decision policies must reference configured score and outcome versions"
+        for arbitration in self.candidate_arbitrations:
+            overlapping_outcomes = tuple(
+                outcome
+                for outcome in self.outcomes
+                if (
+                    arbitration.effective_to is None
+                    or outcome.effective_from <= arbitration.effective_to
+                )
+                and (
+                    outcome.effective_to is None
+                    or arbitration.effective_from <= outcome.effective_to
+                )
             )
+            horizons = {rule.horizon_seconds for rule in arbitration.rules}
+            if not overlapping_outcomes or any(
+                not horizons.issubset(outcome.horizons_seconds) for outcome in overlapping_outcomes
+            ):
+                raise ValueError("candidate arbitration horizons require matching outcome labels")
         return self
 
     def resolve(self, value: date) -> TradingVersion:
@@ -429,22 +390,24 @@ class TradingConfiguration(_StrictModel):
     def resolve_outcomes(self, value: date) -> OutcomeVersion:
         return _resolve_effective(self.outcomes, value, "outcome")
 
-    def resolve_strategies(self, value: date) -> StrategyVersion:
-        return _resolve_effective(self.strategies, value, "strategy")
-
-    def resolve_strategy_evaluation(
-        self,
-        value: date,
-        tier: EvaluationTier = "PROMOTION",
-    ) -> StrategyEvaluationVersion:
-        return _resolve_effective(
-            tuple(item for item in self.strategy_evaluations if item.tier == tier),
-            value,
-            f"{tier.lower()} strategy evaluation",
-        )
-
     def resolve_context(self, value: date) -> ContextVersion:
         return _resolve_effective(self.contexts, value, "context")
+
+    def resolve_candidate_arbitration(self, value: date) -> CandidateArbitrationVersion | None:
+        """Return the prospective policy, or none before arbitration was declared."""
+        matches = tuple(item for item in self.candidate_arbitrations if item.contains(value))
+        if len(matches) > 1:
+            raise TradingConfigurationError(
+                f"expected at most one candidate arbitration version for {value.isoformat()}"
+            )
+        if matches:
+            return matches[0]
+        first = self.candidate_arbitrations[0].effective_from
+        if value < first:
+            return None
+        raise TradingConfigurationError(
+            f"expected one candidate arbitration version for {value.isoformat()}, found 0"
+        )
 
     def resolve_baseline_evaluation(
         self,
@@ -456,9 +419,6 @@ class TradingConfiguration(_StrictModel):
             value,
             f"{tier.lower()} baseline evaluation",
         )
-
-    def resolve_decisions(self, value: date) -> DecisionVersion:
-        return _resolve_effective(self.decisions, value, "decision")
 
     def canonical_bytes(self) -> bytes:
         return canonical_json(self.model_dump(mode="json"))

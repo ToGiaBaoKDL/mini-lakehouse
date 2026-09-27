@@ -157,7 +157,7 @@ def test_t0_feature_contract_preserves_snapshot_and_window_grains() -> None:
     snapshots = product.table("feature_snapshots")
     windows = product.table("feature_windows")
     outcomes = product.table("outcome_labels")
-    decisions = product.table("shadow_decisions")
+    arbitrations = product.table("candidate_arbitrations")
 
     assert product.database == "curated_t0_trading"
     assert product.owner == "t0-trading"
@@ -192,10 +192,9 @@ def test_t0_feature_contract_preserves_snapshot_and_window_grains() -> None:
         "action",
         "horizon_seconds",
     )
-    assert decisions.primary_key == (
-        "decision_configuration_sha256",
-        "feature_snapshot_sha256",
-        "strategy",
+    assert arbitrations.primary_key == (
+        "arbitration_configuration_sha256",
+        "candidate_sha256",
     )
     assert {column.name for column in snapshots.columns} >= {
         "stream_session_id",
@@ -217,17 +216,15 @@ def test_t0_feature_contract_preserves_snapshot_and_window_grains() -> None:
         "outcome_reasons_json",
         "outcome_sha256",
     }
-    assert {column.name for column in decisions.columns} >= {
-        "strategy_configuration_sha256",
-        "outcome_configuration_sha256",
-        "feature_configuration_sha256",
-        "feature_snapshot_sha256",
-        "strategy_score_sha256",
-        "signed_score",
-        "minimum_strength",
+    assert {column.name for column in arbitrations.columns} >= {
+        "candidate_sha256",
+        "arbitration_configuration_sha256",
+        "strength",
+        "status",
         "action",
-        "decision_reasons_json",
-        "decision_sha256",
+        "rejection_reason",
+        "selected_candidate_sha256",
+        "arbitration_sha256",
     }
     assert all(column.data_type != "double" for table in product.tables for column in table.columns)
 

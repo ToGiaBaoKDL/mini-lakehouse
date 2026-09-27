@@ -1,10 +1,10 @@
-"""Durable local shadow journal over the deterministic decision clock."""
+"""Durable local journal for point-in-time candidates and their arbitrations."""
 
 from __future__ import annotations
 
 import hashlib
 import os
-from collections import Counter, deque
+from collections import deque
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from datetime import UTC, date, datetime, timedelta
@@ -15,17 +15,14 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from t0_trading.arbitration.engine import CandidateArbitrator
 from t0_trading.capture.reader import StreamGap
 from t0_trading.configuration import (
+    CandidateArbitrationVersion,
     ContextVersion,
-    DecisionVersion,
-    OutcomeVersion,
-    StrategyVersion,
     TradingVersion,
 )
 from t0_trading.context import LiveDecisionContextEngine
-from t0_trading.decisions.engine import DecisionEngine
-from t0_trading.decisions.model import DECISION_ACTIONS, DecisionAction
 from t0_trading.features import FeatureEngine, FeatureSnapshot, decision_times
 from t0_trading.identity import canonical_json, sha256
 from t0_trading.market import StreamEnvelope
@@ -37,6 +34,15 @@ from t0_trading.strategy.baselines import (
 
 _COMPLETED_RETENTION = timedelta(days=14)
 _PARTIAL_RETENTION = timedelta(days=3)
+_ARBITRATION_SUFFIX = ".arbitrations.jsonl"
+_OWNED_COMPLETED_SUFFIXES = (
+    _ARBITRATION_SUFFIX,
+    ".candidates.jsonl",
+    ".manifest.json",
+)
+_OWNED_PARTIAL_SUFFIXES = tuple(
+    f"{suffix}.partial" for suffix in _OWNED_COMPLETED_SUFFIXES
+)
 
 
 def _utc(value: datetime, name: str) -> datetime:
@@ -53,9 +59,9 @@ def prune_shadow_journals(directory: Path, *, observed_at: datetime | None = Non
     for path in directory.iterdir():
         if path.is_symlink() or not path.is_file():
             continue
-        if path.name.endswith(".partial"):
+        if path.name.endswith(_OWNED_PARTIAL_SUFFIXES):
             retention = _PARTIAL_RETENTION
-        elif path.name.endswith((".jsonl", ".manifest.json")):
+        elif path.name.endswith(_OWNED_COMPLETED_SUFFIXES):
             retention = _COMPLETED_RETENTION
         else:
             continue
@@ -64,12 +70,12 @@ def prune_shadow_journals(directory: Path, *, observed_at: datetime | None = Non
             path.unlink()
 
 
-class ShadowJournalManifest(BaseModel):
-    """Commit marker for one complete local shadow decision journal."""
+class ShadowArbitrationManifest(BaseModel):
+    """Commit marker for one complete arbitration-only shadow journal."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal[2] = 2
+    schema_version: Literal[4] = 4
     trade_date: date
     first_connected_at: datetime
     completed_at: datetime
@@ -78,24 +84,19 @@ class ShadowJournalManifest(BaseModel):
     configuration_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
     configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     feature_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
-    strategy_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
-    strategy_configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    outcome_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
-    outcome_configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    decision_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
-    decision_configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     context_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
     context_configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     baseline_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
-    expected_decision_count: int = Field(ge=1)
-    decision_count: int = Field(ge=1)
-    action_counts: dict[DecisionAction, int]
-    journal_file: str
-    journal_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    arbitration_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    arbitration_configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     expected_candidate_count: int = Field(ge=1)
     candidate_count: int = Field(ge=1)
     candidate_file: str
     candidate_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expected_arbitration_count: int = Field(ge=1)
+    arbitration_count: int = Field(ge=1)
+    arbitration_file: str
+    arbitration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
     @field_validator("first_connected_at", "completed_at")
     @classmethod
@@ -103,8 +104,7 @@ class ShadowJournalManifest(BaseModel):
         return _utc(value, "shadow journal timestamp")
 
     @model_validator(mode="after")
-    def validate_manifest(self) -> ShadowJournalManifest:
-        expected_actions = set(DECISION_ACTIONS)
+    def validate_manifest(self) -> ShadowArbitrationManifest:
         if self.first_connected_at > self.completed_at:
             raise ValueError("shadow journal timestamps are not ordered")
         if (
@@ -114,9 +114,7 @@ class ShadowJournalManifest(BaseModel):
         ):
             raise ValueError("shadow journal capture sessions are inconsistent")
         for session_id, uri in zip(
-            self.stream_session_ids,
-            self.capture_manifest_uris,
-            strict=True,
+            self.stream_session_ids, self.capture_manifest_uris, strict=True
         ):
             parsed = urlparse(uri)
             if (
@@ -127,22 +125,17 @@ class ShadowJournalManifest(BaseModel):
             ):
                 raise ValueError("shadow journal capture manifest lineage is inconsistent")
         if (
-            self.decision_count != self.expected_decision_count
-            or set(self.action_counts) != expected_actions
-            or any(count < 0 for count in self.action_counts.values())
-            or sum(self.action_counts.values()) != self.decision_count
-        ):
-            raise ValueError("shadow journal decision summary is inconsistent")
-        if Path(self.journal_file).name != self.journal_file or not self.journal_file.endswith(
-            ".jsonl"
-        ):
-            raise ValueError("shadow journal file name is invalid")
-        if (
             self.candidate_count != self.expected_candidate_count
             or Path(self.candidate_file).name != self.candidate_file
             or not self.candidate_file.endswith(".candidates.jsonl")
         ):
             raise ValueError("shadow candidate summary is inconsistent")
+        if (
+            self.arbitration_count != self.expected_arbitration_count
+            or Path(self.arbitration_file).name != self.arbitration_file
+            or not self.arbitration_file.endswith(_ARBITRATION_SUFFIX)
+        ):
+            raise ValueError("shadow arbitration summary is inconsistent")
         return self
 
     def canonical_bytes(self) -> bytes:
@@ -153,42 +146,38 @@ class ShadowJournalManifest(BaseModel):
         return sha256(self.canonical_bytes())
 
 
-class ShadowDecisionJournal:
-    """Consume captured envelopes without allowing shadow failures to affect capture."""
+class ShadowArbitrationJournal:
+    """Observe captured envelopes without allowing research failures to affect capture."""
 
     def __init__(
         self,
         output: Path,
         trade_date: date,
         configuration: TradingVersion,
-        strategy_policy: StrategyVersion,
-        outcome_policy: OutcomeVersion,
-        decision_policy: DecisionVersion,
         context_policy: ContextVersion,
+        arbitration_policy: CandidateArbitrationVersion,
         *,
         on_error: Callable[[Exception], None] | None = None,
     ) -> None:
-        if output.suffix != ".jsonl":
-            raise ValueError("shadow journal output must use a .jsonl suffix")
+        if not output.name.endswith(_ARBITRATION_SUFFIX):
+            raise ValueError(f"shadow journal output must end with {_ARBITRATION_SUFFIX}")
         if not context_policy.contains(trade_date):
             raise ValueError("shadow context policy does not cover the trade date")
         if set(configuration.market.symbols) != {"VIC", "VHM"}:
             raise ValueError("shadow buy-first baselines require exactly VIC and VHM")
+        if (
+            not arbitration_policy.contains(trade_date)
+            or arbitration_policy.candidate_version != BASELINE_VERSION
+        ):
+            raise ValueError("shadow arbitration policy does not cover the candidate stream")
         self._trade_date = trade_date
         self._configuration = configuration
-        self._strategy_policy = strategy_policy
-        self._outcome_policy = outcome_policy
-        self._decision_policy = decision_policy
         self._context_policy = context_policy
+        self._arbitration_policy = arbitration_policy
         self._timezone = ZoneInfo(configuration.market.timezone)
         self._feature_engine = FeatureEngine(configuration)
         self._context_engine = LiveDecisionContextEngine(configuration, context_policy)
-        self._decision_engine = DecisionEngine(
-            configuration,
-            strategy_policy,
-            outcome_policy,
-            decision_policy,
-        )
+        self._arbitrator = CandidateArbitrator(arbitration_policy)
         self._decision_times = tuple(decision_times(configuration, trade_date))
         if not self._decision_times:
             raise ValueError("shadow journal configuration has no decision clocks")
@@ -203,17 +192,18 @@ class ShadowDecisionJournal:
         self._on_error = on_error
         self._failed = False
         self._closed = False
-        self._digest = hashlib.sha256()
         self._candidate_digest = hashlib.sha256()
-        self._action_counts: Counter[DecisionAction] = Counter()
-        self.decision_count = 0
+        self._arbitration_digest = hashlib.sha256()
         self.candidate_count = 0
-        self.manifest: ShadowJournalManifest | None = None
+        self.arbitration_count = 0
+        self.manifest: ShadowArbitrationManifest | None = None
+
+        base = output.name.removesuffix(_ARBITRATION_SUFFIX)
         self.output = output
-        self.partial_output = output.with_suffix(".jsonl.partial")
-        self.candidate_output = output.with_suffix(".candidates.jsonl")
+        self.partial_output = Path(f"{output}.partial")
+        self.candidate_output = output.with_name(f"{base}.candidates.jsonl")
         self.partial_candidate_output = Path(f"{self.candidate_output}.partial")
-        self.manifest_output = output.with_suffix(".manifest.json")
+        self.manifest_output = output.with_name(f"{base}.manifest.json")
         self.partial_manifest_output = Path(f"{self.manifest_output}.partial")
         paths = (
             self.output,
@@ -226,7 +216,7 @@ class ShadowDecisionJournal:
         if any(path.exists() for path in paths):
             raise FileExistsError("shadow journal output already exists")
         output.parent.mkdir(parents=True, exist_ok=True)
-        self._stream = self.partial_output.open("xb")
+        self._arbitration_stream = self.partial_output.open("xb")
         self._candidate_stream = self.partial_candidate_output.open("xb")
 
     @property
@@ -234,18 +224,14 @@ class ShadowDecisionJournal:
         return self._failed
 
     @property
-    def journal_sha256(self) -> str | None:
-        return None if not self._closed or self._failed else self._digest.hexdigest()
-
-    @property
-    def action_counts(self) -> dict[DecisionAction, int]:
-        return {action: self._action_counts[action] for action in DECISION_ACTIONS}
+    def arbitration_sha256(self) -> str | None:
+        return None if not self._closed or self._failed else self._arbitration_digest.hexdigest()
 
     def _fail(self, error: Exception) -> None:
         if self._failed:
             return
         self._failed = True
-        self._stream.close()
+        self._arbitration_stream.close()
         self._candidate_stream.close()
         if self._on_error is not None:
             with suppress(Exception):
@@ -260,8 +246,6 @@ class ShadowDecisionJournal:
             self._fail(error)
 
     def connected(self, stream_session_id: str, connected_at: datetime) -> None:
-        """Close an unavailable interval when a fresh SDK connection succeeds."""
-
         def operation() -> None:
             observed_at = _utc(connected_at, "connected_at")
             if not stream_session_id or stream_session_id in self._session_ids:
@@ -283,8 +267,6 @@ class ShadowDecisionJournal:
         self._safe(operation)
 
     def ingest(self, envelopes: Sequence[StreamEnvelope]) -> None:
-        """Queue receipt-ordered evidence; feature state advances only behind the watermark."""
-
         def operation() -> None:
             if self._next_decision == len(self._decision_times):
                 return
@@ -333,19 +315,19 @@ class ShadowDecisionJournal:
             decision_at = self._decision_times[self._next_decision]
             snapshots = self._snapshots(decision_at)
             context = self._context_engine.build(snapshots)
-            for decision in self._decision_engine.decisions(snapshots):
-                line = decision.canonical_bytes() + b"\n"
-                self._stream.write(line)
-                self._digest.update(line)
-                self._action_counts[decision.action] += 1
-                self.decision_count += 1
-            for candidate in score_buy_first_baselines(snapshots, (context,)):
+            candidates = score_buy_first_baselines(snapshots, (context,))
+            for candidate in candidates:
                 line = candidate.canonical_bytes() + b"\n"
                 self._candidate_stream.write(line)
                 self._candidate_digest.update(line)
                 self.candidate_count += 1
-            self._stream.flush()
+            for arbitration in self._arbitrator.decide(candidates):
+                line = arbitration.canonical_bytes() + b"\n"
+                self._arbitration_stream.write(line)
+                self._arbitration_digest.update(line)
+                self.arbitration_count += 1
             self._candidate_stream.flush()
+            self._arbitration_stream.flush()
             self._next_decision += 1
         if self._next_decision == len(self._decision_times):
             self._pending.clear()
@@ -353,12 +335,9 @@ class ShadowDecisionJournal:
             self._apply_until(cutoff)
 
     def advance(self, observed_at: datetime) -> None:
-        """Advance behind one feature cadence so callback delivery cannot race the clock."""
         self._safe(lambda: self._advance(_utc(observed_at, "observed_at") - self._watermark_delay))
 
     def disconnected(self, disconnected_at: datetime, *, unavailable: bool) -> None:
-        """Flush the safe boundary and open a gap before a reconnect when required."""
-
         def operation() -> None:
             observed_at = _utc(disconnected_at, "disconnected_at")
             if unavailable and self._open_gap is None:
@@ -368,8 +347,6 @@ class ShadowDecisionJournal:
         self._safe(operation)
 
     def close(self, observed_at: datetime, capture_manifest_uris: Sequence[str]) -> None:
-        """Publish the local journal only after a clean bounded runtime shutdown."""
-
         def operation() -> None:
             completed_at = _utc(observed_at, "observed_at")
             self._advance(completed_at)
@@ -377,13 +354,16 @@ class ShadowDecisionJournal:
                 raise ValueError("shadow journal did not reach every configured decision clock")
             if self._first_connected_at is None:
                 raise ValueError("shadow journal has no connected capture session")
-            self._stream.flush()
-            os.fsync(self._stream.fileno())
-            self._stream.close()
-            self._candidate_stream.flush()
-            os.fsync(self._candidate_stream.fileno())
-            self._candidate_stream.close()
-            self.manifest = ShadowJournalManifest(
+            for stream in (self._candidate_stream, self._arbitration_stream):
+                stream.flush()
+                os.fsync(stream.fileno())
+                stream.close()
+            expected_count = (
+                len(self._decision_times)
+                * len(self._configuration.market.symbols)
+                * len(BASELINE_NAMES)
+            )
+            self.manifest = ShadowArbitrationManifest(
                 trade_date=self._trade_date,
                 first_connected_at=self._first_connected_at,
                 completed_at=completed_at,
@@ -392,39 +372,26 @@ class ShadowDecisionJournal:
                 configuration_version=self._configuration.version,
                 configuration_sha256=self._configuration.sha256,
                 feature_version=self._configuration.features.version,
-                strategy_version=self._strategy_policy.version,
-                strategy_configuration_sha256=self._strategy_policy.sha256,
-                outcome_version=self._outcome_policy.version,
-                outcome_configuration_sha256=self._outcome_policy.sha256,
-                decision_version=self._decision_policy.version,
-                decision_configuration_sha256=self._decision_policy.sha256,
                 context_version=self._context_policy.version,
                 context_configuration_sha256=self._context_policy.sha256,
                 baseline_version=BASELINE_VERSION,
-                expected_decision_count=(
-                    len(self._decision_times)
-                    * len(self._configuration.market.symbols)
-                    * len(self._decision_policy.rules)
-                ),
-                decision_count=self.decision_count,
-                action_counts=self.action_counts,
-                journal_file=self.output.name,
-                journal_sha256=self._digest.hexdigest(),
-                expected_candidate_count=(
-                    len(self._decision_times)
-                    * len(self._configuration.market.symbols)
-                    * len(BASELINE_NAMES)
-                ),
+                arbitration_version=self._arbitration_policy.version,
+                arbitration_configuration_sha256=self._arbitration_policy.sha256,
+                expected_candidate_count=expected_count,
                 candidate_count=self.candidate_count,
                 candidate_file=self.candidate_output.name,
                 candidate_sha256=self._candidate_digest.hexdigest(),
+                expected_arbitration_count=expected_count,
+                arbitration_count=self.arbitration_count,
+                arbitration_file=self.output.name,
+                arbitration_sha256=self._arbitration_digest.hexdigest(),
             )
             with self.partial_manifest_output.open("xb") as manifest_output:
                 manifest_output.write(self.manifest.canonical_bytes())
                 manifest_output.flush()
                 os.fsync(manifest_output.fileno())
-            os.replace(self.partial_output, self.output)
             os.replace(self.partial_candidate_output, self.candidate_output)
+            os.replace(self.partial_output, self.output)
             os.replace(self.partial_manifest_output, self.manifest_output)
             directory = os.open(self.output.parent, os.O_RDONLY)
             try:
@@ -436,9 +403,8 @@ class ShadowDecisionJournal:
         self._safe(operation)
 
     def abort(self) -> None:
-        """Retain an explicitly partial journal after an unclean process outcome."""
-        if not self._closed and not self._stream.closed:
-            self._stream.close()
-        if not self._closed and not self._candidate_stream.closed:
-            self._candidate_stream.close()
+        """Retain explicitly partial evidence after an unclean process outcome."""
+        for stream in (self._candidate_stream, self._arbitration_stream):
+            if not self._closed and not stream.closed:
+                stream.close()
         self._failed = True

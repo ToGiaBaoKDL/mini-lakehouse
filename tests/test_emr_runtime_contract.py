@@ -113,7 +113,7 @@ def test_market_data_publication_uses_sdk_summary_fields() -> None:
     assert "CAST(NULL AS bigint) AS deal_volume" not in source
     assert '"get_securities_summary_historical"' in contract
     assert "for capability in REST_CAPABILITIES" in scope
-    assert "if capability.scope == \"symbols\" else expected_indices" in scope
+    assert 'if capability.scope == "symbols" else expected_indices' in scope
     assert "DATE '{source_date}' AS trade_date" not in source
     assert "to_date(substr(get_json_object(record_json, '$.trading_date'), 1, 10)" in source
     assert "ssi_index_minute_ohlc" not in source
@@ -197,16 +197,12 @@ def test_market_data_stream_materializes_features_with_the_shared_t0_core() -> N
     features = Path("lakehouse/emr/src/emr_jobs/t0_trading/features.py").read_text(encoding="utf-8")
     outcomes = Path("lakehouse/emr/src/emr_jobs/t0_trading/outcomes.py").read_text(encoding="utf-8")
     research = Path("lakehouse/emr/src/emr_jobs/t0_trading/research.py").read_text(encoding="utf-8")
-    decisions = Path("lakehouse/emr/src/emr_jobs/t0_trading/decisions.py").read_text(
-        encoding="utf-8"
-    )
     image = Path("lakehouse/emr/Dockerfile").read_text(encoding="utf-8")
 
     assert 'curated_product("t0_trading")' in job
     assert "parse_configuration" in job
     assert "resolve_outcomes" in job
-    assert "resolve_strategies" in job
-    assert "resolve_decisions" in job
+    assert "resolve_candidate_arbitration" in job
     assert "trading_config_uri" in job
     assert "certify_market_day" in job
     assert "covers_trading_window" not in job
@@ -214,8 +210,7 @@ def test_market_data_stream_materializes_features_with_the_shared_t0_core() -> N
     assert job.index("publish_certification(") < job.index("publish_features(")
     assert job.index("publish_features(") < job.index("publish_outcomes(")
     assert job.index("publish_outcomes(") < job.index("publish_research(")
-    assert job.index("publish_research(") < job.index("publish_decisions(")
-    assert job.index('certification.status != "passed"') < job.index("publish_decisions(")
+    assert job.index('certification.status != "passed"') < job.index("publish_research(")
     assert 'certification.status != "passed"' in job
     assert 'product.table("market_day_certifications")' in certifications
     assert "source.manifest_count < target.manifest_count" in certifications
@@ -235,11 +230,12 @@ def test_market_data_stream_materializes_features_with_the_shared_t0_core() -> N
     assert "evaluate_buy_first_baselines" in research
     assert 'table="decision_contexts"' in research
     assert 'table="strategy_candidates"' in research
+    assert 'table="candidate_arbitrations"' in research
     assert 'table="strategy_evaluations"' in research
     research_publication = research.split("def publish(", maxsplit=1)[1]
     assert research.count("require_compatible(") == 1
-    assert research_publication.count("_prepare(") == 3
-    assert research_publication.count("insert_missing(") == 3
+    assert research_publication.count("_prepare(") == 4
+    assert research_publication.count("insert_missing(") == 4
     assert research_publication.rfind("_prepare(") < research_publication.find("insert_missing(")
     assert (
         research_publication.find(
@@ -251,15 +247,15 @@ def test_market_data_stream_materializes_features_with_the_shared_t0_core() -> N
             research_publication.find("insert_missing("),
         )
         < research_publication.find(
+            'view="t0_candidate_arbitration_candidates"',
+            research_publication.find("insert_missing("),
+        )
+        < research_publication.find(
             'view="t0_strategy_evaluation_candidates"',
             research_publication.find("insert_missing("),
         )
     )
-    assert 'product.table("shadow_decisions")' in decisions
-    assert "replay_decisions" in decisions
-    assert "decision.sha256" in decisions
-    assert decisions.count("require_compatible(") == 1
-    assert decisions.count("insert_missing(") == 1
+    assert "publish_decisions" not in job
     assert "snapshot.sha256" in features
     immutable = Path("lakehouse/emr/src/emr_jobs/t0_trading/iceberg.py").read_text(encoding="utf-8")
     landing_reader = Path("lakehouse/emr/src/emr_jobs/t0_trading/landing.py").read_text(

@@ -8,15 +8,15 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
+from t0_trading.arbitration import (
+    ShadowArbitrationJournal,
+    ShadowArbitrationManifest,
+    arbitrate_candidates,
+    prune_shadow_journals,
+)
 from t0_trading.capture.reader import StreamDayReader, StreamGap
 from t0_trading.configuration import load_configuration
-from t0_trading.decisions import (
-    DecisionEngine,
-    ShadowDecisionJournal,
-    ShadowJournalManifest,
-    prune_shadow_journals,
-    replay_decisions,
-)
+from t0_trading.context import build_decision_contexts
 from t0_trading.features import (
     FeatureEngine,
     build_feature_audit,
@@ -26,6 +26,7 @@ from t0_trading.features import (
 from t0_trading.features.calculators import window_values
 from t0_trading.market import StreamEnvelope
 from t0_trading.market.events import EventPosition, Trade
+from t0_trading.strategy.baselines import score_buy_first_baselines
 
 CONFIGURATION = Path("t0-trading/config/trading.yaml")
 TRADE_DATE = date(2026, 9, 4)
@@ -344,18 +345,10 @@ def test_unclassified_execution_contributes_to_market_activity_but_not_signed_fl
 
 def test_live_clock_and_full_replay_emit_identical_point_in_time_snapshots() -> None:
     configuration = _configuration()
-    loaded = load_configuration(CONFIGURATION)
     envelopes = _observations()
     decision_at = _received(9, 20, 5)
     live = FeatureEngine(configuration)
-    live_decisions = DecisionEngine(
-        configuration,
-        loaded.resolve_strategies(TRADE_DATE),
-        loaded.resolve_outcomes(TRADE_DATE),
-        loaded.resolve_decisions(TRADE_DATE),
-    )
     live_snapshots = []
-    live_journal = []
     pending = iter(envelopes)
     envelope = next(pending, None)
     for current in decision_times(configuration, TRADE_DATE):
@@ -366,7 +359,6 @@ def test_live_clock_and_full_replay_emit_identical_point_in_time_snapshots() -> 
             envelope = next(pending, None)
         current_snapshots = live.snapshots(current)
         live_snapshots.extend(current_snapshots)
-        live_journal.extend(live_decisions.decisions(current_snapshots))
 
     replayed = tuple(
         snapshot
@@ -375,13 +367,6 @@ def test_live_clock_and_full_replay_emit_identical_point_in_time_snapshots() -> 
     )
 
     assert replayed == tuple(live_snapshots)
-    assert replay_decisions(
-        replayed,
-        configuration,
-        loaded.resolve_strategies(TRADE_DATE),
-        loaded.resolve_outcomes(TRADE_DATE),
-        loaded.resolve_decisions(TRADE_DATE),
-    ) == tuple(live_journal)
 
 
 def test_shadow_journal_matches_multi_segment_replay_and_commits_manifest(
@@ -402,15 +387,16 @@ def test_shadow_journal_matches_multi_segment_replay_and_commits_manifest(
         "s3://landing/stream/trade_date=2026-09-04/session=session-1/manifest.json",
         "s3://landing/stream/trade_date=2026-09-04/session=session-2/manifest.json",
     )
-    output = tmp_path / "shadow.jsonl"
-    journal = ShadowDecisionJournal(
+    output = tmp_path / "shadow.arbitrations.jsonl"
+    arbitration_policy = loaded.candidate_arbitrations[0].model_copy(
+        update={"effective_from": TRADE_DATE}
+    )
+    journal = ShadowArbitrationJournal(
         output,
         TRADE_DATE,
         configuration,
-        loaded.resolve_strategies(TRADE_DATE),
-        loaded.resolve_outcomes(TRADE_DATE),
-        loaded.resolve_decisions(TRADE_DATE),
         loaded.resolve_context(TRADE_DATE),
+        arbitration_policy,
     )
     journal.connected("session-1", _received(9, 0, 0))
     for envelope in first_segment:
@@ -423,37 +409,43 @@ def test_shadow_journal_matches_multi_segment_replay_and_commits_manifest(
         journal.advance(envelope.received_at + timedelta(seconds=5))
     journal.close(_received(9, 21, 0), capture_manifests)
 
-    expected = replay_decisions(
-        replay_features(
-            (*first_segment, *second_segment),
-            configuration,
-            trade_date=TRADE_DATE,
-            gaps=(gap,),
-        ),
+    envelopes = (*first_segment, *second_segment)
+    snapshots = replay_features(
+        envelopes,
         configuration,
-        loaded.resolve_strategies(TRADE_DATE),
-        loaded.resolve_outcomes(TRADE_DATE),
-        loaded.resolve_decisions(TRADE_DATE),
+        trade_date=TRADE_DATE,
+        gaps=(gap,),
     )
-    expected_body = b"".join(decision.canonical_bytes() + b"\n" for decision in expected)
-    manifest = ShadowJournalManifest.model_validate_json(journal.manifest_output.read_bytes())
+    contexts = build_decision_contexts(
+        snapshots,
+        envelopes,
+        configuration,
+        loaded.resolve_context(TRADE_DATE),
+    )
+    candidates = score_buy_first_baselines(snapshots, contexts)
+    arbitrations = arbitrate_candidates(candidates, arbitration_policy)
+    expected_candidates = b"".join(item.canonical_bytes() + b"\n" for item in candidates)
+    expected_arbitrations = b"".join(item.canonical_bytes() + b"\n" for item in arbitrations)
+    manifest = ShadowArbitrationManifest.model_validate_json(journal.manifest_output.read_bytes())
 
-    assert output.read_bytes() == expected_body
-    assert journal.decision_count == len(expected)
-    assert journal.journal_sha256 == hashlib.sha256(expected_body).hexdigest()
     assert manifest.capture_manifest_uris == capture_manifests
     assert manifest.stream_session_ids == ("session-1", "session-2")
-    assert manifest.decision_count == len(expected)
-    assert manifest.journal_sha256 == journal.journal_sha256
     candidate_body = journal.candidate_output.read_bytes()
+    assert candidate_body == expected_candidates
     assert len(candidate_body.splitlines()) == manifest.candidate_count
     assert manifest.candidate_count == manifest.expected_candidate_count
     assert manifest.candidate_sha256 == hashlib.sha256(candidate_body).hexdigest()
+    arbitration_body = journal.output.read_bytes()
+    assert arbitration_body == expected_arbitrations
+    assert len(arbitration_body.splitlines()) == manifest.arbitration_count
+    assert manifest.arbitration_count == manifest.expected_arbitration_count
+    assert manifest.arbitration_sha256 == hashlib.sha256(arbitration_body).hexdigest()
+    assert manifest.arbitration_configuration_sha256 == arbitration_policy.sha256
     assert journal.manifest is not None
     assert manifest.sha256 == journal.manifest.sha256
-    assert any("CAPTURE_GAP" in decision.reasons for decision in expected)
     assert not journal.partial_output.exists()
     assert not journal.partial_manifest_output.exists()
+    assert not journal.partial_candidate_output.exists()
 
 
 @pytest.mark.parametrize(
@@ -473,15 +465,16 @@ def test_shadow_journal_requires_every_decision_clock_and_terminal_manifest(
 ) -> None:
     loaded = load_configuration(CONFIGURATION)
     configuration = _short_configuration()
-    output = tmp_path / "shadow.jsonl"
-    journal = ShadowDecisionJournal(
+    arbitration_policy = loaded.candidate_arbitrations[0].model_copy(
+        update={"effective_from": TRADE_DATE}
+    )
+    output = tmp_path / "shadow.arbitrations.jsonl"
+    journal = ShadowArbitrationJournal(
         output,
         TRADE_DATE,
         configuration,
-        loaded.resolve_strategies(TRADE_DATE),
-        loaded.resolve_outcomes(TRADE_DATE),
-        loaded.resolve_decisions(TRADE_DATE),
         loaded.resolve_context(TRADE_DATE),
+        arbitration_policy,
     )
     journal.connected("session-1", _received(9, 0, 0))
     journal.close(completed_at, capture_manifests)
@@ -501,15 +494,16 @@ def test_shadow_journal_fails_closed_without_raising_into_capture(tmp_path: Path
         failures.append(type(error).__name__)
         raise RuntimeError("observer reporting must not reach capture")
 
-    output = tmp_path / "shadow.jsonl"
-    journal = ShadowDecisionJournal(
+    arbitration_policy = loaded.candidate_arbitrations[0].model_copy(
+        update={"effective_from": TRADE_DATE}
+    )
+    output = tmp_path / "shadow.arbitrations.jsonl"
+    journal = ShadowArbitrationJournal(
         output,
         TRADE_DATE,
         configuration,
-        loaded.resolve_strategies(TRADE_DATE),
-        loaded.resolve_outcomes(TRADE_DATE),
-        loaded.resolve_decisions(TRADE_DATE),
         loaded.resolve_context(TRADE_DATE),
+        arbitration_policy,
         on_error=failing_error_callback,
     )
 
@@ -524,19 +518,17 @@ def test_shadow_journal_fails_closed_without_raising_into_capture(tmp_path: Path
 
 def test_shadow_journal_initialization_failure_leaves_no_artifact(tmp_path: Path) -> None:
     loaded = load_configuration(CONFIGURATION)
-    invalid_policy = loaded.resolve_decisions(TRADE_DATE).model_copy(
-        update={"strategy_version": "missing-strategy"}
+    invalid_policy = loaded.candidate_arbitrations[0].model_copy(
+        update={"effective_from": TRADE_DATE, "candidate_version": "missing-baseline"}
     )
 
-    with pytest.raises(ValueError, match="lineage"):
-        ShadowDecisionJournal(
-            tmp_path / "shadow.jsonl",
+    with pytest.raises(ValueError, match="candidate stream"):
+        ShadowArbitrationJournal(
+            tmp_path / "shadow.arbitrations.jsonl",
             TRADE_DATE,
             _configuration(),
-            loaded.resolve_strategies(TRADE_DATE),
-            loaded.resolve_outcomes(TRADE_DATE),
-            invalid_policy,
             loaded.resolve_context(TRADE_DATE),
+            invalid_policy,
         )
 
     assert not any(tmp_path.iterdir())
@@ -544,14 +536,15 @@ def test_shadow_journal_initialization_failure_leaves_no_artifact(tmp_path: Path
 
 def test_shadow_journal_rejects_a_late_first_connection(tmp_path: Path) -> None:
     loaded = load_configuration(CONFIGURATION)
-    journal = ShadowDecisionJournal(
-        tmp_path / "shadow.jsonl",
+    arbitration_policy = loaded.candidate_arbitrations[0].model_copy(
+        update={"effective_from": TRADE_DATE}
+    )
+    journal = ShadowArbitrationJournal(
+        tmp_path / "shadow.arbitrations.jsonl",
         TRADE_DATE,
         _short_configuration(),
-        loaded.resolve_strategies(TRADE_DATE),
-        loaded.resolve_outcomes(TRADE_DATE),
-        loaded.resolve_decisions(TRADE_DATE),
         loaded.resolve_context(TRADE_DATE),
+        arbitration_policy,
     )
 
     journal.connected("session-1", _received(9, 15, 6))
@@ -564,17 +557,23 @@ def test_shadow_journal_rejects_a_late_first_connection(tmp_path: Path) -> None:
 def test_shadow_journal_retention_is_scoped_by_artifact_state(tmp_path: Path) -> None:
     now = datetime(2026, 9, 16, tzinfo=UTC)
     old_completed = (
-        tmp_path / "old.jsonl",
+        tmp_path / "old.arbitrations.jsonl",
+        tmp_path / "old.candidates.jsonl",
         tmp_path / "old.manifest.json",
     )
     old_partial = (
-        tmp_path / "failed.jsonl.partial",
+        tmp_path / "failed.arbitrations.jsonl.partial",
+        tmp_path / "failed.candidates.jsonl.partial",
         tmp_path / "failed.manifest.json.partial",
     )
     retained = (
-        tmp_path / "recent.jsonl",
+        tmp_path / "recent.arbitrations.jsonl",
+        tmp_path / "recent.candidates.jsonl",
         tmp_path / "recent.manifest.json",
-        tmp_path / "recent.jsonl.partial",
+        tmp_path / "recent.arbitrations.jsonl.partial",
+        tmp_path / "recent.candidates.jsonl.partial",
+        tmp_path / "unowned.jsonl",
+        tmp_path / "unowned.jsonl.partial",
         tmp_path / "unowned.txt",
     )
     for path in (*old_completed, *old_partial, *retained):

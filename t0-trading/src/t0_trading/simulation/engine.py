@@ -1,4 +1,4 @@
-"""Causal, side-effect-free accounting for selected manual T0 research cycles."""
+"""Causal, side-effect-free accounting for arbitrated buy-first T0 cycles."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Literal
 
 from t0_trading.simulation.model import (
-    CycleProposal,
+    ArbitratedCycleProposal,
     CycleResult,
     EndPosition,
     SimulationReport,
@@ -38,12 +38,15 @@ class _Execution:
 
 @dataclass(frozen=True, slots=True)
 class _OpenCycle:
-    proposal: CycleProposal
+    proposal: ArbitratedCycleProposal
     entry: _Execution
 
 
 def _execution(
-    request: SimulationRequest, book_price: Decimal, action: str, quantity: int
+    request: SimulationRequest,
+    book_price: Decimal,
+    action: Literal["BUY", "SELL"],
+    quantity: int,
 ) -> _Execution:
     costs = request.costs
     slip = costs.extra_slippage_bps / _BPS
@@ -55,35 +58,27 @@ def _execution(
 
 
 def _result(
-    proposal: CycleProposal,
+    proposal: ArbitratedCycleProposal,
     *,
     status: Literal["CLOSED", "REJECTED", "OPEN"],
     reason: str | None = None,
     entry: _Execution | None = None,
     exit: _Execution | None = None,
 ) -> CycleResult:
-    decision, outcome = proposal.decision, proposal.outcome
-    if decision.action == "ABSTAIN":
-        raise ValueError("cannot simulate an abstention")
-    gross = None
-    charge = None
-    net = None
+    outcome = proposal.outcome
+    gross = charge = net = None
     if status == "CLOSED":
         if entry is None or exit is None:
             raise ValueError("closed cycle requires both executions")
-        gross = (
-            exit.notional - entry.notional
-            if decision.action == "BUY"
-            else entry.notional - exit.notional
-        )
+        gross = exit.notional - entry.notional
         charge = entry.charge + exit.charge
         net = gross - charge
     return CycleResult(
-        cycle_id=decision.sha256,
+        cycle_id=proposal.cycle_id,
         outcome_sha256=outcome.sha256,
-        symbol=decision.symbol,
-        strategy=decision.strategy,
-        action=decision.action,
+        symbol=proposal.candidate.symbol,
+        strategy=proposal.candidate.strategy,
+        action="BUY",
         quantity=outcome.order_quantity,
         entry_at=outcome.entry_at,
         horizon_at=outcome.horizon_at,
@@ -121,13 +116,7 @@ def _fund_buy(
 
 
 def simulate_cycles(request: SimulationRequest) -> SimulationReport:
-    """Replay explicitly selected cycles; future exit prices never select an entry.
-
-    BUY first consumes cash and later sells previously settled stock. SELL first
-    consumes settled stock and later buys unsettled replacement stock. Rejected
-    entries do not trade; an unavailable exit leaves the portfolio open and makes
-    aggregate Net T0 Alpha unavailable rather than inventing a fill.
-    """
+    """Replay selected buy-first cycles without using future prices for selection."""
     initial = {item.symbol: item for item in request.account.positions}
     positions = {
         symbol: _Position(item.settled_qty, item.t1_qty, item.t2_qty)
@@ -142,8 +131,8 @@ def simulate_cycles(request: SimulationRequest) -> SimulationReport:
     started = 0
     realized_net = Decimal(0)
 
-    # Exit-before-entry at an identical instant permits one completed cycle to
-    # release its symbol and cash without allowing any earlier decision to see it.
+    # Exits precede entries at an identical instant. Priority is assigned by the
+    # prospective arbitration policy and never inferred from outcome prices.
     events = sorted(
         (
             (time, phase, proposal.priority, proposal)
@@ -153,13 +142,13 @@ def simulate_cycles(request: SimulationRequest) -> SimulationReport:
         key=lambda item: (item[0], item[1], item[2]),
     )
     for _, phase, _, proposal in events:
-        decision, outcome = proposal.decision, proposal.outcome
-        cycle_id = decision.sha256
-        position = positions[decision.symbol]
+        candidate, outcome = proposal.candidate, proposal.outcome
+        cycle_id = proposal.cycle_id
+        position = positions[candidate.symbol]
         quantity = outcome.order_quantity
         if phase == 1:
             reason = None
-            if decision.symbol in open_by_symbol:
+            if candidate.symbol in open_by_symbol:
                 reason = "SYMBOL_BUSY"
             elif outcome.entry_vwap is None:
                 reason = "ENTRY_BOOK_UNAVAILABLE"
@@ -171,103 +160,69 @@ def simulate_cycles(request: SimulationRequest) -> SimulationReport:
                 reason = "CYCLE_LIMIT"
             elif realized_net <= -request.risk.max_daily_loss_vnd:
                 reason = "DAILY_LOSS_LIMIT"
-            elif position.settled - quantity < initial[decision.symbol].core_min_qty:
+            elif position.settled - quantity < initial[candidate.symbol].core_min_qty:
                 reason = "INSUFFICIENT_SETTLED_ABOVE_CORE"
             if reason is not None:
                 results[cycle_id] = _result(proposal, status="REJECTED", reason=reason)
                 continue
 
-            if outcome.entry_vwap is None or decision.action == "ABSTAIN":
-                raise ValueError("actionable entry requires a book price and direction")
-            entry = _execution(request, outcome.entry_vwap, decision.action, quantity)
+            if outcome.entry_vwap is None:
+                raise ValueError("actionable entry requires a book price")
+            entry = _execution(request, outcome.entry_vwap, "BUY", quantity)
             if entry.notional > request.risk.max_order_notional_vnd:
                 results[cycle_id] = _result(
                     proposal, status="REJECTED", reason="ORDER_NOTIONAL_LIMIT"
                 )
                 continue
-            funding = (
-                _fund_buy(
-                    request,
-                    cash=cash,
-                    pending_sales=pending_sales,
-                    advance_principal=advance_principal,
-                    advance_interest=advance_interest,
-                    spend=entry.notional + entry.charge,
-                )
-                if decision.action == "BUY"
-                else (Decimal(0), Decimal(0))
-            )
-            if funding is None:
-                results[cycle_id] = _result(proposal, status="REJECTED", reason="CASH_LIMIT")
-                continue
-
-            if decision.action == "BUY":
-                draw, interest = funding
-                cash += draw
-                advance_principal += draw
-                advance_interest += interest
-                realized_net -= interest
-                cash -= entry.notional + entry.charge
-                position.bought_today += quantity
-            else:
-                pending_sales += entry.notional - entry.charge
-                position.settled -= quantity
-            open_by_symbol[decision.symbol] = _OpenCycle(proposal, entry)
-            started += 1
-            continue
-
-        opened = open_by_symbol.get(decision.symbol)
-        if opened is None or opened.proposal.decision.sha256 != cycle_id:
-            continue  # This candidate was rejected at entry, or another cycle owns the symbol.
-        if outcome.horizon_vwap is None:
-            results[cycle_id] = _result(
-                proposal, status="OPEN", reason="EXIT_BOOK_UNAVAILABLE", entry=opened.entry
-            )
-            continue
-        exit_action = "SELL" if decision.action == "BUY" else "BUY"
-        exit_execution = _execution(request, outcome.horizon_vwap, exit_action, quantity)
-        funding = (
-            _fund_buy(
+            funding = _fund_buy(
                 request,
                 cash=cash,
                 pending_sales=pending_sales,
                 advance_principal=advance_principal,
                 advance_interest=advance_interest,
-                spend=exit_execution.notional + exit_execution.charge,
+                spend=entry.notional + entry.charge,
             )
-            if exit_action == "BUY"
-            else (Decimal(0), Decimal(0))
-        )
-        if funding is None:
-            results[cycle_id] = _result(
-                proposal, status="OPEN", reason="BUYBACK_CASH_SHORTFALL", entry=opened.entry
-            )
-            continue
-        if exit_action == "SELL":
-            if position.settled - quantity < initial[decision.symbol].core_min_qty:
-                results[cycle_id] = _result(
-                    proposal, status="OPEN", reason="EXIT_SETTLED_SHORTFALL", entry=opened.entry
-                )
+            if funding is None:
+                results[cycle_id] = _result(proposal, status="REJECTED", reason="CASH_LIMIT")
                 continue
-            position.settled -= quantity
-            pending_sales += exit_execution.notional - exit_execution.charge
-        else:
+
             draw, interest = funding
             cash += draw
             advance_principal += draw
             advance_interest += interest
             realized_net -= interest
+            cash -= entry.notional + entry.charge
             position.bought_today += quantity
-            cash -= exit_execution.notional + exit_execution.charge
+            open_by_symbol[candidate.symbol] = _OpenCycle(proposal, entry)
+            started += 1
+            continue
+
+        opened = open_by_symbol.get(candidate.symbol)
+        if opened is None or opened.proposal.cycle_id != cycle_id:
+            continue
+        if outcome.horizon_vwap is None:
+            results[cycle_id] = _result(
+                proposal, status="OPEN", reason="EXIT_BOOK_UNAVAILABLE", entry=opened.entry
+            )
+            continue
+        if position.settled - quantity < initial[candidate.symbol].core_min_qty:
+            results[cycle_id] = _result(
+                proposal, status="OPEN", reason="EXIT_SETTLED_SHORTFALL", entry=opened.entry
+            )
+            continue
+
+        exit_execution = _execution(request, outcome.horizon_vwap, "SELL", quantity)
+        position.settled -= quantity
+        pending_sales += exit_execution.notional - exit_execution.charge
         result = _result(proposal, status="CLOSED", entry=opened.entry, exit=exit_execution)
         results[cycle_id] = result
         if result.net_pnl_vnd is None:
             raise ValueError("closed cycle is missing net PnL")
         realized_net += result.net_pnl_vnd
-        del open_by_symbol[decision.symbol]
+        del open_by_symbol[candidate.symbol]
 
     ordered = tuple(
-        results[item.decision.sha256]
+        results[item.cycle_id]
         for item in sorted(
             request.proposals,
             key=lambda value: (value.outcome.entry_at, value.priority),
@@ -275,8 +230,7 @@ def simulate_cycles(request: SimulationRequest) -> SimulationReport:
     )
     complete = not open_by_symbol
     gross_alpha = sum(
-        (item.gross_pnl_vnd for item in ordered if item.gross_pnl_vnd is not None),
-        Decimal(0),
+        (item.gross_pnl_vnd for item in ordered if item.gross_pnl_vnd is not None), Decimal(0)
     )
     trading_cost = sum(
         (item.trading_cost_vnd for item in ordered if item.trading_cost_vnd is not None),
@@ -304,8 +258,8 @@ def simulate_cycles(request: SimulationRequest) -> SimulationReport:
         fee_provenance_recorded=request.costs.fee_checked_at is not None,
         fee_basis=request.costs.basis,
         account_plan=request.costs.account_plan,
-        selection_reference_recorded=bool(request.selection_records)
-        and all(item.source_sha256 for item in request.selection_records),
+        selection_reference_recorded=bool(request.selection_evidence)
+        and all(item.source_sha256 for item in request.selection_evidence),
         status="COMPLETE" if complete else "INCOMPLETE",
         cycles=ordered,
         starting_cash_vnd=request.account.cash_vnd,

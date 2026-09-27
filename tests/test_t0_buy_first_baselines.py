@@ -118,7 +118,7 @@ def _costs() -> CostPolicy:
     )
 
 
-def test_baselines_match_brief_groups_without_entering_shadow_decisions() -> None:
+def test_baselines_match_brief_groups_without_emitting_orders() -> None:
     vic = _snapshot("VIC")
     vhm = _snapshot("VHM", long_return="60")
     lagged_vhm = _snapshot("VHM", DECISION_AT - timedelta(seconds=30), long_return="60")

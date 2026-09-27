@@ -37,29 +37,27 @@ def test_trading_configuration_is_strict_effective_dated_and_stable() -> None:
     assert outcomes.horizons_seconds == (30, 60, 300)
     assert outcomes.order_quantity == 100
     assert outcomes.execution_latency_milliseconds == 500
-    strategies = configuration.resolve_strategies(date(2026, 9, 5))
-    assert strategies.version == "microstructure-scores-v1"
-    assert strategies.momentum_window_seconds == 60
-    assert strategies.order_flow_window_seconds == 30
-    assert strategies.relative_value_window_seconds == 300
-    assert strategies.relative_value_symbols == ("VIC", "VHM")
-    evaluation = configuration.resolve_strategy_evaluation(date(2026, 9, 5))
-    assert evaluation.version == "purged-walk-forward-v1"
-    assert evaluation.tier == "PROMOTION"
-    assert evaluation.score_bucket_count == 5
-    assert evaluation.minimum_training_sessions == 20
-    assert evaluation.validation_sessions == 5
-    assert evaluation.purge_sessions == 1
-    exploratory = configuration.resolve_strategy_evaluation(date(2026, 9, 5), "EXPLORATORY")
-    assert exploratory.version == "exploratory-purged-holdout-v1"
-    assert exploratory.minimum_training_sessions == 10
-    assert exploratory.validation_sessions == 5
-    assert exploratory.purge_sessions == 1
     baseline = configuration.resolve_baseline_evaluation(date(2026, 9, 5), "EXPLORATORY")
     assert baseline.version == "exploratory-baseline-holdout-v1"
     assert baseline.development_sessions == 10
     assert baseline.purge_sessions == 1
     assert baseline.holdout_sessions == 5
+    promotion = configuration.resolve_baseline_evaluation(date(2026, 9, 5), "PROMOTION")
+    assert promotion.version == "promotion-baseline-holdout-v1"
+    assert promotion.development_sessions == 20
+    assert configuration.resolve_candidate_arbitration(date(2026, 9, 27)) is None
+    arbitration = configuration.resolve_candidate_arbitration(date(2026, 9, 28))
+    assert arbitration is not None
+    assert arbitration.version == "buy-first-candidate-arbitration-v1"
+    assert arbitration.candidate_version == "buy-first-baselines-v3"
+    assert arbitration.cooldown_seconds == 300
+    assert arbitration.maximum_selections_per_clock == 2
+    assert tuple((rule.strategy, rule.priority) for rule in arbitration.rules) == (
+        ("vic_vhm_relative", 0),
+        ("momentum_pullback", 1),
+        ("mean_reversion", 2),
+    )
+    assert {rule.horizon_seconds for rule in arbitration.rules} == {300}
     context = configuration.resolve_context(date(2026, 9, 5))
     assert context.version == "decision-context-v3"
     assert context.zone_lookback_seconds == 900
@@ -69,25 +67,8 @@ def test_trading_configuration_is_strict_effective_dated_and_stable() -> None:
     assert context.historical_proxy_stale_after_seconds == 65
     assert context.tradable_market_statuses == ("LO", "OPEN", "CONTINUOUS")
     assert len(context.sha256) == 64
-    decisions = configuration.resolve_decisions(date(2026, 9, 5))
-    assert decisions.version == "microstructure-decisions-v1"
-    assert decisions.strategy_version == strategies.version
-    assert decisions.outcome_version == outcomes.version
-    assert tuple(rule.strategy for rule in decisions.rules) == (
-        "momentum",
-        "order_flow",
-        "relative_value",
-    )
-    assert decisions.rules[0].buy_minimum_strength == Decimal("0.68")
-    assert decisions.rules[1].horizon_seconds == 300
-    assert decisions.maximum_spread_bps == Decimal(25)
-    assert decisions.maximum_trade_age_seconds == Decimal(30)
-    assert decisions.maximum_quote_age_seconds == Decimal(5)
-    assert decisions.cooldown_seconds == 60
     assert len(outcomes.sha256) == 64
-    assert len(strategies.sha256) == 64
-    assert len(evaluation.sha256) == 64
-    assert len(decisions.sha256) == 64
+    assert len(baseline.sha256) == 64
     assert len(configuration.sha256) == 64
     assert len(version.sha256) == 64
     assert version.sha256 != configuration.sha256
@@ -105,6 +86,31 @@ def test_trading_configuration_rejects_unknown_fields(tmp_path: Path) -> None:
 
     with pytest.raises(TradingConfigurationError, match="invalid trading configuration"):
         load_configuration(path)
+
+
+@pytest.mark.parametrize("schema_version", (1, 3))
+def test_trading_configuration_rejects_unsupported_schema_version(
+    schema_version: int,
+) -> None:
+    payload = CONFIGURATION.read_text(encoding="utf-8").replace(
+        "schema_version: 2",
+        f"schema_version: {schema_version}",
+        1,
+    )
+
+    with pytest.raises(TradingConfigurationError, match="invalid trading configuration"):
+        parse_configuration(payload)
+
+
+def test_candidate_arbitration_horizon_requires_a_configured_outcome() -> None:
+    payload = CONFIGURATION.read_text(encoding="utf-8").replace(
+        "        horizon_seconds: 300",
+        "        horizon_seconds: 120",
+        1,
+    )
+
+    with pytest.raises(TradingConfigurationError, match="invalid trading configuration"):
+        parse_configuration(payload)
 
 
 def test_outcome_assumptions_do_not_change_feature_configuration_identity() -> None:
@@ -153,27 +159,6 @@ def test_capture_scope_must_cover_effective_decision_requirements() -> None:
         configuration.capture_scope(date(2026, 9, 5))
 
 
-def test_strategy_assumptions_have_an_independent_identity() -> None:
-    original = load_configuration(CONFIGURATION)
-    changed = parse_configuration(
-        CONFIGURATION.read_text(encoding="utf-8").replace(
-            "momentum_window_seconds: 60",
-            "momentum_window_seconds: 300",
-        )
-    )
-    effective_date = date(2026, 9, 5)
-
-    assert changed.resolve(effective_date).sha256 == original.resolve(effective_date).sha256
-    assert (
-        changed.resolve_outcomes(effective_date).sha256
-        == original.resolve_outcomes(effective_date).sha256
-    )
-    assert (
-        changed.resolve_strategies(effective_date).sha256
-        != original.resolve_strategies(effective_date).sha256
-    )
-
-
 def test_context_assumptions_have_an_independent_identity() -> None:
     original = load_configuration(CONFIGURATION)
     changed = parse_configuration(
@@ -186,21 +171,17 @@ def test_context_assumptions_have_an_independent_identity() -> None:
 
     assert changed.resolve(effective_date).sha256 == original.resolve(effective_date).sha256
     assert (
-        changed.resolve_strategies(effective_date).sha256
-        == original.resolve_strategies(effective_date).sha256
-    )
-    assert (
         changed.resolve_context(effective_date).sha256
         != original.resolve_context(effective_date).sha256
     )
 
 
-def test_strategy_evaluation_assumptions_have_an_independent_identity() -> None:
+def test_baseline_evaluation_assumptions_have_an_independent_identity() -> None:
     original = load_configuration(CONFIGURATION)
     changed = parse_configuration(
         CONFIGURATION.read_text(encoding="utf-8").replace(
-            "score_bucket_count: 5",
-            "score_bucket_count: 10",
+            "development_sessions: 20",
+            "development_sessions: 25",
         )
     )
     effective_date = date(2026, 9, 5)
@@ -211,33 +192,8 @@ def test_strategy_evaluation_assumptions_have_an_independent_identity() -> None:
         == original.resolve_outcomes(effective_date).sha256
     )
     assert (
-        changed.resolve_strategies(effective_date).sha256
-        == original.resolve_strategies(effective_date).sha256
-    )
-    assert (
-        changed.resolve_strategy_evaluation(effective_date).sha256
-        != original.resolve_strategy_evaluation(effective_date).sha256
-    )
-
-
-def test_decision_assumptions_have_an_independent_identity() -> None:
-    original = load_configuration(CONFIGURATION)
-    changed = parse_configuration(
-        CONFIGURATION.read_text(encoding="utf-8").replace(
-            'buy_minimum_strength: "0.68"',
-            'buy_minimum_strength: "0.70"',
-        )
-    )
-    effective_date = date(2026, 9, 5)
-
-    assert changed.resolve(effective_date).sha256 == original.resolve(effective_date).sha256
-    assert (
-        changed.resolve_strategies(effective_date).sha256
-        == original.resolve_strategies(effective_date).sha256
-    )
-    assert (
-        changed.resolve_decisions(effective_date).sha256
-        != original.resolve_decisions(effective_date).sha256
+        changed.resolve_baseline_evaluation(effective_date).sha256
+        != original.resolve_baseline_evaluation(effective_date).sha256
     )
 
 
@@ -283,15 +239,7 @@ def test_trading_configuration_rejects_overlapping_versions(tmp_path: Path) -> N
                 "effective_to": effective_to,
             }
         )
-    payload = {
-        "schema_version": 1,
-        "versions": versions,
-        "outcomes": load_configuration(CONFIGURATION).model_dump(mode="json")["outcomes"],
-        "strategies": load_configuration(CONFIGURATION).model_dump(mode="json")["strategies"],
-        "strategy_evaluations": load_configuration(CONFIGURATION).model_dump(mode="json")[
-            "strategy_evaluations"
-        ],
-    }
+    payload = load_configuration(CONFIGURATION).model_dump(mode="json") | {"versions": versions}
     path = tmp_path / "trading.yaml"
     path.write_text(json.dumps(payload), encoding="utf-8")
 
@@ -307,9 +255,7 @@ def test_trading_configuration_fails_closed_for_unconfigured_date() -> None:
     with pytest.raises(TradingConfigurationError, match="found 0"):
         configuration.resolve_outcomes(date(2026, 8, 26))
     with pytest.raises(TradingConfigurationError, match="found 0"):
-        configuration.resolve_strategies(date(2026, 8, 26))
-    with pytest.raises(TradingConfigurationError, match="found 0"):
-        configuration.resolve_strategy_evaluation(date(2026, 8, 26))
+        configuration.resolve_baseline_evaluation(date(2026, 8, 26))
 
 
 @pytest.mark.parametrize(
@@ -338,36 +284,12 @@ def test_trading_configuration_rejects_invalid_outcome_policy(
 @pytest.mark.parametrize(
     ("original", "invalid"),
     (
-        ("momentum_window_seconds: 60", "momentum_window_seconds: 0"),
-        ("relative_value_symbols: [VIC, VHM]", "relative_value_symbols: [VIC, VIC]"),
-        ("relative_value_symbols: [VIC, VHM]", "relative_value_symbols: [vic, VHM]"),
-    ),
-)
-def test_trading_configuration_rejects_invalid_strategy_policy(
-    tmp_path: Path,
-    original: str,
-    invalid: str,
-) -> None:
-    path = tmp_path / "trading.yaml"
-    path.write_text(
-        CONFIGURATION.read_text(encoding="utf-8").replace(original, invalid),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(TradingConfigurationError, match="invalid trading configuration"):
-        load_configuration(path)
-
-
-@pytest.mark.parametrize(
-    ("original", "invalid"),
-    (
-        ("score_bucket_count: 5", "score_bucket_count: 1"),
-        ("minimum_training_sessions: 20", "minimum_training_sessions: 1"),
-        ("validation_sessions: 5", "validation_sessions: 0"),
+        ("development_sessions: 20", "development_sessions: 1"),
+        ("holdout_sessions: 5", "holdout_sessions: 0"),
         ("purge_sessions: 1", "purge_sessions: 0"),
     ),
 )
-def test_trading_configuration_rejects_invalid_strategy_evaluation_policy(
+def test_trading_configuration_rejects_invalid_baseline_evaluation_policy(
     tmp_path: Path,
     original: str,
     invalid: str,

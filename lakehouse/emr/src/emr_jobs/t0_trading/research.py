@@ -6,7 +6,12 @@ from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 
 from pyspark.sql import SparkSession
-from t0_trading.configuration import ContextVersion, TradingVersion
+from t0_trading.arbitration import CandidateArbitration, arbitrate_candidates
+from t0_trading.configuration import (
+    CandidateArbitrationVersion,
+    ContextVersion,
+    TradingVersion,
+)
 from t0_trading.context import (
     DecisionContext,
     IndexObservation,
@@ -222,6 +227,19 @@ def _evaluation_rows(
     return tuple(rows)
 
 
+def _arbitration_rows(
+    decisions: Sequence[CandidateArbitration], processed_at: datetime
+) -> tuple[dict[str, object], ...]:
+    return tuple(
+        {
+            **decision.model_dump(mode="python"),
+            "processed_at": processed_at,
+            "arbitration_sha256": decision.sha256,
+        }
+        for decision in decisions
+    )
+
+
 def _prepare(
     spark: SparkSession,
     *,
@@ -254,10 +272,12 @@ def publish(
     stream_envelopes: Iterable[StreamEnvelope],
     configuration: TradingVersion,
     context_policy: ContextVersion,
+    arbitration_policy: CandidateArbitrationVersion | None,
     capture_evidence_sha256: str,
 ) -> tuple[
     tuple[DecisionContext, ...],
     tuple[BaselineCandidate, ...],
+    tuple[CandidateArbitration, ...],
     BaselineAuditReport,
 ]:
     """Build and idempotently publish one certified context-aware research matrix."""
@@ -278,6 +298,11 @@ def publish(
         for candidate in candidates
     ):
         raise RuntimeError("materialized strategy candidates require context lineage")
+    arbitrations = (
+        arbitrate_candidates(candidates, arbitration_policy)
+        if arbitration_policy is not None
+        else ()
+    )
     report = evaluate_buy_first_baselines(
         candidates,
         labels,
@@ -306,6 +331,18 @@ def publish(
         view="t0_strategy_candidate_candidates",
         fingerprint="candidate_sha256",
     )
+    arbitration_prepared = (
+        _prepare(
+            spark,
+            product=product,
+            table="candidate_arbitrations",
+            rows=_arbitration_rows(arbitrations, processed_at),
+            view="t0_candidate_arbitration_candidates",
+            fingerprint="arbitration_sha256",
+        )
+        if arbitrations
+        else None
+    )
     evaluation_target, evaluation_keys = _prepare(
         spark,
         product=product,
@@ -315,7 +352,7 @@ def publish(
         fingerprint="audit_sha256",
     )
     # Publish lineage inputs first. The terminal evaluation row is the completion
-    # boundary: consumers must not treat an orphan context/candidate as a full audit.
+    # boundary: consumers must not treat orphan context/candidate/arbitration rows as a full audit.
     insert_missing(
         spark,
         view="t0_decision_context_candidates",
@@ -328,10 +365,18 @@ def publish(
         target=candidate_target,
         keys=candidate_keys,
     )
+    if arbitration_prepared is not None:
+        arbitration_target, arbitration_keys = arbitration_prepared
+        insert_missing(
+            spark,
+            view="t0_candidate_arbitration_candidates",
+            target=arbitration_target,
+            keys=arbitration_keys,
+        )
     insert_missing(
         spark,
         view="t0_strategy_evaluation_candidates",
         target=evaluation_target,
         keys=evaluation_keys,
     )
-    return contexts, candidates, report
+    return contexts, candidates, arbitrations, report
