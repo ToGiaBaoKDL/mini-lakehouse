@@ -17,6 +17,7 @@ from ssi_sdk import Data, Stream
 from ssi_sdk import __version__ as SSI_SDK_VERSION
 from ssi_sdk.enums import Timeframe
 
+from t0_trading.capture.rest_contract import REST_CAPABILITY_CONTRACT
 from t0_trading.credentials import Credentials
 from t0_trading.evidence import fingerprint, observation, public_value
 from t0_trading.provider import authenticated
@@ -221,6 +222,7 @@ def run_certification(
     to_day = now.strftime("%Y/%m/%d")
     report: dict[str, Any] = {
         "certification": "ssi-fastconnect-v3",
+        "rest_capability_contract": REST_CAPABILITY_CONTRACT,
         "generated_at": now.isoformat(),
         "market_timezone": str(MARKET_TIMEZONE),
         "sdk": {"package": "ssi-sdk", "version": SSI_SDK_VERSION},
@@ -281,18 +283,6 @@ def run_certification(
                 report["rest"][f"securities_summary_by_index_historical:{index}"] = _probe(
                     lambda index=index: market.get_securities_summary_by_index_historical(
                         index, from_day, to_day
-                    ),
-                    options.sample_limit,
-                )
-                report["rest"][f"ohlc_1day_historical:{index}"] = _probe_pages(
-                    lambda page, index=index: market.get_ohlc_1day_historical(
-                        index, from_date, to_date, page=page, size=options.page_size
-                    ),
-                    options.sample_limit,
-                )
-                report["rest"][f"ohlc_1minute_historical:{index}"] = _probe_pages(
-                    lambda page, index=index: market.get_ohlc_1minute_historical(
-                        index, from_date, to_date, page=page, size=options.page_size
                     ),
                     options.sample_limit,
                 )

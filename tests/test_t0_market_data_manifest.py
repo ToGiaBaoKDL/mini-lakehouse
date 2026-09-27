@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 import pytest
 from emr_jobs.market_data import rest_manifest as manifest
+from t0_trading.capture.rest_contract import REST_CAPABILITY_CONTRACT
 
 from lakehouse.contracts import load_contracts
 
@@ -159,3 +160,36 @@ def test_bounded_scope_must_match_every_requested_symbol_and_index(
     manifest.require_bounded_scope(bounded)
     with pytest.raises(RuntimeError, match="required bounded request set"):
         manifest.require_bounded_scope(replace(bounded, requests=bounded.requests[:-1]))
+
+
+def test_current_capability_contract_does_not_probe_index_minute_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capture = manifest.load_capture(_capture(monkeypatch), "2026-08-26", RAW_PREFIX)
+    publication = capture.requests[0]
+    endpoints = (
+        *("get_securities_info",) * 2,
+        *("get_securities_summary_historical",) * 2,
+        *("get_ohlc_1day_historical",) * 2,
+        *("get_ohlc_1minute_historical",) * 2,
+        "get_master_data_historical",
+        "get_indexes",
+        *("get_index_summary_historical",) * 2,
+    )
+    bounded = replace(
+        capture,
+        capability_contract=REST_CAPABILITY_CONTRACT,
+        requests=tuple(replace(publication, endpoint=endpoint) for endpoint in endpoints),
+    )
+
+    manifest.require_bounded_scope(bounded)
+    legacy_probe = replace(
+        bounded,
+        requests=bounded.requests
+        + tuple(
+            replace(publication, endpoint="get_ohlc_1minute_historical")
+            for _ in bounded.indices
+        ),
+    )
+    with pytest.raises(RuntimeError, match="required bounded request set"):
+        manifest.require_bounded_scope(legacy_probe)

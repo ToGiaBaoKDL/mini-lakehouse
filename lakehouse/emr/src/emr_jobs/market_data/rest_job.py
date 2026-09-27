@@ -28,7 +28,6 @@ def run(*, source_date: str, capture_manifest_uri: str, contracts_uri: str) -> N
                 "securities",
                 "daily_security_summaries",
                 "intraday_bars_1m",
-                "index_bars_1m",
                 "index_snapshots",
             )
         ),

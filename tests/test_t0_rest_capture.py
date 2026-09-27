@@ -65,6 +65,11 @@ class _Index:
     index_value: float = 1234.5
 
 
+@dataclass
+class _MarketIndex:
+    index: str
+
+
 class _Market:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object]] = []
@@ -101,6 +106,15 @@ class _Market:
         self.calls.append(("index", index))
         return _Index(trading_date)
 
+    def get_indexes(self) -> list[_MarketIndex]:
+        self.calls.append(("indexes", None))
+        return [
+            _MarketIndex("VNINDEX"),
+            _MarketIndex("VN30"),
+            _MarketIndex("VNREAL"),
+            _MarketIndex("HNXINDEX"),
+        ]
+
 
 def test_rest_capture_is_immutable_scoped_and_idempotent() -> None:
     s3 = _S3()
@@ -134,8 +148,10 @@ def test_rest_capture_is_immutable_scoped_and_idempotent() -> None:
     assert manifest["trade_date"] == "2026-08-26"
     assert manifest["symbols"] == ["VIC", "VHM"]
     assert manifest["indices"] == ["VNINDEX", "VN30"]
-    assert len(manifest["requests"]) == 13
-    assert sum(call[0] == "minute" for call in market.calls) == 4
+    assert manifest["capability_contract"] == "ssi-fastconnect-rest/v1"
+    assert len(manifest["requests"]) == 12
+    assert sum(call[0] == "minute" for call in market.calls) == 2
+    assert sum(call[0] == "indexes" for call in market.calls) == 1
     serialized = json.dumps(manifest)
     assert "manual__2026-08-27" not in serialized
 
@@ -154,6 +170,8 @@ def test_rest_capture_is_immutable_scoped_and_idempotent() -> None:
         )
         if "get_master_data_historical" in {record["endpoint"] for record in records}:
             assert {record["symbol"] for record in records} == {"VIC", "VHM"}
+        if "get_indexes" in {record["endpoint"] for record in records}:
+            assert {record["symbol"] for record in records} == {"VNINDEX", "VN30"}
 
 
 def test_rest_capture_rejects_an_existing_manifest_from_another_sdk() -> None:
@@ -210,6 +228,23 @@ def test_capture_options_reject_noncanonical_scope() -> None:
             assert "symbols" in str(error)
         else:
             raise AssertionError("Expected noncanonical symbols to be rejected")
+
+
+def test_rest_capture_rejects_indices_absent_from_the_official_catalog() -> None:
+    class _MissingIndexMarket(_Market):
+        def get_indexes(self) -> list[_MarketIndex]:
+            return [_MarketIndex("VNINDEX")]
+
+    with pytest.raises(RuntimeError, match="missing configured indices: VN30"):
+        capture_rest(
+            _MissingIndexMarket(),
+            S3CaptureStore(_S3(), "s3://landing/root"),
+            RestCaptureOptions(
+                trade_date=date(2026, 8, 26),
+                job_token="run",
+                indices=("VNINDEX", "VN30"),
+            ),
+        )
 
 
 def test_s3_store_defers_only_retryable_sdk_failures() -> None:

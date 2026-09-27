@@ -1,8 +1,12 @@
 """Validate one immutable SSI REST capture manifest and its object lineage."""
 
-from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
+
+from t0_trading.capture.rest_contract import (
+    REST_CAPABILITY_CONTRACT,
+    has_exact_request_set,
+)
 
 from emr_jobs.common.s3 import head_object, read_bytes, split_uri
 from emr_jobs.market_data.capture_manifest import (
@@ -54,22 +58,18 @@ class CaptureRun:
     indices: tuple[str, ...]
     api_version: str
     sdk_version: str
+    capability_contract: str | None
     requests: tuple[RequestPublication, ...]
     objects: tuple[CaptureObject, ...]
 
 
 def require_bounded_scope(capture: CaptureRun) -> None:
-    expected = Counter(
-        {
-            "get_securities_info": len(capture.symbols),
-            "get_securities_summary_historical": len(capture.symbols),
-            "get_ohlc_1day_historical": len(capture.symbols),
-            "get_ohlc_1minute_historical": len(capture.symbols) + len(capture.indices),
-            "get_master_data_historical": 1,
-            "get_index_summary_historical": len(capture.indices),
-        }
-    )
-    if Counter(item.endpoint for item in capture.requests) != expected:
+    if not has_exact_request_set(
+        tuple(item.endpoint for item in capture.requests),
+        symbols=len(capture.symbols),
+        indices=len(capture.indices),
+        allow_legacy_index_minute_probe=capture.capability_contract is None,
+    ):
         raise RuntimeError("SSI capture does not contain the required bounded request set")
 
 
@@ -93,6 +93,9 @@ def load_capture(uri: str, expected_trade_date: str, raw_object_prefix: str) -> 
         raise RuntimeError("SSI capture manifest does not match the requested trade date")
     if run.get("api_version") != API_VERSION or run.get("sdk_version") != SDK_VERSION:
         raise RuntimeError("Unsupported SSI capture API or SDK version")
+    capability_contract = run.get("capability_contract")
+    if capability_contract not in (None, REST_CAPABILITY_CONTRACT):
+        raise RuntimeError("Unsupported SSI REST capability contract")
     symbols = tuple(required(run, "symbols", list))
     indices = tuple(required(run, "indices", list))
     if (
@@ -219,6 +222,7 @@ def load_capture(uri: str, expected_trade_date: str, raw_object_prefix: str) -> 
         indices=indices,
         api_version=API_VERSION,
         sdk_version=SDK_VERSION,
+        capability_contract=capability_contract,
         requests=tuple(publications),
         objects=tuple(objects),
     )

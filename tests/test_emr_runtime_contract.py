@@ -89,6 +89,10 @@ def test_market_data_publication_uses_sdk_summary_fields() -> None:
     source = Path("lakehouse/emr/src/emr_jobs/market_data/rest_curated.py").read_text(
         encoding="utf-8"
     )
+    scope = Path("lakehouse/emr/src/emr_jobs/market_data/rest_scope.py").read_text(encoding="utf-8")
+    contract = Path("t0-trading/src/t0_trading/capture/rest_contract.py").read_text(
+        encoding="utf-8"
+    )
 
     for sdk_field, curated_field in {
         "total_deal": "deal_volume",
@@ -107,7 +111,12 @@ def test_market_data_publication_uses_sdk_summary_fields() -> None:
 
     assert "CAST(NULL AS bigint) AS foreign_buy_volume" not in source
     assert "CAST(NULL AS bigint) AS deal_volume" not in source
-    assert 'scopes.get("get_securities_summary_historical", set())' in source
+    assert '"get_securities_summary_historical"' in contract
+    assert "for capability in REST_CAPABILITIES" in scope
+    assert "if capability.scope == \"symbols\" else expected_indices" in scope
+    assert "DATE '{source_date}' AS trade_date" not in source
+    assert "to_date(substr(get_json_object(record_json, '$.trading_date'), 1, 10)" in source
+    assert "ssi_index_minute_ohlc" not in source
     assert "return False" not in source
 
 

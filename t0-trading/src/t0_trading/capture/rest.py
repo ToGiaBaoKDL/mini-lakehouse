@@ -10,6 +10,7 @@ from typing import Any
 
 from ssi_sdk import __version__ as SSI_SDK_VERSION
 
+from t0_trading.capture.rest_contract import REST_CAPABILITY_CONTRACT
 from t0_trading.capture.store import CaptureStore
 from t0_trading.evidence import public_value
 from t0_trading.identity import canonical_json, sha256
@@ -53,6 +54,7 @@ class _Request:
     identity: str | None = None
     page_size: int | None = None
     max_pages: int = 1
+    identity_field: str = "symbol"
 
 
 def _records(value: object) -> list[object]:
@@ -120,7 +122,7 @@ def _capture_request(
         for record_index, value in enumerate(values):
             public = public_value(value)
             record_json = canonical_json(public).decode("utf-8")
-            symbol = _field(value, "symbol")
+            symbol = _field(value, request.identity_field)
             rows.append(
                 {
                     "request_id": request_id,
@@ -213,11 +215,24 @@ def capture_rest(
         }
         if any(current.get(key) != value for key, value in expected_scope.items()):
             raise RuntimeError("Existing capture manifest does not match the requested scope")
+        if current.get("capability_contract") not in (None, REST_CAPABILITY_CONTRACT):
+            raise RuntimeError("Existing capture manifest uses an unsupported REST contract")
         return store.uri(run_manifest_key)
 
     day = options.trade_date.strftime("%Y/%m/%d")
     day_start = f"{day} 00:00:00"
     day_end = f"{day} 23:59:59"
+    index_catalog = tuple(_records(market.get_indexes()))
+    catalog_indices = {
+        value
+        for item in index_catalog
+        if isinstance((value := _field(item, "index")), str) and value
+    }
+    missing_indices = sorted(set(options.indices) - catalog_indices)
+    if missing_indices:
+        raise RuntimeError(
+            "SSI index catalog is missing configured indices: " + ",".join(missing_indices)
+        )
 
     requests: list[_Request] = []
     for symbol in options.symbols:
@@ -293,39 +308,26 @@ def capture_rest(
             ],
         )
     )
+    requests.append(
+        _Request(
+            "get_indexes",
+            {"scope_indices": list(options.indices)},
+            lambda _page: [
+                item for item in index_catalog if _field(item, "index") in options.indices
+            ],
+            identity_field="index",
+        )
+    )
     for index in options.indices:
-        requests.extend(
-            [
-                _Request(
-                    "get_ohlc_1minute_historical",
-                    {
-                        "symbol": index,
-                        "from_date": day_start,
-                        "to_date": day_end,
-                        "page_size": options.page_size,
-                    },
-                    lambda page, index=index: _records(
-                        market.get_ohlc_1minute_historical(
-                            index,
-                            day_start,
-                            day_end,
-                            page=page,
-                            size=options.page_size,
-                        )
-                    ),
-                    index,
-                    options.page_size,
-                    options.max_pages,
+        requests.append(
+            _Request(
+                "get_index_summary_historical",
+                {"index": index, "trading_date": day},
+                lambda _page, index=index: _records(
+                    market.get_index_summary_historical(index, day)
                 ),
-                _Request(
-                    "get_index_summary_historical",
-                    {"index": index, "trading_date": day},
-                    lambda _page, index=index: _records(
-                        market.get_index_summary_historical(index, day)
-                    ),
-                    index,
-                ),
-            ]
+                index,
+            )
         )
 
     request_manifests = [
@@ -340,6 +342,7 @@ def capture_rest(
     ]
     run_manifest: dict[str, Any] = {
         "schema_version": 1,
+        "capability_contract": REST_CAPABILITY_CONTRACT,
         "trade_date": options.trade_date.isoformat(),
         "symbols": list(options.symbols),
         "indices": list(options.indices),

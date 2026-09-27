@@ -692,14 +692,18 @@ command writes the report before returning non-zero when any probe is partial, s
 provider behavior remains a visible gate. Generated reports are disposable local evidence and are
 not committed.
 
-The REST scope includes one completed trading date of SDK-auto-paginated master data for reference,
-floor, and ceiling prices; security and index one-minute bars; security summaries; and daily index
-context. Index bars are stored separately as `index_bars_1m` with decimal index precision and
-`ssi_rest_index_1m_historical` provenance. Bounded capture uses the SDK aggregate symbol subscription for trades, quotes, and
-foreign-room updates plus the SDK one-minute interval subscription. Certification separately probes
-the index subscription. Provider interval bars remain reconciliation evidence; deterministic bars
-built from captured trades are now certified by the explicit full-session report before any future
-curated promotion.
+The versioned `ssi-fastconnect-rest/v1` contract includes one completed trading date of
+SDK-auto-paginated stock master data, stock summaries, stock daily and one-minute OHLC, the official
+index catalog, and daily index summaries. It deliberately does not claim historical index OHLC:
+the generic SDK method accepts index identifiers but the provider returns no bars for that scope.
+Curated `trade_date` partitions are derived from each provider record and checked against the bounded
+source date; request and processing timestamps never choose the market-data partition.
+`index_bars_1m` remains a provider-neutral target for a separately contracted source; no iBoard data
+is mislabeled as FastConnect SDK evidence. Bounded stream capture uses the SDK aggregate symbol
+subscription for trades, quotes, and foreign-room updates plus the SDK one-minute interval
+subscription. Certification separately probes the index stream subscription. Provider interval bars
+remain reconciliation evidence; deterministic bars built from captured trades are certified by the
+explicit full-session report before any future curated promotion.
 
 ## Delivery gates
 
