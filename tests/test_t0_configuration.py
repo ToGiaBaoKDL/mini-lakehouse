@@ -58,6 +58,23 @@ def test_trading_configuration_is_strict_effective_dated_and_stable() -> None:
         ("mean_reversion", 2),
     )
     assert {rule.horizon_seconds for rule in arbitration.rules} == {300}
+    assert configuration.resolve_promotion_gate(date(2026, 9, 27)) is None
+    promotion_gate = configuration.resolve_promotion_gate(date(2026, 9, 28))
+    assert promotion_gate is not None
+    assert promotion_gate.version == "shadow-to-paper-v1"
+    assert promotion_gate.scope == "SHADOW_TO_PAPER"
+    assert promotion_gate.minimum_selected_count == 5
+    assert promotion_gate.minimum_outcome_coverage_rate == Decimal("0.90")
+    assert len(promotion_gate.targets) == 6
+    assert configuration.resolve_paper_execution(date(2026, 9, 27)) is None
+    paper_execution = configuration.resolve_paper_execution(date(2026, 9, 28))
+    assert paper_execution is not None
+    assert paper_execution.version == "buy-first-paper-execution-v1"
+    assert paper_execution.promotion_gate_version == "shadow-to-paper-v1"
+    assert paper_execution.context_version == "decision-context-v3"
+    assert paper_execution.order_quantity == 100
+    assert paper_execution.lot_size == 100
+    assert paper_execution.maximum_quote_age_seconds == 5
     context = configuration.resolve_context(date(2026, 9, 5))
     assert context.version == "decision-context-v3"
     assert context.zone_lookback_seconds == 900
@@ -70,6 +87,8 @@ def test_trading_configuration_is_strict_effective_dated_and_stable() -> None:
     assert len(outcomes.sha256) == 64
     assert len(baseline.sha256) == 64
     assert len(configuration.sha256) == 64
+    assert len(promotion_gate.sha256) == 64
+    assert len(paper_execution.sha256) == 64
     assert len(version.sha256) == 64
     assert version.sha256 != configuration.sha256
     assert configuration.canonical_bytes() == configuration.canonical_bytes()
@@ -111,6 +130,33 @@ def test_candidate_arbitration_horizon_requires_a_configured_outcome() -> None:
 
     with pytest.raises(TradingConfigurationError, match="invalid trading configuration"):
         parse_configuration(payload)
+
+
+@pytest.mark.parametrize(
+    ("original", "invalid"),
+    (
+        (
+            "evaluation_version: promotion-baseline-holdout-v1",
+            "evaluation_version: missing-evaluation-v1",
+        ),
+        (
+            "arbitration_version: buy-first-candidate-arbitration-v1",
+            "arbitration_version: missing-arbitration-v1",
+        ),
+        (
+            "order_quantity: 100\n    lot_size: 100",
+            "order_quantity: 50\n    lot_size: 100",
+        ),
+    ),
+)
+def test_promotion_and_paper_policies_reject_broken_references(
+    original: str,
+    invalid: str,
+) -> None:
+    with pytest.raises(TradingConfigurationError, match="invalid trading configuration"):
+        parse_configuration(
+            CONFIGURATION.read_text(encoding="utf-8").replace(original, invalid, 1)
+        )
 
 
 def test_outcome_assumptions_do_not_change_feature_configuration_identity() -> None:

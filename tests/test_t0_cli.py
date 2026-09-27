@@ -23,6 +23,8 @@ def test_cli_help_and_validation_do_not_initialize_aws(monkeypatch: Any) -> None
     assert "audit-outcomes" in help_result.stdout
     assert "audit-buy-first-baselines" in help_result.stdout
     assert "audit-baseline-walk-forward" in help_result.stdout
+    assert "evaluate-promotion-gate" in help_result.stdout
+    assert "audit-arbitrated-session" in help_result.stdout
     assert "audit-shadow-journal" in help_result.stdout
     assert "validate-stream-day" in help_result.stdout
     assert "certify-stream-day" in help_result.stdout

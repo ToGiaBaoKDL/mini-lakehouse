@@ -354,6 +354,66 @@ uv run --project t0-trading t0-trading audit-baseline-walk-forward \
 The formulas are frozen before holdout evaluation; development dates are not silently used to tune
 them. An exploratory report always carries `promotion_eligible=false` and can promote only to shadow.
 
+### Shadow-to-paper promotion gate
+
+`t0_trading.promotion` is a pure evidence gate over the population actually selected by the
+prospective arbitration policy. It never substitutes aggregate standalone-baseline performance for
+the candidates the runtime would execute. For each session, `audit-arbitrated-session` replays the
+certified capture, proves the recomputed candidate and arbitration journals against a byte-parity
+shadow audit, joins only `SELECTED` records to their exact BUY outcome, and records capture,
+feature, context, outcome, cost, arbitration, and shadow-audit lineage.
+
+The walk-forward gate evaluates the six configured strategy/symbol/300-second variants over those
+daily selected-population reports. Missing sessions, too few selections, or missing fold outcomes
+remain `PENDING`;
+capture gaps or a failed outcome-coverage, positive-net-rate, average-net-return, or worst-fold
+threshold produce `FAIL`.
+
+The thresholds in `trading.yaml` are effective from 2026-09-28 and must not be retuned after reading
+their holdout outcomes. A gate `PASS` has scope `SHADOW_TO_PAPER` and the report contract fixes
+`capital_authorized=false`; manual approval or a broker adapter cannot reinterpret it as permission
+to trade capital. The reusable CLI exits with the data-quality code until the gate passes:
+
+```bash
+AWS_PROFILE=tgbao-dev uv run --project t0-trading t0-trading audit-arbitrated-session \
+  --trade-date YYYY-MM-DD \
+  --landing-uri s3://<landing-bucket> \
+  --shadow-audit-file /path/to/shadow-audit-YYYY-MM-DD.json \
+  --output /tmp/t0-arbitrated-session-YYYY-MM-DD.json
+
+uv run --project t0-trading t0-trading evaluate-promotion-gate \
+  --report-file /path/to/t0-arbitrated-session-YYYY-MM-DD.json \
+  --output /tmp/t0-promotion-gate.json
+```
+
+### Paper execution boundary
+
+`t0_trading.execution` contains broker-neutral paper contracts and no network adapter. The planner
+accepts one exact selected candidate, its pre-entry selection evidence, a timestamped account
+snapshot, current quote/security band, market phase, explicit risk limits, and the effective public
+DTA cost assumption. It also requires an exact promotion `PASS` produced before the candidate's
+trade date and matching the candidate target, gate policy, and arbitration policy. It never accepts
+an `OutcomeLabel`. It emits either a deterministic `PAPER` limit-order intent or ordered block
+reasons for stale/incomplete market state, price/quantity limits, cash, core inventory, daily loss,
+or cycle capacity.
+
+The intent reserves settled inventory for the later sell leg and settled cash including the buy fee;
+sale receivables and advance are not inferred. `PaperResourceLedger` is an immutable, revisioned
+state whose hash is embedded in every intent. Reservation transitions reject an intent planned from
+an older ledger; the future persistence adapter must commit the next revision with compare-and-swap,
+so concurrent candidates cannot spend the same cash or settled shares. Terminal entry transitions
+release unused resources and retain only the quantity actually filled for the SELL leg.
+
+`PaperOrderEvent` is append-only. Every adapter event has an external identity and evidence hash;
+every fill additionally carries its market session, receive sequence, price, incremental quantity,
+available quantity, and source hash. The reducer rejects duplicate evidence, reused or regressing
+market positions, inconsistent cumulative averages, overfills, fills beyond evidenced liquidity,
+and limit violations. SELL planning uses only a terminal entry, its open ledger reservation, and a
+fresh bid at or after the arbitration horizon. A rejected or unfilled entry cannot create an exit,
+while partial exits retain an open reservation for the remaining quantity. The contracts are the
+seam for a future paper adapter; they are deliberately not SSI/VNDIRECT request payloads and cannot
+send an order.
+
 ## Shadow candidate arbitration
 
 The scheduled capture container writes local candidate and arbitration journals from the receipt-ordered queue,

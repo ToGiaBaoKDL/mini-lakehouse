@@ -33,9 +33,12 @@ class ShadowArbitrationAuditReport(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal[2] = 2
+    schema_version: Literal[3] = 3
     status: Literal["passed"] = "passed"
     trade_date: date
+    baseline_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    arbitration_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    arbitration_configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     stream_session_ids: tuple[str, ...]
     capture_evidence_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     capture_message_count: int = Field(ge=0)
@@ -183,6 +186,9 @@ def audit_shadow_journal(
 
     return ShadowArbitrationAuditReport(
         trade_date=manifest.trade_date,
+        baseline_version=manifest.baseline_version,
+        arbitration_version=manifest.arbitration_version,
+        arbitration_configuration_sha256=manifest.arbitration_configuration_sha256,
         stream_session_ids=manifest.stream_session_ids,
         capture_evidence_sha256=capture.evidence_sha256,
         capture_message_count=capture.message_count,

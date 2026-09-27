@@ -72,6 +72,12 @@ def _validate_effective_versions(values: tuple[_EffectiveVersion, ...], label: s
         raise ValueError(f"{label} effective intervals must not overlap")
 
 
+def _intervals_overlap(left: _EffectiveVersion, right: _EffectiveVersion) -> bool:
+    return (left.effective_to is None or right.effective_from <= left.effective_to) and (
+        right.effective_to is None or left.effective_from <= right.effective_to
+    )
+
+
 # Keep Python 3.11 syntax because this package is bundled into the EMR runtime.
 def _resolve_effective(  # noqa: UP047
     values: tuple[_EffectiveVersionT, ...], value: date, label: str
@@ -290,6 +296,60 @@ class CandidateArbitrationVersion(_EffectiveVersion):
         return self
 
 
+class PromotionTarget(_StrictModel):
+    """One fixed baseline variant eligible for evidence-based promotion."""
+
+    strategy: str = Field(pattern=r"^[a-z0-9][a-z0-9_]*$")
+    symbol: str = Field(pattern=r"^[A-Z][A-Z0-9]*$")
+    horizon_seconds: int = Field(ge=1, le=86_400)
+
+
+class PromotionGateVersion(_EffectiveVersion):
+    """Prospective thresholds for moving a fixed hypothesis from shadow to paper."""
+
+    scope: Literal["SHADOW_TO_PAPER"] = "SHADOW_TO_PAPER"
+    evaluation_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    arbitration_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    minimum_selected_count: int = Field(ge=1)
+    minimum_outcome_coverage_rate: Decimal = Field(ge=0, le=1)
+    minimum_positive_net_rate: Decimal = Field(ge=0, le=1)
+    minimum_average_net_return_bps: Decimal
+    minimum_worst_fold_net_return_bps: Decimal
+    maximum_capture_gap_count: int = Field(ge=0)
+    targets: tuple[PromotionTarget, ...]
+
+    @model_validator(mode="after")
+    def validate_targets(self) -> PromotionGateVersion:
+        keys = tuple(
+            (target.strategy, target.symbol, target.horizon_seconds)
+            for target in self.targets
+        )
+        if not keys or len(set(keys)) != len(keys) or tuple(sorted(keys)) != keys:
+            raise ValueError("promotion targets must be unique, non-empty, and ordered")
+        if self.minimum_worst_fold_net_return_bps > self.minimum_average_net_return_bps:
+            raise ValueError("worst-fold threshold cannot exceed the aggregate threshold")
+        return self
+
+
+class PaperExecutionVersion(_EffectiveVersion):
+    """Broker-neutral assumptions for deterministic paper order planning."""
+
+    arbitration_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    promotion_gate_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    context_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    order_quantity: int = Field(ge=1)
+    lot_size: int = Field(ge=1)
+    maximum_quote_age_seconds: int = Field(ge=1, le=300)
+    limit_offset_ticks: int = Field(ge=0, le=100)
+    time_in_force_seconds: int = Field(ge=1, le=300)
+
+    @model_validator(mode="after")
+    def validate_execution(self) -> PaperExecutionVersion:
+        if self.order_quantity % self.lot_size:
+            raise ValueError("paper order quantity must align to lot size")
+        return self
+
+
 class ContextVersion(_EffectiveVersion):
     """Point-in-time zone and broad-market research assumptions."""
 
@@ -332,6 +392,8 @@ class TradingConfiguration(_StrictModel):
     outcomes: tuple[OutcomeVersion, ...]
     baseline_evaluations: tuple[BaselineEvaluationVersion, ...]
     candidate_arbitrations: tuple[CandidateArbitrationVersion, ...]
+    promotion_gates: tuple[PromotionGateVersion, ...]
+    paper_executions: tuple[PaperExecutionVersion, ...]
     contexts: tuple[ContextVersion, ...]
 
     @model_validator(mode="after")
@@ -350,25 +412,71 @@ class TradingConfiguration(_StrictModel):
         ) != len(self.baseline_evaluations):
             raise ValueError("baseline evaluation versions must be unique and canonically ordered")
         _validate_effective_versions(self.candidate_arbitrations, "candidate arbitration")
+        _validate_effective_versions(self.promotion_gates, "promotion gate")
+        _validate_effective_versions(self.paper_executions, "paper execution")
         _validate_effective_versions(self.contexts, "context")
         for arbitration in self.candidate_arbitrations:
             overlapping_outcomes = tuple(
                 outcome
                 for outcome in self.outcomes
-                if (
-                    arbitration.effective_to is None
-                    or outcome.effective_from <= arbitration.effective_to
-                )
-                and (
-                    outcome.effective_to is None
-                    or arbitration.effective_from <= outcome.effective_to
-                )
+                if _intervals_overlap(arbitration, outcome)
             )
             horizons = {rule.horizon_seconds for rule in arbitration.rules}
             if not overlapping_outcomes or any(
                 not horizons.issubset(outcome.horizons_seconds) for outcome in overlapping_outcomes
             ):
                 raise ValueError("candidate arbitration horizons require matching outcome labels")
+        evaluation_versions = {
+            item.version: item for item in self.baseline_evaluations if item.tier == "PROMOTION"
+        }
+        arbitration_versions = {item.version: item for item in self.candidate_arbitrations}
+        for gate in self.promotion_gates:
+            evaluation = evaluation_versions.get(gate.evaluation_version)
+            arbitration = arbitration_versions.get(gate.arbitration_version)
+            if evaluation is None or arbitration is None:
+                raise ValueError("promotion gate references an unknown policy version")
+            if not evaluation.contains(gate.effective_from) or not arbitration.contains(
+                gate.effective_from
+            ):
+                raise ValueError("promotion gate starts outside its referenced policies")
+            if gate.effective_to is not None and (
+                not evaluation.contains(gate.effective_to)
+                or not arbitration.contains(gate.effective_to)
+            ):
+                raise ValueError("promotion gate ends outside its referenced policies")
+            rules = {rule.strategy: rule for rule in arbitration.rules}
+            if any(
+                target.strategy not in rules
+                or target.horizon_seconds != rules[target.strategy].horizon_seconds
+                for target in gate.targets
+            ):
+                raise ValueError("promotion targets do not match arbitration rules")
+            overlapping_markets = tuple(
+                version for version in self.versions if _intervals_overlap(gate, version)
+            )
+            if not overlapping_markets or any(
+                any(target.symbol not in version.market.symbols for target in gate.targets)
+                for version in overlapping_markets
+            ):
+                raise ValueError("promotion targets do not match the effective market universe")
+        gate_versions = {item.version: item for item in self.promotion_gates}
+        context_versions = {item.version: item for item in self.contexts}
+        for execution in self.paper_executions:
+            arbitration = arbitration_versions.get(execution.arbitration_version)
+            gate = gate_versions.get(execution.promotion_gate_version)
+            context = context_versions.get(execution.context_version)
+            if arbitration is None or gate is None or context is None:
+                raise ValueError("paper execution references an unknown policy version")
+            referenced = (arbitration, gate, context)
+            if gate.arbitration_version != arbitration.version or any(
+                not item.contains(execution.effective_from)
+                or (
+                    execution.effective_to is not None
+                    and not item.contains(execution.effective_to)
+                )
+                for item in referenced
+            ):
+                raise ValueError("paper execution falls outside its referenced policies")
         return self
 
     def resolve(self, value: date) -> TradingVersion:
@@ -395,18 +503,35 @@ class TradingConfiguration(_StrictModel):
 
     def resolve_candidate_arbitration(self, value: date) -> CandidateArbitrationVersion | None:
         """Return the prospective policy, or none before arbitration was declared."""
-        matches = tuple(item for item in self.candidate_arbitrations if item.contains(value))
+        return self._resolve_optional(
+            self.candidate_arbitrations,
+            value,
+            "candidate arbitration",
+        )
+
+    def resolve_promotion_gate(self, value: date) -> PromotionGateVersion | None:
+        """Return the prospective shadow-to-paper gate, if one has been declared."""
+        return self._resolve_optional(self.promotion_gates, value, "promotion gate")
+
+    def resolve_paper_execution(self, value: date) -> PaperExecutionVersion | None:
+        """Return the broker-neutral paper policy, if one has been declared."""
+        return self._resolve_optional(self.paper_executions, value, "paper execution")
+
+    @staticmethod
+    def _resolve_optional(
+        values: tuple[_EffectiveVersionT, ...], value: date, label: str
+    ) -> _EffectiveVersionT | None:
+        matches = tuple(item for item in values if item.contains(value))
         if len(matches) > 1:
             raise TradingConfigurationError(
-                f"expected at most one candidate arbitration version for {value.isoformat()}"
+                f"expected at most one {label} version for {value.isoformat()}"
             )
         if matches:
             return matches[0]
-        first = self.candidate_arbitrations[0].effective_from
-        if value < first:
+        if value < values[0].effective_from:
             return None
         raise TradingConfigurationError(
-            f"expected one candidate arbitration version for {value.isoformat()}, found 0"
+            f"expected one {label} version for {value.isoformat()}, found 0"
         )
 
     def resolve_baseline_evaluation(

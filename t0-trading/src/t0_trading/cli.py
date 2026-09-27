@@ -19,7 +19,9 @@ from ssi_sdk import Data
 
 from t0_trading.arbitration import (
     ShadowArbitrationAuditError,
+    ShadowArbitrationAuditReport,
     ShadowArbitrationJournal,
+    arbitrate_candidates,
     audit_shadow_journal,
     prune_shadow_journals,
 )
@@ -42,6 +44,10 @@ from t0_trading.configuration import (
     load_configuration,
 )
 from t0_trading.context import build_decision_contexts
+from t0_trading.controls import (
+    PUBLIC_VNDIRECT_DTA_CHECKED_AT,
+    public_vndirect_dta_costs,
+)
 from t0_trading.credentials import CredentialError, load_credentials
 from t0_trading.features import (
     FeatureAuditReport,
@@ -57,12 +63,14 @@ from t0_trading.market.reconciliation import (
     select_feature_capture,
 )
 from t0_trading.outcomes import OutcomeLabel, build_outcome_audit, label_outcomes
+from t0_trading.promotion import (
+    ArbitratedSessionReport,
+    PromotionGateReport,
+    evaluate_arbitrated_session,
+    evaluate_promotion_gate,
+)
 from t0_trading.provider import authenticated, market_stream
 from t0_trading.simulation import SimulationRequest, simulate_cycles
-from t0_trading.simulation.presets import (
-    PUBLIC_VNDIRECT_DTA_CHECKED_AT,
-    public_vndirect_dta_costs,
-)
 from t0_trading.strategy.baseline_audit import (
     BaselineAuditReport,
     evaluate_buy_first_baselines,
@@ -232,6 +240,8 @@ def check_config(
         promotion_evaluation = configuration.resolve_baseline_evaluation(selected_date, "PROMOTION")
         context = configuration.resolve_context(selected_date)
         arbitration = configuration.resolve_candidate_arbitration(selected_date)
+        promotion_gate = configuration.resolve_promotion_gate(selected_date)
+        paper_execution = configuration.resolve_paper_execution(selected_date)
     except TradingConfigurationError as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error
@@ -252,6 +262,14 @@ def check_config(
                 "context_version_sha256": context.sha256,
                 "arbitration_version": arbitration.version if arbitration else None,
                 "arbitration_version_sha256": arbitration.sha256 if arbitration else None,
+                "promotion_gate_version": promotion_gate.version if promotion_gate else None,
+                "promotion_gate_version_sha256": (
+                    promotion_gate.sha256 if promotion_gate else None
+                ),
+                "paper_execution_version": paper_execution.version if paper_execution else None,
+                "paper_execution_version_sha256": (
+                    paper_execution.sha256 if paper_execution else None
+                ),
                 "version": version.version,
                 "version_sha256": version.sha256,
             },
@@ -718,6 +736,120 @@ def audit_baseline_walk_forward_command(
     _emit_model(result, output)
 
 
+def audit_arbitrated_session_command(
+    trade_date: Annotated[
+        str,
+        typer.Option(help="Prospective exchange-local trade date in YYYY-MM-DD format."),
+    ],
+    landing_uri: Annotated[str, typer.Option(help="Landing S3 root URI.")],
+    shadow_audit_file: Annotated[
+        Path,
+        typer.Option(
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            help="Byte-parity ShadowArbitrationAuditReport JSON for the same date.",
+        ),
+    ],
+    region: Annotated[str, typer.Option(help="AWS region containing the landing bucket.")] = (
+        "ap-southeast-1"
+    ),
+    config: Annotated[Path, typer.Option(help="Versioned non-secret trading YAML.")] = (
+        DEFAULT_TRADING_CONFIG
+    ),
+    output: Annotated[
+        Path | None,
+        typer.Option(help="Optional local JSON report path; stdout is always emitted."),
+    ] = None,
+) -> None:
+    """Evaluate outcomes only for candidates proven SELECTED by the shadow journal."""
+    parsed_trade_date = _parse_trade_date(trade_date)
+    try:
+        shadow_audit = ShadowArbitrationAuditReport.model_validate_json(
+            shadow_audit_file.read_bytes()
+        )
+        reader, configuration, snapshots, labels = _replay_outcome_day(
+            parsed_trade_date, landing_uri, region, config
+        )
+        version = configuration.resolve(parsed_trade_date)
+        contexts = build_decision_contexts(
+            snapshots,
+            reader.envelopes(),
+            version,
+            configuration.resolve_context(parsed_trade_date),
+        )
+        candidates = score_buy_first_baselines(snapshots, contexts)
+        arbitration = configuration.resolve_candidate_arbitration(parsed_trade_date)
+        gate = configuration.resolve_promotion_gate(parsed_trade_date)
+        if arbitration is None or gate is None:
+            raise ValueError("no prospective arbitration/promotion policy covers this session")
+        arbitrations = arbitrate_candidates(candidates, arbitration)
+        costs = public_vndirect_dta_costs(
+            parsed_trade_date,
+            checked_at=PUBLIC_VNDIRECT_DTA_CHECKED_AT,
+        )
+        report = evaluate_arbitrated_session(
+            candidates,
+            arbitrations,
+            labels,
+            costs,
+            shadow_audit,
+            gate,
+            capture_evidence_sha256=reader.evidence_sha256,
+        )
+    except (OSError, TradingConfigurationError, ValidationError, ValueError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+    except (CaptureStoreUnavailable, BotoCoreError) as error:
+        typer.echo(f"SSI arbitrated session audit failed: {_safe_error(error)}", err=True)
+        raise typer.Exit(code=1) from None
+    _emit_model(report, output)
+
+
+def evaluate_promotion_gate_command(
+    report_file: Annotated[
+        list[Path],
+        typer.Option(help="Daily ArbitratedSessionReport JSON; repeat in any date order."),
+    ],
+    config: Annotated[Path, typer.Option(help="Versioned non-secret trading YAML.")] = (
+        DEFAULT_TRADING_CONFIG
+    ),
+    output: Annotated[
+        Path | None,
+        typer.Option(help="Optional local JSON path; stdout is always emitted."),
+    ] = None,
+) -> None:
+    """Evaluate the prospective shadow-to-paper gate; never authorize capital."""
+    try:
+        configuration = load_configuration(config)
+        sessions: dict[date, ArbitratedSessionReport] = {}
+        for path in report_file:
+            report = ArbitratedSessionReport.model_validate_json(path.read_bytes())
+            if report.trade_date in sessions:
+                raise ValueError("arbitrated session report dates must be unique")
+            sessions[report.trade_date] = report
+        if not sessions:
+            raise ValueError("promotion gate requires daily arbitrated session reports")
+        effective_date = max(sessions)
+        gate = configuration.resolve_promotion_gate(effective_date)
+        arbitration = configuration.resolve_candidate_arbitration(effective_date)
+        if gate is None or arbitration is None:
+            raise ValueError("no prospective promotion policy covers the latest session")
+        result: PromotionGateReport = evaluate_promotion_gate(
+            sessions,
+            configuration.resolve_baseline_evaluation(effective_date, "PROMOTION"),
+            gate,
+            arbitration,
+        )
+    except (OSError, TradingConfigurationError, ValidationError, ValueError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+    _emit_model(result, output)
+    if result.status != "PASS":
+        raise typer.Exit(code=INELIGIBLE_EXIT_CODE)
+
+
 def simulate_cycles_command(
     input_file: Annotated[
         Path,
@@ -894,6 +1026,8 @@ app.command("audit-features")(audit_features_command)
 app.command("audit-outcomes")(audit_outcomes_command)
 app.command("audit-buy-first-baselines")(audit_buy_first_baselines_command)
 app.command("audit-baseline-walk-forward")(audit_baseline_walk_forward_command)
+app.command("audit-arbitrated-session")(audit_arbitrated_session_command)
+app.command("evaluate-promotion-gate")(evaluate_promotion_gate_command)
 app.command("simulate-cycles")(simulate_cycles_command)
 app.command("audit-shadow-journal")(audit_shadow_journal_command)
 app.command("validate-stream-day")(validate_stream_day_command)

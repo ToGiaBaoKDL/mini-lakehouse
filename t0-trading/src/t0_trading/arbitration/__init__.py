@@ -15,6 +15,7 @@ from t0_trading.arbitration.model import (
     ArbitrationStatus,
     CandidateArbitration,
     RejectionReason,
+    require_selected_candidate,
 )
 
 __all__ = [
@@ -29,4 +30,5 @@ __all__ = [
     "arbitrate_candidates",
     "audit_shadow_journal",
     "prune_shadow_journals",
+    "require_selected_candidate",
 ]

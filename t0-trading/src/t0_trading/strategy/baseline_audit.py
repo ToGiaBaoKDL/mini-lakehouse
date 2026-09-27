@@ -10,10 +10,10 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from t0_trading.context import ContextDataMode, MarketRegime
+from t0_trading.controls import CostPolicy, conditional_net_return_bps
 from t0_trading.identity import canonical_json, sha256
-from t0_trading.numeric import basis_points, rate, ratio
+from t0_trading.numeric import rate, ratio
 from t0_trading.outcomes import OutcomeLabel
-from t0_trading.simulation.model import CostPolicy
 from t0_trading.strategy.baselines import (
     BASELINE_GROUP_NAMES,
     BASELINE_NAMES,
@@ -21,7 +21,6 @@ from t0_trading.strategy.baselines import (
     BaselineName,
 )
 
-_TEN_THOUSAND = Decimal(10_000)
 _SYMBOLS = ("VIC", "VHM")
 
 
@@ -168,17 +167,6 @@ def _average(values: Sequence[Decimal]) -> Decimal | None:
     return ratio(sum(values, Decimal(0)), len(values), quantum=Decimal("0.0001"))
 
 
-def _conditional_net_bps(label: OutcomeLabel, costs: CostPolicy) -> Decimal:
-    """Apply both-side fees/tax/slippage after the visible-book VWAP."""
-    if label.action != "BUY" or label.entry_vwap is None or label.horizon_vwap is None:
-        raise ValueError("conditional net return requires a priced BUY label")
-    entry = label.entry_vwap * (1 + (costs.buy_fee_bps + costs.extra_slippage_bps) / _TEN_THOUSAND)
-    exit_value = label.horizon_vwap * (
-        1 - (costs.sell_fee_bps + costs.sell_tax_bps + costs.extra_slippage_bps) / _TEN_THOUSAND
-    )
-    return basis_points(exit_value - entry, entry)
-
-
 def _priced_outcomes(
     candidates: Sequence[BaselineCandidate],
     horizon: int,
@@ -206,7 +194,7 @@ def _priced_outcomes(
                 raise ValueError("eligible baseline outcome must be priced")
             eligible.append(label)
             gross.append(label.gross_return_bps)
-    return eligible, gross, [_conditional_net_bps(label, costs) for label in eligible]
+    return eligible, gross, [conditional_net_return_bps(label, costs) for label in eligible]
 
 
 def evaluate_buy_first_baselines(

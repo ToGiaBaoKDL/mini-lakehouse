@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 from t0_trading.configuration import load_configuration
+from t0_trading.controls import CostPolicy
 from t0_trading.features import FeatureSnapshot, WindowFeatures
 from t0_trading.market.session import MarketSession
 from t0_trading.numeric import basis_points
 from t0_trading.outcomes import OutcomeLabel
-from t0_trading.simulation.model import CostPolicy
 from t0_trading.strategy.baseline_audit import evaluate_buy_first_baselines
 from t0_trading.strategy.baseline_walk_forward import evaluate_baseline_walk_forward
 from t0_trading.strategy.baselines import BaselineCandidate, score_buy_first_baselines

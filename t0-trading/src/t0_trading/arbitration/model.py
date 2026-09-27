@@ -9,6 +9,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from t0_trading.identity import canonical_json, sha256
+from t0_trading.strategy.baselines import BaselineCandidate
 
 ArbitrationStatus = Literal["SELECTED", "REJECTED"]
 RejectionReason = Literal[
@@ -94,3 +95,23 @@ class CandidateArbitration(BaseModel):
     @property
     def sha256(self) -> str:
         return sha256(self.canonical_bytes())
+
+
+def require_selected_candidate(
+    candidate: BaselineCandidate,
+    arbitration: CandidateArbitration,
+) -> None:
+    """Validate the canonical candidate-to-selection lineage once at every boundary."""
+    if (
+        not candidate.is_candidate
+        or arbitration.status != "SELECTED"
+        or arbitration.candidate_version != candidate.baseline_version
+        or arbitration.candidate_sha256 != candidate.sha256
+        or arbitration.strategy != candidate.strategy
+        or arbitration.symbol != candidate.symbol
+        or arbitration.trade_date != candidate.trade_date
+        or arbitration.decision_at != candidate.decision_at
+        or arbitration.strength != candidate.strength
+        or arbitration.selected_candidate_sha256 != candidate.sha256
+    ):
+        raise ValueError("candidate and selected arbitration lineage do not match")

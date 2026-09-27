@@ -47,6 +47,39 @@ candidate_arbitrations:
         priority: 2
         minimum_strength: "0"
         horizon_seconds: 300
+promotion_gates:
+  - version: shadow-to-paper-v1
+    # Fixed prospectively before the first arbitration session; never tune on holdout outcomes.
+    effective_from: 2026-09-28
+    effective_to: null
+    scope: SHADOW_TO_PAPER
+    evaluation_version: promotion-baseline-holdout-v1
+    arbitration_version: buy-first-candidate-arbitration-v1
+    minimum_selected_count: 5
+    minimum_outcome_coverage_rate: "0.90"
+    minimum_positive_net_rate: "0.55"
+    minimum_average_net_return_bps: "0"
+    minimum_worst_fold_net_return_bps: "-10"
+    maximum_capture_gap_count: 0
+    targets:
+      - {strategy: mean_reversion, symbol: VHM, horizon_seconds: 300}
+      - {strategy: mean_reversion, symbol: VIC, horizon_seconds: 300}
+      - {strategy: momentum_pullback, symbol: VHM, horizon_seconds: 300}
+      - {strategy: momentum_pullback, symbol: VIC, horizon_seconds: 300}
+      - {strategy: vic_vhm_relative, symbol: VHM, horizon_seconds: 300}
+      - {strategy: vic_vhm_relative, symbol: VIC, horizon_seconds: 300}
+paper_executions:
+  - version: buy-first-paper-execution-v1
+    effective_from: 2026-09-28
+    effective_to: null
+    arbitration_version: buy-first-candidate-arbitration-v1
+    promotion_gate_version: shadow-to-paper-v1
+    context_version: decision-context-v3
+    order_quantity: 100
+    lot_size: 100
+    maximum_quote_age_seconds: 5
+    limit_offset_ticks: 0
+    time_in_force_seconds: 5
 contexts:
   - version: decision-context-v3
     effective_from: 2026-08-27
