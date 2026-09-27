@@ -32,42 +32,13 @@ from t0_trading.strategy.baselines import (
     score_buy_first_baselines,
 )
 
-_COMPLETED_RETENTION = timedelta(days=14)
-_PARTIAL_RETENTION = timedelta(days=3)
 _ARBITRATION_SUFFIX = ".arbitrations.jsonl"
-_OWNED_COMPLETED_SUFFIXES = (
-    _ARBITRATION_SUFFIX,
-    ".candidates.jsonl",
-    ".manifest.json",
-)
-_OWNED_PARTIAL_SUFFIXES = tuple(
-    f"{suffix}.partial" for suffix in _OWNED_COMPLETED_SUFFIXES
-)
 
 
 def _utc(value: datetime, name: str) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{name} must be timezone-aware")
     return value.astimezone(UTC)
-
-
-def prune_shadow_journals(directory: Path, *, observed_at: datetime | None = None) -> None:
-    """Remove only owned shadow artifacts after their local diagnostic lifetime."""
-    if not directory.exists():
-        return
-    now = _utc(observed_at or datetime.now(UTC), "observed_at")
-    for path in directory.iterdir():
-        if path.is_symlink() or not path.is_file():
-            continue
-        if path.name.endswith(_OWNED_PARTIAL_SUFFIXES):
-            retention = _PARTIAL_RETENTION
-        elif path.name.endswith(_OWNED_COMPLETED_SUFFIXES):
-            retention = _COMPLETED_RETENTION
-        else:
-            continue
-        modified_at = datetime.fromtimestamp(path.stat().st_mtime, UTC)
-        if modified_at <= now - retention:
-            path.unlink()
 
 
 class ShadowArbitrationManifest(BaseModel):
@@ -127,13 +98,17 @@ class ShadowArbitrationManifest(BaseModel):
         if (
             self.candidate_count != self.expected_candidate_count
             or Path(self.candidate_file).name != self.candidate_file
-            or not self.candidate_file.endswith(".candidates.jsonl")
+            or not self.candidate_file.endswith(
+                (".candidates.jsonl", ".candidates.jsonl.gz")
+            )
         ):
             raise ValueError("shadow candidate summary is inconsistent")
         if (
             self.arbitration_count != self.expected_arbitration_count
             or Path(self.arbitration_file).name != self.arbitration_file
-            or not self.arbitration_file.endswith(_ARBITRATION_SUFFIX)
+            or not self.arbitration_file.endswith(
+                (_ARBITRATION_SUFFIX, f"{_ARBITRATION_SUFFIX}.gz")
+            )
         ):
             raise ValueError("shadow arbitration summary is inconsistent")
         return self

@@ -416,32 +416,40 @@ send an order.
 
 ## Shadow candidate arbitration
 
-The scheduled capture container writes local candidate and arbitration journals from the receipt-ordered queue,
-outside the SSI SDK callback. Its clock stays one feature cadence behind receipt time to avoid racing
-callback delivery. A reconnect is recorded as `CAPTURE_GAP` through the configured warm-up period.
-During processing, the file remains `.jsonl.partial`. A bounded shutdown publishes the journal and
-then a sidecar `.manifest.json` as its commit marker only when capture began before the first decision
-clock, every configured clock was evaluated, and every observed stream session has a terminal S3
-capture manifest for the same trade date. The sidecar owns feature, context, baseline, arbitration, session,
-count, and checksum lineage; consumers ignore partial files or journals without the manifest. The
-`.candidates.jsonl` artifact contains all three baseline outcomes—including abstentions—for every
-symbol and clock; `.arbitrations.jsonl` records a selection or structured rejection for each one. Shadow
-initialization, processing, or reporting errors disable only the journal; immutable raw capture
-remains the primary workload and continues independently. The local journal is parity evidence, not
-a serving database or notification queue. Completed local artifacts are retained for 14 days and
-partial artifacts for three days; cleanup runs before the scheduled capture opens a new journal.
+The scheduled capture container builds candidate and arbitration journals from the receipt-ordered
+queue outside the SSI SDK callback. Its clock stays one feature cadence behind receipt time to avoid
+racing callback delivery. A reconnect is recorded as `CAPTURE_GAP` through the configured warm-up
+period. Working files exist only in the container's temporary filesystem. At bounded shutdown they
+are deterministically compressed and published as immutable S3 objects; `manifest.json` is written
+last as the sole commit marker after every configured clock was evaluated and every observed stream
+session has a terminal capture manifest for the same trade date. The existing bounded capture spool
+acts only as an outbox during S3 unavailability and removes delivered objects; it is not a journal
+source of truth.
 
-Audit a committed local journal against the exact terminal capture lineage declared by its manifest:
+The manifest owns feature, context, baseline, arbitration, session, count, and checksum lineage.
+Consumers ignore payloads without the manifest. `shadow.candidates.jsonl.gz` contains all three
+baseline outcomes—including abstentions—for every symbol and clock, while
+`shadow.arbitrations.jsonl.gz` records a selection or structured rejection for each one. Shadow
+initialization or processing errors do not interrupt immutable raw capture; the downstream evidence
+task fails closed instead. There is no persistent OCI journal directory and Airflow does not mount
+host state.
+
+Audit committed S3 evidence against the exact terminal capture lineage declared by its manifest:
 
 ```bash
 uv run --project t0-trading t0-trading audit-shadow-journal \
-  --manifest /path/to/YYYY-MM-DDTHHMMSS.ffffffZ.manifest.json
+  --manifest-uri s3://<landing-bucket>/stream/ssi_fastconnect_stream/promotion/shadow_journals/trade_date=YYYY-MM-DD/manifest.json
 ```
 
-The audit validates canonical local artifacts, effective policy hashes, the complete feature clock,
+The audit validates canonical immutable objects, effective policy hashes, the complete feature clock,
 every S3 manifest and batch checksum, receipt ordering, capture gaps, record counts, and finally
 compares every journal record byte-for-byte with deterministic replay. It is read-only and exits
 non-zero on any mismatch.
+
+After stream certification, `etl_emr_ingest_market_data_stream` runs this audit automatically,
+publishes the daily arbitrated-session report, reloads prior committed reports from S3, and writes an
+immutable as-of promotion-gate report. `PENDING` while fewer than 26 eligible sessions exist is a
+successful orchestration state; missing or conflicting evidence fails the task.
 
 dbt exposes `analytics_trading.fct_trading_backtest_observations` as a safe-by-default view. It
 inner joins the current passed certification, eligible snapshots, their normalized windows, and

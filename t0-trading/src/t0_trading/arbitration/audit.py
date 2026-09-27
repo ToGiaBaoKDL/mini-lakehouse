@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
-import hashlib
+import gzip
+import io
 from datetime import date
-from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from t0_trading.arbitration.engine import arbitrate_candidates
 from t0_trading.arbitration.journal import ShadowArbitrationManifest
 from t0_trading.capture.reader import StreamDayReader, StreamSessionReader
-from t0_trading.capture.store import CaptureStoreUnavailable
+from t0_trading.capture.store import CaptureStoreUnavailable, S3CaptureStore
 from t0_trading.configuration import TradingConfiguration
 from t0_trading.context import build_decision_contexts
+from t0_trading.evidence_paths import shadow_journal_manifest_key
 from t0_trading.features import decision_times, replay_features
 from t0_trading.identity import sha256
 from t0_trading.strategy.baselines import (
@@ -29,7 +31,7 @@ class ShadowArbitrationAuditError(RuntimeError):
 
 
 class ShadowArbitrationAuditReport(BaseModel):
-    """Proof that local candidate/arbitration output equals deterministic S3 replay."""
+    """Proof that immutable candidate/arbitration output equals deterministic replay."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -50,57 +52,70 @@ class ShadowArbitrationAuditReport(BaseModel):
     arbitration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
-def _load_manifest(path: Path) -> tuple[ShadowArbitrationManifest, bytes]:
-    if path.is_symlink() or not path.is_file() or not path.name.endswith(".manifest.json"):
-        raise ShadowArbitrationAuditError("shadow journal manifest path is invalid")
+def _load_manifest(
+    manifest_uri: str, s3_client: Any
+) -> tuple[ShadowArbitrationManifest, bytes, S3CaptureStore, str]:
+    parsed = urlparse(manifest_uri)
+    key = parsed.path.lstrip("/")
+    if parsed.scheme != "s3" or not parsed.netloc or not key.endswith("/manifest.json"):
+        raise ShadowArbitrationAuditError("shadow journal manifest URI is invalid")
+    store = S3CaptureStore(s3_client, f"s3://{parsed.netloc}")
     try:
-        body = path.read_bytes()
+        body = store.read_capture(key)
+        if body is None:
+            raise ShadowArbitrationAuditError("shadow journal manifest does not exist")
         manifest = ShadowArbitrationManifest.model_validate_json(body)
-    except (OSError, ValueError) as error:
+    except ShadowArbitrationAuditError:
+        raise
+    except (RuntimeError, ValueError) as error:
         raise ShadowArbitrationAuditError("shadow journal manifest is invalid") from error
-    if body != manifest.canonical_bytes():
+    if (
+        body != manifest.canonical_bytes()
+        or not key.endswith(shadow_journal_manifest_key(manifest.trade_date))
+    ):
         raise ShadowArbitrationAuditError("shadow journal manifest is not canonical")
-    expected_name = manifest.arbitration_file.removesuffix(".arbitrations.jsonl") + ".manifest.json"
-    if path.name != expected_name:
-        raise ShadowArbitrationAuditError("shadow journal manifest file lineage is inconsistent")
-    return manifest, body
+    return manifest, body, store, key.rsplit("/", maxsplit=1)[0]
 
 
-def _journal_digest(path: Path) -> str:
-    if path.is_symlink() or not path.is_file():
-        raise ShadowArbitrationAuditError("shadow journal does not exist")
+def _read_journal(store: S3CaptureStore, key: str, label: str) -> bytes:
     try:
-        with path.open("rb") as journal:
-            return hashlib.file_digest(journal, "sha256").hexdigest()
-    except OSError as error:
-        raise ShadowArbitrationAuditError("shadow journal cannot be read") from error
+        compressed = store.read_capture(key)
+        if compressed is None:
+            raise ShadowArbitrationAuditError(f"shadow {label} journal does not exist")
+        return gzip.decompress(compressed)
+    except ShadowArbitrationAuditError:
+        raise
+    except (OSError, RuntimeError) as error:
+        raise ShadowArbitrationAuditError(f"shadow {label} journal is invalid") from error
 
 
-def _verify_replay(path: Path, records: tuple[Any, ...], label: str) -> None:
-    try:
-        with path.open("rb") as journal:
-            for record in records:
-                if journal.readline() != record.canonical_bytes() + b"\n":
-                    raise ShadowArbitrationAuditError(f"shadow {label} journal differs from replay")
-            if journal.read(1):
-                raise ShadowArbitrationAuditError(
-                    f"shadow {label} journal contains trailing records"
-                )
-    except OSError as error:
-        raise ShadowArbitrationAuditError(f"shadow {label} journal cannot be read") from error
+def _verify_replay(body: bytes, records: tuple[Any, ...], label: str) -> None:
+    journal = io.BytesIO(body)
+    for record in records:
+        if journal.readline() != record.canonical_bytes() + b"\n":
+            raise ShadowArbitrationAuditError(f"shadow {label} journal differs from replay")
+    if journal.read(1):
+        raise ShadowArbitrationAuditError(f"shadow {label} journal contains trailing records")
 
 
 def audit_shadow_journal(
-    manifest_path: Path,
+    manifest_uri: str,
     s3_client: Any,
     configuration: TradingConfiguration,
 ) -> ShadowArbitrationAuditReport:
     """Prove one committed journal against immutable capture and policy lineage."""
-    manifest, manifest_body = _load_manifest(manifest_path)
-    candidate_path = manifest_path.with_name(manifest.candidate_file)
-    arbitration_path = manifest_path.with_name(manifest.arbitration_file)
-    candidate_sha256 = _journal_digest(candidate_path)
-    arbitration_sha256 = _journal_digest(arbitration_path)
+    manifest, manifest_body, store, root = _load_manifest(manifest_uri, s3_client)
+    if not (
+        manifest.candidate_file.endswith(".candidates.jsonl.gz")
+        and manifest.arbitration_file.endswith(".arbitrations.jsonl.gz")
+    ):
+        raise ShadowArbitrationAuditError("shadow journal object lineage is inconsistent")
+    candidate_body = _read_journal(store, f"{root}/{manifest.candidate_file}", "candidate")
+    arbitration_body = _read_journal(
+        store, f"{root}/{manifest.arbitration_file}", "arbitration"
+    )
+    candidate_sha256 = sha256(candidate_body)
+    arbitration_sha256 = sha256(arbitration_body)
     if candidate_sha256 != manifest.candidate_sha256:
         raise ShadowArbitrationAuditError("shadow candidate journal checksum mismatch")
     if arbitration_sha256 != manifest.arbitration_sha256:
@@ -181,8 +196,8 @@ def audit_shadow_journal(
         raise ShadowArbitrationAuditError("shadow candidate summary differs from replay")
     if len(arbitrations) != manifest.arbitration_count:
         raise ShadowArbitrationAuditError("shadow arbitration summary differs from replay")
-    _verify_replay(candidate_path, candidates, "candidate")
-    _verify_replay(arbitration_path, arbitrations, "arbitration")
+    _verify_replay(candidate_body, candidates, "candidate")
+    _verify_replay(arbitration_body, arbitrations, "arbitration")
 
     return ShadowArbitrationAuditReport(
         trade_date=manifest.trade_date,

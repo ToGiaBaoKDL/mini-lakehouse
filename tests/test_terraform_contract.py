@@ -346,6 +346,8 @@ def test_t0_trading_runtime_is_bound_to_owned_raw_prefixes_and_secrets() -> None
     assert "/api/ssi_fastconnect_rest/raw/*" in identity
     assert '"stream/ssi_fastconnect_stream/raw"' in identity
     assert "/stream/ssi_fastconnect_stream/raw/*" in identity
+    assert '"stream/ssi_fastconnect_stream/promotion"' in identity
+    assert "/stream/ssi_fastconnect_stream/promotion/*" in identity
     assert '"rdbms/t0_trading/raw"' not in identity
     assert 'actions   = ["secretsmanager:GetSecretValue"]' in identity
     assert 'actions   = ["ssm:GetParameter"]' in identity

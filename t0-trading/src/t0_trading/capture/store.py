@@ -142,6 +142,29 @@ class S3CaptureStore:
             raise RuntimeError(f"Capture manifest must be an object: {key}")
         return cast(dict[str, Any], value)
 
+    def list_keys(self, prefix: str) -> tuple[str, ...]:
+        """List stable, store-relative keys below one owned prefix."""
+        relative_prefix = prefix.strip("/")
+        physical_prefix = self._physical_key(relative_prefix)
+        if relative_prefix and not physical_prefix.endswith("/"):
+            physical_prefix += "/"
+        root_prefix = f"{self._root}/" if self._root else ""
+        try:
+            paginator = self._client.get_paginator("list_objects_v2")
+            pages = paginator.paginate(Bucket=self._bucket, Prefix=physical_prefix)
+            keys = tuple(
+                item["Key"].removeprefix(root_prefix)
+                for page in pages
+                for item in page.get("Contents", ())
+                if isinstance(item.get("Key"), str) and item["Key"].startswith(root_prefix)
+            )
+        except ClientError as error:
+            _raise_if_unavailable(error)
+            raise
+        except _TRANSPORT_ERRORS as error:
+            raise CaptureStoreUnavailable("capture store is temporarily unavailable") from error
+        return tuple(sorted(keys))
+
     def read_capture(self, key: str) -> bytes | None:
         """Read one object and verify its capture-owned checksum metadata."""
         try:

@@ -1,4 +1,4 @@
-"""Bounded local outbox for immutable stream capture objects."""
+"""Bounded local outbox for immutable stream and derived evidence objects."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ class SpoolFullError(RuntimeError):
 
 
 class CaptureSpool:
-    """Atomically stage capture objects and deliver them through the canonical store."""
+    """Atomically stage evidence objects and deliver commit manifests last."""
 
     def __init__(self, root: Path, *, max_bytes: int) -> None:
         if max_bytes < 1:
@@ -36,14 +36,22 @@ class CaptureSpool:
         return self._bytes
 
     def _entries(self) -> tuple[Path, ...]:
-        return tuple(sorted(path for path in self._root.rglob("*") if path.is_file()))
+        return tuple(
+            sorted(
+                (path for path in self._root.rglob("*") if path.is_file()),
+                key=lambda path: (path.name == "manifest.json", path.as_posix()),
+            )
+        )
 
     def _path(self, key: str) -> Path:
         relative = PurePosixPath(key)
         if not relative.parts or relative.is_absolute() or ".." in relative.parts:
-            raise ValueError("spool object key must be a safe relative path")
-        if not (key.endswith(".json.gz") or key.endswith("/manifest.json")):
-            raise ValueError("spool accepts only capture batches and manifests")
+            raise ValueError("spool evidence key must be a safe relative path")
+        if not (
+            key.endswith((".json.gz", ".jsonl.gz"))
+            or key.endswith("/manifest.json")
+        ):
+            raise ValueError("spool accepts only immutable payloads and manifests")
         return self._root.joinpath(*relative.parts)
 
     def _stage(self, key: str, body: bytes) -> str:
@@ -51,7 +59,7 @@ class CaptureSpool:
         digest = sha256(body)
         if target.exists():
             if sha256(target.read_bytes()) != digest:
-                raise RuntimeError(f"Local capture spool conflict: {key}")
+                raise RuntimeError(f"Local evidence spool conflict: {key}")
             return digest
         if self._bytes + len(body) > self._max_bytes:
             raise SpoolFullError("capture spool capacity exceeded")
@@ -88,7 +96,7 @@ class CaptureSpool:
             body = path.read_bytes()
             digest = sha256(body)
             try:
-                if key.endswith(".json.gz"):
+                if key.endswith((".json.gz", ".jsonl.gz")):
                     _, stored_digest = store.put_capture(key, body)
                 else:
                     value = json.loads(body)

@@ -1,16 +1,23 @@
 """Promotion evaluates the exact prospective arbitration-selected population."""
 
+import json
+from collections.abc import Mapping
 from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import pytest
+from t0_trading.arbitration import ShadowArbitrationAuditReport
 from t0_trading.configuration import load_configuration
-from t0_trading.identity import sha256
+from t0_trading.identity import canonical_json, sha256
 from t0_trading.promotion import (
     ArbitratedSessionEvaluation,
     ArbitratedSessionReport,
     evaluate_promotion_gate,
+    load_session_evidence,
+    publish_gate_evidence,
+    publish_session_evidence,
 )
 
 CONFIGURATION = Path("t0-trading/config/trading.yaml")
@@ -55,6 +62,46 @@ def _session(trade_date: date, *, net_bps: str = "5") -> ArbitratedSessionReport
     )
 
 
+class _Store:
+    def __init__(self) -> None:
+        self.values: dict[str, bytes] = {}
+
+    def uri(self, key: str) -> str:
+        return f"s3://landing/{key}"
+
+    def read_json(self, key: str) -> dict[str, Any] | None:
+        body = self.values.get(key)
+        return None if body is None else json.loads(body)
+
+    def list_keys(self, prefix: str) -> tuple[str, ...]:
+        return tuple(sorted(key for key in self.values if key.startswith(f"{prefix}/")))
+
+    def put_json(self, key: str, value: Mapping[str, Any]) -> tuple[str, str]:
+        body = canonical_json(value)
+        current = self.values.setdefault(key, body)
+        if current != body:
+            raise RuntimeError("immutable conflict")
+        return key, sha256(body)
+
+
+def _shadow_audit(trade_date: date, session: ArbitratedSessionReport):
+    return ShadowArbitrationAuditReport(
+        trade_date=trade_date,
+        baseline_version=session.baseline_version,
+        arbitration_version=session.arbitration_version,
+        arbitration_configuration_sha256=session.arbitration_configuration_sha256,
+        stream_session_ids=("session-1",),
+        capture_evidence_sha256=session.capture_evidence_sha256,
+        capture_message_count=1,
+        gap_count=0,
+        manifest_sha256="5" * 64,
+        candidate_count=1,
+        candidate_sha256="6" * 64,
+        arbitration_count=1,
+        arbitration_sha256="7" * 64,
+    )
+
+
 def test_promotion_stays_pending_until_the_full_session_policy_exists() -> None:
     evaluation, gate, arbitration = _policies()
     sessions = {
@@ -69,6 +116,27 @@ def test_promotion_stays_pending_until_the_full_session_policy_exists() -> None:
     assert report.required_session_count == 26
     assert report.capital_authorized is False
     assert all(item.status == "PENDING" for item in report.targets)
+
+
+def test_daily_evidence_and_as_of_gate_are_immutable_and_reloadable() -> None:
+    evaluation, gate, arbitration = _policies()
+    store = _Store()
+    session = _session(FIRST_DATE)
+    shadow = _shadow_audit(FIRST_DATE, session)
+    session = session.model_copy(
+        update={"shadow_audit_sha256": sha256(canonical_json(shadow.model_dump(mode="json")))}
+    )
+
+    first = publish_session_evidence(store, shadow, session)
+    assert publish_session_evidence(store, shadow, session) == first
+    sessions = load_session_evidence(store, gate, as_of_date=FIRST_DATE)
+    assert sessions == {FIRST_DATE: session}
+
+    report = evaluate_promotion_gate(sessions, evaluation, gate, arbitration)
+    key, digest = publish_gate_evidence(store, as_of_date=FIRST_DATE, report=report)
+    assert key.endswith("as_of_date=2026-09-28/promotion_gate.json")
+    assert digest == report.sha256
+    assert report.status == "PENDING"
 
 
 def test_complete_profitable_selected_holdout_passes_for_paper_only() -> None:

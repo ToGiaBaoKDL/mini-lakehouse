@@ -39,6 +39,24 @@ class _S3:
         self.objects[object_id] = (Body, values["Metadata"])
         self.puts += 1
 
+    def get_paginator(self, name: str) -> Any:
+        assert name == "list_objects_v2"
+        objects = self.objects
+
+        class _Paginator:
+            def paginate(self, *, Bucket: str, Prefix: str) -> list[dict[str, Any]]:
+                return [
+                    {
+                        "Contents": [
+                            {"Key": key.removeprefix(f"{Bucket}/")}
+                            for key in objects
+                            if key.startswith(f"{Bucket}/{Prefix}")
+                        ]
+                    }
+                ]
+
+        return _Paginator()
+
 
 @dataclass
 class _Security:
@@ -172,6 +190,15 @@ def test_rest_capture_is_immutable_scoped_and_idempotent() -> None:
             assert {record["symbol"] for record in records} == {"VIC", "VHM"}
         if "get_indexes" in {record["endpoint"] for record in records}:
             assert {record["symbol"] for record in records} == {"VNINDEX", "VN30"}
+
+
+def test_s3_store_lists_only_relative_keys_below_its_owned_root() -> None:
+    s3 = _S3()
+    store = S3CaptureStore(s3, "s3://landing/root")
+    store.put_json("promotion/a.json", {"value": 1})
+    store.put_json("other/b.json", {"value": 2})
+
+    assert store.list_keys("promotion") == ("promotion/a.json",)
 
 
 def test_rest_capture_rejects_an_existing_manifest_from_another_sdk() -> None:

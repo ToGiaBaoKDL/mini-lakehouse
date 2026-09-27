@@ -1,4 +1,4 @@
-"""Certify and publish one terminal SSI Stream trading day."""
+"""Certify, publish, and audit one terminal SSI Stream trading day."""
 
 from datetime import timedelta
 
@@ -8,7 +8,7 @@ from callbacks.notifications import (
     dag_success_callbacks,
     task_data_quality_callbacks,
 )
-from config.assets import CURATED_MARKET_DATA, CURATED_T0_TRADING
+from config.assets import CURATED_MARKET_DATA, CURATED_T0_TRADING, T0_PROMOTION_EVIDENCE
 from config.templates import (
     DAG_START_DATE,
     LOCAL_TIMEZONE,
@@ -92,5 +92,25 @@ with DAG(
             detail="Stream evidence was published, but deterministic features were withheld."
         ),
     )
+    publish_promotion = docker_task(
+        task_id="publish_t0_promotion_evidence",
+        image="t0-trading:runtime",
+        command=[
+            "publish-promotion-evidence",
+            "--trade-date",
+            TRADE_DATE,
+            "--landing-uri",
+            runtime_value("storage/landing_uri"),
+        ],
+        workload="t0-trading",
+        execution_timeout=timedelta(minutes=45),
+        cpus=2,
+        mem_limit="2g",
+        retries=1,
+        retry_delay=timedelta(minutes=10),
+        skip_on_exit_code=99,
+        outlets=[T0_PROMOTION_EVIDENCE],
+    )
     validate.set_downstream(publish)
     publish.set_downstream(certify)
+    certify.set_downstream(publish_promotion)

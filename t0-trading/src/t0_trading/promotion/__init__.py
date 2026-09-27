@@ -16,13 +16,22 @@ from t0_trading.promotion.model import (
     PromotionStatus,
     PromotionTargetResult,
 )
+from t0_trading.promotion.publication import (
+    PROMOTION_EVIDENCE_PREFIX,
+    PromotionEvidencePublication,
+    load_session_evidence,
+    publish_gate_evidence,
+    publish_session_evidence,
+)
 
 __all__ = [
+    "PROMOTION_EVIDENCE_PREFIX",
     "ArbitratedHoldoutEvaluation",
     "ArbitratedSessionEvaluation",
     "ArbitratedSessionReport",
     "ArbitratedWalkForwardFold",
     "ArbitratedWalkForwardReport",
+    "PromotionEvidencePublication",
     "PromotionGateReport",
     "PromotionReason",
     "PromotionStatus",
@@ -30,4 +39,7 @@ __all__ = [
     "evaluate_arbitrated_session",
     "evaluate_arbitrated_walk_forward",
     "evaluate_promotion_gate",
+    "load_session_evidence",
+    "publish_gate_evidence",
+    "publish_session_evidence",
 ]

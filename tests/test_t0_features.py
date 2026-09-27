@@ -1,6 +1,5 @@
 import hashlib
 import json
-import os
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -12,7 +11,6 @@ from t0_trading.arbitration import (
     ShadowArbitrationJournal,
     ShadowArbitrationManifest,
     arbitrate_candidates,
-    prune_shadow_journals,
 )
 from t0_trading.capture.reader import StreamDayReader, StreamGap
 from t0_trading.configuration import load_configuration
@@ -552,43 +550,6 @@ def test_shadow_journal_rejects_a_late_first_connection(tmp_path: Path) -> None:
     assert journal.failed is True
     assert journal.partial_output.exists()
     assert not journal.output.exists()
-
-
-def test_shadow_journal_retention_is_scoped_by_artifact_state(tmp_path: Path) -> None:
-    now = datetime(2026, 9, 16, tzinfo=UTC)
-    old_completed = (
-        tmp_path / "old.arbitrations.jsonl",
-        tmp_path / "old.candidates.jsonl",
-        tmp_path / "old.manifest.json",
-    )
-    old_partial = (
-        tmp_path / "failed.arbitrations.jsonl.partial",
-        tmp_path / "failed.candidates.jsonl.partial",
-        tmp_path / "failed.manifest.json.partial",
-    )
-    retained = (
-        tmp_path / "recent.arbitrations.jsonl",
-        tmp_path / "recent.candidates.jsonl",
-        tmp_path / "recent.manifest.json",
-        tmp_path / "recent.arbitrations.jsonl.partial",
-        tmp_path / "recent.candidates.jsonl.partial",
-        tmp_path / "unowned.jsonl",
-        tmp_path / "unowned.jsonl.partial",
-        tmp_path / "unowned.txt",
-    )
-    for path in (*old_completed, *old_partial, *retained):
-        path.touch()
-    for path in old_completed:
-        timestamp = (now - timedelta(days=15)).timestamp()
-        os.utime(path, (timestamp, timestamp))
-    for path in old_partial:
-        timestamp = (now - timedelta(days=4)).timestamp()
-        os.utime(path, (timestamp, timestamp))
-
-    prune_shadow_journals(tmp_path, observed_at=now)
-
-    assert all(not path.exists() for path in (*old_completed, *old_partial))
-    assert all(path.exists() for path in retained)
 
 
 def test_future_observations_cannot_change_an_earlier_feature_snapshot() -> None:

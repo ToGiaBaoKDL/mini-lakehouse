@@ -7,6 +7,7 @@ import os
 import signal
 from datetime import UTC, date, datetime
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from threading import Event
 from typing import Annotated
 from zoneinfo import ZoneInfo
@@ -23,7 +24,7 @@ from t0_trading.arbitration import (
     ShadowArbitrationJournal,
     arbitrate_candidates,
     audit_shadow_journal,
-    prune_shadow_journals,
+    publish_shadow_journal,
 )
 from t0_trading.capture import MAX_STREAM_BATCH_MESSAGES
 from t0_trading.capture.reader import (
@@ -49,6 +50,7 @@ from t0_trading.controls import (
     public_vndirect_dta_costs,
 )
 from t0_trading.credentials import CredentialError, load_credentials
+from t0_trading.evidence_paths import shadow_journal_manifest_key
 from t0_trading.features import (
     FeatureAuditReport,
     FeatureSnapshot,
@@ -65,9 +67,13 @@ from t0_trading.market.reconciliation import (
 from t0_trading.outcomes import OutcomeLabel, build_outcome_audit, label_outcomes
 from t0_trading.promotion import (
     ArbitratedSessionReport,
+    PromotionEvidencePublication,
     PromotionGateReport,
     evaluate_arbitrated_session,
     evaluate_promotion_gate,
+    load_session_evidence,
+    publish_gate_evidence,
+    publish_session_evidence,
 )
 from t0_trading.provider import authenticated, market_stream
 from t0_trading.simulation import SimulationRequest, simulate_cycles
@@ -195,6 +201,45 @@ def _replay_outcome_day(
         authorized_stream_session_ids=reader.stream_session_ids,
     )
     return reader, configuration, snapshots, labels
+
+
+def _evaluate_arbitrated_session_day(
+    trade_date: date,
+    landing_uri: str,
+    region: str,
+    config: Path,
+    shadow_audit: ShadowArbitrationAuditReport,
+) -> tuple[ArbitratedSessionReport, TradingConfiguration]:
+    reader, configuration, snapshots, labels = _replay_outcome_day(
+        trade_date, landing_uri, region, config
+    )
+    version = configuration.resolve(trade_date)
+    contexts = build_decision_contexts(
+        snapshots,
+        reader.envelopes(),
+        version,
+        configuration.resolve_context(trade_date),
+    )
+    candidates = score_buy_first_baselines(snapshots, contexts)
+    arbitration = configuration.resolve_candidate_arbitration(trade_date)
+    gate = configuration.resolve_promotion_gate(trade_date)
+    if arbitration is None or gate is None:
+        raise ValueError("no prospective arbitration/promotion policy covers this session")
+    arbitrations = arbitrate_candidates(candidates, arbitration)
+    costs = public_vndirect_dta_costs(
+        trade_date,
+        checked_at=PUBLIC_VNDIRECT_DTA_CHECKED_AT,
+    )
+    report = evaluate_arbitrated_session(
+        candidates,
+        arbitrations,
+        labels,
+        costs,
+        shadow_audit,
+        gate,
+        capture_evidence_sha256=reader.evidence_sha256,
+    )
+    return report, configuration
 
 
 def _stream_day_readers(
@@ -420,12 +465,6 @@ def capture_stream_command(
         typer.Option(help="Optional persistent directory for pending stream objects."),
     ] = None,
     spool_max_bytes: Annotated[int, typer.Option(min=1)] = 268_435_456,
-    shadow_journal_dir: Annotated[
-        Path | None,
-        typer.Option(
-            help="Optional persistent directory for local candidate arbitration journals."
-        ),
-    ] = None,
     ready_file: Annotated[
         Path | None,
         typer.Option(help="Optional runtime readiness marker written after the first heartbeat."),
@@ -462,37 +501,34 @@ def capture_stream_command(
         for signum in (signal.SIGINT, signal.SIGTERM)
     }
     journal: ShadowArbitrationJournal | None = None
+    journal_workspace: TemporaryDirectory[str] | None = None
+    shadow_manifest_uri: str | None = None
+    shadow_manifest_sha256: str | None = None
     capture_completed = False
     try:
         credentials = load_credentials(effective_secret_id, region)
         store = S3CaptureStore(boto3.client("s3", region_name=region), landing_uri)
         spool = CaptureSpool(spool_dir, max_bytes=spool_max_bytes) if spool_dir else None
-        if shadow_journal_dir is not None:
-            try:
-                started_at = datetime.now(UTC)
-                prune_shadow_journals(shadow_journal_dir, observed_at=started_at)
-                arbitration = configuration.resolve_candidate_arbitration(trade_date)
-                if arbitration is not None:
-                    output = shadow_journal_dir / (
-                        f"{trade_date.isoformat()}T{started_at.strftime('%H%M%S.%fZ')}"
-                        ".arbitrations.jsonl"
-                    )
-                    journal = ShadowArbitrationJournal(
-                        output,
-                        trade_date,
-                        version,
-                        configuration.resolve_context(trade_date),
-                        arbitration,
-                        on_error=lambda error: typer.echo(
-                            f"T0 shadow journal disabled ({type(error).__name__})",
-                            err=True,
-                        ),
-                    )
-            except (OSError, ValueError) as error:
-                typer.echo(
-                    f"T0 shadow journal unavailable ({type(error).__name__})",
-                    err=True,
+        try:
+            arbitration = configuration.resolve_candidate_arbitration(trade_date)
+            if arbitration is not None:
+                journal_workspace = TemporaryDirectory(prefix="t0-shadow-")
+                journal = ShadowArbitrationJournal(
+                    Path(journal_workspace.name) / "shadow.arbitrations.jsonl",
+                    trade_date,
+                    version,
+                    configuration.resolve_context(trade_date),
+                    arbitration,
+                    on_error=lambda error: typer.echo(
+                        f"T0 shadow journal disabled ({type(error).__name__})",
+                        err=True,
+                    ),
                 )
+        except (OSError, ValueError) as error:
+            typer.echo(
+                f"T0 shadow journal unavailable ({type(error).__name__})",
+                err=True,
+            )
         manifest_uris = capture_stream_resilient(
             lambda: market_stream(credentials),
             store,
@@ -511,6 +547,10 @@ def capture_stream_command(
         )
         if journal is not None:
             journal.close(datetime.now(UTC), manifest_uris)
+            if not journal.failed:
+                shadow_manifest_uri, shadow_manifest_sha256 = publish_shadow_journal(
+                    journal, store, spool=spool
+                )
         capture_completed = True
     except CredentialError as error:
         typer.echo(str(error), err=True)
@@ -521,6 +561,8 @@ def capture_stream_command(
     finally:
         if journal is not None and not capture_completed:
             journal.abort()
+        if journal_workspace is not None:
+            journal_workspace.cleanup()
         for signum, handler in previous_handlers.items():
             signal.signal(signum, handler)
     if journal is not None and journal.arbitration_sha256 is not None:
@@ -530,9 +572,8 @@ def capture_stream_command(
                     "arbitration_count": journal.arbitration_count,
                     "arbitration_sha256": journal.arbitration_sha256,
                     "candidate_count": journal.candidate_count,
-                    "manifest": str(journal.manifest_output),
-                    "manifest_sha256": journal.manifest.sha256 if journal.manifest else None,
-                    "output": str(journal.output),
+                    "manifest_uri": shadow_manifest_uri,
+                    "manifest_sha256": shadow_manifest_sha256,
                     "trade_date": trade_date.isoformat(),
                 },
                 separators=(",", ":"),
@@ -769,34 +810,12 @@ def audit_arbitrated_session_command(
         shadow_audit = ShadowArbitrationAuditReport.model_validate_json(
             shadow_audit_file.read_bytes()
         )
-        reader, configuration, snapshots, labels = _replay_outcome_day(
-            parsed_trade_date, landing_uri, region, config
-        )
-        version = configuration.resolve(parsed_trade_date)
-        contexts = build_decision_contexts(
-            snapshots,
-            reader.envelopes(),
-            version,
-            configuration.resolve_context(parsed_trade_date),
-        )
-        candidates = score_buy_first_baselines(snapshots, contexts)
-        arbitration = configuration.resolve_candidate_arbitration(parsed_trade_date)
-        gate = configuration.resolve_promotion_gate(parsed_trade_date)
-        if arbitration is None or gate is None:
-            raise ValueError("no prospective arbitration/promotion policy covers this session")
-        arbitrations = arbitrate_candidates(candidates, arbitration)
-        costs = public_vndirect_dta_costs(
+        report, _ = _evaluate_arbitrated_session_day(
             parsed_trade_date,
-            checked_at=PUBLIC_VNDIRECT_DTA_CHECKED_AT,
-        )
-        report = evaluate_arbitrated_session(
-            candidates,
-            arbitrations,
-            labels,
-            costs,
+            landing_uri,
+            region,
+            config,
             shadow_audit,
-            gate,
-            capture_evidence_sha256=reader.evidence_sha256,
         )
     except (OSError, TradingConfigurationError, ValidationError, ValueError) as error:
         typer.echo(str(error), err=True)
@@ -805,6 +824,87 @@ def audit_arbitrated_session_command(
         typer.echo(f"SSI arbitrated session audit failed: {_safe_error(error)}", err=True)
         raise typer.Exit(code=1) from None
     _emit_model(report, output)
+
+
+def publish_promotion_evidence_command(
+    trade_date: Annotated[
+        str,
+        typer.Option(help="Prospective exchange-local trade date in YYYY-MM-DD format."),
+    ],
+    landing_uri: Annotated[str, typer.Option(help="Landing S3 root URI.")],
+    region: Annotated[str, typer.Option(help="AWS region containing the landing bucket.")] = (
+        "ap-southeast-1"
+    ),
+    config: Annotated[Path, typer.Option(help="Versioned non-secret trading YAML.")] = (
+        DEFAULT_TRADING_CONFIG
+    ),
+) -> None:
+    """Publish daily shadow evidence and the current shadow-to-paper gate."""
+    parsed_trade_date = _parse_trade_date(trade_date)
+    try:
+        configuration = load_configuration(config)
+        gate = configuration.resolve_promotion_gate(parsed_trade_date)
+        arbitration = configuration.resolve_candidate_arbitration(parsed_trade_date)
+        if gate is None or arbitration is None:
+            typer.echo("no prospective arbitration/promotion policy covers this session")
+            raise typer.Exit(code=99)
+        client = boto3.client("s3", region_name=region)
+        store = S3CaptureStore(client, landing_uri)
+        manifest_uri = store.uri(shadow_journal_manifest_key(parsed_trade_date))
+        shadow_audit = audit_shadow_journal(manifest_uri, client, configuration)
+        session, configuration = _evaluate_arbitrated_session_day(
+            parsed_trade_date,
+            landing_uri,
+            region,
+            config,
+            shadow_audit,
+        )
+        shadow_key, shadow_digest, session_key, session_digest = publish_session_evidence(
+            store, shadow_audit, session
+        )
+        sessions = load_session_evidence(store, gate, as_of_date=parsed_trade_date)
+        if sessions.get(parsed_trade_date) != session:
+            raise RuntimeError("published promotion session is not visible to the gate")
+        gate_report = evaluate_promotion_gate(
+            sessions,
+            configuration.resolve_baseline_evaluation(parsed_trade_date, "PROMOTION"),
+            gate,
+            arbitration,
+        )
+        gate_key, gate_digest = publish_gate_evidence(
+            store,
+            as_of_date=parsed_trade_date,
+            report=gate_report,
+        )
+        publication = PromotionEvidencePublication(
+            trade_date=parsed_trade_date,
+            shadow_audit_uri=store.uri(shadow_key),
+            shadow_audit_sha256=shadow_digest,
+            session_report_uri=store.uri(session_key),
+            session_report_sha256=session_digest,
+            gate_report_uri=store.uri(gate_key),
+            gate_report_sha256=gate_digest,
+            gate_status=gate_report.status,
+            observed_session_count=gate_report.observed_session_count,
+            required_session_count=gate_report.required_session_count,
+        )
+    except typer.Exit:
+        raise
+    except (
+        OSError,
+        ShadowArbitrationAuditError,
+        StreamCaptureReadError,
+        TradingConfigurationError,
+        ValidationError,
+        RuntimeError,
+        ValueError,
+    ) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+    except (CaptureStoreUnavailable, BotoCoreError, ClientError) as error:
+        typer.echo(f"SSI promotion evidence publication failed: {_safe_error(error)}", err=True)
+        raise typer.Exit(code=1) from None
+    _emit_model(publication)
 
 
 def evaluate_promotion_gate_command(
@@ -873,15 +973,9 @@ def simulate_cycles_command(
 
 
 def audit_shadow_journal_command(
-    manifest: Annotated[
-        Path,
-        typer.Option(
-            exists=True,
-            file_okay=True,
-            dir_okay=False,
-            readable=True,
-            help="Local committed shadow journal manifest.",
-        ),
+    manifest_uri: Annotated[
+        str,
+        typer.Option(help="Immutable S3 shadow journal manifest URI."),
     ],
     region: Annotated[str, typer.Option(help="AWS region containing the landing bucket.")] = (
         "ap-southeast-1"
@@ -894,10 +988,10 @@ def audit_shadow_journal_command(
         typer.Option(help="Optional local JSON path; stdout is always emitted."),
     ] = None,
 ) -> None:
-    """Prove a local shadow journal is byte-identical to immutable S3 replay."""
+    """Prove an immutable S3 shadow journal is byte-identical to deterministic replay."""
     try:
         report = audit_shadow_journal(
-            manifest,
+            manifest_uri,
             boto3.client("s3", region_name=region),
             load_configuration(config),
         )
@@ -1028,6 +1122,7 @@ app.command("audit-buy-first-baselines")(audit_buy_first_baselines_command)
 app.command("audit-baseline-walk-forward")(audit_baseline_walk_forward_command)
 app.command("audit-arbitrated-session")(audit_arbitrated_session_command)
 app.command("evaluate-promotion-gate")(evaluate_promotion_gate_command)
+app.command("publish-promotion-evidence")(publish_promotion_evidence_command)
 app.command("simulate-cycles")(simulate_cycles_command)
 app.command("audit-shadow-journal")(audit_shadow_journal_command)
 app.command("validate-stream-day")(validate_stream_day_command)

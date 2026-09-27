@@ -27,6 +27,8 @@ data "aws_iam_policy_document" "t0_trading" {
         "api/ssi_fastconnect_rest/raw/*",
         "stream/ssi_fastconnect_stream/raw",
         "stream/ssi_fastconnect_stream/raw/*",
+        "stream/ssi_fastconnect_stream/promotion",
+        "stream/ssi_fastconnect_stream/promotion/*",
       ]
     }
   }
@@ -39,6 +41,7 @@ data "aws_iam_policy_document" "t0_trading" {
     resources = [
       "${var.bucket_arns.landing}/api/ssi_fastconnect_rest/raw/*",
       "${var.bucket_arns.landing}/stream/ssi_fastconnect_stream/raw/*",
+      "${var.bucket_arns.landing}/stream/ssi_fastconnect_stream/promotion/*",
     ]
   }
   statement {

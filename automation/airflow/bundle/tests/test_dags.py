@@ -228,9 +228,11 @@ def test_market_data_stream_dag_publishes_evidence_before_eligibility_enforcemen
     validate = dag.get_task("validate_market_data_stream")
     publish = dag.get_task("publish_market_data_stream")
     certify = dag.get_task("certify_market_data_stream")
+    promotion = dag.get_task("publish_t0_promotion_evidence")
     assert isinstance(validate, LoggedDockerOperator)
     assert isinstance(publish, LoggedEmrServerlessStartJobOperator)
     assert isinstance(certify, LoggedDockerOperator)
+    assert isinstance(promotion, LoggedDockerOperator)
     for task, command in (
         (validate, "validate-stream-day"),
         (certify, "certify-stream-day"),
@@ -247,7 +249,16 @@ def test_market_data_stream_dag_publishes_evidence_before_eligibility_enforcemen
     assert publish.downstream_task_ids == {"certify_market_data_stream"}
     assert certify.skip_on_exit_code == [10]
     assert len(certify.on_skipped_callback) == 2
-    assert not certify.downstream_task_ids
+    assert certify.downstream_task_ids == {"publish_t0_promotion_evidence"}
+    assert isinstance(promotion.command, list)
+    assert promotion.command[:2] == ["publish-promotion-evidence", "--trade-date"]
+    assert promotion.mounts is not None
+    assert len(promotion.mounts) == 1
+    assert promotion.retries == 1
+    assert promotion.retry_delay == timedelta(minutes=10)
+    assert promotion.skip_on_exit_code == [99]
+    assert promotion.outlets[0].uri == "lakehouse://evidence/t0-promotion"
+    assert not promotion.downstream_task_ids
     arguments = publish.job_driver["sparkSubmit"]["entryPointArguments"]
     assert arguments[0] == "--source-date"
     assert "dag_run.partition_key or dag_run.run_after" in arguments[1]

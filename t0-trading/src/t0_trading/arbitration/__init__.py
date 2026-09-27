@@ -9,7 +9,6 @@ from t0_trading.arbitration.engine import CandidateArbitrator, arbitrate_candida
 from t0_trading.arbitration.journal import (
     ShadowArbitrationJournal,
     ShadowArbitrationManifest,
-    prune_shadow_journals,
 )
 from t0_trading.arbitration.model import (
     ArbitrationStatus,
@@ -17,6 +16,7 @@ from t0_trading.arbitration.model import (
     RejectionReason,
     require_selected_candidate,
 )
+from t0_trading.arbitration.publication import publish_shadow_journal
 
 __all__ = [
     "ArbitrationStatus",
@@ -29,6 +29,6 @@ __all__ = [
     "ShadowArbitrationManifest",
     "arbitrate_candidates",
     "audit_shadow_journal",
-    "prune_shadow_journals",
+    "publish_shadow_journal",
     "require_selected_candidate",
 ]
