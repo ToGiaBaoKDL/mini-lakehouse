@@ -14,7 +14,6 @@ os.environ.setdefault("HOST_AWS_IDENTITY_DIR", "/tmp")
 os.environ["LAKEHOUSE_ENVIRONMENT"] = "ci"
 
 from airflow.models import DagBag
-from airflow.providers.standard.sensors.external_task import ExternalTaskSensor
 from airflow.sdk import DAG, CronPartitionTimetable
 from airflow.utils.file import list_py_file_paths
 from jinja2 import StrictUndefined
@@ -40,8 +39,7 @@ ALLOWED_ACTIONS = {"build", "ingest", "maintain"}
 EXPECTED_DAGS = {
     "etl_emr_ingest_arxiv_metadata",
     "etl_emr_ingest_github_archive",
-    "etl_emr_ingest_market_data_stream",
-    "etl_mix_ingest_market_data_rest",
+    "etl_mix_ingest_market_data",
     "gov_emr_maintain_iceberg",
     "tl_docker_build_analytics",
 }
@@ -190,18 +188,30 @@ def test_arxiv_oai_captures_on_oci_before_emr_publication() -> None:
     assert publish.outlets[0].uri == "lakehouse://curated/arxiv/metadata"
 
 
-def test_market_data_rest_dag_keeps_capture_and_publication_bounded() -> None:
-    dag = _dag(_bag(), "etl_mix_ingest_market_data_rest")
+def test_market_data_dag_owns_one_ordered_trade_date_partition() -> None:
+    dag = _dag(_bag(), "etl_mix_ingest_market_data")
 
     assert isinstance(dag.timetable, CronPartitionTimetable)
     assert dag.timetable.expression == "0 17 * * 1-5"
     assert dag.timetable.key_format == "%Y-%m-%d"
     assert dag.max_active_runs == 1
     assert not dag.params
-    capture = dag.get_task("capture_rest")
-    publish = dag.get_task("publish_market_data_rest")
+    capture = dag.get_task("capture_market_data_rest")
+    publish_rest = dag.get_task("publish_market_data_rest")
+    validate = dag.get_task("validate_market_data_stream")
+    publish_stream = dag.get_task("publish_market_data_stream")
+    certify = dag.get_task("certify_market_data_stream")
+    ensure_journal = dag.get_task("ensure_t0_shadow_journal")
+    promotion = dag.get_task("publish_t0_promotion_evidence")
+
     assert isinstance(capture, LoggedDockerOperator)
-    assert isinstance(publish, LoggedEmrServerlessStartJobOperator)
+    assert isinstance(publish_rest, LoggedEmrServerlessStartJobOperator)
+    assert isinstance(validate, LoggedDockerOperator)
+    assert isinstance(publish_stream, LoggedEmrServerlessStartJobOperator)
+    assert isinstance(certify, LoggedDockerOperator)
+    assert isinstance(ensure_journal, LoggedDockerOperator)
+    assert isinstance(promotion, LoggedDockerOperator)
+
     assert capture.image == "t0-trading:runtime"
     assert capture.mounts is not None
     assert capture.mounts[0]["Source"] == "/tmp/t0-trading"
@@ -215,35 +225,13 @@ def test_market_data_rest_dag_keeps_capture_and_publication_bounded() -> None:
     assert any("dag_run.partition_key or dag_run.run_after" in item for item in capture.command)
     assert capture.skip_on_exit_code == [99]
     assert capture.downstream_task_ids == {"publish_market_data_rest"}
-    arguments = publish.job_driver["sparkSubmit"]["entryPointArguments"]
-    assert "--capture-manifest-uri" in arguments
-    assert "{{ ti.xcom_pull(task_ids='capture_rest') }}" in arguments
-    assert publish.outlets[0].uri == "lakehouse://curated/market-data"
 
+    rest_arguments = publish_rest.job_driver["sparkSubmit"]["entryPointArguments"]
+    assert "--capture-manifest-uri" in rest_arguments
+    assert "{{ ti.xcom_pull(task_ids='capture_market_data_rest') }}" in rest_arguments
+    assert publish_rest.outlets[0].uri == "lakehouse://curated/market-data"
+    assert publish_rest.downstream_task_ids == {"validate_market_data_stream"}
 
-def test_market_data_stream_dag_publishes_evidence_before_eligibility_enforcement() -> None:
-    dag = _dag(_bag(), "etl_emr_ingest_market_data_stream")
-
-    assert isinstance(dag.timetable, CronPartitionTimetable)
-    assert dag.timetable.expression == "0 17 * * 1-5"
-    assert dag.timetable.key_format == "%Y-%m-%d"
-    assert dag.max_active_runs == 1
-    assert not dag.params
-    wait_for_rest = dag.get_task("wait_for_market_data_rest")
-    validate = dag.get_task("validate_market_data_stream")
-    publish = dag.get_task("publish_market_data_stream")
-    certify = dag.get_task("certify_market_data_stream")
-    ensure_journal = dag.get_task("ensure_t0_shadow_journal")
-    promotion = dag.get_task("publish_t0_promotion_evidence")
-    assert isinstance(wait_for_rest, ExternalTaskSensor)
-    assert wait_for_rest.external_dag_id == "etl_mix_ingest_market_data_rest"
-    assert wait_for_rest.external_task_id == "publish_market_data_rest"
-    assert wait_for_rest.downstream_task_ids == {"validate_market_data_stream"}
-    assert isinstance(validate, LoggedDockerOperator)
-    assert isinstance(publish, LoggedEmrServerlessStartJobOperator)
-    assert isinstance(certify, LoggedDockerOperator)
-    assert isinstance(ensure_journal, LoggedDockerOperator)
-    assert isinstance(promotion, LoggedDockerOperator)
     for task, command in (
         (validate, "validate-stream-day"),
         (certify, "certify-stream-day"),
@@ -257,7 +245,7 @@ def test_market_data_stream_dag_publishes_evidence_before_eligibility_enforcemen
         assert "--landing-uri" in task.command
     assert validate.skip_on_exit_code == [99]
     assert validate.downstream_task_ids == {"publish_market_data_stream"}
-    assert publish.downstream_task_ids == {"certify_market_data_stream"}
+    assert publish_stream.downstream_task_ids == {"certify_market_data_stream"}
     assert certify.skip_on_exit_code == [10]
     assert len(certify.on_skipped_callback) == 2
     assert certify.downstream_task_ids == {"ensure_t0_shadow_journal"}
@@ -278,7 +266,7 @@ def test_market_data_stream_dag_publishes_evidence_before_eligibility_enforcemen
     assert promotion.skip_on_exit_code == [99]
     assert promotion.outlets[0].uri == "lakehouse://evidence/t0-promotion"
     assert not promotion.downstream_task_ids
-    arguments = publish.job_driver["sparkSubmit"]["entryPointArguments"]
+    arguments = publish_stream.job_driver["sparkSubmit"]["entryPointArguments"]
     assert arguments[0] == "--source-date"
     assert "dag_run.partition_key or dag_run.run_after" in arguments[1]
     assert "--landing-uri" in arguments
@@ -287,8 +275,8 @@ def test_market_data_stream_dag_publishes_evidence_before_eligibility_enforcemen
     assert any(
         "emr/code_uri" in argument and argument.endswith("/trading.yaml") for argument in arguments
     )
-    assert publish.outlets[0].uri == "lakehouse://curated/market-data"
-    assert publish.outlets[1].uri == "lakehouse://curated/t0-trading"
+    assert publish_stream.outlets[0].uri == "lakehouse://curated/market-data"
+    assert publish_stream.outlets[1].uri == "lakehouse://curated/t0-trading"
 
 
 def test_analytics_runs_every_domain_on_one_daily_schedule() -> None:

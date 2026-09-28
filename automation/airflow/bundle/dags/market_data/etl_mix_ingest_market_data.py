@@ -1,9 +1,8 @@
-"""Certify, publish, and audit one terminal SSI Stream trading day."""
+"""Capture and publish one complete SSI market-data trade-date partition."""
 
 from datetime import timedelta
 
-from airflow.providers.standard.sensors.external_task import ExternalTaskSensor
-from airflow.sdk import DAG, CronPartitionTimetable
+from airflow.sdk import DAG, CronPartitionTimetable, chain
 from callbacks.notifications import (
     dag_failure_callbacks,
     dag_success_callbacks,
@@ -20,10 +19,11 @@ from operators.docker import docker_task
 from operators.emr import emr_spark_job
 
 TRADE_DATE = partition_key_or_run_date()
+REST_CAPTURE_MANIFEST = "{{ ti.xcom_pull(task_ids='capture_market_data_rest') }}"
 
 with DAG(
-    dag_id="etl_emr_ingest_market_data_stream",
-    description="Certify and publish one SSI Stream trade-date partition.",
+    dag_id="etl_mix_ingest_market_data",
+    description="Capture, publish, certify, and audit one SSI market-data trade date.",
     schedule=CronPartitionTimetable(
         "0 17 * * 1-5",
         timezone=LOCAL_TIMEZONE,
@@ -35,20 +35,49 @@ with DAG(
     max_active_runs=1,
     on_failure_callback=dag_failure_callbacks(),
     on_success_callback=dag_success_callbacks(),
-    tags=["market-data", "etl", "emr", "ssi", "stream", "iceberg"],
+    tags=["market-data", "etl", "mix", "ssi", "rest", "stream", "iceberg"],
 ) as dag:
-    wait_for_rest = ExternalTaskSensor(
-        task_id="wait_for_market_data_rest",
-        external_dag_id="etl_mix_ingest_market_data_rest",
-        external_task_id="publish_market_data_rest",
-        allowed_states=["success"],
-        failed_states=["failed", "upstream_failed"],
-        skipped_states=["skipped"],
-        timeout=timedelta(hours=2).total_seconds(),
-        poke_interval=60,
-        mode="reschedule",
+    capture_rest = docker_task(
+        task_id="capture_market_data_rest",
+        image="t0-trading:runtime",
+        command=[
+            "capture-rest",
+            "--trade-date",
+            TRADE_DATE,
+            "--job-token",
+            "{{ run_id }}",
+            "--landing-uri",
+            runtime_value("storage/landing_uri"),
+        ],
+        workload="t0-trading",
+        execution_timeout=timedelta(minutes=30),
+        cpus=1,
+        mem_limit="1g",
+        retries=1,
+        retry_delay=timedelta(minutes=10),
+        do_xcom_push=True,
+        skip_on_exit_code=99,
     )
-    validate = docker_task(
+    publish_rest = emr_spark_job(
+        task_id="publish_market_data_rest",
+        job_name=f"ssi-market-data-rest-{TRADE_DATE}",
+        entry_point="entrypoints/market_data_rest.py",
+        entry_point_arguments=[
+            "--source-date",
+            TRADE_DATE,
+            "--capture-manifest-uri",
+            REST_CAPTURE_MANIFEST,
+        ],
+        outlets=[CURATED_MARKET_DATA],
+        spark_conf={
+            "spark.driver.cores": "2",
+            "spark.driver.memory": "4g",
+            "spark.executor.cores": "2",
+            "spark.executor.memory": "4g",
+            "spark.dynamicAllocation.maxExecutors": "2",
+        },
+    )
+    validate_stream = docker_task(
         task_id="validate_market_data_stream",
         image="t0-trading:runtime",
         command=[
@@ -64,7 +93,7 @@ with DAG(
         mem_limit="1g",
         skip_on_exit_code=99,
     )
-    publish = emr_spark_job(
+    publish_stream = emr_spark_job(
         task_id="publish_market_data_stream",
         job_name=f"ssi-market-data-stream-{TRADE_DATE}",
         entry_point="entrypoints/market_data_stream.py",
@@ -85,7 +114,7 @@ with DAG(
             "spark.dynamicAllocation.maxExecutors": "2",
         },
     )
-    certify = docker_task(
+    certify_stream = docker_task(
         task_id="certify_market_data_stream",
         image="t0-trading:runtime",
         command=[
@@ -141,8 +170,13 @@ with DAG(
         skip_on_exit_code=99,
         outlets=[T0_PROMOTION_EVIDENCE],
     )
-    wait_for_rest.set_downstream(validate)
-    validate.set_downstream(publish)
-    publish.set_downstream(certify)
-    certify.set_downstream(ensure_shadow_journal)
-    ensure_shadow_journal.set_downstream(publish_promotion)
+
+    chain(
+        capture_rest,
+        publish_rest,
+        validate_stream,
+        publish_stream,
+        certify_stream,
+        ensure_shadow_journal,
+        publish_promotion,
+    )

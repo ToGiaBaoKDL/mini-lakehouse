@@ -15,14 +15,13 @@ Airflow image.
 
 ## Production DAGs
 
-| DAG                                 | Execution                 | Trigger                               |
-| ----------------------------------- | ------------------------- | ------------------------------------- |
-| `etl_emr_ingest_github_archive`     | Docker + EMR Serverless   | `30 7 * * *`                          |
-| `etl_emr_ingest_arxiv_metadata`     | Docker + EMR Serverless   | `0 11 * * *`                          |
-| `etl_mix_ingest_market_data_rest`   | Docker + EMR Serverless   | 17:00 Monday-Friday, Asia/Ho_Chi_Minh |
-| `etl_emr_ingest_market_data_stream` | Docker + EMR Serverless   | 17:00 Monday-Friday, Asia/Ho_Chi_Minh |
-| `tl_docker_build_analytics`         | Isolated dbt Docker tasks | Curated GitHub or ArXiv asset update  |
-| `gov_emr_maintain_iceberg`          | EMR Serverless            | `0 3 * * 0`                           |
+| DAG                             | Execution                 | Trigger                               |
+| ------------------------------- | ------------------------- | ------------------------------------- |
+| `etl_emr_ingest_github_archive` | Docker + EMR Serverless   | `30 7 * * *`                          |
+| `etl_emr_ingest_arxiv_metadata` | Docker + EMR Serverless   | `0 11 * * *`                          |
+| `etl_mix_ingest_market_data`    | Docker + EMR Serverless   | 17:00 Monday-Friday, Asia/Ho_Chi_Minh |
+| `tl_docker_build_analytics`     | Isolated dbt Docker tasks | Curated GitHub or ArXiv asset update  |
+| `gov_emr_maintain_iceberg`      | EMR Serverless            | `0 3 * * 0`                           |
 
 There is no OCR DAG. OCR is an explicit local CLI action backed by Modal.
 
@@ -34,8 +33,10 @@ There is no OCR DAG. OCR is an explicit local CLI action backed by Modal.
 
 The bounded vocabulary and examples are in [Conventions](/docs/reference/conventions). The primary
 publication runtime belongs in `worker_type`; supporting runtimes are explicit task boundaries and
-DAG tags. `scope` describes stable business or data ownership. Existing DAG IDs stay stable so
-deployments preserve run history.
+DAG tags. `scope` describes stable business or data ownership. DAG IDs stay stable once that
+ownership boundary is established. Market-data REST and stream publication intentionally share one
+trade-date owner, so their former independently scheduled DAGs were consolidated instead of being
+coupled through a logical-date sensor.
 
 ## Execution boundaries
 

@@ -463,7 +463,7 @@ every S3 manifest and batch checksum, receipt ordering, capture gaps, record cou
 compares every journal record byte-for-byte with deterministic replay. It is read-only and exits
 non-zero on any mismatch.
 
-After stream certification, `etl_emr_ingest_market_data_stream` ensures and audits the journal,
+After stream certification, `etl_mix_ingest_market_data` ensures and audits the journal,
 publishes the daily arbitrated-session report, reloads prior committed reports from S3, and writes
 an immutable as-of promotion-gate report. `PENDING` while fewer than 26 eligible sessions exist is
 a successful orchestration state; missing or conflicting evidence fails the task.
@@ -516,10 +516,12 @@ partial sessions that cannot pass full-session certification.
 
 ## Bounded publication
 
-The `etl_mix_ingest_market_data_rest` DAG uses Airflow 3's daily partition timetable at 17:00 Monday
-through Friday in `Asia/Ho_Chi_Minh`. Its partition key is the exact exchange-local trade date used
-by capture and publication. Historical ranges use Airflow's native Backfill action; there is no
-date Param, resolver task, or separate backfill DAG.
+The `etl_mix_ingest_market_data` DAG uses Airflow 3's daily partition timetable at 17:00 Monday
+through Friday in `Asia/Ho_Chi_Minh`. One exchange-local partition owns REST capture and publication,
+then stream validation, publication, certification, journal recovery, and promotion evidence. The
+in-DAG dependency guarantees that historical index bars exist before stream research without a
+cross-DAG sensor or logical-date lookup. Historical ranges use Airflow's native Backfill action;
+there is no date Param, resolver task, or separate backfill DAG.
 
 Capture rejects future dates and asks SSI for the exact VN30 historical date before writing raw
 evidence. A weekday with no SSI-observed session exits through DockerOperator's supported skip code,
@@ -572,10 +574,11 @@ heartbeats and acknowledgements remain as immutable raw evidence. The 17:00 cert
 exact-date history and skips lakehouse publication, so it cannot create synthetic landing or curated
 facts for that date.
 
-At 17:00 Monday through Friday, `etl_emr_ingest_market_data_stream` first runs a bounded manifest
-validation task. It uses SSI's exact-date history through the official SDK as the trading-day gate;
-an unobserved date exits with the shared Airflow skip code. For an observed date it discovers every
-direct terminal manifest and validates its immutable lineage before submitting EMR.
+At 17:00 Monday through Friday, `etl_mix_ingest_market_data` publishes the completed-day REST
+partition before running bounded stream-manifest validation. The validation uses SSI's exact-date
+history through the official SDK as the trading-day gate; an unobserved date exits with the shared
+Airflow skip code. For an observed date it discovers every direct terminal manifest and validates
+its immutable lineage before submitting EMR.
 
 The EMR job independently validates every batch and publishes structurally valid sessions to
 landing and curated market-data tables even when reconnects make the day unsuitable for research.
