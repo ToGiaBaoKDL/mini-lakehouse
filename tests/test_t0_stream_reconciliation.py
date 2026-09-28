@@ -403,6 +403,15 @@ def test_market_sessions_use_configured_exchange_local_boundaries() -> None:
     )
     assert (
         session_at(
+            datetime(2026, 9, 4, 7, 45, 0, 60_000, tzinfo=UTC),
+            trade_date=TRADE_DATE,
+            timezone=timezone,
+            schedule=version.market.sessions,
+        )
+        == MarketSession.CLOSING_AUCTION
+    )
+    assert (
+        session_at(
             datetime(2026, 9, 4, 7, 45, 1, tzinfo=UTC),
             trade_date=TRADE_DATE,
             timezone=timezone,
@@ -671,29 +680,30 @@ def test_reader_streams_verified_rows_and_reconciliation_matches_ohlcv() -> None
     assert report.provider_interval_update_count == 2
     assert report.provider_interval_minute_count == 2
     assert report.matched_interval_update_count == 2
+    assert report.unmatched_interval_update_count == 0
     assert report.final_interval_exact_minute_count == 2
     assert report.provider_interval_progression_issue_count == 0
     assert report.differences == ()
+    assert report.interval_differences == ()
 
 
-def test_reconciliation_fails_closed_on_an_ohlcv_difference() -> None:
+def test_reconciliation_reports_provider_interval_differences_without_rejecting_trades() -> None:
     version = load_configuration(Path("t0-trading/config/trading.yaml")).resolve(TRADE_DATE)
     report = reconcile_session(_reader(interval_close=101), version)
 
-    assert report.status == "failed"
+    assert report.status == "passed"
     assert report.matched_interval_update_count == 1
+    assert report.unmatched_interval_update_count == 1
     assert report.final_interval_exact_minute_count == 1
-    assert report.differences == (
-        "VIC@2026-09-04T09:15:00+07:00:interval_not_causal_trade_prefix["
-        "observed_at=2026-09-04T09:15:57+07:00]",
-    )
+    assert report.differences == ()
+    assert report.interval_differences == ("VIC@2026-09-04T09:15:00+07:00:final_interval_mismatch",)
 
 
 def test_market_day_certification_withholds_a_session_that_fails_reconciliation() -> None:
     version = load_configuration(Path("t0-trading/config/trading.yaml")).resolve(TRADE_DATE)
 
     certification, report = certify_market_day(
-        (_reader(interval_close=101),),
+        (_reader(include_vhm=False),),
         version,
         trade_date=TRADE_DATE,
     )
@@ -722,6 +732,7 @@ def test_reconciliation_accepts_a_provider_interval_that_precedes_the_last_trade
     assert report.matched_interval_update_count == 2
     assert report.final_interval_exact_minute_count == 1
     assert report.differences == ()
+    assert report.interval_differences == ("VIC@2026-09-04T09:15:00+07:00:final_interval_mismatch",)
 
 
 def test_reconciliation_fails_when_a_configured_symbol_has_no_business_data() -> None:
@@ -746,16 +757,18 @@ def test_reconciliation_fails_when_capture_scope_omits_a_configured_symbol() -> 
     assert report.capture_scope_matches_configuration is False
 
 
-def test_reconciliation_rejects_an_interval_that_matches_a_future_trade_prefix() -> None:
+def test_reconciliation_reports_noncausal_interval_updates_without_rejecting_trades() -> None:
     version = load_configuration(Path("t0-trading/config/trading.yaml")).resolve(TRADE_DATE)
     report = reconcile_session(
         _reader(interval_observed_time="2026/09/04 09:15:20"),
         version,
     )
 
-    assert report.status == "failed"
+    assert report.status == "passed"
     assert report.matched_interval_update_count == 1
-    assert "interval_not_causal_trade_prefix" in report.differences[0]
+    assert report.unmatched_interval_update_count == 1
+    assert report.differences == ()
+    assert report.interval_differences == ()
 
 
 def test_reconciliation_rejects_a_nonzero_full_session_volume_baseline() -> None:

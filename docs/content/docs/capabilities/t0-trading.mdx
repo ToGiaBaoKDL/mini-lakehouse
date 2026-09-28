@@ -624,20 +624,21 @@ AWS_PROFILE=tgbao-dev uv run --project t0-trading t0-trading reconcile-stream \
   --output /tmp/t0-stream-reconciliation.json
 ```
 
-An interval can legitimately precede the final trade callback in its minute. Every provider update
-must therefore match an exact OHLCV prefix that existed no later than the provider observation time;
-simple range containment and future-prefix matches are not accepted. Rolling snapshots must also
-progress monotonically in provider time, volume, open, high, and low. The report exposes how many
-final interval snapshots equal the completed replay bar and reconciles all message, event, session,
-and interval counts.
+Interval and trade callbacks are independent SSI topics, so their cross-topic receive order is not a
+causal ordering contract. Rolling interval snapshots must still progress monotonically in provider
+time, volume, open, high, and low. The report counts interval updates that match an observed trade
+prefix, records unmatched updates separately, and lists every final-minute difference. These are
+diagnostics for the secondary provider feed; deterministic bars remain derived from the contiguous,
+cumulative-volume-checked trade stream.
 
 A passed full-session report additionally requires the manifest scope plus both executable trades
 and valid quotes to cover every configured symbol, the first executable trade's cumulative volume
 to start from the captured quantity, and every executable trade to fall inside an exchange trading
-session. Missing minute keys or per-symbol data, non-causal or regressing intervals, volume gaps or
+session. Missing per-symbol business data, regressing provider intervals, trade-volume gaps or
 duplicates, incomplete session coverage, or any replay integrity issue returns a failed report and
-a non-zero exit code. Quotes and acknowledgements outside the decision sessions remain raw evidence
-and are never mistaken for permission to trade.
+a non-zero exit code. Final interval differences remain explicit diagnostics without invalidating an
+otherwise self-consistent trade stream. Quotes and acknowledgements outside the decision sessions
+remain raw evidence and are never mistaken for permission to trade.
 
 ## Synchronize and certify
 

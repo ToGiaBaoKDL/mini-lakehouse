@@ -143,9 +143,11 @@ class ReconciliationReport(BaseModel):
     provider_interval_minute_count: int
     matched_interval_update_count: int
     gap_interval_update_count: int
+    unmatched_interval_update_count: int
     final_interval_exact_minute_count: int
     provider_interval_progression_issue_count: int
     differences: tuple[str, ...]
+    interval_differences: tuple[str, ...]
     replay_issues: tuple[str, ...]
 
     @model_validator(mode="after")
@@ -159,8 +161,10 @@ class ReconciliationReport(BaseModel):
             raise ValueError("event counts do not reconcile to business_event_count")
         if (
             self.provider_interval_update_count != self.message_counts.get("IntervalMessage", 0)
-            or self.matched_interval_update_count + self.gap_interval_update_count
-            > self.provider_interval_update_count
+            or self.matched_interval_update_count
+            + self.gap_interval_update_count
+            + self.unmatched_interval_update_count
+            != self.provider_interval_update_count
             or self.provider_interval_minute_count > self.provider_interval_update_count
             or self.final_interval_exact_minute_count > self.provider_interval_minute_count
             or self.provider_interval_progression_issue_count > self.provider_interval_update_count
@@ -190,8 +194,6 @@ class ReconciliationReport(BaseModel):
             and self.cumulative_volume_baseline_matches
             and self.out_of_session_trade_count == 0
             and self.business_event_count > 0
-            and self.matched_interval_update_count + self.gap_interval_update_count
-            == self.provider_interval_update_count
             and self.provider_interval_progression_issue_count == 0
             and not self.differences
             and not self.replay_issues
@@ -527,6 +529,7 @@ def reconcile_capture(
     first_trades: dict[str, Trade] = {}
     out_of_session_trades: Counter[str] = Counter()
     differences: set[str] = set()
+    interval_differences: set[str] = set()
     provider_interval_progression_issue_count = 0
     interval_seconds = configuration.market.bar_interval_seconds
 
@@ -614,11 +617,13 @@ def reconcile_capture(
         provider = provider_bars.get((symbol, start))
         reconstructed = replayed_bars.get((symbol, start))
         if provider is None:
-            differences.add(f"{label}:missing_provider_interval")
+            interval_differences.add(f"{label}:missing_provider_interval")
         elif reconstructed is None:
-            differences.add(f"{label}:missing_replayed_bar")
+            interval_differences.add(f"{label}:missing_replayed_bar")
         elif provider.values == _bar_values(reconstructed):
             final_exact += 1
+        else:
+            interval_differences.add(f"{label}:final_interval_mismatch")
 
     matched_updates = 0
     gap_updates = 0
@@ -636,12 +641,7 @@ def reconcile_capture(
         prefix_time = observed_prefixes.get(key, {}).get(interval.values)
         if prefix_time is not None and prefix_time <= interval.observed_at:
             matched_updates += 1
-        else:
-            symbol, start = key
-            differences.add(
-                f"{symbol}@{start.isoformat()}:interval_not_causal_trade_prefix["
-                f"observed_at={interval.observed_at.isoformat()}]"
-            )
+    unmatched_updates = len(provider_updates) - matched_updates - gap_updates
 
     full_session_coverage = covers_trading_window(
         capture.connected_at,
@@ -691,9 +691,11 @@ def reconcile_capture(
         provider_interval_minute_count=len(provider_bars),
         matched_interval_update_count=matched_updates,
         gap_interval_update_count=gap_updates,
+        unmatched_interval_update_count=unmatched_updates,
         final_interval_exact_minute_count=final_exact,
         provider_interval_progression_issue_count=provider_interval_progression_issue_count,
         differences=tuple(sorted(differences)),
+        interval_differences=tuple(sorted(interval_differences)),
         replay_issues=result.issues,
     )
 

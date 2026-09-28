@@ -120,7 +120,9 @@ def session_at(
         return MarketSession.LUNCH_BREAK
     if value < afternoon_end:
         return MarketSession.CONTINUOUS_PM
-    # SSI stamps the closing-auction executions at exactly the configured end second.
-    if value <= closing_end:
+    # SSI includes fractional precision on executions stamped in the configured
+    # closing second. Treat that whole second as auction time without extending
+    # the market window into the following second.
+    if value.replace(microsecond=0) <= closing_end:
         return MarketSession.CLOSING_AUCTION
     return MarketSession.CLOSED
