@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -28,6 +29,7 @@ from t0_trading.arbitration import (
     publish_shadow_journal,
 )
 from t0_trading.capture import MAX_STREAM_BATCH_MESSAGES
+from t0_trading.capture.membership import capture_index_memberships
 from t0_trading.capture.reader import (
     StreamCaptureReadError,
     StreamDayReader,
@@ -520,6 +522,14 @@ def capture_stream_command(
     capture_completed = False
     try:
         credentials = load_credentials(effective_secret_id, region)
+        breadth_membership = None
+        if capture_scope.membership_indices:
+            with authenticated(credentials) as auth, Data(auth) as data:
+                breadth_membership = capture_index_memberships(
+                    data.market_data,
+                    capture_scope.membership_indices,
+                )
+        options = replace(options, breadth_membership=breadth_membership)
         store = S3CaptureStore(boto3.client("s3", region_name=region), landing_uri)
         spool = CaptureSpool(spool_dir, max_bytes=spool_max_bytes) if spool_dir else None
         try:

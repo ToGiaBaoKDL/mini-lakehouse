@@ -677,12 +677,19 @@ landing evidence until a consumer justifies a separate durable breadth grain.
 Curated `trade_date` partitions are derived from each provider record and checked against the bounded
 source date; request and processing timestamps never choose the market-data partition.
 `index_bars_1m` stores only exact-date SDK evidence; no iBoard data is mislabeled as FastConnect SDK
-evidence. Bounded stream capture uses the SDK aggregate symbol
-subscription for trades, quotes, and foreign-room updates plus the SDK one-minute interval
-subscription. Certification probes index-minute bars through REST, not the non-producing index
-stream subscription. Provider interval bars
-remain reconciliation evidence; deterministic bars built from captured trades are certified by the
-explicit full-session report before any future curated promotion.
+evidence. Bounded stream capture resolves current `VN30` and `VNREAL` membership through the
+official SDK at startup. It keeps the aggregate trade/quote subscription limited to `VIC` and
+`VHM`, while the one-minute interval subscription uses the sorted union of those decision symbols
+and the captured constituents. A v4 terminal manifest preserves every membership record checksum,
+unavailable-index status, snapshot identity, and exact interval scope, so reconnect segments cannot
+silently change universe. Missing constituent intervals are reported as breadth coverage without
+weakening or changing the existing VIC/VHM certification gates. Breadth remains capture-only:
+strategy, regime, and promotion logic do not consume it yet.
+
+Certification probes index-minute bars through REST, not the non-producing index stream
+subscription. Provider interval bars remain reconciliation evidence; deterministic bars built from
+captured VIC/VHM trades are certified by the explicit full-session report before any future curated
+promotion.
 
 ## Delivery gates
 

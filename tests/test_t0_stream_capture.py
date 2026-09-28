@@ -10,6 +10,7 @@ from threading import Event
 from typing import Any
 
 import pytest
+from t0_trading.capture.membership import capture_index_memberships
 from t0_trading.capture.reader import StreamManifest
 from t0_trading.capture.spool import CaptureSpool
 from t0_trading.capture.store import CaptureStoreUnavailable
@@ -141,9 +142,16 @@ class MarketStatusMessage:
 
 
 class _Stream:
-    def __init__(self, timer: _Timer, *, heartbeat: bool = True) -> None:
+    def __init__(
+        self,
+        timer: _Timer,
+        *,
+        heartbeat: bool = True,
+        interval_symbols: tuple[str, ...] = ("VHM", "VIC"),
+    ) -> None:
         self.timer = timer
         self.heartbeat = heartbeat
+        self.interval_symbols = interval_symbols
         self.on_data: Any = None
         self.on_heartbeat: Any = None
         self.is_connected = False
@@ -160,7 +168,7 @@ class _Stream:
         assert symbols == ["VIC", "VHM"]
 
     def subscribe_symbol_ohlcv(self, symbols: list[str], interval: Any) -> None:
-        assert symbols == ["VIC", "VHM"]
+        assert symbols == list(self.interval_symbols)
         assert str(interval.value) == "1m"
 
     def ping(self) -> None:
@@ -267,6 +275,54 @@ def test_stream_capture_versions_and_scopes_market_status_evidence() -> None:
     assert status["message_type"] == "MarketStatusMessage"
     assert status["subscription_context"] == "markets"
     assert status["symbol"] == "HOSE"
+
+
+def test_stream_capture_scopes_breadth_from_hashed_sdk_membership() -> None:
+    class _Market:
+        def get_securities_info_by_index(self, index: str) -> object:
+            if index == "VN30":
+                return [
+                    {"symbol": "VIC", "name": "VinGroup"},
+                    {"symbol": "FPT", "name": "FPT"},
+                ]
+            raise RuntimeError("provider unavailable")
+
+    timer = _Timer()
+    snapshot = capture_index_memberships(
+        _Market(),
+        ("VN30", "VNREAL"),
+        clock=timer.clock,
+    )
+    assert snapshot.indices == ("VN30", "VNREAL")
+    assert snapshot.symbols == ("FPT", "VIC")
+    assert snapshot.memberships[0].status == "captured"
+    assert snapshot.memberships[1].status == "unavailable"
+
+    store = _Store()
+    manifest_uri = capture_stream(
+        _MarketStream(timer, interval_symbols=("FPT", "VHM", "VIC")),
+        store,
+        StreamCaptureOptions(
+            markets=("HOSE",),
+            breadth_membership=snapshot,
+            duration_seconds=1,
+            heartbeat_seconds=0.25,
+            stale_after_seconds=0.75,
+            flush_seconds=0.5,
+            batch_size=8,
+            queue_size=10,
+        ),
+        clock=timer.clock,
+        timer=timer.tick,
+        session_id="breadth-session",
+    )
+
+    manifest = json.loads(store.objects[manifest_uri.removeprefix("s3://landing/root/")])
+    validated = StreamManifest.model_validate(manifest)
+    assert validated.schema_version == 4
+    assert validated.symbols == ("VIC", "VHM")
+    assert validated.interval_symbols == ("FPT", "VHM", "VIC")
+    assert validated.breadth_membership == snapshot
 
 
 def test_stream_capture_fails_closed_when_heartbeats_are_stale() -> None:

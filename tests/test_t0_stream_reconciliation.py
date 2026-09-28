@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from ssi_sdk import __version__ as SSI_SDK_VERSION
 from t0_trading.capture import MAX_STREAM_BATCH_MESSAGES, SSI_STREAM_RAW_PREFIX
+from t0_trading.capture.membership import capture_index_memberships
 from t0_trading.capture.reader import (
     StreamBatch,
     StreamCaptureReadError,
@@ -197,6 +198,8 @@ def _reader(
     error_type: str | None = None,
     session_id: str = SESSION_ID,
     last_heartbeat_at: str | None = None,
+    breadth_symbols: tuple[str, ...] = (),
+    include_breadth_intervals: bool = True,
 ) -> StreamSessionReader:
     rows = [
         _quote_row(
@@ -275,6 +278,26 @@ def _reader(
             received_at=datetime(2026, 9, 4, 2, 15, 58, tzinfo=UTC),
         )
     )
+    extra_breadth_symbols = (
+        tuple(symbol for symbol in breadth_symbols if symbol not in symbols)
+        if include_breadth_intervals
+        else ()
+    )
+    for offset, symbol in enumerate(extra_breadth_symbols, start=1):
+        rows.append(
+            _interval_row(
+                len(rows) + 1,
+                symbol=symbol,
+                interval_time="2026/09/04 09:16:00",
+                observed_time=f"2026/09/04 09:16:{offset:02d}",
+                open_price=50,
+                high=50,
+                low=50,
+                close=50,
+                volume=10,
+                received_at=datetime(2026, 9, 4, 2, 16, offset + 1, tzinfo=UTC),
+            )
+        )
     return _reader_from_rows(
         rows,
         symbols=symbols,
@@ -285,6 +308,7 @@ def _reader(
         error_type=error_type,
         session_id=session_id,
         last_heartbeat_at=last_heartbeat_at,
+        breadth_symbols=breadth_symbols,
     )
 
 
@@ -300,6 +324,7 @@ def _reader_from_rows(
     error_type: str | None = None,
     session_id: str = SESSION_ID,
     last_heartbeat_at: str | None = None,
+    breadth_symbols: tuple[str, ...] = (),
 ) -> StreamSessionReader:
     rows = [{**row, "stream_session_id": session_id} for row in rows]
     body = gzip.compress(
@@ -331,8 +356,21 @@ def _reader_from_rows(
         "published_at": batch_published_at,
     }
     manifest_key = f"{session_prefix}/manifest.json"
+    breadth_membership = None
+    if breadth_symbols:
+
+        class _Market:
+            def get_securities_info_by_index(self, index: str) -> object:
+                assert index == "VN30"
+                return [{"symbol": symbol} for symbol in breadth_symbols]
+
+        breadth_membership = capture_index_memberships(
+            _Market(),
+            ("VN30",),
+            clock=lambda: datetime(2026, 9, 4, 1, 0, tzinfo=UTC),
+        )
     manifest = {
-        "schema_version": 1,
+        "schema_version": 4 if breadth_membership is not None else 1,
         "stream_session_id": session_id,
         "symbols": list(symbols),
         "connected_at": connected_at,
@@ -351,6 +389,10 @@ def _reader_from_rows(
         "error_type": error_type,
         "published_at": "2026-09-04T09:00:01+00:00",
     }
+    if breadth_membership is not None:
+        manifest["markets"] = ["HOSE"]
+        manifest["interval_symbols"] = sorted(set(symbols) | set(breadth_symbols))
+        manifest["breadth_membership"] = breadth_membership.model_dump(mode="json")
     objects = {object_key: body, manifest_key: canonical_json(manifest)}
     reader = StreamSessionReader(_Store(objects), manifest_key)
     if corrupt:
@@ -678,6 +720,9 @@ def test_reader_streams_verified_rows_and_reconciliation_matches_ohlcv() -> None
     assert report.session_counts == {"continuous_am": 5}
     assert report.replayed_bar_count == 2
     assert report.provider_interval_update_count == 2
+    assert report.breadth_interval_update_count == 0
+    assert report.breadth_interval_symbols == ()
+    assert report.missing_breadth_interval_symbols == ()
     assert report.provider_interval_minute_count == 2
     assert report.matched_interval_update_count == 2
     assert report.unmatched_interval_update_count == 0
@@ -685,6 +730,36 @@ def test_reader_streams_verified_rows_and_reconciliation_matches_ohlcv() -> None
     assert report.provider_interval_progression_issue_count == 0
     assert report.differences == ()
     assert report.interval_differences == ()
+
+
+def test_reconciliation_reports_breadth_coverage_without_changing_core_gates() -> None:
+    reader = _reader(breadth_symbols=("FPT", "VIC"))
+    version = load_configuration(Path("t0-trading/config/trading.yaml")).resolve(TRADE_DATE)
+
+    report = reconcile_session(reader, version)
+
+    assert report.status == "passed"
+    assert report.provider_interval_update_count == 2
+    assert report.breadth_interval_update_count == 1
+    assert report.message_counts["IntervalMessage"] == 3
+    assert report.breadth_interval_symbols == ("FPT", "VIC")
+    assert report.missing_breadth_interval_symbols == ()
+    assert report.replayed_bar_count == 2
+
+
+def test_reconciliation_reports_missing_breadth_without_failing_core_capture() -> None:
+    reader = _reader(
+        breadth_symbols=("FPT", "VIC"),
+        include_breadth_intervals=False,
+    )
+    version = load_configuration(Path("t0-trading/config/trading.yaml")).resolve(TRADE_DATE)
+
+    report = reconcile_session(reader, version)
+
+    assert report.status == "passed"
+    assert report.breadth_interval_update_count == 0
+    assert report.breadth_interval_symbols == ("VIC",)
+    assert report.missing_breadth_interval_symbols == ("FPT",)
 
 
 def test_reconciliation_reports_provider_interval_differences_without_rejecting_trades() -> None:

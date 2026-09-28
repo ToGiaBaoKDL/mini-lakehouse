@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from ssi_sdk import __version__ as SSI_SDK_VERSION
 
 from t0_trading.capture import MAX_STREAM_BATCH_MESSAGES, SSI_STREAM_RAW_PREFIX
+from t0_trading.capture.membership import BreadthMembershipSnapshot
 from t0_trading.capture.store import S3CaptureStore
 from t0_trading.identity import canonical_json, sha256
 from t0_trading.market.events import StreamEnvelope
@@ -91,11 +92,13 @@ class StreamBatch(_StrictModel):
 
 
 class StreamManifest(_StrictModel):
-    schema_version: Literal[1, 2, 3]
+    schema_version: Literal[1, 2, 3, 4]
     stream_session_id: str = Field(min_length=1)
     symbols: tuple[str, ...]
     indices: tuple[str, ...] = ()
     markets: tuple[str, ...] = ()
+    interval_symbols: tuple[str, ...] = ()
+    breadth_membership: BreadthMembershipSnapshot | None = None
     connected_at: datetime
     disconnected_at: datetime
     disconnect_kind: StreamDisconnectKind
@@ -143,12 +146,33 @@ class StreamManifest(_StrictModel):
         invalid_markets = len(self.markets) != len(set(self.markets)) or any(
             not market or market != market.strip().upper() for market in self.markets
         )
+        expected_interval_symbols = (
+            tuple(sorted(set(self.symbols) | set(self.breadth_membership.symbols)))
+            if self.breadth_membership is not None
+            else ()
+        )
+        invalid_interval_symbols = len(self.interval_symbols) != len(
+            set(self.interval_symbols)
+        ) or any(not symbol or symbol != symbol.strip().upper() for symbol in self.interval_symbols)
         invalid_schema_scope = (
-            (self.schema_version == 1 and bool(self.indices or self.markets))
+            (
+                self.schema_version in {1, 2, 3}
+                and bool(self.interval_symbols or self.breadth_membership)
+            )
+            or (self.schema_version == 1 and bool(self.indices or self.markets))
             or (self.schema_version == 2 and (not self.indices or bool(self.markets)))
             or (self.schema_version == 3 and not self.markets)
+            or (
+                self.schema_version == 4
+                and (
+                    not self.markets
+                    or self.indices
+                    or self.breadth_membership is None
+                    or self.interval_symbols != expected_interval_symbols
+                )
+            )
         )
-        if invalid_indices or invalid_markets or invalid_schema_scope:
+        if invalid_indices or invalid_markets or invalid_interval_symbols or invalid_schema_scope:
             raise ValueError("subscription scopes do not match the stream manifest schema")
         if not self.connected_at <= self.disconnected_at <= self.published_at:
             raise ValueError("terminal timestamps are not ordered")
@@ -190,6 +214,16 @@ class _CapturedRow(StreamEnvelope):
     provider_topic: None
     api_version: str
     sdk_version: str
+
+
+def _breadth_scope(manifest: object) -> tuple[tuple[str, str, tuple[str, ...]], ...]:
+    snapshot = getattr(manifest, "breadth_membership", None)
+    if snapshot is None:
+        return ()
+    return tuple(
+        (membership.index, membership.status, membership.symbols)
+        for membership in snapshot.memberships
+    )
 
 
 def _manifest_location(key: str) -> tuple[date, str]:
@@ -323,7 +357,13 @@ class StreamSessionReader:
                     or (
                         row.subscription_context == "symbols"
                         and row.symbol is not None
-                        and row.symbol not in self.manifest.symbols
+                        and row.symbol
+                        not in (
+                            self.manifest.interval_symbols
+                            if row.message_type == "IntervalMessage"
+                            and self.manifest.schema_version == 4
+                            else self.manifest.symbols
+                        )
                     )
                     or (
                         row.subscription_context == "indices"
@@ -432,6 +472,9 @@ class StreamDayReader:
             or reader.manifest.symbols != first.manifest.symbols
             or getattr(reader.manifest, "indices", ()) != getattr(first.manifest, "indices", ())
             or getattr(reader.manifest, "markets", ()) != getattr(first.manifest, "markets", ())
+            or getattr(reader.manifest, "interval_symbols", ())
+            != getattr(first.manifest, "interval_symbols", ())
+            or _breadth_scope(reader.manifest) != _breadth_scope(first.manifest)
             or reader.manifest.api_version != first.manifest.api_version
             or reader.manifest.sdk_version != first.manifest.sdk_version
             for reader in ordered[1:]
@@ -445,6 +488,12 @@ class StreamDayReader:
         self.symbols = first.manifest.symbols
         self.indices = getattr(first.manifest, "indices", ())
         self.markets = getattr(first.manifest, "markets", ())
+        self.interval_symbols = getattr(first.manifest, "interval_symbols", ())
+        self.breadth_membership = getattr(first.manifest, "breadth_membership", None)
+
+    @property
+    def breadth_symbols(self) -> tuple[str, ...]:
+        return self.breadth_membership.symbols if self.breadth_membership is not None else ()
 
     @property
     def stream_session_ids(self) -> tuple[str, ...]:

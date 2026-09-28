@@ -140,6 +140,9 @@ class ReconciliationReport(BaseModel):
     session_counts: dict[str, int]
     replayed_bar_count: int
     provider_interval_update_count: int
+    breadth_interval_update_count: int
+    breadth_interval_symbols: tuple[str, ...]
+    missing_breadth_interval_symbols: tuple[str, ...]
     provider_interval_minute_count: int
     matched_interval_update_count: int
     gap_interval_update_count: int
@@ -160,7 +163,8 @@ class ReconciliationReport(BaseModel):
         ):
             raise ValueError("event counts do not reconcile to business_event_count")
         if (
-            self.provider_interval_update_count != self.message_counts.get("IntervalMessage", 0)
+            self.provider_interval_update_count + self.breadth_interval_update_count
+            != self.message_counts.get("IntervalMessage", 0)
             or self.matched_interval_update_count
             + self.gap_interval_update_count
             + self.unmatched_interval_update_count
@@ -179,7 +183,12 @@ class ReconciliationReport(BaseModel):
             raise ValueError("reconciliation capture lineage is inconsistent")
         if any(
             tuple(sorted(set(symbols))) != symbols
-            for symbols in (self.trade_symbols, self.quote_symbols)
+            for symbols in (
+                self.trade_symbols,
+                self.quote_symbols,
+                self.breadth_interval_symbols,
+                self.missing_breadth_interval_symbols,
+            )
         ):
             raise ValueError("event symbol summaries must be sorted and unique")
         return self
@@ -522,6 +531,8 @@ def reconcile_capture(
     message_counts: Counter[str] = Counter()
     provider_bars: dict[_BarKey, _ProviderBar] = {}
     provider_updates: list[_ProviderBar] = []
+    all_interval_symbols: set[str] = set()
+    breadth_interval_update_count = 0
     trade_prefixes: dict[_BarKey, _TradePrefix] = {}
     observed_prefixes: dict[_BarKey, dict[_BarValues, datetime]] = {}
     trade_symbols: set[str] = set()
@@ -562,11 +573,20 @@ def reconcile_capture(
         observed_prefixes.setdefault(key, {})[prefix.values] = event.event_time.astimezone(timezone)
 
     def observed() -> Iterable[StreamEnvelope]:
-        nonlocal provider_interval_progression_issue_count
+        nonlocal breadth_interval_update_count, provider_interval_progression_issue_count
         for envelope in capture.envelopes():
             message_counts[envelope.message_type] += 1
             interval = _provider_bar(envelope, timezone)
             if interval is not None:
+                all_interval_symbols.add(interval.symbol)
+                if interval.symbol in capture.breadth_symbols and (
+                    interval.symbol not in configuration.market.symbols
+                ):
+                    if interval.start.date() != capture.trade_date:
+                        raise ValueError("SSI interval does not belong to the captured trade date")
+                    breadth_interval_update_count += 1
+                    yield envelope
+                    continue
                 if interval.symbol not in configuration.market.symbols:
                     raise ValueError("SSI interval symbol is outside the configured universe")
                 if interval.start.date() != capture.trade_date:
@@ -651,6 +671,8 @@ def reconcile_capture(
         schedule=configuration.market.sessions,
     )
     configured_symbols = set(configuration.market.symbols)
+    configured_breadth_symbols = set(capture.breadth_symbols)
+    observed_breadth_symbols = configured_breadth_symbols & all_interval_symbols
     capture_scope_matches_configuration = set(capture.symbols) == configured_symbols
     for symbol in sorted(configured_symbols - trade_symbols):
         differences.add(f"{symbol}:configured_symbol_without_trade")
@@ -688,6 +710,11 @@ def reconcile_capture(
         session_counts=dict(result.session_counts),
         replayed_bar_count=len(replayed_bars),
         provider_interval_update_count=len(provider_updates),
+        breadth_interval_update_count=breadth_interval_update_count,
+        breadth_interval_symbols=tuple(sorted(observed_breadth_symbols)),
+        missing_breadth_interval_symbols=tuple(
+            sorted(configured_breadth_symbols - observed_breadth_symbols)
+        ),
         provider_interval_minute_count=len(provider_bars),
         matched_interval_update_count=matched_updates,
         gap_interval_update_count=gap_updates,

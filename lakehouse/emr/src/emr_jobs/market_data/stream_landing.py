@@ -106,6 +106,13 @@ def _messages_frame(spark: SparkSession, capture: StreamSessionReader) -> DataFr
     symbol_scope = F.col("subscription_context") == F.lit("symbols")
     market_scope = F.col("subscription_context") == F.lit("markets")
     symbol_in_scope = F.col("symbol").isin(*manifest.symbols)
+    interval_symbol_in_scope = F.col("symbol").isin(
+        *(manifest.interval_symbols or manifest.symbols)
+    )
+    allowed_symbol_scope = F.when(
+        F.col("message_type") == F.lit("IntervalMessage"),
+        interval_symbol_in_scope,
+    ).otherwise(symbol_in_scope)
     market_in_scope = F.col("symbol").isin(*manifest.markets) if manifest.markets else F.lit(False)
     invalid = messages.filter(
         F.expr(" OR ".join(f"{column} IS NULL" for column in required_columns))
@@ -124,7 +131,7 @@ def _messages_frame(spark: SparkSession, capture: StreamSessionReader) -> DataFr
         | (F.col("received_at") > F.col("published_at"))
         | (
             F.col("symbol").isNotNull()
-            & ((symbol_scope & ~symbol_in_scope) | (market_scope & ~market_in_scope))
+            & ((symbol_scope & ~allowed_symbol_scope) | (market_scope & ~market_in_scope))
         )
         | (
             F.coalesce(F.col("symbol"), F.lit("__NULL__"))

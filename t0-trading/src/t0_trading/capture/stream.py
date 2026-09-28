@@ -19,6 +19,7 @@ from ssi_sdk import __version__ as SSI_SDK_VERSION
 from ssi_sdk.enums import Timeframe
 
 from t0_trading.capture import MAX_STREAM_BATCH_MESSAGES, SSI_STREAM_RAW_PREFIX
+from t0_trading.capture.membership import BreadthMembershipSnapshot
 from t0_trading.capture.spool import CaptureSpool
 from t0_trading.capture.store import CaptureStore
 from t0_trading.evidence import public_value
@@ -54,6 +55,7 @@ class StreamObserver(Protocol):
 class StreamCaptureOptions:
     symbols: tuple[str, ...] = ("VIC", "VHM")
     markets: tuple[str, ...] = ()
+    breadth_membership: BreadthMembershipSnapshot | None = None
     duration_seconds: float = 600
     heartbeat_seconds: float = 30
     stale_after_seconds: float = 90
@@ -72,6 +74,8 @@ class StreamCaptureOptions:
                 or any(not value or value != value.strip().upper() for value in values)
             ):
                 raise ValueError(f"{label} must contain unique uppercase identifiers")
+        if self.breadth_membership is not None and not self.markets:
+            raise ValueError("breadth capture requires a market-status scope")
         if self.duration_seconds <= 0:
             raise ValueError("duration_seconds must be positive")
         if self.heartbeat_seconds <= 0:
@@ -84,6 +88,11 @@ class StreamCaptureOptions:
             or self.queue_size < self.batch_size
         ):
             raise ValueError("stream buffer limits are invalid")
+
+    @property
+    def interval_symbols(self) -> tuple[str, ...]:
+        breadth = self.breadth_membership.symbols if self.breadth_membership is not None else ()
+        return tuple(sorted(set(self.symbols) | set(breadth)))
 
 
 def _field(value: object, name: str) -> object | None:
@@ -326,7 +335,9 @@ def capture_stream(
         # keeping protocol details out of service logs.
         with redirect_stdout(StringIO()):
             client.subscribe_symbol(list(options.symbols))
-            client.subscribe_symbol_ohlcv(list(options.symbols), interval=Timeframe.MINUTE_1)
+            client.subscribe_symbol_ohlcv(
+                list(options.interval_symbols), interval=Timeframe.MINUTE_1
+            )
             if options.markets:
                 client.subscribe_market_status(list(options.markets))
             client.ping()
@@ -400,7 +411,9 @@ def capture_stream(
     message_count = sum(cast(int, batch["message_count"]) for batch in batches)
     manifest_key = f"{session_prefix}/manifest.json"
     manifest: dict[str, object] = {
-        "schema_version": 3 if options.markets else 1,
+        "schema_version": 4
+        if options.breadth_membership is not None
+        else (3 if options.markets else 1),
         "stream_session_id": session_id,
         "symbols": list(options.symbols),
         "connected_at": connected_at.isoformat(),
@@ -421,6 +434,9 @@ def capture_stream(
     }
     if options.markets:
         manifest["markets"] = list(options.markets)
+    if options.breadth_membership is not None:
+        manifest["interval_symbols"] = list(options.interval_symbols)
+        manifest["breadth_membership"] = options.breadth_membership.model_dump(mode="json")
     if spool is None:
         store.put_json(manifest_key, manifest)
     else:

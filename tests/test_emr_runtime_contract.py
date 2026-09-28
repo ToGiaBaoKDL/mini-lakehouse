@@ -174,7 +174,8 @@ def test_market_data_stream_routes_only_supported_symbol_and_status_capture() ->
 
     assert 'F.col("subscription_context") == F.lit("symbols")' in landing
     assert 'F.col("symbol").isin(*manifest.symbols)' in landing
-    assert "(symbol_scope & ~symbol_in_scope)" in landing
+    assert "manifest.interval_symbols or manifest.symbols" in landing
+    assert "(symbol_scope & ~allowed_symbol_scope)" in landing
     assert "(market_scope & ~market_in_scope)" in landing
     assert 'F.col("subscription_context") == F.lit("indices")' not in landing
     assert "manifest.indices" not in landing
