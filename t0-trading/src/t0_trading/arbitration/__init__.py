@@ -17,6 +17,10 @@ from t0_trading.arbitration.model import (
     require_selected_candidate,
 )
 from t0_trading.arbitration.publication import publish_shadow_journal
+from t0_trading.arbitration.recovery import (
+    ShadowJournalEnsureResult,
+    ensure_shadow_journal,
+)
 
 __all__ = [
     "ArbitrationStatus",
@@ -27,8 +31,10 @@ __all__ = [
     "ShadowArbitrationAuditReport",
     "ShadowArbitrationJournal",
     "ShadowArbitrationManifest",
+    "ShadowJournalEnsureResult",
     "arbitrate_candidates",
     "audit_shadow_journal",
+    "ensure_shadow_journal",
     "publish_shadow_journal",
     "require_selected_candidate",
 ]

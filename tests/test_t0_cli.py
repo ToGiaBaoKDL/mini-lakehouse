@@ -27,6 +27,7 @@ def test_cli_help_and_validation_do_not_initialize_aws(monkeypatch: Any) -> None
     assert "publish-promotion-evidence" in help_result.stdout
     assert "audit-arbitrated-session" in help_result.stdout
     assert "audit-shadow-journal" in help_result.stdout
+    assert "ensure-shadow-journal" in help_result.stdout
     assert "validate-stream-day" in help_result.stdout
     assert "certify-stream-day" in help_result.stdout
     assert "check-config" in help_result.stdout
@@ -99,7 +100,8 @@ def test_buy_first_audit_sanitizes_transport_failure(monkeypatch: Any) -> None:
 
 
 def test_promotion_publication_skips_pre_policy_sessions() -> None:
-    result = CliRunner().invoke(
+    runner = CliRunner()
+    result = runner.invoke(
         app,
         [
             "publish-promotion-evidence",
@@ -112,6 +114,20 @@ def test_promotion_publication_skips_pre_policy_sessions() -> None:
 
     assert result.exit_code == 99
     assert "no prospective arbitration/promotion policy" in result.output
+
+    recovery = runner.invoke(
+        app,
+        [
+            "ensure-shadow-journal",
+            "--trade-date",
+            "2026-09-27",
+            "--landing-uri",
+            "s3://landing/root",
+        ],
+    )
+
+    assert recovery.exit_code == 99
+    assert "no prospective candidate-arbitration policy" in recovery.output
 
 
 def test_validate_stream_day_skips_an_unobserved_trading_date(monkeypatch: Any) -> None:

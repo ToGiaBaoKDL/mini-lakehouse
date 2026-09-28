@@ -244,8 +244,7 @@ class PaperExecutionRequest(_StrictModel):
             raise ValueError("paper market snapshot does not match candidate lineage")
         if (
             self.account.as_of > self.market.observed_at
-            or self.account.as_of.astimezone(_MARKET_TIMEZONE).date()
-            != self.candidate.trade_date
+            or self.account.as_of.astimezone(_MARKET_TIMEZONE).date() != self.candidate.trade_date
         ):
             raise ValueError("paper account snapshot does not precede same-day planning")
         if not self.costs.contains(self.candidate.trade_date):
@@ -398,9 +397,7 @@ class PaperOrderEvent(_StrictModel):
                 raise ValueError("terminal paper event requires a reason")
         elif self.reason is not None:
             raise ValueError("non-terminal paper event cannot carry a reason")
-        if (self.event_type in {"PARTIALLY_FILLED", "FILLED"}) != (
-            self.fill_evidence is not None
-        ):
+        if (self.event_type in {"PARTIALLY_FILLED", "FILLED"}) != (self.fill_evidence is not None):
             raise ValueError("paper fill events require exact market evidence")
         return self
 
@@ -428,9 +425,7 @@ class PaperOrderState(_StrictModel):
             self.status != "CREATED" or self.last_event_sha256 is not None
         ):
             raise ValueError("paper order state without events must remain CREATED")
-        if self.event_count > 0 and (
-            self.status == "CREATED" or self.last_event_sha256 is None
-        ):
+        if self.event_count > 0 and (self.status == "CREATED" or self.last_event_sha256 is None):
             raise ValueError("paper order state with events requires event lineage")
         return self
 
@@ -459,8 +454,7 @@ class PaperExitRequest(_StrictModel):
             or not any(
                 item.entry_intent_sha256 == self.entry_intent.sha256
                 and item.status == "OPEN"
-                and 0 < item.reserved_exit_quantity
-                <= self.entry_state.cumulative_filled_quantity
+                and 0 < item.reserved_exit_quantity <= self.entry_state.cumulative_filled_quantity
                 for item in self.resources.reservations
             )
         ):

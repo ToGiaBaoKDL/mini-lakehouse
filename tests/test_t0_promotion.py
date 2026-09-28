@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from t0_trading.arbitration import ShadowArbitrationAuditReport
@@ -19,6 +19,7 @@ from t0_trading.promotion import (
     publish_gate_evidence,
     publish_session_evidence,
 )
+from t0_trading.strategy.baselines import BaselineName
 
 CONFIGURATION = Path("t0-trading/config/trading.yaml")
 FIRST_DATE = date(2026, 9, 28)
@@ -49,7 +50,7 @@ def _session(trade_date: date, *, net_bps: str = "5") -> ArbitratedSessionReport
         capture_gap_count=0,
         evaluations=tuple(
             ArbitratedSessionEvaluation(
-                strategy=target.strategy,
+                strategy=cast(BaselineName, target.strategy),
                 symbol=target.symbol,
                 horizon_seconds=target.horizon_seconds,
                 selected_count=1,

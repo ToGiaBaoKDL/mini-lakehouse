@@ -209,7 +209,7 @@ def test_t0_certification_uses_the_official_read_only_sdk_boundary() -> None:
     assert "get_securities_summary_by_index" in certification
     assert "subscribe_symbol" in certification
     assert "subscribe_symbol_ohlcv" in certification
-    assert "subscribe_index" in certification
+    assert "subscribe_index" not in certification
     assert "client.ping()" in certification
     assert "client.ping()" in Path("t0-trading/src/t0_trading/capture/stream.py").read_text(
         encoding="utf-8"

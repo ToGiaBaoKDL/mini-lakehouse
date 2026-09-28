@@ -115,6 +115,10 @@ class _Market:
         self.calls.append(("minute", (symbol, page, size)))
         return [_Bar(symbol, f"{from_date[:10]} 09:00:00")] if page == 1 else []
 
+    def get_ohlc_1minute(self, symbol: str) -> list[_Bar]:
+        self.calls.append(("index_minute", symbol))
+        return [_Bar(symbol, "2026/08/26 09:00:00")]
+
     def get_master_data_historical(self, from_date: str, to_date: str) -> list[_Security]:
         self.calls.append(("master", from_date))
         assert from_date == to_date == "2026/08/26"
@@ -133,12 +137,16 @@ class _Market:
             _MarketIndex("HNXINDEX"),
         ]
 
+    def get_securities_info_by_index(self, index: str) -> list[_Security]:
+        self.calls.append(("membership", index))
+        return [_Security("VIC"), _Security("VHM")]
+
 
 def test_rest_capture_is_immutable_scoped_and_idempotent() -> None:
     s3 = _S3()
     store = S3CaptureStore(s3, "s3://landing/root")
     market = _Market()
-    instant = datetime(2026, 8, 27, tzinfo=UTC)
+    instant = datetime(2026, 8, 26, 9, tzinfo=UTC)
 
     def clock() -> datetime:
         nonlocal instant
@@ -150,6 +158,7 @@ def test_rest_capture_is_immutable_scoped_and_idempotent() -> None:
         job_token="manual__2026-08-27",
         symbols=("VIC", "VHM"),
         indices=("VNINDEX", "VN30"),
+        membership_indices=("VN30",),
         page_size=2,
     )
     manifest_uri = capture_rest(market, store, options, clock=clock)
@@ -163,12 +172,18 @@ def test_rest_capture_is_immutable_scoped_and_idempotent() -> None:
 
     manifest_key = manifest_uri.removeprefix("s3://landing/")
     manifest = json.loads(s3.objects[f"landing/{manifest_key}"][0])
+    assert manifest["schema_version"] == 2
     assert manifest["trade_date"] == "2026-08-26"
     assert manifest["symbols"] == ["VIC", "VHM"]
     assert manifest["indices"] == ["VNINDEX", "VN30"]
-    assert manifest["capability_contract"] == "ssi-fastconnect-rest/v1"
-    assert len(manifest["requests"]) == 12
+    assert manifest["membership_indices"] == ["VN30"]
+    assert manifest["capability_contract"] == "ssi-fastconnect-rest/v2"
+    assert manifest["index_bar_status"] == {"VN30": "captured", "VNINDEX": "captured"}
+    assert manifest["membership_status"] == {"VN30": "captured"}
+    assert len(manifest["requests"]) == 15
     assert sum(call[0] == "minute" for call in market.calls) == 2
+    assert sum(call[0] == "index_minute" for call in market.calls) == 2
+    assert sum(call[0] == "membership" for call in market.calls) == 1
     assert sum(call[0] == "indexes" for call in market.calls) == 1
     serialized = json.dumps(manifest)
     assert "manual__2026-08-27" not in serialized
@@ -256,6 +271,14 @@ def test_capture_options_reject_noncanonical_scope() -> None:
         else:
             raise AssertionError("Expected noncanonical symbols to be rejected")
 
+    with pytest.raises(ValueError, match="membership_indices must be captured indices"):
+        RestCaptureOptions(
+            trade_date=date(2026, 8, 26),
+            job_token="run",
+            indices=("VNINDEX",),
+            membership_indices=("VN30",),
+        )
+
 
 def test_rest_capture_rejects_indices_absent_from_the_official_catalog() -> None:
     class _MissingIndexMarket(_Market):
@@ -272,6 +295,52 @@ def test_rest_capture_rejects_indices_absent_from_the_official_catalog() -> None
                 indices=("VNINDEX", "VN30"),
             ),
         )
+
+
+def test_rest_capture_marks_nonmatching_same_day_index_data_unavailable() -> None:
+    class _HistoricalRunMarket(_Market):
+        def get_ohlc_1minute(self, symbol: str) -> list[_Bar]:
+            return [_Bar(symbol, "2026/09/28 09:00:00")]
+
+    s3 = _S3()
+    store = S3CaptureStore(s3, "s3://landing/root")
+    uri = capture_rest(
+        _HistoricalRunMarket(),
+        store,
+        RestCaptureOptions(
+            trade_date=date(2026, 8, 26),
+            job_token="historical-run",
+            indices=("VNINDEX", "VN30"),
+        ),
+    )
+
+    manifest_key = uri.removeprefix("s3://landing/")
+    manifest = json.loads(s3.objects[f"landing/{manifest_key}"][0])
+    assert manifest["index_bar_status"] == {
+        "VN30": "unavailable",
+        "VNINDEX": "unavailable",
+    }
+
+
+def test_rest_capture_never_assigns_current_membership_to_a_historical_day() -> None:
+    s3 = _S3()
+    market = _Market()
+    uri = capture_rest(
+        market,
+        S3CaptureStore(s3, "s3://landing/root"),
+        RestCaptureOptions(
+            trade_date=date(2026, 8, 26),
+            job_token="historical-membership",
+            indices=("VN30",),
+            membership_indices=("VN30",),
+        ),
+        clock=lambda: datetime(2026, 9, 28, tzinfo=UTC),
+    )
+
+    manifest_key = uri.removeprefix("s3://landing/")
+    manifest = json.loads(s3.objects[f"landing/{manifest_key}"][0])
+    assert manifest["membership_status"] == {"VN30": "unavailable"}
+    assert all(call[0] != "membership" for call in market.calls)
 
 
 def test_s3_store_defers_only_retryable_sdk_failures() -> None:

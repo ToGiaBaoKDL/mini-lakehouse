@@ -50,14 +50,14 @@ Corporate actions remain empty until an official structured source is certified.
 
 The physical tables intentionally use one table per durable grain, not one table per engine:
 
-| Tables                                                                          | State                            | Reason                                                                                    |
-| ------------------------------------------------------------------------------- | -------------------------------- | ----------------------------------------------------------------------------------------- |
-| REST `records`, `request_publications`                                          | Active in bounded publication    | Immutable records and one terminal request marker are different grains.                   |
-| `securities`, `daily_security_summaries`, `intraday_bars_1m`, `index_snapshots` | Active in bounded publication    | Current certified REST normalization output.                                              |
-| Stream `messages`, `sessions`                                                   | Active in manifest-scoped replay | Message lineage and terminal connection-session completeness are the two durable grains.  |
-| `trade_ticks`, `quote_snapshots`, `quote_levels`                                | Active in manifest-scoped replay | Quotes use a parent snapshot plus one-to-many levels; ticks retain receive order.         |
-| `market_status_events`                                                          | Active in manifest-scoped replay | Official market-phase transitions feed the point-in-time fail-closed context gate.        |
-| `corporate_actions`                                                             | Deferred                         | Required for adjusted replay, but has no writer until its structured source is certified. |
+| Tables                                                                                           | State                            | Reason                                                                                    |
+| ------------------------------------------------------------------------------------------------ | -------------------------------- | ----------------------------------------------------------------------------------------- |
+| REST `records`, `request_publications`                                                           | Active in bounded publication    | Immutable records and one terminal request marker are different grains.                   |
+| `securities`, `daily_security_summaries`, `intraday_bars_1m`, `index_bars_1m`, `index_snapshots` | Active in bounded publication    | Current certified REST normalization output.                                              |
+| Stream `messages`, `sessions`                                                                    | Active in manifest-scoped replay | Message lineage and terminal connection-session completeness are the two durable grains.  |
+| `trade_ticks`, `quote_snapshots`, `quote_levels`                                                 | Active in manifest-scoped replay | Quotes use a parent snapshot plus one-to-many levels; ticks retain receive order.         |
+| `market_status_events`                                                                           | Active in manifest-scoped replay | Official market-phase transitions feed the point-in-time fail-closed context gate.        |
+| `corporate_actions`                                                                              | Deferred                         | Required for adjusted replay, but has no writer until its structured source is certified. |
 
 Each bounded EMR job requires only the landing and curated tables that it writes. Deferred
 contracts do not add a runtime branch, generic repository, or empty application service.
@@ -279,13 +279,13 @@ joins a separately versioned, immutable `DecisionContext` at the exact feature c
 - VIC–VHM Relative requires target underperformance, a prior disjoint 30-second peer move followed
   by target recovery, and positive broad-market confirmation. The lagged move is a baseline proxy,
   not a fitted rolling leader model. Positive VN30 and VNINDEX returns confirm the candidate only
-  when both index streams are fresh and have complete point-in-time lookback windows.
+  when both index series are fresh and have complete point-in-time lookback windows.
 
 The same context classifies `TREND_UP`, `TREND_DOWN`, `RANGE`, or `HIGH_VOLATILITY` from VNINDEX and
-VN30. Live publication prefers index stream observations. For pre-index-stream dates, research replay
-may use completed-day one-minute REST bars, but records `HISTORICAL_PROXY` and the original REST
-record hash on every context; it never presents those bars as contemporaneously received stream
-evidence. A REST close is conservatively exposed only after one complete configured bar interval;
+VN30. Research replay uses completed-day one-minute REST bars and records `HISTORICAL_PROXY` plus the
+original REST record hash on every context; it never presents those bars as contemporaneously
+received stream evidence. Live shadow context remains fail-closed until a separately certified
+point-in-time source is connected. A REST close is conservatively exposed only after one complete configured bar interval;
 both that delay and its staleness grace are versioned in the context-policy hash. Missing, stale, or
 insufficient history produces `UNKNOWN` with explicit reasons. A daily
 index summary is never expanded into synthetic intraday observations. Context policy, source feature
@@ -441,15 +441,32 @@ uv run --project t0-trading t0-trading audit-shadow-journal \
   --manifest-uri s3://<landing-bucket>/stream/ssi_fastconnect_stream/promotion/shadow_journals/trade_date=YYYY-MM-DD/manifest.json
 ```
 
+The scheduled post-close path first runs `ensure-shadow-journal`. An existing journal is audited
+without being rewritten. If the live observer failed before publishing its commit marker, the
+command rebuilds candidates and arbitrations from the certified receipt-ordered terminal capture,
+publishes the same immutable manifest-last contract, and immediately audits it. Concurrent retries
+are safe because every object is content-verified and create-only; any non-identical object is an
+immutable conflict rather than an overwrite.
+
+```bash
+uv run --project t0-trading t0-trading ensure-shadow-journal \
+  --trade-date YYYY-MM-DD \
+  --landing-uri s3://<landing-bucket>
+```
+
+Recovery uses only the prospective configuration and raw evidence for that date. It does not read
+outcomes while constructing candidates or arbitration decisions and does not make an ineligible
+capture eligible.
+
 The audit validates canonical immutable objects, effective policy hashes, the complete feature clock,
 every S3 manifest and batch checksum, receipt ordering, capture gaps, record counts, and finally
 compares every journal record byte-for-byte with deterministic replay. It is read-only and exits
 non-zero on any mismatch.
 
-After stream certification, `etl_emr_ingest_market_data_stream` runs this audit automatically,
-publishes the daily arbitrated-session report, reloads prior committed reports from S3, and writes an
-immutable as-of promotion-gate report. `PENDING` while fewer than 26 eligible sessions exist is a
-successful orchestration state; missing or conflicting evidence fails the task.
+After stream certification, `etl_emr_ingest_market_data_stream` ensures and audits the journal,
+publishes the daily arbitrated-session report, reloads prior committed reports from S3, and writes
+an immutable as-of promotion-gate report. `PENDING` while fewer than 26 eligible sessions exist is
+a successful orchestration state; missing or conflicting evidence fails the task.
 
 dbt exposes `analytics_trading.fct_trading_backtest_observations` as a safe-by-default view. It
 inner joins the current passed certification, eligible snapshots, their normalized windows, and
@@ -458,12 +475,11 @@ features, coverage, or returns, and failed certifications disappear immediately 
 incremental-delete repair path.
 
 The bounded stream command subscribes to aggregate symbol data and one-minute intervals for
-`VIC,VHM`, plus the captured `VNINDEX,VN30,VNREAL` index stream and HOSE market-status transitions.
-Stream manifest v3 records symbol, index, and market scopes, while replay remains backward compatible
-with v1/v2 manifests.
+`VIC,VHM`, plus HOSE market-status transitions. It does not subscribe to SSI index topics: deployed
+probes received acknowledgements but no index business messages, so claiming that scope would create
+false lineage. Stream manifest v3 records only the supported symbol and market scopes.
 Landing validates each non-null identifier against its declared scope. Curated replay routes only
-symbol-scoped trades and quotes into security tables; index-scoped trade observations are published
-idempotently to `index_snapshots` with their receipt-time lineage. SDK callbacks only serialize
+symbol-scoped trades and quotes into security tables. SDK callbacks only serialize
 into a bounded in-memory queue; the main process writes
 content-addressed gzip micro-batches every 30 seconds or 500 messages, whichever comes first, so S3
 latency cannot block the WebSocket receive thread. Each
@@ -476,7 +492,6 @@ The deployed canary established the concrete callback shapes used by replay:
 | SDK callback          | Certified shape                                                     | Replay destination                                                                   |
 | --------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
 | `TradeMessage`        | Symbol, provider time, price, quantity, side, and cumulative volume | Symbol-scoped executable matches go to `trade_ticks`; auction state stays in landing |
-| Index `TradeMessage`  | Index code, provider time, value, and cumulative market volume      | Index-scoped observations go to `index_snapshots`                                    |
 | `QuoteMessage`        | Ten price/quantity slots with the advertised Top 3 populated        | `quote_snapshots` and `quote_levels`                                                 |
 | `IntervalMessage`     | Provider one-minute OHLCV observation                               | Landing evidence for later reconciliation                                            |
 | `ForeignRoomMessage`  | Cumulative foreign flow and room observation                        | Landing evidence; not a final daily fact                                             |
@@ -643,16 +658,25 @@ command writes the report before returning non-zero when any probe is partial, s
 provider behavior remains a visible gate. Generated reports are disposable local evidence and are
 not committed.
 
-The versioned `ssi-fastconnect-rest/v1` contract includes one completed trading date of
+The versioned `ssi-fastconnect-rest/v2` contract includes one completed trading date of
 SDK-auto-paginated stock master data, stock summaries, stock daily and one-minute OHLC, the official
-index catalog, and daily index summaries. It deliberately does not claim historical index OHLC:
-the generic SDK method accepts index identifiers but the provider returns no bars for that scope.
+index catalog, daily index summaries, and same-day one-minute index OHLC from the official
+`get_ohlc_1minute` SDK method. Each configured index is explicitly marked `captured` or `unavailable`;
+the latter is expected for historical backfills because SSI does not expose historical index-minute
+bars through the pinned SDK. The same bounded capture also preserves point-in-time membership for
+the explicitly configured `VN30` and `VNREAL` breadth universes via
+`get_securities_info_by_index`; `VNINDEX` is excluded because the pinned SDK cannot parse every
+instrument returned by that provider scope. Membership is captured only when the requested trade
+date equals the current Vietnam market date; historical runs are explicitly marked `unavailable`
+rather than assigning today's constituents to an older session. Membership stays as immutable
+landing evidence until a consumer justifies a separate durable breadth grain.
 Curated `trade_date` partitions are derived from each provider record and checked against the bounded
 source date; request and processing timestamps never choose the market-data partition.
-`index_bars_1m` remains a provider-neutral target for a separately contracted source; no iBoard data
-is mislabeled as FastConnect SDK evidence. Bounded stream capture uses the SDK aggregate symbol
+`index_bars_1m` stores only exact-date SDK evidence; no iBoard data is mislabeled as FastConnect SDK
+evidence. Bounded stream capture uses the SDK aggregate symbol
 subscription for trades, quotes, and foreign-room updates plus the SDK one-minute interval
-subscription. Certification separately probes the index stream subscription. Provider interval bars
+subscription. Certification probes index-minute bars through REST, not the non-producing index
+stream subscription. Provider interval bars
 remain reconciliation evidence; deterministic bars built from captured trades are certified by the
 explicit full-session report before any future curated promotion.
 

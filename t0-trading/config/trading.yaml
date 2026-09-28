@@ -2,6 +2,7 @@ schema_version: 2
 capture:
   symbols: [VIC, VHM]
   indices: [VNINDEX, VN30, VNREAL]
+  membership_indices: [VN30, VNREAL]
   markets: [HOSE]
 outcomes:
   - version: top3-taker-markout-v1

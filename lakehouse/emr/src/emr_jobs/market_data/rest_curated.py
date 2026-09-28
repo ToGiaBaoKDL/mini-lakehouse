@@ -50,7 +50,9 @@ def _validate_scope(spark: SparkSession, capture: CaptureRun) -> None:
         scopes,
         expected_symbols=set(capture.symbols),
         expected_indices=set(capture.indices),
-        allow_legacy_without_index_catalog=capture.capability_contract is None,
+        expected_membership_indices=set(capture.membership_indices),
+        captured_index_bars=capture.captured_index_bars,
+        captured_memberships=capture.captured_memberships,
     )
 
 
@@ -280,6 +282,37 @@ def _market_views(spark: SparkSession, source_date: str) -> None:
     )
     spark.sql(
         f"""
+        CREATE OR REPLACE TEMP VIEW ssi_index_minute_ohlc AS
+        SELECT
+            records.symbol AS index_code,
+            to_date(substr(get_json_object(record_json, '$.trading_date'), 1, 10),
+                'yyyy/MM/dd') AS trade_date,
+            to_utc_timestamp(
+                to_timestamp(get_json_object(record_json, '$.trading_date'),
+                    'yyyy/MM/dd HH:mm:ss'),
+                'Asia/Ho_Chi_Minh'
+            ) AS bar_start,
+            try_cast(get_json_object(record_json, '$.open_price') AS decimal(18, 6))
+                AS open_value,
+            try_cast(get_json_object(record_json, '$.high_price') AS decimal(18, 6))
+                AS high_value,
+            try_cast(get_json_object(record_json, '$.low_price') AS decimal(18, 6))
+                AS low_value,
+            try_cast(get_json_object(record_json, '$.close_price') AS decimal(18, 6))
+                AS close_value,
+            try_cast(get_json_object(record_json, '$.volume') AS bigint) AS volume,
+            try_cast(get_json_object(record_json, '$.value') AS decimal(24, 0)) AS value,
+            received_at,
+            record_sha256
+        FROM ssi_capture_records records
+        JOIN ssi_capture_indices scope ON records.symbol = scope.index_code
+        WHERE endpoint = 'get_ohlc_1minute'
+          AND substr(get_json_object(record_json, '$.trading_date'), 1, 10)
+              = replace('{source_date}', '-', '/')
+        """
+    )
+    spark.sql(
+        f"""
         CREATE OR REPLACE TEMP VIEW ssi_security_summary AS
         SELECT
             symbol,
@@ -468,6 +501,38 @@ def _validate_market_data(spark: SparkSession, capture: CaptureRun) -> None:
         raise RuntimeError("SSI daily and one-minute OHLC records do not reconcile")
 
 
+def _validate_index_bars(spark: SparkSession, capture: CaptureRun) -> None:
+    expected = len(capture.captured_index_bars)
+    invalid = spark.sql(
+        f"""
+        SELECT 1 FROM ssi_index_minute_ohlc
+        WHERE index_code IS NULL OR trade_date IS NULL OR bar_start IS NULL
+           OR open_value IS NULL OR high_value IS NULL
+           OR low_value IS NULL OR close_value IS NULL
+           OR open_value <= 0 OR high_value <= 0 OR low_value <= 0 OR close_value <= 0
+           OR high_value < greatest(open_value, low_value, close_value)
+           OR low_value > least(open_value, high_value, close_value)
+           OR volume < 0 OR value < 0
+        UNION ALL
+        SELECT 1 FROM (
+            SELECT count(DISTINCT index_code) AS indices
+            FROM ssi_index_minute_ohlc
+        ) coverage
+        WHERE indices != {expected}
+        UNION ALL
+        SELECT 1 FROM (
+            SELECT index_code, bar_start, count(*) AS records
+            FROM ssi_index_minute_ohlc
+            GROUP BY index_code, bar_start
+        ) duplicates
+        WHERE records != 1
+        LIMIT 1
+        """
+    ).count()
+    if invalid:
+        raise RuntimeError("SSI same-day index OHLC normalization produced invalid values")
+
+
 def _publish_daily(spark: SparkSession, target: str) -> None:
     spark.sql(
         """
@@ -614,6 +679,61 @@ def _publish_bars(spark: SparkSession, target: str) -> None:
     spark.sql(f"INSERT INTO {target} SELECT * FROM ssi_bars_new")
 
 
+def _publish_index_bars(spark: SparkSession, target: str) -> None:
+    spark.sql(
+        """
+        CREATE OR REPLACE TEMP VIEW ssi_index_bar_candidates AS
+        SELECT
+            index_code,
+            trade_date,
+            bar_start,
+            'ssi_rest_index_1m_historical' AS source_kind,
+            open_value,
+            high_value,
+            low_value,
+            close_value,
+            volume,
+            value,
+            received_at AS available_at,
+            current_timestamp() AS processed_at,
+            true AS is_final,
+            record_sha256 AS source_record_sha256
+        FROM ssi_index_minute_ohlc
+        """
+    )
+    spark.sql(
+        f"""
+        CREATE OR REPLACE TEMP VIEW ssi_index_bars_new AS
+        SELECT
+            candidate.index_code,
+            candidate.trade_date,
+            candidate.bar_start,
+            coalesce(revisions.max_revision + 1, 0) AS revision,
+            candidate.source_kind,
+            candidate.open_value,
+            candidate.high_value,
+            candidate.low_value,
+            candidate.close_value,
+            candidate.volume,
+            candidate.value,
+            candidate.available_at,
+            candidate.processed_at,
+            candidate.is_final,
+            candidate.source_record_sha256
+        FROM ssi_index_bar_candidates candidate
+        LEFT JOIN (
+            SELECT index_code, bar_start, max(revision) AS max_revision
+            FROM {target} GROUP BY index_code, bar_start
+        ) revisions USING (index_code, bar_start)
+        LEFT ANTI JOIN {target} existing
+          ON existing.index_code = candidate.index_code
+         AND existing.bar_start = candidate.bar_start
+         AND existing.source_record_sha256 = candidate.source_record_sha256
+        """
+    )
+    spark.sql(f"INSERT INTO {target} SELECT * FROM ssi_index_bars_new")
+
+
 def _publish_indices(
     spark: SparkSession,
     target: str,
@@ -707,6 +827,7 @@ def publish(
 
     _market_views(spark, source_date)
     _validate_market_data(spark, capture)
+    _validate_index_bars(spark, capture)
     _publish_daily(
         spark,
         qualified_name(product.table_identifier("daily_security_summaries")),
@@ -714,6 +835,10 @@ def publish(
     _publish_bars(
         spark,
         qualified_name(product.table_identifier("intraday_bars_1m")),
+    )
+    _publish_index_bars(
+        spark,
+        qualified_name(product.table_identifier("index_bars_1m")),
     )
     _publish_indices(
         spark,

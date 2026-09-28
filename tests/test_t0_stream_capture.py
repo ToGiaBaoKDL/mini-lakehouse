@@ -176,19 +176,7 @@ class _Stream:
             self.on_heartbeat({"message": "pong"})
 
 
-class _IndexStream(_Stream):
-    def subscribe_index(self, indices: list[str]) -> None:
-        assert indices == ["VNINDEX", "VN30", "VNREAL"]
-
-    def wait(self, timeout: float | None = None) -> None:
-        first = not self._emitted
-        super().wait(timeout)
-        if first:
-            self.on_data(_Trade("VN30", "09:00:02", 1200))
-            self.on_data(_Trade("VNREAL", "09:00:03", 950))
-
-
-class _MarketStream(_IndexStream):
+class _MarketStream(_Stream):
     def subscribe_market_status(self, markets: list[str]) -> None:
         assert markets == ["HOSE"]
 
@@ -250,39 +238,6 @@ def test_stream_capture_publishes_batches_and_one_terminal_manifest(tmp_path: Pa
     assert batch["object_sha256"] == hashlib.sha256(body).hexdigest()
 
 
-def test_stream_capture_versions_and_scopes_index_evidence() -> None:
-    store = _Store()
-    timer = _Timer()
-    manifest_uri = capture_stream(
-        _IndexStream(timer),
-        store,
-        StreamCaptureOptions(
-            indices=("VNINDEX", "VN30", "VNREAL"),
-            duration_seconds=1,
-            heartbeat_seconds=0.25,
-            stale_after_seconds=0.75,
-            flush_seconds=0.5,
-            batch_size=4,
-            queue_size=10,
-        ),
-        clock=timer.clock,
-        timer=timer.tick,
-        session_id="index-session",
-    )
-
-    manifest = json.loads(store.objects[manifest_uri.removeprefix("s3://landing/root/")])
-    assert manifest["schema_version"] == 2
-    assert manifest["indices"] == ["VNINDEX", "VN30", "VNREAL"]
-    body = store.objects[manifest["batches"][0]["object_key"]]
-    rows = [json.loads(line) for line in gzip.decompress(body).splitlines()]
-    assert [row["subscription_context"] for row in rows] == [
-        "symbols",
-        "symbols",
-        "indices",
-        "indices",
-    ]
-
-
 def test_stream_capture_versions_and_scopes_market_status_evidence() -> None:
     store = _Store()
     timer = _Timer()
@@ -290,7 +245,6 @@ def test_stream_capture_versions_and_scopes_market_status_evidence() -> None:
         _MarketStream(timer),
         store,
         StreamCaptureOptions(
-            indices=("VNINDEX", "VN30", "VNREAL"),
             markets=("HOSE",),
             duration_seconds=1,
             heartbeat_seconds=0.25,

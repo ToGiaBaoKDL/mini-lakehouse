@@ -100,8 +100,7 @@ def evaluate_arbitrated_walk_forward(
         (item.strategy, item.symbol, item.horizon_seconds) for item in reports[0].evaluations
     )
     if any(
-        tuple((row.strategy, row.symbol, row.horizon_seconds) for row in report.evaluations)
-        != keys
+        tuple((row.strategy, row.symbol, row.horizon_seconds) for row in report.evaluations) != keys
         for report in reports
     ):
         raise ValueError("arbitrated sessions must share one ordered target matrix")
@@ -252,9 +251,7 @@ def evaluate_promotion_gate(
             reasons=("INSUFFICIENT_SESSIONS",),
             targets=targets,
         )
-    walk_forward = evaluate_arbitrated_walk_forward(
-        sessions, evaluation_policy, arbitration_policy
-    )
+    walk_forward = evaluate_arbitrated_walk_forward(sessions, evaluation_policy, arbitration_policy)
     holdout_dates = tuple(
         sorted(value for fold in walk_forward.folds for value in fold.holdout_dates)
     )

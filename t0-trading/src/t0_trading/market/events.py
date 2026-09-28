@@ -109,8 +109,9 @@ MarketEvent = Trade | AuctionObservation | QuoteSnapshot
 
 
 def provider_timestamp(value: str, timezone: ZoneInfo) -> datetime:
+    timestamp_format = "%Y/%m/%d %H:%M:%S.%f" if "." in value else "%Y/%m/%d %H:%M:%S"
     try:
-        parsed = datetime.strptime(value, "%Y/%m/%d %H:%M:%S").replace(tzinfo=timezone)
+        parsed = datetime.strptime(value, timestamp_format).replace(tzinfo=timezone)
     except ValueError as error:
         raise MarketEventError("unsupported SSI timestamp") from error
     return parsed.astimezone(UTC)

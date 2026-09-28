@@ -56,16 +56,12 @@ def _next(
         account_snapshot_sha256=ledger.account_snapshot_sha256,
         revision=ledger.revision + 1,
         available_cash_vnd=(
-            ledger.available_cash_vnd
-            if available_cash_vnd is None
-            else available_cash_vnd
+            ledger.available_cash_vnd if available_cash_vnd is None else available_cash_vnd
         ),
         positions=ledger.positions if positions is None else positions,
         started_cycles=ledger.started_cycles if started_cycles is None else started_cycles,
         realized_net_pnl_vnd=(
-            ledger.realized_net_pnl_vnd
-            if realized_net_pnl_vnd is None
-            else realized_net_pnl_vnd
+            ledger.realized_net_pnl_vnd if realized_net_pnl_vnd is None else realized_net_pnl_vnd
         ),
         reservations=ledger.reservations if reservations is None else reservations,
     )
@@ -77,8 +73,10 @@ def _positions(
     found = False
     values: list[PaperResourcePosition] = []
     for item in ledger.positions:
-        quantity = item.available_exit_quantity + delta if item.symbol == symbol else (
-            item.available_exit_quantity
+        quantity = (
+            item.available_exit_quantity + delta
+            if item.symbol == symbol
+            else (item.available_exit_quantity)
         )
         if item.symbol == symbol:
             found = True
@@ -150,11 +148,7 @@ def settle_paper_entry(
     reservation = matches[0]
     filled = state.cumulative_filled_quantity
     average = state.average_fill_price
-    spent = (
-        Decimal(0)
-        if average is None
-        else average * filled * (1 + costs.buy_fee_bps / _BPS)
-    )
+    spent = Decimal(0) if average is None else average * filled * (1 + costs.buy_fee_bps / _BPS)
     if spent > reservation.reserved_cash_vnd:
         raise ValueError("paper entry fill exceeds reserved cash")
     remaining = tuple(
@@ -180,9 +174,7 @@ def settle_paper_entry(
         )
     return _next(
         ledger,
-        available_cash_vnd=(
-            ledger.available_cash_vnd + reservation.reserved_cash_vnd - spent
-        ),
+        available_cash_vnd=(ledger.available_cash_vnd + reservation.reserved_cash_vnd - spent),
         positions=_positions(
             ledger,
             intent.symbol,
@@ -256,11 +248,9 @@ def settle_paper_exit(
     if sold:
         if state.average_fill_price is None or reservation.entry_average_fill_price is None:
             raise ValueError("paper exit settlement requires priced entry and exit fills")
-        entry_cost = reservation.entry_average_fill_price * sold * (
-            1 + costs.buy_fee_bps / _BPS
-        )
-        sale_value = state.average_fill_price * sold * (
-            1 - (costs.sell_fee_bps + costs.sell_tax_bps) / _BPS
+        entry_cost = reservation.entry_average_fill_price * sold * (1 + costs.buy_fee_bps / _BPS)
+        sale_value = (
+            state.average_fill_price * sold * (1 - (costs.sell_fee_bps + costs.sell_tax_bps) / _BPS)
         )
         realized = sale_value - entry_cost
     outstanding = reservation.reserved_exit_quantity - sold

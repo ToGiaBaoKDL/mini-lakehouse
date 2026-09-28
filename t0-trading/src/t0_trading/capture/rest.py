@@ -7,6 +7,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from ssi_sdk import __version__ as SSI_SDK_VERSION
 
@@ -17,6 +18,7 @@ from t0_trading.identity import canonical_json, sha256
 from t0_trading.provider import SSI_API_VERSION
 
 SSI_REST_RAW_PREFIX = "api/ssi_fastconnect_rest/raw"
+SSI_MARKET_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +27,7 @@ class RestCaptureOptions:
     job_token: str
     symbols: tuple[str, ...] = ("VIC", "VHM")
     indices: tuple[str, ...] = ("VNINDEX", "VN30", "VNREAL")
+    membership_indices: tuple[str, ...] = ()
     page_size: int = 1000
     max_pages: int = 10
 
@@ -33,13 +36,19 @@ class RestCaptureOptions:
             raise ValueError("job_token cannot be empty")
         if not self.symbols or not self.indices:
             raise ValueError("symbols and indices cannot be empty")
-        for label, values in (("symbols", self.symbols), ("indices", self.indices)):
+        for label, values in (
+            ("symbols", self.symbols),
+            ("indices", self.indices),
+            ("membership_indices", self.membership_indices),
+        ):
             if len(values) != len(set(values)) or any(
                 not value or value != value.strip().upper() for value in values
             ):
                 raise ValueError(f"{label} must contain unique uppercase identifiers")
         if set(self.symbols) & set(self.indices):
             raise ValueError("symbols and indices must be disjoint")
+        if not set(self.membership_indices).issubset(self.indices):
+            raise ValueError("membership_indices must be captured indices")
         if self.page_size < 1 or self.page_size > 1000:
             raise ValueError("page_size must be between 1 and 1000")
         if self.max_pages < 1:
@@ -77,6 +86,14 @@ def _source_time(value: object) -> str | None:
         if isinstance(item, str) and item:
             return item
     return None
+
+
+def _on_trade_date(value: object, trade_date: date) -> bool:
+    """Return whether an SDK observation belongs to the requested exchange day."""
+    source_time = _source_time(value)
+    if source_time is None:
+        return False
+    return source_time[:10].replace("/", "-") == trade_date.isoformat()
 
 
 def _capture_request(
@@ -209,16 +226,18 @@ def capture_rest(
             "trade_date": options.trade_date.isoformat(),
             "symbols": list(options.symbols),
             "indices": list(options.indices),
+            "membership_indices": list(options.membership_indices),
             "job_token_sha256": job_token_sha256,
             "api_version": SSI_API_VERSION,
             "sdk_version": SSI_SDK_VERSION,
         }
         if any(current.get(key) != value for key, value in expected_scope.items()):
             raise RuntimeError("Existing capture manifest does not match the requested scope")
-        if current.get("capability_contract") not in (None, REST_CAPABILITY_CONTRACT):
+        if current.get("capability_contract") != REST_CAPABILITY_CONTRACT:
             raise RuntimeError("Existing capture manifest uses an unsupported REST contract")
         return store.uri(run_manifest_key)
 
+    capture_market_date = clock().astimezone(SSI_MARKET_TIMEZONE).date()
     day = options.trade_date.strftime("%Y/%m/%d")
     day_start = f"{day} 00:00:00"
     day_end = f"{day} 23:59:59"
@@ -233,6 +252,28 @@ def capture_rest(
         raise RuntimeError(
             "SSI index catalog is missing configured indices: " + ",".join(missing_indices)
         )
+
+    index_minute_bars = {
+        index: tuple(
+            item
+            for item in _records(market.get_ohlc_1minute(index))
+            if _on_trade_date(item, options.trade_date)
+        )
+        for index in options.indices
+    }
+    index_bar_status = {
+        index: "captured" if bars else "unavailable" for index, bars in index_minute_bars.items()
+    }
+    membership_snapshots = {
+        index: tuple(_records(market.get_securities_info_by_index(index)))
+        if options.trade_date == capture_market_date
+        else ()
+        for index in options.membership_indices
+    }
+    membership_status = {
+        index: "captured" if records else "unavailable"
+        for index, records in membership_snapshots.items()
+    }
 
     requests: list[_Request] = []
     for symbol in options.symbols:
@@ -319,14 +360,40 @@ def capture_rest(
         )
     )
     for index in options.indices:
+        requests.extend(
+            [
+                _Request(
+                    "get_index_summary_historical",
+                    {"index": index, "trading_date": day},
+                    lambda _page, index=index: _records(
+                        market.get_index_summary_historical(index, day)
+                    ),
+                    index,
+                ),
+                _Request(
+                    "get_ohlc_1minute",
+                    {
+                        "index": index,
+                        "trade_date": options.trade_date.isoformat(),
+                        "availability": index_bar_status[index],
+                    },
+                    lambda _page, index=index: index_minute_bars[index],
+                    index,
+                ),
+            ]
+        )
+    for index in options.membership_indices:
         requests.append(
             _Request(
-                "get_index_summary_historical",
-                {"index": index, "trading_date": day},
-                lambda _page, index=index: _records(
-                    market.get_index_summary_historical(index, day)
-                ),
+                "get_securities_info_by_index",
+                {
+                    "index": index,
+                    "trade_date": options.trade_date.isoformat(),
+                    "availability": membership_status[index],
+                },
+                lambda _page, index=index: membership_snapshots[index],
                 index,
+                identity_field="__request_index__",
             )
         )
 
@@ -341,11 +408,14 @@ def capture_rest(
         for request in requests
     ]
     run_manifest: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "capability_contract": REST_CAPABILITY_CONTRACT,
         "trade_date": options.trade_date.isoformat(),
         "symbols": list(options.symbols),
         "indices": list(options.indices),
+        "membership_indices": list(options.membership_indices),
+        "index_bar_status": index_bar_status,
+        "membership_status": membership_status,
         "job_token_sha256": job_token_sha256,
         "api_version": SSI_API_VERSION,
         "sdk_version": SSI_SDK_VERSION,

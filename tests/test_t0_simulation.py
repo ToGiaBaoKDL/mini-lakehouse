@@ -3,6 +3,7 @@
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from typing import cast
 
 import pytest
 from pydantic import ValidationError
@@ -52,9 +53,12 @@ def _proposal(
         trade_date=TRADE_DATE,
         decision_at=decision_at,
         feature_snapshot_sha256=feature_hash,
-        groups=tuple(
-            GroupEvidence(name=name, strength=Decimal("0.8"))
-            for name in BASELINE_GROUP_NAMES[strategy]
+        groups=cast(
+            tuple[GroupEvidence, GroupEvidence, GroupEvidence],
+            tuple(
+                GroupEvidence(name=name, strength=Decimal("0.8"))
+                for name in BASELINE_GROUP_NAMES[strategy]
+            ),
         ),
         strength=Decimal("0.8"),
         block_reasons=(),
@@ -122,9 +126,7 @@ def _request(
     lot_size: int = 100,
     advance: AdvancePolicy | None = None,
 ) -> SimulationRequest:
-    costs = public_vndirect_dta_costs(
-        TRADE_DATE, checked_at=datetime(2026, 9, 22, tzinfo=UTC)
-    )
+    costs = public_vndirect_dta_costs(TRADE_DATE, checked_at=datetime(2026, 9, 22, tzinfo=UTC))
     if not verified:
         costs = costs.model_copy(
             update={"fee_source": None, "fee_checked_at": None, "basis": "USER_SUPPLIED"}
@@ -209,9 +211,7 @@ def test_advance_is_explicit_and_financing_is_deducted_from_alpha() -> None:
         daily_interest_bps=Decimal("3.7"),
         source="VNDIRECT public UTTB scenario; opt-in assumed",
     )
-    report = simulate_cycles(
-        _request(proposals, cash="10010", settled=300, advance=advance)
-    )
+    report = simulate_cycles(_request(proposals, cash="10010", settled=300, advance=advance))
 
     assert report.status == "COMPLETE"
     assert report.advance_principal_vnd == Decimal(10010)

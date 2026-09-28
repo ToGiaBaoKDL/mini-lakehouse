@@ -98,9 +98,7 @@ class ShadowArbitrationManifest(BaseModel):
         if (
             self.candidate_count != self.expected_candidate_count
             or Path(self.candidate_file).name != self.candidate_file
-            or not self.candidate_file.endswith(
-                (".candidates.jsonl", ".candidates.jsonl.gz")
-            )
+            or not self.candidate_file.endswith((".candidates.jsonl", ".candidates.jsonl.gz"))
         ):
             raise ValueError("shadow candidate summary is inconsistent")
         if (

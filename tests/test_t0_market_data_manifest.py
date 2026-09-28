@@ -21,6 +21,7 @@ def _capture(
     *,
     request_body: bytes | None = None,
     sdk_version: str = "3.2.1",
+    capability_contract: str = REST_CAPABILITY_CONTRACT,
 ):
     captured_at = datetime(2026, 8, 27, tzinfo=UTC).isoformat()
     object_key = (
@@ -59,10 +60,14 @@ def _capture(
     request["request_parameters_sha256"] = hashlib.sha256(_json(request["parameters"])).hexdigest()
     expected_request_body = _json(request)
     run = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "capability_contract": capability_contract,
         "trade_date": "2026-08-26",
         "symbols": ["VIC", "VHM"],
         "indices": ["VNINDEX", "VN30"],
+        "membership_indices": [],
+        "index_bar_status": {"VNINDEX": "unavailable", "VN30": "unavailable"},
+        "membership_status": {},
         "api_version": "v3",
         "sdk_version": sdk_version,
         "requests": [
@@ -139,30 +144,18 @@ def test_capture_manifest_rejects_previous_sdk_version(
         manifest.load_capture(_capture(monkeypatch, sdk_version="3.2.0"), "2026-08-26", RAW_PREFIX)
 
 
-def test_bounded_scope_must_match_every_requested_symbol_and_index(
+def test_capture_manifest_rejects_retired_rest_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    capture = manifest.load_capture(_capture(monkeypatch), "2026-08-26", RAW_PREFIX)
-    publication = capture.requests[0]
-    endpoints = (
-        *("get_securities_info",) * 2,
-        *("get_securities_summary_historical",) * 2,
-        *("get_ohlc_1day_historical",) * 2,
-        *("get_ohlc_1minute_historical",) * 4,
-        "get_master_data_historical",
-        *("get_index_summary_historical",) * 2,
-    )
-    bounded = replace(
-        capture,
-        requests=tuple(replace(publication, endpoint=endpoint) for endpoint in endpoints),
-    )
-
-    manifest.require_bounded_scope(bounded)
-    with pytest.raises(RuntimeError, match="required bounded request set"):
-        manifest.require_bounded_scope(replace(bounded, requests=bounded.requests[:-1]))
+    with pytest.raises(RuntimeError, match="Unsupported SSI REST capability contract"):
+        manifest.load_capture(
+            _capture(monkeypatch, capability_contract="ssi-fastconnect-rest/v1"),
+            "2026-08-26",
+            RAW_PREFIX,
+        )
 
 
-def test_current_capability_contract_does_not_probe_index_minute_history(
+def test_bounded_scope_must_match_every_requested_symbol_and_index(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     capture = manifest.load_capture(_capture(monkeypatch), "2026-08-26", RAW_PREFIX)
@@ -175,6 +168,32 @@ def test_current_capability_contract_does_not_probe_index_minute_history(
         "get_master_data_historical",
         "get_indexes",
         *("get_index_summary_historical",) * 2,
+        *("get_ohlc_1minute",) * 2,
+    )
+    bounded = replace(
+        capture,
+        requests=tuple(replace(publication, endpoint=endpoint) for endpoint in endpoints),
+    )
+
+    manifest.require_bounded_scope(bounded)
+    with pytest.raises(RuntimeError, match="required bounded request set"):
+        manifest.require_bounded_scope(replace(bounded, requests=bounded.requests[:-1]))
+
+
+def test_current_capability_contract_rejects_retired_index_history_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capture = manifest.load_capture(_capture(monkeypatch), "2026-08-26", RAW_PREFIX)
+    publication = capture.requests[0]
+    endpoints = (
+        *("get_securities_info",) * 2,
+        *("get_securities_summary_historical",) * 2,
+        *("get_ohlc_1day_historical",) * 2,
+        *("get_ohlc_1minute_historical",) * 2,
+        "get_master_data_historical",
+        "get_indexes",
+        *("get_index_summary_historical",) * 2,
+        *("get_ohlc_1minute",) * 2,
     )
     bounded = replace(
         capture,
@@ -183,13 +202,12 @@ def test_current_capability_contract_does_not_probe_index_minute_history(
     )
 
     manifest.require_bounded_scope(bounded)
-    legacy_probe = replace(
+    retired_probe = replace(
         bounded,
         requests=bounded.requests
         + tuple(
-            replace(publication, endpoint="get_ohlc_1minute_historical")
-            for _ in bounded.indices
+            replace(publication, endpoint="get_ohlc_1minute_historical") for _ in bounded.indices
         ),
     )
     with pytest.raises(RuntimeError, match="required bounded request set"):
-        manifest.require_bounded_scope(legacy_probe)
+        manifest.require_bounded_scope(retired_probe)

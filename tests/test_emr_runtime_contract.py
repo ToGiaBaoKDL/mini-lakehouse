@@ -112,11 +112,13 @@ def test_market_data_publication_uses_sdk_summary_fields() -> None:
     assert "CAST(NULL AS bigint) AS foreign_buy_volume" not in source
     assert "CAST(NULL AS bigint) AS deal_volume" not in source
     assert '"get_securities_summary_historical"' in contract
+    assert '"get_securities_info_by_index"' in contract
     assert "for capability in REST_CAPABILITIES" in scope
-    assert 'if capability.scope == "symbols" else expected_indices' in scope
+    assert '"membership_indices": expected_membership_indices' in scope
     assert "DATE '{source_date}' AS trade_date" not in source
     assert "to_date(substr(get_json_object(record_json, '$.trading_date'), 1, 10)" in source
-    assert "ssi_index_minute_ohlc" not in source
+    assert "ssi_index_minute_ohlc" in source
+    assert 'product.table_identifier("index_bars_1m")' in source
     assert "return False" not in source
 
 
@@ -146,7 +148,8 @@ def test_market_data_stream_replay_uses_verified_sdk_models_and_top_three_quotes
     assert "StreamSessionReader.from_uri" in capture
     assert "stream_manifest_uris" in capture
     assert not Path("lakehouse/emr/src/emr_jobs/market_data/stream_manifest.py").exists()
-    assert '"index_snapshots"' in job
+    assert '"index_snapshots"' not in job
+    assert '"index_bars_1m"' in job
     assert 'F.sha2("message_json", 256)' in landing
     assert "duplicate_keys" in landing
     assert "batch_count_mismatches" in landing
@@ -161,7 +164,7 @@ def test_market_data_stream_replay_uses_verified_sdk_models_and_top_three_quotes
     assert "WHEN NOT MATCHED THEN INSERT *" in curated
 
 
-def test_market_data_stream_routes_mixed_symbol_and_index_capture() -> None:
+def test_market_data_stream_routes_only_supported_symbol_and_status_capture() -> None:
     landing = Path("lakehouse/emr/src/emr_jobs/market_data/stream_landing.py").read_text(
         encoding="utf-8"
     )
@@ -170,19 +173,20 @@ def test_market_data_stream_routes_mixed_symbol_and_index_capture() -> None:
     )
 
     assert 'F.col("subscription_context") == F.lit("symbols")' in landing
-    assert 'F.col("subscription_context") == F.lit("indices")' in landing
     assert 'F.col("symbol").isin(*manifest.symbols)' in landing
-    assert 'F.col("symbol").isin(*manifest.indices)' in landing
     assert "(symbol_scope & ~symbol_in_scope)" in landing
-    assert "(index_scope & ~index_in_scope)" in landing
     assert "(market_scope & ~market_in_scope)" in landing
+    assert 'F.col("subscription_context") == F.lit("indices")' not in landing
+    assert "manifest.indices" not in landing
 
     assert curated.count("subscription_context = 'symbols'") == 2
-    assert "subscription_context = 'indices'" in curated
-    assert "ssi_stream_index_candidates" in curated
-    assert "'ssi_stream_index' AS source_kind" in curated
-    assert 'product.table_identifier("index_snapshots")' in curated
-    assert "SSI Stream index normalization produced invalid values" in curated
+    assert "subscription_context = 'indices'" not in curated
+    assert "ssi_stream_index_candidates" not in curated
+    assert "'ssi_stream_index' AS source_kind" not in curated
+    assert 'product.table_identifier("index_snapshots")' not in curated
+    assert '"yyyy/MM/dd HH:mm:ss[.SSSSSS]"' in curated
+    assert curated.count('_ssi_local_timestamp("$.trading_time")') == 2
+    assert "'yyyy/MM/dd HH:mm:ss')" not in curated
     assert "subscription_context = 'markets'" in curated
     assert "ssi_stream_market_status_candidates" in curated
     assert "SSI Stream market-status trading date is invalid" in curated

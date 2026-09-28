@@ -47,10 +47,7 @@ class CaptureSpool:
         relative = PurePosixPath(key)
         if not relative.parts or relative.is_absolute() or ".." in relative.parts:
             raise ValueError("spool evidence key must be a safe relative path")
-        if not (
-            key.endswith((".json.gz", ".jsonl.gz"))
-            or key.endswith("/manifest.json")
-        ):
+        if not (key.endswith((".json.gz", ".jsonl.gz")) or key.endswith("/manifest.json")):
             raise ValueError("spool accepts only immutable payloads and manifests")
         return self._root.joinpath(*relative.parts)
 

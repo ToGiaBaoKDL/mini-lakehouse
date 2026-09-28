@@ -34,9 +34,7 @@ def _journal_sha256(records: Sequence[BaselineCandidate | CandidateArbitration])
 
 def _average(values: Sequence[Decimal]) -> Decimal | None:
     return (
-        ratio(sum(values, Decimal(0)), len(values), quantum=Decimal("0.0001"))
-        if values
-        else None
+        ratio(sum(values, Decimal(0)), len(values), quantum=Decimal("0.0001")) if values else None
     )
 
 
@@ -117,9 +115,7 @@ def evaluate_arbitrated_session(
         ]
         net_returns: list[Decimal] = []
         for candidate, arbitration in target_selected:
-            label = outcome_by_key[
-                (candidate.feature_snapshot_sha256, arbitration.horizon_seconds)
-            ]
+            label = outcome_by_key[(candidate.feature_snapshot_sha256, arbitration.horizon_seconds)]
             if (
                 label.trade_date != candidate.trade_date
                 or label.symbol != candidate.symbol

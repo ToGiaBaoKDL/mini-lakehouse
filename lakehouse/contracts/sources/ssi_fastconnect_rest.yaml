@@ -22,7 +22,7 @@ tables:
       - {field_id: 6, name: requested_at, data_type: timestamptz, required: true, description: UTC time immediately before the SDK request.}
       - {field_id: 7, name: received_at, data_type: timestamptz, required: true, description: UTC time when the SDK response was available to the capture process.}
       - {field_id: 8, name: record_type, data_type: string, required: true, description: Exported SSI SDK model type.}
-      - {field_id: 9, name: symbol, data_type: string, required: false, description: Provider symbol when exposed by the SDK model.}
+      - {field_id: 9, name: symbol, data_type: string, required: false, description: Bounded request-scope identifier; a security symbol or index code.}
       - {field_id: 10, name: source_time_text, data_type: string, required: false, description: Provider timestamp text preserved without reinterpretation.}
       - {field_id: 11, name: record_json, data_type: string, required: true, description: Canonical serialization of every field exposed by the SDK model.}
       - {field_id: 12, name: record_sha256, data_type: string, required: true, description: SHA-256 of record_json.}

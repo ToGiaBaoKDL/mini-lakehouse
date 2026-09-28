@@ -53,7 +53,6 @@ class StreamObserver(Protocol):
 @dataclass(frozen=True, slots=True)
 class StreamCaptureOptions:
     symbols: tuple[str, ...] = ("VIC", "VHM")
-    indices: tuple[str, ...] = ()
     markets: tuple[str, ...] = ()
     duration_seconds: float = 600
     heartbeat_seconds: float = 30
@@ -65,7 +64,6 @@ class StreamCaptureOptions:
     def __post_init__(self) -> None:
         for label, values in (
             ("symbols", self.symbols),
-            ("indices", self.indices),
             ("markets", self.markets),
         ):
             if (
@@ -74,8 +72,6 @@ class StreamCaptureOptions:
                 or any(not value or value != value.strip().upper() for value in values)
             ):
                 raise ValueError(f"{label} must contain unique uppercase identifiers")
-        if set(self.symbols) & set(self.indices):
-            raise ValueError("symbols and indices must be disjoint")
         if self.duration_seconds <= 0:
             raise ValueError("duration_seconds must be positive")
         if self.heartbeat_seconds <= 0:
@@ -110,14 +106,12 @@ class _Receiver:
         messages: Queue[StreamEnvelope],
         *,
         session_id: str,
-        indices: frozenset[str],
         markets: frozenset[str],
         clock: Callable[[], datetime],
         timer: Callable[[], float],
     ) -> None:
         self._messages = messages
         self._session_id = session_id
-        self._indices = indices
         self._markets = markets
         self._clock = clock
         self._timer = timer
@@ -147,8 +141,6 @@ class _Receiver:
                         subscription_context=(
                             "markets"
                             if message_type == "MarketStatusMessage" and identifier in self._markets
-                            else "indices"
-                            if identifier in self._indices
                             else "symbols"
                         ),
                         symbol=identifier,
@@ -273,7 +265,6 @@ def capture_stream(
     receiver = _Receiver(
         queue,
         session_id=session_id,
-        indices=frozenset(options.indices),
         markets=frozenset(options.markets),
         clock=clock,
         timer=timer,
@@ -336,8 +327,6 @@ def capture_stream(
         with redirect_stdout(StringIO()):
             client.subscribe_symbol(list(options.symbols))
             client.subscribe_symbol_ohlcv(list(options.symbols), interval=Timeframe.MINUTE_1)
-            if options.indices:
-                client.subscribe_index(list(options.indices))
             if options.markets:
                 client.subscribe_market_status(list(options.markets))
             client.ping()
@@ -411,7 +400,7 @@ def capture_stream(
     message_count = sum(cast(int, batch["message_count"]) for batch in batches)
     manifest_key = f"{session_prefix}/manifest.json"
     manifest: dict[str, object] = {
-        "schema_version": 3 if options.markets else 2 if options.indices else 1,
+        "schema_version": 3 if options.markets else 1,
         "stream_session_id": session_id,
         "symbols": list(options.symbols),
         "connected_at": connected_at.isoformat(),
@@ -430,8 +419,6 @@ def capture_stream(
         "error_type": failure_type,
         "published_at": clock().astimezone(UTC).isoformat(),
     }
-    if options.indices:
-        manifest["indices"] = list(options.indices)
     if options.markets:
         manifest["markets"] = list(options.markets)
     if spool is None:

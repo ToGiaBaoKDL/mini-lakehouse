@@ -212,6 +212,28 @@ def test_unclassified_auction_match_is_preserved_without_inventing_an_aggressor(
     assert (bars[0].volume, bars[0].buy_volume, bars[0].sell_volume) == (150, 50, 0)
 
 
+def test_trade_accepts_live_ssi_timestamp_with_milliseconds() -> None:
+    state = MarketState(_configuration())
+    envelope = _trade(1, "2026/09/04 09:15:00.009", 100, 10, "B").model_copy(
+        update={"received_at": datetime(2026, 9, 4, 2, 15, 0, 10_000, tzinfo=UTC)}
+    )
+
+    update = state.apply(envelope)
+
+    assert isinstance(update.event, Trade)
+    assert update.event.event_time == datetime(2026, 9, 4, 2, 15, 0, 9_000, tzinfo=UTC)
+
+
+def test_fractional_provider_timestamp_remains_causal_at_subsecond_precision() -> None:
+    state = MarketState(_configuration())
+    envelope = _trade(1, "2026/09/04 09:15:00.009", 100, 10, "B").model_copy(
+        update={"received_at": datetime(2026, 9, 4, 2, 15, 0, 8_000, tzinfo=UTC)}
+    )
+
+    with pytest.raises(MarketEventError, match="provider event time follows capture receipt"):
+        state.apply(envelope)
+
+
 def test_unknown_provider_trade_side_is_rejected() -> None:
     state = MarketState(_configuration())
 

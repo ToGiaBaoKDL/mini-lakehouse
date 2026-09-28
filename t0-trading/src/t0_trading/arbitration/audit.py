@@ -69,9 +69,8 @@ def _load_manifest(
         raise
     except (RuntimeError, ValueError) as error:
         raise ShadowArbitrationAuditError("shadow journal manifest is invalid") from error
-    if (
-        body != manifest.canonical_bytes()
-        or not key.endswith(shadow_journal_manifest_key(manifest.trade_date))
+    if body != manifest.canonical_bytes() or not key.endswith(
+        shadow_journal_manifest_key(manifest.trade_date)
     ):
         raise ShadowArbitrationAuditError("shadow journal manifest is not canonical")
     return manifest, body, store, key.rsplit("/", maxsplit=1)[0]
@@ -111,9 +110,7 @@ def audit_shadow_journal(
     ):
         raise ShadowArbitrationAuditError("shadow journal object lineage is inconsistent")
     candidate_body = _read_journal(store, f"{root}/{manifest.candidate_file}", "candidate")
-    arbitration_body = _read_journal(
-        store, f"{root}/{manifest.arbitration_file}", "arbitration"
-    )
+    arbitration_body = _read_journal(store, f"{root}/{manifest.arbitration_file}", "arbitration")
     candidate_sha256 = sha256(candidate_body)
     arbitration_sha256 = sha256(arbitration_body)
     if candidate_sha256 != manifest.candidate_sha256:

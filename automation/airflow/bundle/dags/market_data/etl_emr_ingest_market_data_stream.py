@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 
+from airflow.providers.standard.sensors.external_task import ExternalTaskSensor
 from airflow.sdk import DAG, CronPartitionTimetable
 from callbacks.notifications import (
     dag_failure_callbacks,
@@ -36,6 +37,17 @@ with DAG(
     on_success_callback=dag_success_callbacks(),
     tags=["market-data", "etl", "emr", "ssi", "stream", "iceberg"],
 ) as dag:
+    wait_for_rest = ExternalTaskSensor(
+        task_id="wait_for_market_data_rest",
+        external_dag_id="etl_mix_ingest_market_data_rest",
+        external_task_id="publish_market_data_rest",
+        allowed_states=["success"],
+        failed_states=["failed", "upstream_failed"],
+        skipped_states=["skipped"],
+        timeout=timedelta(hours=2).total_seconds(),
+        poke_interval=60,
+        mode="reschedule",
+    )
     validate = docker_task(
         task_id="validate_market_data_stream",
         image="t0-trading:runtime",
@@ -92,6 +104,24 @@ with DAG(
             detail="Stream evidence was published, but deterministic features were withheld."
         ),
     )
+    ensure_shadow_journal = docker_task(
+        task_id="ensure_t0_shadow_journal",
+        image="t0-trading:runtime",
+        command=[
+            "ensure-shadow-journal",
+            "--trade-date",
+            TRADE_DATE,
+            "--landing-uri",
+            runtime_value("storage/landing_uri"),
+        ],
+        workload="t0-trading",
+        execution_timeout=timedelta(minutes=45),
+        cpus=2,
+        mem_limit="2g",
+        retries=1,
+        retry_delay=timedelta(minutes=10),
+        skip_on_exit_code=99,
+    )
     publish_promotion = docker_task(
         task_id="publish_t0_promotion_evidence",
         image="t0-trading:runtime",
@@ -111,6 +141,8 @@ with DAG(
         skip_on_exit_code=99,
         outlets=[T0_PROMOTION_EVIDENCE],
     )
+    wait_for_rest.set_downstream(validate)
     validate.set_downstream(publish)
     publish.set_downstream(certify)
-    certify.set_downstream(publish_promotion)
+    certify.set_downstream(ensure_shadow_journal)
+    ensure_shadow_journal.set_downstream(publish_promotion)

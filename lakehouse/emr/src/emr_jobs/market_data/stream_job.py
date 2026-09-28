@@ -64,7 +64,6 @@ def run(
                 "trade_ticks",
                 "quote_snapshots",
                 "quote_levels",
-                "index_snapshots",
                 "index_bars_1m",
                 "market_status_events",
             )
@@ -146,8 +145,7 @@ def run(
             capture_evidence_sha256=feature_capture.evidence_sha256,
         )
         logger.info(
-            "Published {} contexts, {} buy-first candidates, {} arbitrations, "
-            "and {} evaluations",
+            "Published {} contexts, {} buy-first candidates, {} arbitrations, and {} evaluations",
             len(contexts),
             len(candidates),
             len(arbitrations),

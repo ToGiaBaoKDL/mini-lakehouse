@@ -166,7 +166,6 @@ def _stream_cycle(auth: Any, options: CertificationOptions, cycle: int) -> dict[
             with redirect_stdout(StringIO()):
                 client.subscribe_symbol(list(options.symbols))
                 client.subscribe_symbol_ohlcv(list(options.symbols), interval=Timeframe.MINUTE_1)
-                client.subscribe_index(list(options.indices))
                 client.ping()
             client.wait(timeout=options.stream_seconds)
         return {
@@ -276,6 +275,10 @@ def run_certification(
                 )
             completed_trading_dates: set[str] = set()
             for index in options.indices:
+                report["rest"][f"ohlc_1minute:{index}"] = _probe(
+                    lambda index=index: market.get_ohlc_1minute(index),
+                    options.sample_limit,
+                )
                 report["rest"][f"securities_summary_by_index:{index}"] = _probe(
                     lambda index=index: market.get_securities_summary_by_index(index),
                     options.sample_limit,

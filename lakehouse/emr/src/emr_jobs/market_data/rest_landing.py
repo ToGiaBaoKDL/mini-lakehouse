@@ -33,8 +33,10 @@ RECORD_TYPES = {
     "get_securities_summary_historical": "SecuritiesSummary",
     "get_ohlc_1day_historical": "OHLCData",
     "get_ohlc_1minute_historical": "OHLCData",
+    "get_ohlc_1minute": "OHLCData",
     "get_master_data_historical": "MasterData",
     "get_indexes": "MarketIndexes",
+    "get_securities_info_by_index": "SecuritiesInfo",
     "get_index_summary_historical": "MarketIndexSummary",
 }
 

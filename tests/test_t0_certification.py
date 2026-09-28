@@ -243,7 +243,8 @@ def test_certification_uses_only_official_data_and_stream_boundaries(
     assert report["rest"]["master_data_historical"]["requested_date"] == "2026/08/26"
     assert report["rest"]["ohlc_1minute:VIC"]["status"] == "ok"
     assert report["rest"]["securities_summary_by_index:VN30"]["status"] == "ok"
-    assert report["rest_capability_contract"] == "ssi-fastconnect-rest/v1"
+    assert report["rest_capability_contract"] == "ssi-fastconnect-rest/v2"
+    assert report["rest"]["ohlc_1minute:VN30"]["status"] == "ok"
     assert "ohlc_1minute_historical:VN30" not in report["rest"]
     assert "ohlc_1day_historical:VN30" not in report["rest"]
     assert config_values == [

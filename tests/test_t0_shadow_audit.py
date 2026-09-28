@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 
 import pytest
@@ -15,8 +15,10 @@ from t0_trading.arbitration import (
     ShadowArbitrationAuditError,
     ShadowArbitrationJournal,
     audit_shadow_journal,
+    ensure_shadow_journal,
     publish_shadow_journal,
 )
+from t0_trading.capture.reader import StreamDayReader, StreamSessionReader
 from t0_trading.capture.spool import CaptureSpool
 from t0_trading.capture.store import S3CaptureStore
 from t0_trading.configuration import TradingConfiguration, load_configuration
@@ -99,6 +101,8 @@ class _SessionReader:
 def _artifacts(tmp_path: Path) -> tuple[str, TradingConfiguration, _SessionReader, _S3]:
     configuration = _configuration()
     version = configuration.resolve(TRADE_DATE)
+    arbitration_policy = configuration.resolve_candidate_arbitration(TRADE_DATE)
+    assert arbitration_policy is not None
     connected_at = _received(9, 0)
     disconnected_at = _received(9, 21)
     journal = ShadowArbitrationJournal(
@@ -106,14 +110,12 @@ def _artifacts(tmp_path: Path) -> tuple[str, TradingConfiguration, _SessionReade
         TRADE_DATE,
         version,
         configuration.resolve_context(TRADE_DATE),
-        configuration.resolve_candidate_arbitration(TRADE_DATE),
+        arbitration_policy,
     )
     journal.connected(SESSION_ID, connected_at)
     journal.close(disconnected_at, (CAPTURE_MANIFEST_URI,))
     s3 = _S3()
-    manifest_uri, _ = publish_shadow_journal(
-        journal, S3CaptureStore(s3, "s3://landing/root")
-    )
+    manifest_uri, _ = publish_shadow_journal(journal, S3CaptureStore(s3, "s3://landing/root"))
     reader = _SessionReader(
         uri=CAPTURE_MANIFEST_URI,
         trade_date=TRADE_DATE,
@@ -121,6 +123,7 @@ def _artifacts(tmp_path: Path) -> tuple[str, TradingConfiguration, _SessionReade
         manifest=SimpleNamespace(
             connected_at=connected_at,
             disconnected_at=disconnected_at,
+            disconnect_kind="shutdown",
             published_at=disconnected_at,
             stream_session_id=SESSION_ID,
             symbols=version.market.symbols,
@@ -166,12 +169,14 @@ def test_shadow_journal_is_published_and_audited_from_s3(
 def test_shadow_journal_outbox_publishes_commit_marker_last(tmp_path: Path) -> None:
     configuration = _configuration()
     version = configuration.resolve(TRADE_DATE)
+    arbitration_policy = configuration.resolve_candidate_arbitration(TRADE_DATE)
+    assert arbitration_policy is not None
     journal = ShadowArbitrationJournal(
         tmp_path / "work" / "shadow.arbitrations.jsonl",
         TRADE_DATE,
         version,
         configuration.resolve_context(TRADE_DATE),
-        configuration.resolve_candidate_arbitration(TRADE_DATE),
+        arbitration_policy,
     )
     journal.connected(SESSION_ID, _received(9, 0))
     journal.close(_received(9, 21), (CAPTURE_MANIFEST_URI,))
@@ -182,6 +187,48 @@ def test_shadow_journal_outbox_publishes_commit_marker_last(tmp_path: Path) -> N
 
     assert list(s3.objects)[-1].endswith("/manifest.json")
     assert spool.pending_bytes == 0
+
+
+def test_shadow_journal_recovery_is_replayable_and_idempotent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_uri, configuration, reader, s3 = _artifacts(tmp_path / "live")
+    _use_capture(monkeypatch, reader)
+    live_objects = {
+        object_id: value
+        for object_id, value in s3.objects.items()
+        if "/promotion/shadow_journals/" in object_id
+    }
+    for object_id in tuple(s3.objects):
+        if "/promotion/shadow_journals/" in object_id:
+            del s3.objects[object_id]
+    capture = StreamDayReader((cast(StreamSessionReader, reader),))
+    store = S3CaptureStore(s3, "s3://landing/root")
+
+    rebuilt = ensure_shadow_journal(
+        capture,
+        configuration,
+        store,
+        s3,
+        tmp_path / "recovery",
+    )
+    published = dict(s3.objects)
+    existing = ensure_shadow_journal(
+        capture,
+        configuration,
+        store,
+        s3,
+        tmp_path / "unused",
+    )
+
+    assert rebuilt.action == "REBUILT"
+    assert existing.action == "EXISTING"
+    assert rebuilt.manifest_uri == existing.manifest_uri == manifest_uri
+    assert rebuilt.manifest_sha256 == existing.manifest_sha256
+    assert rebuilt.capture_evidence_sha256 == existing.capture_evidence_sha256
+    assert s3.objects == published
+    assert {object_id: s3.objects[object_id] for object_id in live_objects} == live_objects
 
 
 def test_shadow_journal_audit_rejects_s3_checksum_drift(

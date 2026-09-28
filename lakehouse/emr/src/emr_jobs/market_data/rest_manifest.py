@@ -56,11 +56,22 @@ class CaptureRun:
     trade_date: str
     symbols: tuple[str, ...]
     indices: tuple[str, ...]
+    membership_indices: tuple[str, ...]
     api_version: str
     sdk_version: str
-    capability_contract: str | None
+    capability_contract: str
+    index_bar_status: tuple[tuple[str, str], ...]
+    membership_status: tuple[tuple[str, str], ...]
     requests: tuple[RequestPublication, ...]
     objects: tuple[CaptureObject, ...]
+
+    @property
+    def captured_index_bars(self) -> frozenset[str]:
+        return frozenset(index for index, status in self.index_bar_status if status == "captured")
+
+    @property
+    def captured_memberships(self) -> frozenset[str]:
+        return frozenset(index for index, status in self.membership_status if status == "captured")
 
 
 def require_bounded_scope(capture: CaptureRun) -> None:
@@ -68,7 +79,7 @@ def require_bounded_scope(capture: CaptureRun) -> None:
         tuple(item.endpoint for item in capture.requests),
         symbols=len(capture.symbols),
         indices=len(capture.indices),
-        allow_legacy_index_minute_probe=capture.capability_contract is None,
+        membership_indices=len(capture.membership_indices),
     ):
         raise RuntimeError("SSI capture does not contain the required bounded request set")
 
@@ -89,27 +100,52 @@ def load_capture(uri: str, expected_trade_date: str, raw_object_prefix: str) -> 
         raise RuntimeError("Unexpected SSI capture manifest URI")
     run_prefix = logical_run_key.removesuffix("/manifest.json")
     run = json_object(read_bytes(uri), uri)
-    if run.get("schema_version") != 1 or run.get("trade_date") != expected_trade_date:
+    if run.get("schema_version") != 2 or run.get("trade_date") != expected_trade_date:
         raise RuntimeError("SSI capture manifest does not match the requested trade date")
     if run.get("api_version") != API_VERSION or run.get("sdk_version") != SDK_VERSION:
         raise RuntimeError("Unsupported SSI capture API or SDK version")
     capability_contract = run.get("capability_contract")
-    if capability_contract not in (None, REST_CAPABILITY_CONTRACT):
+    if capability_contract != REST_CAPABILITY_CONTRACT:
         raise RuntimeError("Unsupported SSI REST capability contract")
     symbols = tuple(required(run, "symbols", list))
     indices = tuple(required(run, "indices", list))
+    membership_indices = tuple(required(run, "membership_indices", list))
     if (
         not symbols
         or not indices
         or set(symbols) & set(indices)
+        or not set(membership_indices).issubset(indices)
         or any(
             not isinstance(item, str) or not item or item != item.strip().upper()
-            for item in (*symbols, *indices)
+            for item in (*symbols, *indices, *membership_indices)
         )
         or len(symbols) != len(set(symbols))
         or len(indices) != len(set(indices))
+        or len(membership_indices) != len(set(membership_indices))
     ):
         raise RuntimeError("SSI capture manifest has an invalid scope")
+
+    raw_index_bar_status = run.get("index_bar_status")
+    if (
+        not isinstance(raw_index_bar_status, dict)
+        or set(raw_index_bar_status) != set(indices)
+        or any(
+            status not in {"captured", "unavailable"} for status in raw_index_bar_status.values()
+        )
+    ):
+        raise RuntimeError("SSI capture manifest has invalid index-bar availability")
+    index_bar_status = tuple((index, raw_index_bar_status[index]) for index in indices)
+
+    raw_membership_status = run.get("membership_status")
+    if (
+        not isinstance(raw_membership_status, dict)
+        or set(raw_membership_status) != set(membership_indices)
+        or any(
+            status not in {"captured", "unavailable"} for status in raw_membership_status.values()
+        )
+    ):
+        raise RuntimeError("SSI capture manifest has invalid membership availability")
+    membership_status = tuple((index, raw_membership_status[index]) for index in membership_indices)
 
     references = required(run, "requests", list)
     publications: list[RequestPublication] = []
@@ -220,9 +256,12 @@ def load_capture(uri: str, expected_trade_date: str, raw_object_prefix: str) -> 
         trade_date=expected_trade_date,
         symbols=symbols,
         indices=indices,
+        membership_indices=membership_indices,
         api_version=API_VERSION,
         sdk_version=SDK_VERSION,
         capability_contract=capability_contract,
+        index_bar_status=index_bar_status,
+        membership_status=membership_status,
         requests=tuple(publications),
         objects=tuple(objects),
     )

@@ -68,9 +68,7 @@ class ArbitratedSessionEvaluation(_StrictModel):
     def validate_counts(self) -> ArbitratedSessionEvaluation:
         if not self.positive_net_count <= self.eligible_outcome_count <= self.selected_count:
             raise ValueError("arbitrated session counts are inconsistent")
-        if (self.eligible_outcome_count == 0) != (
-            self.average_conditional_net_return_bps is None
-        ):
+        if (self.eligible_outcome_count == 0) != (self.average_conditional_net_return_bps is None):
             raise ValueError("arbitrated session average requires eligible outcomes")
         return self
 
@@ -122,9 +120,7 @@ class ArbitratedHoldoutEvaluation(_StrictModel):
     def validate_counts(self) -> ArbitratedHoldoutEvaluation:
         if not self.positive_net_count <= self.eligible_outcome_count <= self.selected_count:
             raise ValueError("arbitrated holdout counts are inconsistent")
-        if (self.eligible_outcome_count == 0) != (
-            self.average_conditional_net_return_bps is None
-        ):
+        if (self.eligible_outcome_count == 0) != (self.average_conditional_net_return_bps is None):
             raise ValueError("arbitrated holdout average requires eligible outcomes")
         return self
 
@@ -169,14 +165,10 @@ class ArbitratedWalkForwardReport(_StrictModel):
         if tuple(item.fold for item in self.folds) != tuple(range(1, len(self.folds) + 1)):
             raise ValueError("arbitrated walk-forward folds must be contiguous")
         keys = tuple(
-            (item.strategy, item.symbol, item.horizon_seconds)
-            for item in self.folds[0].evaluations
+            (item.strategy, item.symbol, item.horizon_seconds) for item in self.folds[0].evaluations
         )
         if any(
-            tuple(
-                (item.strategy, item.symbol, item.horizon_seconds)
-                for item in fold.evaluations
-            )
+            tuple((item.strategy, item.symbol, item.horizon_seconds) for item in fold.evaluations)
             != keys
             for fold in self.folds
         ):
@@ -232,8 +224,7 @@ class PromotionGateReport(_StrictModel):
             raise ValueError("promotion report reasons must be unique and ordered")
         expected_status: PromotionStatus = (
             "FAIL"
-            if any(item.status == "FAIL" for item in self.targets)
-            or "CAPTURE_GAPS" in self.reasons
+            if any(item.status == "FAIL" for item in self.targets) or "CAPTURE_GAPS" in self.reasons
             else "PENDING"
             if self.reasons or any(item.status == "PENDING" for item in self.targets)
             else "PASS"

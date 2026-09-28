@@ -6,9 +6,9 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Literal
 
-REST_CAPABILITY_CONTRACT = "ssi-fastconnect-rest/v1"
+REST_CAPABILITY_CONTRACT = "ssi-fastconnect-rest/v2"
 
-InstrumentScope = Literal["symbols", "indices"]
+InstrumentScope = Literal["symbols", "indices", "membership_indices"]
 RequestCardinality = Literal["per_identity", "single"]
 
 
@@ -21,10 +21,14 @@ class RestCapability:
     cardinality: RequestCardinality
     label: str
 
-    def request_count(self, *, symbols: int, indices: int) -> int:
+    def request_count(self, *, symbols: int, indices: int, membership_indices: int) -> int:
         if self.cardinality == "single":
             return 1
-        return symbols if self.scope == "symbols" else indices
+        return {
+            "symbols": symbols,
+            "indices": indices,
+            "membership_indices": membership_indices,
+        }[self.scope]
 
 
 REST_CAPABILITIES = (
@@ -70,14 +74,30 @@ REST_CAPABILITIES = (
         "per_identity",
         "completed-day index summary",
     ),
+    RestCapability(
+        "get_ohlc_1minute",
+        "indices",
+        "per_identity",
+        "same-day index OHLC 1-minute",
+    ),
+    RestCapability(
+        "get_securities_info_by_index",
+        "membership_indices",
+        "per_identity",
+        "point-in-time index membership",
+    ),
 )
 
 
-def expected_request_counts(*, symbols: int, indices: int) -> Counter[str]:
+def expected_request_counts(*, symbols: int, indices: int, membership_indices: int) -> Counter[str]:
     """Return exact request cardinality for the declared provider capabilities."""
     return Counter(
         {
-            capability.endpoint: capability.request_count(symbols=symbols, indices=indices)
+            capability.endpoint: capability.request_count(
+                symbols=symbols,
+                indices=indices,
+                membership_indices=membership_indices,
+            )
             for capability in REST_CAPABILITIES
         }
     )
@@ -88,20 +108,11 @@ def has_exact_request_set(
     *,
     symbols: int,
     indices: int,
-    allow_legacy_index_minute_probe: bool = False,
+    membership_indices: int,
 ) -> bool:
-    """Check a bounded request set, optionally accepting the retired index probe."""
-    actual = Counter(endpoints)
-    expected = expected_request_counts(symbols=symbols, indices=indices)
-    if actual == expected:
-        return True
-    if not allow_legacy_index_minute_probe:
-        return False
-    legacy = expected.copy()
-    legacy["get_ohlc_1minute_historical"] += indices
-    if actual == legacy:
-        return True
-    # Captures written before index-catalog evidence was added remain replayable;
-    # new captures must always satisfy the current contract above.
-    del legacy["get_indexes"]
-    return actual == legacy
+    """Check that a capture contains exactly the current bounded request set."""
+    return Counter(endpoints) == expected_request_counts(
+        symbols=symbols,
+        indices=indices,
+        membership_indices=membership_indices,
+    )

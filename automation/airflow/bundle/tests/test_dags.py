@@ -14,6 +14,7 @@ os.environ.setdefault("HOST_AWS_IDENTITY_DIR", "/tmp")
 os.environ["LAKEHOUSE_ENVIRONMENT"] = "ci"
 
 from airflow.models import DagBag
+from airflow.providers.standard.sensors.external_task import ExternalTaskSensor
 from airflow.sdk import DAG, CronPartitionTimetable
 from airflow.utils.file import list_py_file_paths
 from jinja2 import StrictUndefined
@@ -21,6 +22,9 @@ from jinja2.sandbox import SandboxedEnvironment
 from operators import emr as emr_module
 from operators.docker import LoggedDockerOperator
 from operators.emr import LoggedEmrServerlessStartJobOperator
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
+os.chdir(REPOSITORY_ROOT)
 
 ALLOWED_JOB_TYPES = {"etl", "el", "tl", "rpt", "mon", "bk", "gov", "test"}
 ALLOWED_WORKER_TYPES = {
@@ -225,13 +229,20 @@ def test_market_data_stream_dag_publishes_evidence_before_eligibility_enforcemen
     assert dag.timetable.key_format == "%Y-%m-%d"
     assert dag.max_active_runs == 1
     assert not dag.params
+    wait_for_rest = dag.get_task("wait_for_market_data_rest")
     validate = dag.get_task("validate_market_data_stream")
     publish = dag.get_task("publish_market_data_stream")
     certify = dag.get_task("certify_market_data_stream")
+    ensure_journal = dag.get_task("ensure_t0_shadow_journal")
     promotion = dag.get_task("publish_t0_promotion_evidence")
+    assert isinstance(wait_for_rest, ExternalTaskSensor)
+    assert wait_for_rest.external_dag_id == "etl_mix_ingest_market_data_rest"
+    assert wait_for_rest.external_task_id == "publish_market_data_rest"
+    assert wait_for_rest.downstream_task_ids == {"validate_market_data_stream"}
     assert isinstance(validate, LoggedDockerOperator)
     assert isinstance(publish, LoggedEmrServerlessStartJobOperator)
     assert isinstance(certify, LoggedDockerOperator)
+    assert isinstance(ensure_journal, LoggedDockerOperator)
     assert isinstance(promotion, LoggedDockerOperator)
     for task, command in (
         (validate, "validate-stream-day"),
@@ -249,7 +260,15 @@ def test_market_data_stream_dag_publishes_evidence_before_eligibility_enforcemen
     assert publish.downstream_task_ids == {"certify_market_data_stream"}
     assert certify.skip_on_exit_code == [10]
     assert len(certify.on_skipped_callback) == 2
-    assert certify.downstream_task_ids == {"publish_t0_promotion_evidence"}
+    assert certify.downstream_task_ids == {"ensure_t0_shadow_journal"}
+    assert isinstance(ensure_journal.command, list)
+    assert ensure_journal.command[:2] == ["ensure-shadow-journal", "--trade-date"]
+    assert ensure_journal.mounts is not None
+    assert len(ensure_journal.mounts) == 1
+    assert ensure_journal.retries == 1
+    assert ensure_journal.retry_delay == timedelta(minutes=10)
+    assert ensure_journal.skip_on_exit_code == [99]
+    assert ensure_journal.downstream_task_ids == {"publish_t0_promotion_evidence"}
     assert isinstance(promotion.command, list)
     assert promotion.command[:2] == ["publish-promotion-evidence", "--trade-date"]
     assert promotion.mounts is not None

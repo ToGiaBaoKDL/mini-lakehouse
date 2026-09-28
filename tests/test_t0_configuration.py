@@ -19,6 +19,7 @@ def test_trading_configuration_is_strict_effective_dated_and_stable() -> None:
 
     assert configuration.capture.symbols == ("VIC", "VHM")
     assert configuration.capture.indices == ("VNINDEX", "VN30", "VNREAL")
+    assert configuration.capture.membership_indices == ("VN30", "VNREAL")
     assert configuration.capture_scope(date(2026, 9, 5)) == configuration.capture
     assert version.version == "market-state-v1"
     assert version.market.symbols == ("VIC", "VHM")
@@ -154,9 +155,7 @@ def test_promotion_and_paper_policies_reject_broken_references(
     invalid: str,
 ) -> None:
     with pytest.raises(TradingConfigurationError, match="invalid trading configuration"):
-        parse_configuration(
-            CONFIGURATION.read_text(encoding="utf-8").replace(original, invalid, 1)
-        )
+        parse_configuration(CONFIGURATION.read_text(encoding="utf-8").replace(original, invalid, 1))
 
 
 def test_outcome_assumptions_do_not_change_feature_configuration_identity() -> None:
@@ -193,12 +192,13 @@ def test_capture_scope_has_independent_operational_identity() -> None:
 
 
 def test_capture_scope_must_cover_effective_decision_requirements() -> None:
+    content = CONFIGURATION.read_text(encoding="utf-8").replace(
+        "indices: [VNINDEX, VN30, VNREAL]",
+        "indices: [VNINDEX, VNREAL]",
+        1,
+    )
     configuration = parse_configuration(
-        CONFIGURATION.read_text(encoding="utf-8").replace(
-            "indices: [VNINDEX, VN30, VNREAL]",
-            "indices: [VNINDEX, VNREAL]",
-            1,
-        )
+        content.replace("membership_indices: [VN30, VNREAL]", "membership_indices: [VNREAL]")
     )
 
     with pytest.raises(TradingConfigurationError, match="does not cover"):

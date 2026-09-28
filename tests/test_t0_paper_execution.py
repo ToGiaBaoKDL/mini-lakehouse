@@ -3,6 +3,7 @@
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from typing import cast
 
 import pytest
 from pydantic import ValidationError
@@ -32,6 +33,7 @@ from t0_trading.promotion import PromotionGateReport, PromotionTargetResult
 from t0_trading.strategy.baselines import (
     BASELINE_GROUP_NAMES,
     BaselineCandidate,
+    BaselineName,
     GroupEvidence,
 )
 
@@ -63,7 +65,7 @@ def _promotion_report() -> PromotionGateReport:
         reasons=(),
         targets=tuple(
             PromotionTargetResult(
-                strategy=target.strategy,
+                strategy=cast(BaselineName, target.strategy),
                 symbol=target.symbol,
                 horizon_seconds=target.horizon_seconds,
                 status="PASS",
@@ -96,9 +98,12 @@ def _request(
         trade_date=TRADE_DATE,
         decision_at=DECISION_AT,
         feature_snapshot_sha256="1" * 64,
-        groups=tuple(
-            GroupEvidence(name=name, strength=Decimal("0.8"))
-            for name in BASELINE_GROUP_NAMES["momentum_pullback"]
+        groups=cast(
+            tuple[GroupEvidence, GroupEvidence, GroupEvidence],
+            tuple(
+                GroupEvidence(name=name, strength=Decimal("0.8"))
+                for name in BASELINE_GROUP_NAMES["momentum_pullback"]
+            ),
         ),
         strength=Decimal("0.8"),
         block_reasons=(),
@@ -407,6 +412,7 @@ def test_paper_order_lifecycle_rejects_impossible_or_price_violating_history() -
         adapter_event_id="accepted-1",
         adapter_evidence_sha256="8" * 64,
     )
+    assert filled_without_acceptance.fill_evidence is not None
     above_limit = filled_without_acceptance.model_copy(
         update={
             "sequence": 2,

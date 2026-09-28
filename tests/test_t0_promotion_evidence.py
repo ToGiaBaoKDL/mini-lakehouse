@@ -1,12 +1,18 @@
 """Daily promotion evidence is derived from selected shadow records, not raw candidates."""
 
 import hashlib
+from collections.abc import Iterable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from typing import cast
 
 import pytest
-from t0_trading.arbitration import ShadowArbitrationAuditReport, arbitrate_candidates
+from t0_trading.arbitration import (
+    CandidateArbitration,
+    ShadowArbitrationAuditReport,
+    arbitrate_candidates,
+)
 from t0_trading.configuration import load_configuration
 from t0_trading.controls import public_vndirect_dta_costs
 from t0_trading.numeric import basis_points
@@ -16,6 +22,7 @@ from t0_trading.strategy.baselines import (
     BASELINE_GROUP_NAMES,
     BASELINE_NAMES,
     BaselineCandidate,
+    BaselineName,
     GroupEvidence,
 )
 
@@ -24,7 +31,7 @@ TRADE_DATE = date(2026, 9, 28)
 DECISION_AT = datetime(2026, 9, 28, 2, 30, tzinfo=UTC)
 
 
-def _journal_sha(records) -> str:
+def _journal_sha(records: Iterable[BaselineCandidate | CandidateArbitration]) -> str:
     digest = hashlib.sha256()
     for record in records:
         digest.update(record.canonical_bytes())
@@ -32,7 +39,7 @@ def _journal_sha(records) -> str:
     return digest.hexdigest()
 
 
-def _candidate(strategy, symbol: str) -> BaselineCandidate:
+def _candidate(strategy: BaselineName, symbol: str) -> BaselineCandidate:
     return BaselineCandidate(
         strategy=strategy,
         symbol=symbol,
@@ -49,9 +56,12 @@ def _candidate(strategy, symbol: str) -> BaselineCandidate:
         context_configuration_sha256="2" * 64,
         context_data_mode="LIVE",
         market_regime="TREND_UP",
-        groups=tuple(
-            GroupEvidence(name=name, strength=Decimal("0.8"))
-            for name in BASELINE_GROUP_NAMES[strategy]
+        groups=cast(
+            tuple[GroupEvidence, GroupEvidence, GroupEvidence],
+            tuple(
+                GroupEvidence(name=name, strength=Decimal("0.8"))
+                for name in BASELINE_GROUP_NAMES[strategy]
+            ),
         ),
         strength=Decimal("0.8"),
         block_reasons=(),
@@ -92,17 +102,13 @@ def _evidence():
     gate = configuration.resolve_promotion_gate(TRADE_DATE)
     assert policy is not None and gate is not None
     candidates = tuple(
-        _candidate(strategy, symbol)
-        for symbol in ("VHM", "VIC")
-        for strategy in BASELINE_NAMES
+        _candidate(strategy, symbol) for symbol in ("VHM", "VIC") for strategy in BASELINE_NAMES
     )
     arbitrations = arbitrate_candidates(candidates, policy)
     selected = tuple(
         candidate
         for candidate in candidates
-        if next(
-            item for item in arbitrations if item.candidate_sha256 == candidate.sha256
-        ).status
+        if next(item for item in arbitrations if item.candidate_sha256 == candidate.sha256).status
         == "SELECTED"
     )
     audit = ShadowArbitrationAuditReport(

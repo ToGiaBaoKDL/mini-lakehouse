@@ -24,6 +24,7 @@ from t0_trading.arbitration import (
     ShadowArbitrationJournal,
     arbitrate_candidates,
     audit_shadow_journal,
+    ensure_shadow_journal,
     publish_shadow_journal,
 )
 from t0_trading.capture import MAX_STREAM_BATCH_MESSAGES
@@ -153,11 +154,7 @@ def _replay_feature_day(
     FeatureAuditReport,
 ]:
     """Certify and replay one logical market day without retaining raw input."""
-    configuration = load_configuration(config)
-    version = configuration.resolve(trade_date)
-    readers = _stream_day_readers(trade_date, landing_uri, region)
-    certification, _ = certify_market_day(readers, version, trade_date=trade_date)
-    reader = select_feature_capture(readers, certification)
+    reader, configuration = _certified_stream_day(trade_date, landing_uri, region, config)
     snapshots, report = _replay_feature_capture(reader, configuration)
     return reader, configuration, snapshots, report
 
@@ -252,6 +249,22 @@ def _stream_day_readers(
     if not manifest_uris:
         raise ValueError("no terminal SSI Stream session exists for the trading date")
     return tuple(StreamSessionReader.from_uri(client, uri) for uri in manifest_uris)
+
+
+def _certified_stream_day(
+    trade_date: date,
+    landing_uri: str,
+    region: str,
+    config: Path,
+) -> tuple[StreamDayReader, TradingConfiguration]:
+    configuration = load_configuration(config)
+    readers = _stream_day_readers(trade_date, landing_uri, region)
+    certification, _ = certify_market_day(
+        readers,
+        configuration.resolve(trade_date),
+        trade_date=trade_date,
+    )
+    return select_feature_capture(readers, certification), configuration
 
 
 def check_config(
@@ -428,6 +441,7 @@ def capture_rest_command(
                     job_token=job_token,
                     symbols=capture_scope.symbols,
                     indices=capture_scope.indices,
+                    membership_indices=capture_scope.membership_indices,
                     page_size=page_size,
                 ),
             )
@@ -480,7 +494,6 @@ def capture_stream_command(
         capture_scope = configuration.capture_scope(trade_date)
         options = StreamCaptureOptions(
             symbols=capture_scope.symbols,
-            indices=capture_scope.indices,
             markets=capture_scope.markets,
             duration_seconds=duration_seconds,
             heartbeat_seconds=heartbeat_seconds,
@@ -890,6 +903,9 @@ def publish_promotion_evidence_command(
         )
     except typer.Exit:
         raise
+    except (CaptureStoreUnavailable, BotoCoreError) as error:
+        typer.echo(f"SSI promotion evidence publication failed: {_safe_error(error)}", err=True)
+        raise typer.Exit(code=1) from None
     except (
         OSError,
         ShadowArbitrationAuditError,
@@ -901,9 +917,6 @@ def publish_promotion_evidence_command(
     ) as error:
         typer.echo(str(error), err=True)
         raise typer.Exit(code=1) from error
-    except (CaptureStoreUnavailable, BotoCoreError, ClientError) as error:
-        typer.echo(f"SSI promotion evidence publication failed: {_safe_error(error)}", err=True)
-        raise typer.Exit(code=1) from None
     _emit_model(publication)
 
 
@@ -1007,6 +1020,61 @@ def audit_shadow_journal_command(
         typer.echo(f"SSI shadow journal audit failed: {_safe_error(error)}", err=True)
         raise typer.Exit(code=1) from None
     _emit_model(report, output)
+
+
+def ensure_shadow_journal_command(
+    trade_date: Annotated[
+        str,
+        typer.Option(help="Prospective exchange-local trade date in YYYY-MM-DD format."),
+    ],
+    landing_uri: Annotated[str, typer.Option(help="Landing S3 root URI.")],
+    region: Annotated[str, typer.Option(help="AWS region containing the landing bucket.")] = (
+        "ap-southeast-1"
+    ),
+    config: Annotated[Path, typer.Option(help="Versioned non-secret trading YAML.")] = (
+        DEFAULT_TRADING_CONFIG
+    ),
+) -> None:
+    """Audit or deterministically recover one immutable shadow journal."""
+    parsed_trade_date = _parse_trade_date(trade_date)
+    try:
+        configuration = load_configuration(config)
+        if configuration.resolve_candidate_arbitration(parsed_trade_date) is None:
+            typer.echo("no prospective candidate-arbitration policy covers this session")
+            raise typer.Exit(code=99)
+        capture, configuration = _certified_stream_day(
+            parsed_trade_date,
+            landing_uri,
+            region,
+            config,
+        )
+        client = boto3.client("s3", region_name=region)
+        store = S3CaptureStore(client, landing_uri)
+        with TemporaryDirectory(prefix="t0-shadow-recovery-") as workspace:
+            result = ensure_shadow_journal(
+                capture,
+                configuration,
+                store,
+                client,
+                Path(workspace),
+            )
+    except typer.Exit:
+        raise
+    except (CaptureStoreUnavailable, BotoCoreError) as error:
+        typer.echo(f"SSI shadow journal recovery failed: {_safe_error(error)}", err=True)
+        raise typer.Exit(code=1) from None
+    except (
+        OSError,
+        ShadowArbitrationAuditError,
+        StreamCaptureReadError,
+        TradingConfigurationError,
+        ValidationError,
+        RuntimeError,
+        ValueError,
+    ) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(code=1) from error
+    _emit_model(result)
 
 
 def certify_stream_day_command(
@@ -1125,5 +1193,6 @@ app.command("evaluate-promotion-gate")(evaluate_promotion_gate_command)
 app.command("publish-promotion-evidence")(publish_promotion_evidence_command)
 app.command("simulate-cycles")(simulate_cycles_command)
 app.command("audit-shadow-journal")(audit_shadow_journal_command)
+app.command("ensure-shadow-journal")(ensure_shadow_journal_command)
 app.command("validate-stream-day")(validate_stream_day_command)
 app.command("certify-stream-day")(certify_stream_day_command)

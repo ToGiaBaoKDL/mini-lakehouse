@@ -168,6 +168,7 @@ class CaptureConfiguration(_StrictModel):
 
     symbols: tuple[str, ...]
     indices: tuple[str, ...]
+    membership_indices: tuple[str, ...]
     markets: tuple[str, ...]
 
     @model_validator(mode="after")
@@ -175,11 +176,14 @@ class CaptureConfiguration(_StrictModel):
         for name, values in (
             ("symbols", self.symbols),
             ("indices", self.indices),
+            ("membership_indices", self.membership_indices),
             ("markets", self.markets),
         ):
             _require_identifiers(f"capture {name}", values)
         if set(self.symbols) & set(self.indices):
             raise ValueError("capture symbols and indices must be disjoint")
+        if not set(self.membership_indices).issubset(self.indices):
+            raise ValueError("capture membership indices must be captured indices")
         return self
 
 
@@ -321,8 +325,7 @@ class PromotionGateVersion(_EffectiveVersion):
     @model_validator(mode="after")
     def validate_targets(self) -> PromotionGateVersion:
         keys = tuple(
-            (target.strategy, target.symbol, target.horizon_seconds)
-            for target in self.targets
+            (target.strategy, target.symbol, target.horizon_seconds) for target in self.targets
         )
         if not keys or len(set(keys)) != len(keys) or tuple(sorted(keys)) != keys:
             raise ValueError("promotion targets must be unique, non-empty, and ordered")
@@ -417,9 +420,7 @@ class TradingConfiguration(_StrictModel):
         _validate_effective_versions(self.contexts, "context")
         for arbitration in self.candidate_arbitrations:
             overlapping_outcomes = tuple(
-                outcome
-                for outcome in self.outcomes
-                if _intervals_overlap(arbitration, outcome)
+                outcome for outcome in self.outcomes if _intervals_overlap(arbitration, outcome)
             )
             horizons = {rule.horizon_seconds for rule in arbitration.rules}
             if not overlapping_outcomes or any(
@@ -471,8 +472,7 @@ class TradingConfiguration(_StrictModel):
             if gate.arbitration_version != arbitration.version or any(
                 not item.contains(execution.effective_from)
                 or (
-                    execution.effective_to is not None
-                    and not item.contains(execution.effective_to)
+                    execution.effective_to is not None and not item.contains(execution.effective_to)
                 )
                 for item in referenced
             ):

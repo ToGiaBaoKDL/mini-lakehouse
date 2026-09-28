@@ -3,6 +3,7 @@
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from typing import cast
 
 import pytest
 from t0_trading.arbitration import CandidateArbitrator, arbitrate_candidates
@@ -38,8 +39,11 @@ def _candidate(
         peer_feature_snapshot_sha256=(
             "c" * 64 if strategy == "vic_vhm_relative" and not blocked else None
         ),
-        groups=tuple(
-            GroupEvidence(name=name, strength=value) for name in BASELINE_GROUP_NAMES[strategy]
+        groups=cast(
+            tuple[GroupEvidence, GroupEvidence, GroupEvidence],
+            tuple(
+                GroupEvidence(name=name, strength=value) for name in BASELINE_GROUP_NAMES[strategy]
+            ),
         ),
         strength=Decimal(0) if blocked else Decimal(strength),
         block_reasons=reasons,
