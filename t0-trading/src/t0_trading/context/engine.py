@@ -13,7 +13,9 @@ from zoneinfo import ZoneInfo
 from pydantic import TypeAdapter
 from ssi_sdk.models import MarketStatusMessage, TradeMessage
 
-from t0_trading.configuration import ContextVersion, TradingVersion
+from t0_trading.capture.membership import BreadthMembershipSnapshot
+from t0_trading.configuration import BreadthVersion, ContextVersion, TradingVersion
+from t0_trading.context.breadth import BreadthEngine
 from t0_trading.context.model import (
     ContextDataMode,
     DecisionContext,
@@ -496,29 +498,37 @@ def build_decision_contexts(
     envelopes: Iterable[StreamEnvelope],
     configuration: TradingVersion,
     policy: ContextVersion,
+    *,
+    breadth_policy: BreadthVersion | None = None,
+    breadth_membership: BreadthMembershipSnapshot | None = None,
 ) -> tuple[DecisionContext, ...]:
-    """Build live contexts using only index messages received before each clock."""
-    timezone = ZoneInfo(configuration.market.timezone)
-    observations: list[IndexObservation] = []
-    statuses: list[MarketStatusObservation] = []
-    for envelope in envelopes:
-        if (tick := _index_tick(envelope, set(configuration.market.indices), timezone)) is not None:
-            observations.append(tick)
-        if (
-            status := _market_status_tick(
-                envelope,
-                set(configuration.market.status_markets),
-            )
-        ) is not None:
-            statuses.append(status)
-    return build_decision_contexts_from_observations(
-        snapshots,
-        observations,
+    """Replay the live engine; only receipts available at each decision may advance state."""
+    if not snapshots:
+        raise ValueError("decision context requires feature snapshots")
+    if len({item.trade_date for item in snapshots}) != 1:
+        raise ValueError("context requires one feature trade date")
+    engine = LiveDecisionContextEngine(
         configuration,
         policy,
-        data_mode="LIVE",
-        market_status_observations=statuses,
+        breadth_policy=breadth_policy,
+        breadth_membership=breadth_membership,
     )
+    clocks: dict[datetime, list[FeatureSnapshot]] = defaultdict(list)
+    for snapshot in snapshots:
+        clocks[snapshot.decision_at].append(snapshot)
+    source = iter(envelopes)
+    pending = next(source, None)
+    contexts = []
+    for at, group in sorted(clocks.items()):
+        while pending is not None and pending.received_at <= at:
+            engine.apply(pending)
+            pending = next(source, None)
+        contexts.append(engine.build(group))
+    # Exhaust the verified reader so terminal count/checksum checks still run.
+    while pending is not None:
+        engine.apply(pending)
+        pending = next(source, None)
+    return tuple(contexts)
 
 
 class LiveDecisionContextEngine:
@@ -528,7 +538,14 @@ class LiveDecisionContextEngine:
     :class:`FeatureEngine`, so capture, features, and context can fail independently.
     """
 
-    def __init__(self, configuration: TradingVersion, policy: ContextVersion) -> None:
+    def __init__(
+        self,
+        configuration: TradingVersion,
+        policy: ContextVersion,
+        *,
+        breadth_policy: BreadthVersion | None = None,
+        breadth_membership: BreadthMembershipSnapshot | None = None,
+    ) -> None:
         self._configuration = configuration
         self._policy = policy
         self._timezone = ZoneInfo(configuration.market.timezone)
@@ -543,11 +560,18 @@ class LiveDecisionContextEngine:
         }
         self._last_received_at: datetime | None = None
         self._last_decision_at: datetime | None = None
+        self._breadth = (
+            BreadthEngine(configuration, breadth_policy, breadth_membership)
+            if breadth_policy
+            else None
+        )
 
     def apply(self, envelope: StreamEnvelope) -> None:
         if self._last_received_at is not None and envelope.received_at < self._last_received_at:
             raise ValueError("context envelopes must be receipt ordered")
         self._last_received_at = envelope.received_at
+        if self._breadth is not None:
+            self._breadth.apply(envelope)
         index = _index_tick(envelope, set(self._index_ticks), self._timezone)
         if index is not None:
             self._index_ticks[index.index].append(index)
@@ -607,6 +631,7 @@ class LiveDecisionContextEngine:
             zones=zones,
             indices=indices,
             market_statuses=statuses,
+            breadth=self._breadth.build(decision_at) if self._breadth is not None else (),
             market_confirmation_strength=confirmation,
             regime=regime,
             reasons=reasons,

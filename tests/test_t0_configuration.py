@@ -198,7 +198,9 @@ def test_capture_scope_must_cover_effective_decision_requirements() -> None:
         1,
     )
     configuration = parse_configuration(
-        content.replace("membership_indices: [VN30, VNREAL]", "membership_indices: [VNREAL]")
+        content.replace(
+            "membership_indices: [VN30, VNREAL]", "membership_indices: [VNREAL]"
+        ).replace("    indices: [VN30, VNREAL]", "    indices: [VNREAL]")
     )
 
     with pytest.raises(TradingConfigurationError, match="does not cover"):

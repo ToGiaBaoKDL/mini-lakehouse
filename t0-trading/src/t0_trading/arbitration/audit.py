@@ -216,7 +216,14 @@ def audit_shadow_journal(
     snapshots = replay_features(
         capture.envelopes(), version, trade_date=manifest.trade_date, gaps=capture.gaps
     )
-    contexts = build_decision_contexts(snapshots, capture.envelopes(), version, context_policy)
+    contexts = build_decision_contexts(
+        snapshots,
+        capture.envelopes(),
+        version,
+        context_policy,
+        breadth_policy=configuration.resolve_breadth(manifest.trade_date),
+        breadth_membership=capture.breadth_membership,
+    )
     candidates = score_buy_first_baselines(snapshots, contexts)
     arbitrations = arbitrate_candidates(candidates, arbitration_policy)
     if len(candidates) != manifest.candidate_count:

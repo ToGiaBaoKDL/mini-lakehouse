@@ -7,7 +7,9 @@ from datetime import UTC, datetime, timedelta
 
 from pyspark.sql import SparkSession
 from t0_trading.arbitration import CandidateArbitration, arbitrate_candidates
+from t0_trading.capture.membership import BreadthMembershipSnapshot
 from t0_trading.configuration import (
+    BreadthVersion,
     CandidateArbitrationVersion,
     ContextVersion,
     TradingVersion,
@@ -94,12 +96,16 @@ def _contexts(
     stream_envelopes: Iterable[StreamEnvelope],
     configuration: TradingVersion,
     context_policy: ContextVersion,
+    breadth_policy: BreadthVersion | None = None,
+    breadth_membership: BreadthMembershipSnapshot | None = None,
 ) -> tuple[DecisionContext, ...]:
     live = build_decision_contexts(
         snapshots,
         stream_envelopes,
         configuration,
         context_policy,
+        breadth_policy=breadth_policy,
+        breadth_membership=breadth_membership,
     )
     if any(item.value is not None for context in live for item in context.indices):
         return live
@@ -112,12 +118,16 @@ def _contexts(
     )
     if not historical:
         return live
-    return build_decision_contexts_from_observations(
+    proxy = build_decision_contexts_from_observations(
         snapshots,
         historical,
         configuration,
         context_policy,
         data_mode="HISTORICAL_PROXY",
+    )
+    return tuple(
+        context.model_copy(update={"breadth": live_context.breadth})
+        for context, live_context in zip(proxy, live, strict=True)
     )
 
 
@@ -138,6 +148,9 @@ def _context_rows(
             "reasons_json": _json(context.reasons),
             "zones_json": _json([item.model_dump(mode="json") for item in context.zones]),
             "indices_json": _json([item.model_dump(mode="json") for item in context.indices]),
+            "breadth_json": _json([item.model_dump(mode="json") for item in context.breadth])
+            if context.breadth
+            else None,
             "processed_at": processed_at,
             "context_sha256": context.sha256,
             "market_statuses_json": _json(
@@ -274,6 +287,8 @@ def publish(
     context_policy: ContextVersion,
     arbitration_policy: CandidateArbitrationVersion | None,
     capture_evidence_sha256: str,
+    breadth_policy: BreadthVersion | None = None,
+    breadth_membership: BreadthMembershipSnapshot | None = None,
 ) -> tuple[
     tuple[DecisionContext, ...],
     tuple[BaselineCandidate, ...],
@@ -288,6 +303,8 @@ def publish(
         stream_envelopes=stream_envelopes,
         configuration=configuration,
         context_policy=context_policy,
+        breadth_policy=breadth_policy,
+        breadth_membership=breadth_membership,
     )
     candidates = score_buy_first_baselines(snapshots, contexts)
     if any(

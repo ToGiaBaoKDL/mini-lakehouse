@@ -39,8 +39,8 @@ one-minute bars, at-least-once trade ticks, quote snapshots and levels, index sn
 status events, and structured corporate actions. Every decision-relevant fact separates event,
 receipt, availability, and processing time where the source permits it. Prices and monetary values
 use explicit decimal precision and scale through Pydantic, PyIceberg, and Spark; quantities and
-sequences remain integers. Live and historical bars converge into one table through source and
-revision lineage.
+sequences remain integers. REST security bars and captured constituent stream revisions keep
+distinct grains and availability semantics; neither is relabeled as the other.
 
 `market_status_events` and `corporate_actions` are structured facts, not news or sentiment feeds.
 Market-level status now has an official stream writer. Symbol-level SSI `F` security status is not
@@ -57,6 +57,7 @@ The physical tables intentionally use one table per durable grain, not one table
 | Stream `messages`, `sessions`                                                                    | Active in manifest-scoped replay | Message lineage and terminal connection-session completeness are the two durable grains.  |
 | `trade_ticks`, `quote_snapshots`, `quote_levels`                                                 | Active in manifest-scoped replay | Quotes use a parent snapshot plus one-to-many levels; ticks retain receive order.         |
 | `market_status_events`                                                                           | Active in manifest-scoped replay | Official market-phase transitions feed the point-in-time fail-closed context gate.        |
+| `index_membership_snapshots`, `constituent_bars_1m`                                              | Manifest-scoped replay writer    | Captured membership and every SDK minute revision retain receipt-time lineage.            |
 | `corporate_actions`                                                                              | Deferred                         | Required for adjusted replay, but has no writer until its structured source is certified. |
 
 Each bounded EMR job requires only the landing and curated tables that it writes. Deferred
@@ -143,7 +144,8 @@ by `curated_t0_trading`:
   snapshot, action, and horizon;
 - `decision_contexts` stores the versioned zone, index-window, market-confirmation, and regime
   result at each feature clock. `data_mode` distinguishes genuine `LIVE` evidence from an explicit
-  completed-day `HISTORICAL_PROXY`;
+  completed-day `HISTORICAL_PROXY`. Optional `breadth_json` preserves independently versioned
+  constituent context, coverage, confirmation, and raw observation lineage;
 - `strategy_candidates` stores the complete buy-first candidate/abstention matrix, including every
   evidence group, block reason, and feature/context fingerprint;
 - `candidate_arbitrations` stores the prospective selection or structured rejection of every
@@ -672,8 +674,9 @@ the explicitly configured `VN30` and `VNREAL` breadth universes via
 `get_securities_info_by_index`; `VNINDEX` is excluded because the pinned SDK cannot parse every
 instrument returned by that provider scope. Membership is captured only when the requested trade
 date equals the current Vietnam market date; historical runs are explicitly marked `unavailable`
-rather than assigning today's constituents to an older session. Membership stays as immutable
-landing evidence until a consumer justifies a separate durable breadth grain.
+rather than assigning today's constituents to an older session. The stream manifest's exact startup
+snapshot is also published into curated for the breadth consumer; a later REST membership request
+never replaces it.
 Curated `trade_date` partitions are derived from each provider record and checked against the bounded
 source date; request and processing timestamps never choose the market-data partition.
 `index_bars_1m` stores only exact-date SDK evidence; no iBoard data is mislabeled as FastConnect SDK
@@ -683,8 +686,53 @@ official SDK at startup. It keeps the aggregate trade/quote subscription limited
 and the captured constituents. A v4 terminal manifest preserves every membership record checksum,
 unavailable-index status, snapshot identity, and exact interval scope, so reconnect segments cannot
 silently change universe. Missing constituent intervals are reported as breadth coverage without
-weakening or changing the existing VIC/VHM certification gates. Breadth remains capture-only:
-strategy, regime, and promotion logic do not consume it yet.
+weakening or changing the existing VIC/VHM certification gates.
+
+### Constituent context
+
+The stream EMR job publishes `index_membership_snapshots` and `constituent_bars_1m`. Each minute
+revision keeps the original stream session/receive sequence, provider update time, receipt time,
+membership hash, message hash, and manifest URI/hash. There is no invented final flag: the latest
+revision known at a decision clock is not necessarily the provider's final revision. Reruns insert
+missing facts and reject conflicts rather than overwriting evidence. These tables can be rebuilt
+from existing manifests that already contain membership and constituent intervals, not from
+sessions where those messages were never captured.
+
+One `BreadthEngine` supplies both live and replay `DecisionContext`; journal recovery, audit, CLI
+research, and EMR use the same configuration and captured membership. The optional context is
+serialized in `decision_contexts.breadth_json`, including its policy, membership, and contributing
+observation hashes. This adds no separate scheduler, feature service, or local journal store.
+
+For a decision at 09:30:05 and a five-minute lookback, the engine compares the latest known revisions
+of 09:29 and 09:24. Both minutes must be closed and belong to the same continuous session. Exact
+minute pairs are required; absent minutes are not forward-filled. A delayed receipt can affect only
+later decisions, and an older provider update cannot rewind a newer revision. Provider-time
+staleness is checked independently of receipt time.
+
+- `advance_ratio`: fraction of usable constituents with a positive close-to-close lookback return;
+  this is **not** the fraction above the exchange's daily reference price.
+- `participation`: usable pairs divided by the full captured constituent count, not by the subset
+  of symbols that happened to emit messages. This measures evidence coverage, not turnover share.
+- `dispersion_bps`: population standard deviation of equal-weight constituent returns in basis
+  points; `mean_return_bps` is the corresponding equal-weight mean.
+- `upward_confirmation`: upward breadth with a positive mean, available only when membership,
+  session, freshness, and participation checks pass. VNREAL uses this same generic calculation.
+  Partial metrics remain inspectable with reasons, but confirmation is null when evidence is weak.
+
+The separately effective-dated `breadth` policy starts on **2026-10-02**. Its initial five-minute
+lookback, 90-second freshness, 80% participation and 60% advancing thresholds are provisional research
+defaults, not tuned profitability claims. Earlier contexts omit breadth and retain their original
+canonical hashes. Deploy the same configuration with both capture and EMR before activating it;
+do not edit an effective policy after it has produced journals.
+
+Breadth is supplemental context, not an official index, a security-halt signal, or a new strategy
+gate. Existing baseline scores, official-index regime, security safety boundaries, and 26-session
+promotion requirements are unchanged. Strategy use requires a separate prospective evaluation.
+
+Deployment requires `make catalog-apply` before the new EMR release: two new tables and an optional
+`breadth_json` column are additive. Publish the EMR artifacts and deploy the capture image/config
+through the existing release flow. Airflow needs no new DAG or schedule; the existing stream job
+owns the writes. A successful local test does not substitute for checking the first deployed run.
 
 Certification probes index-minute bars through REST, not the non-producing index stream
 subscription. Provider interval bars remain reconciliation evidence; deterministic bars built from

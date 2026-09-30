@@ -81,6 +81,17 @@ paper_executions:
     maximum_quote_age_seconds: 5
     limit_offset_ticks: 0
     time_in_force_seconds: 5
+# Prospective context only: historical journals retain their original digests.
+# These research defaults do not authorize strategy promotion or execution.
+breadth:
+  - version: constituent-breadth-v1
+    effective_from: 2026-10-02
+    effective_to: null
+    indices: [VN30, VNREAL]
+    lookback_seconds: 300
+    stale_after_seconds: 90
+    minimum_participation: "0.80"
+    confirmation_advance_ratio: "0.60"
 contexts:
   - version: decision-context-v3
     effective_from: 2026-08-27

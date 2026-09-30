@@ -16,8 +16,10 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from t0_trading.arbitration.engine import CandidateArbitrator
+from t0_trading.capture.membership import BreadthMembershipSnapshot
 from t0_trading.capture.reader import StreamGap
 from t0_trading.configuration import (
+    BreadthVersion,
     CandidateArbitrationVersion,
     ContextVersion,
     TradingVersion,
@@ -130,6 +132,8 @@ class ShadowArbitrationJournal:
         context_policy: ContextVersion,
         arbitration_policy: CandidateArbitrationVersion,
         *,
+        breadth_policy: BreadthVersion | None = None,
+        breadth_membership: BreadthMembershipSnapshot | None = None,
         on_error: Callable[[Exception], None] | None = None,
     ) -> None:
         if not output.name.endswith(_ARBITRATION_SUFFIX):
@@ -149,7 +153,12 @@ class ShadowArbitrationJournal:
         self._arbitration_policy = arbitration_policy
         self._timezone = ZoneInfo(configuration.market.timezone)
         self._feature_engine = FeatureEngine(configuration)
-        self._context_engine = LiveDecisionContextEngine(configuration, context_policy)
+        self._context_engine = LiveDecisionContextEngine(
+            configuration,
+            context_policy,
+            breadth_policy=breadth_policy,
+            breadth_membership=breadth_membership,
+        )
         self._arbitrator = CandidateArbitrator(arbitration_policy)
         self._decision_times = tuple(decision_times(configuration, trade_date))
         if not self._decision_times:

@@ -99,8 +99,18 @@ class _SessionReader:
         return iter(())
 
 
-def _artifacts(tmp_path: Path) -> tuple[str, TradingConfiguration, _SessionReader, _S3]:
+def _artifacts(
+    tmp_path: Path, *, enable_breadth: bool = False
+) -> tuple[str, TradingConfiguration, _SessionReader, _S3]:
     configuration = _configuration()
+    if enable_breadth:
+        configuration = configuration.model_copy(
+            update={
+                "breadth": (
+                    configuration.breadth[0].model_copy(update={"effective_from": TRADE_DATE}),
+                )
+            }
+        )
     version = configuration.resolve(TRADE_DATE)
     arbitration_policy = configuration.resolve_candidate_arbitration(TRADE_DATE)
     assert arbitration_policy is not None
@@ -112,6 +122,7 @@ def _artifacts(tmp_path: Path) -> tuple[str, TradingConfiguration, _SessionReade
         version,
         configuration.resolve_context(TRADE_DATE),
         arbitration_policy,
+        breadth_policy=configuration.resolve_breadth(TRADE_DATE),
     )
     journal.connected(SESSION_ID, connected_at)
     journal.close(disconnected_at, (CAPTURE_MANIFEST_URI,))
@@ -148,11 +159,13 @@ def _key(uri: str) -> str:
     return urlparse(uri).path.lstrip("/")
 
 
+@pytest.mark.parametrize("enable_breadth", [False, True])
 def test_shadow_journal_is_published_and_audited_from_s3(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    enable_breadth: bool,
 ) -> None:
-    manifest_uri, configuration, reader, s3 = _artifacts(tmp_path)
+    manifest_uri, configuration, reader, s3 = _artifacts(tmp_path, enable_breadth=enable_breadth)
     _use_capture(monkeypatch, reader)
 
     report = audit_shadow_journal(manifest_uri, s3, configuration)
@@ -211,9 +224,13 @@ def test_certified_journal_handles_only_post_close_extra_segments(
         ),
     )
     readers = {item.uri: item for item in (reader, extra)}
+
+    def from_uri(_client: object, uri: str) -> _SessionReader:
+        return readers[uri]
+
     monkeypatch.setattr(
         "t0_trading.arbitration.audit.StreamSessionReader.from_uri",
-        lambda client, uri: readers[uri],
+        from_uri,
     )
     manifest = json.loads(s3.objects[f"landing/{_key(manifest_uri)}"][0])
     manifest.update(
@@ -243,11 +260,15 @@ def test_certified_journal_handles_only_post_close_extra_segments(
     assert s3.objects == before
 
 
+@pytest.mark.parametrize("enable_breadth", [False, True])
 def test_shadow_journal_recovery_is_replayable_and_idempotent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    enable_breadth: bool,
 ) -> None:
-    manifest_uri, configuration, reader, s3 = _artifacts(tmp_path / "live")
+    manifest_uri, configuration, reader, s3 = _artifacts(
+        tmp_path / "live", enable_breadth=enable_breadth
+    )
     _use_capture(monkeypatch, reader)
     live_objects = {
         object_id: value

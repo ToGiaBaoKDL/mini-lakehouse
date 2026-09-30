@@ -8,6 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from t0_trading.context.breadth import BreadthContext
 from t0_trading.identity import canonical_json, sha256
 
 MarketRegime = Literal["TREND_UP", "TREND_DOWN", "RANGE", "HIGH_VOLATILITY", "UNKNOWN"]
@@ -145,6 +146,7 @@ class DecisionContext(_StrictModel):
     zones: tuple[ZoneContext, ...]
     indices: tuple[IndexContext, ...]
     market_statuses: tuple[MarketStatusContext, ...]
+    breadth: tuple[BreadthContext, ...] = Field(default=(), exclude_if=lambda value: not value)
     market_confirmation_strength: Decimal | None = Field(default=None, ge=0, le=1)
     regime: MarketRegime
     reasons: tuple[str, ...]
@@ -158,6 +160,10 @@ class DecisionContext(_StrictModel):
 
     @model_validator(mode="after")
     def validate_context(self) -> DecisionContext:
+        if tuple(item.index for item in self.breadth) != tuple(
+            sorted({item.index for item in self.breadth})
+        ):
+            raise ValueError("breadth indices must be unique and sorted")
         if tuple(zone.symbol for zone in self.zones) != tuple(
             sorted({zone.symbol for zone in self.zones})
         ):

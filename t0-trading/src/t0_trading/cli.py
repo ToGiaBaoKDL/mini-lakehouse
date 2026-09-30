@@ -218,6 +218,8 @@ def _evaluate_arbitrated_session_day(
         reader.envelopes(),
         version,
         configuration.resolve_context(trade_date),
+        breadth_policy=configuration.resolve_breadth(trade_date),
+        breadth_membership=reader.breadth_membership,
     )
     candidates = score_buy_first_baselines(snapshots, contexts)
     arbitration = configuration.resolve_candidate_arbitration(trade_date)
@@ -542,6 +544,8 @@ def capture_stream_command(
                     version,
                     configuration.resolve_context(trade_date),
                     arbitration,
+                    breadth_policy=configuration.resolve_breadth(trade_date),
+                    breadth_membership=breadth_membership,
                     on_error=lambda error: typer.echo(
                         f"T0 shadow journal disabled ({type(error).__name__})",
                         err=True,
@@ -740,6 +744,8 @@ def audit_buy_first_baselines_command(
             reader.envelopes(),
             configuration.resolve(parsed_trade_date),
             configuration.resolve_context(parsed_trade_date),
+            breadth_policy=configuration.resolve_breadth(parsed_trade_date),
+            breadth_membership=reader.breadth_membership,
         )
         candidates = score_buy_first_baselines(snapshots, contexts)
         costs = public_vndirect_dta_costs(

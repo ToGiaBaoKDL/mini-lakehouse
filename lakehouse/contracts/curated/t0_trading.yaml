@@ -146,6 +146,7 @@ tables:
       - {field_id: 13, name: processed_at, data_type: timestamptz, required: true, description: UTC materialization time.}
       - {field_id: 14, name: context_sha256, data_type: string, required: true, description: SHA-256 of the canonical complete DecisionContext.}
       - {field_id: 15, name: market_statuses_json, data_type: string, required: true, description: "Canonical JSON point-in-time market status, tradability gate, and source lineage."}
+      - {field_id: 16, name: breadth_json, data_type: string, required: false, description: "Optional equal-weight constituent context with membership and observation lineage; never official index regime."}
     partitioning:
       - {field_id: 1000, field: trade_date, transform: identity}
 

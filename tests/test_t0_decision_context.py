@@ -153,6 +153,8 @@ def test_context_adds_certified_zone_market_confirmation_and_regime() -> None:
     assert all(item.is_eligible for item in current.indices)
     assert type(current).model_validate_json(current.model_dump_json()) == current
     assert current.sha256 == contexts[-1].sha256
+    # Golden identity from the pre-breadth engine: reruns must retain published lineage.
+    assert current.sha256 == "9ab63d35068b9278a83f88fd0069d424296e36896ba8a6406eb824f4b4685de7"
 
     candidates = score_buy_first_baselines(_snapshots(), contexts)
     mean = next(

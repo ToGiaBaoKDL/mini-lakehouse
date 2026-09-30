@@ -382,6 +382,21 @@ class ContextVersion(_EffectiveVersion):
         return self
 
 
+class BreadthVersion(_EffectiveVersion):
+    """Equal-weight closed-minute context, independently versioned from index regime."""
+
+    indices: tuple[str, ...]
+    lookback_seconds: int = Field(ge=60, le=3600, multiple_of=60)
+    stale_after_seconds: int = Field(ge=60, le=900)
+    minimum_participation: Decimal = Field(gt=0, le=1)
+    confirmation_advance_ratio: Decimal = Field(gt=0.5, le=1)
+
+    @model_validator(mode="after")
+    def validate_breadth(self) -> BreadthVersion:
+        _require_identifiers("breadth indices", self.indices)
+        return self
+
+
 class TradingVersion(_EffectiveVersion):
     market: MarketConfiguration
     data_quality: DataQualityConfiguration
@@ -398,6 +413,7 @@ class TradingConfiguration(_StrictModel):
     promotion_gates: tuple[PromotionGateVersion, ...]
     paper_executions: tuple[PaperExecutionVersion, ...]
     contexts: tuple[ContextVersion, ...]
+    breadth: tuple[BreadthVersion, ...] = Field(default=(), exclude_if=lambda value: not value)
 
     @model_validator(mode="after")
     def validate_versions(self) -> TradingConfiguration:
@@ -418,6 +434,13 @@ class TradingConfiguration(_StrictModel):
         _validate_effective_versions(self.promotion_gates, "promotion gate")
         _validate_effective_versions(self.paper_executions, "paper execution")
         _validate_effective_versions(self.contexts, "context")
+        if self.breadth:
+            _validate_effective_versions(self.breadth, "breadth")
+            if any(
+                not set(item.indices).issubset(self.capture.membership_indices)
+                for item in self.breadth
+            ):
+                raise ValueError("breadth indices require captured membership")
         for arbitration in self.candidate_arbitrations:
             overlapping_outcomes = tuple(
                 outcome for outcome in self.outcomes if _intervals_overlap(arbitration, outcome)
@@ -500,6 +523,9 @@ class TradingConfiguration(_StrictModel):
 
     def resolve_context(self, value: date) -> ContextVersion:
         return _resolve_effective(self.contexts, value, "context")
+
+    def resolve_breadth(self, value: date) -> BreadthVersion | None:
+        return self._resolve_optional(self.breadth, value, "breadth") if self.breadth else None
 
     def resolve_candidate_arbitration(self, value: date) -> CandidateArbitrationVersion | None:
         """Return the prospective policy, or none before arbitration was declared."""

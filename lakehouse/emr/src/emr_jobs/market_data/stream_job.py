@@ -66,6 +66,8 @@ def run(
                 "quote_levels",
                 "index_bars_1m",
                 "market_status_events",
+                "constituent_bars_1m",
+                "index_membership_snapshots",
             )
         ),
         *(t0_trading.table_identifier(table.key) for table in t0_trading.tables),
@@ -81,6 +83,7 @@ def run(
                 landing_table=landing_table,
                 product=market_data,
                 capture=capture,
+                timezone=configuration.market.timezone,
             )
             logger.info(
                 "Replayed SSI Stream session {} with {} messages",
@@ -143,6 +146,8 @@ def run(
             context_policy=context_policy,
             arbitration_policy=arbitration_policy,
             capture_evidence_sha256=feature_capture.evidence_sha256,
+            breadth_policy=trading.resolve_breadth(trade_date),
+            breadth_membership=feature_capture.breadth_membership,
         )
         logger.info(
             "Published {} contexts, {} buy-first candidates, {} arbitrations, and {} evaluations",

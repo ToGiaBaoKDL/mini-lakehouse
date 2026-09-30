@@ -5,6 +5,7 @@ from pyspark.sql import functions as F
 from t0_trading.capture.reader import StreamSessionReader
 
 from emr_jobs.common.iceberg import qualified_name
+from emr_jobs.market_data.constituents import publish as publish_constituents
 from lakehouse.contracts.curated import CuratedProductContract
 
 _SSI_TIMESTAMP_PATTERN = "yyyy/MM/dd HH:mm:ss[.SSSSSS]"
@@ -412,6 +413,7 @@ def publish(
     landing_table: str,
     product: CuratedProductContract,
     capture: StreamSessionReader,
+    timezone: str,
 ) -> None:
     _capture_view(spark, landing_table=landing_table, capture=capture)
     _trade_view(spark, capture)
@@ -427,6 +429,13 @@ def publish(
         _merge_market_statuses(
             spark,
             qualified_name(product.table_identifier("market_status_events")),
+        )
+        publish_constituents(
+            spark,
+            landing_table=landing_table,
+            product=product,
+            capture=capture,
+            timezone=timezone,
         )
     finally:
         quotes.unpersist()

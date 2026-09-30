@@ -112,6 +112,8 @@ def test_market_data_contracts_are_ssi_only_replayable_and_conformed() -> None:
         "index_snapshots",
         "market_status_events",
         "corporate_actions",
+        "constituent_bars_1m",
+        "index_membership_snapshots",
     }
     assert all(column.data_type != "double" for table in product.tables for column in table.columns)
     assert product.table("trade_ticks").primary_key == (

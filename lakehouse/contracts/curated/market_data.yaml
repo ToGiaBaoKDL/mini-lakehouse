@@ -9,6 +9,47 @@ description: Point-in-time market facts conformed from SSI FastConnect SDK captu
 upstream_sources: [ssi_fastconnect_rest, ssi_fastconnect_stream]
 
 tables:
+  - key: index_membership_snapshots
+    name: index_membership_snapshots
+    description: Immutable SSI membership observed at capture time, including unavailable index scopes.
+    primary_key: [snapshot_sha256]
+    columns:
+      - {field_id: 1, name: snapshot_sha256, data_type: string, required: true, description: Hash of the complete validated capture snapshot.}
+      - {field_id: 2, name: trade_date, data_type: date, required: true, description: Exchange-local capture date; never a reconstructed historical membership.}
+      - {field_id: 3, name: captured_at, data_type: timestamptz, required: true, description: UTC membership availability.}
+      - {field_id: 4, name: source_kind, data_type: string, required: true, description: Official SSI REST membership capture.}
+      - {field_id: 5, name: memberships_json, data_type: string, required: true, description: Canonical index scopes with status and sorted constituent record hashes.}
+      - {field_id: 6, name: processed_at, data_type: timestamptz, required: true, description: UTC publication time.}
+    partitioning:
+      - {field_id: 1000, field: trade_date, transform: identity}
+
+  - key: constituent_bars_1m
+    name: constituent_bars_1m
+    description: Every captured constituent minute revision; closed-clock eligibility does not assert provider finality.
+    primary_key: [stream_session_id, receive_sequence]
+    columns:
+      - {field_id: 1, name: stream_session_id, data_type: string, required: true, description: Immutable source capture segment.}
+      - {field_id: 2, name: receive_sequence, data_type: long, required: true, description: Revision position within the segment; retain every update.}
+      - {field_id: 3, name: symbol, data_type: string, required: true, description: Constituent symbol present in the captured membership.}
+      - {field_id: 4, name: trade_date, data_type: date, required: true, description: Exchange-local bar date.}
+      - {field_id: 5, name: bar_start, data_type: timestamptz, required: true, description: UTC minute start.}
+      - {field_id: 6, name: observed_at, data_type: timestamptz, required: true, description: Provider update event time within the minute.}
+      - {field_id: 7, name: received_at, data_type: timestamptz, required: true, description: UTC capture receipt; mandatory point-in-time replay boundary.}
+      - {field_id: 8, name: source_kind, data_type: string, required: true, description: ssi_stream_interval only; never historical REST.}
+      - {field_id: 9, name: open_price, data_type: decimal, precision: 18, scale: 0, required: true, description: Minute open in VND.}
+      - {field_id: 10, name: high_price, data_type: decimal, precision: 18, scale: 0, required: true, description: Minute high in VND.}
+      - {field_id: 11, name: low_price, data_type: decimal, precision: 18, scale: 0, required: true, description: Minute low in VND.}
+      - {field_id: 12, name: close_price, data_type: decimal, precision: 18, scale: 0, required: true, description: Last price observed in the minute in VND.}
+      - {field_id: 13, name: volume, data_type: long, required: true, description: Matched shares accumulated within this minute revision.}
+      - {field_id: 14, name: membership_sha256, data_type: string, required: true, description: Join key to the exact captured membership snapshot.}
+      - {field_id: 15, name: message_sha256, data_type: string, required: true, description: Original SDK message payload digest.}
+      - {field_id: 16, name: manifest_uri, data_type: string, required: true, description: Immutable raw capture manifest URI.}
+      - {field_id: 17, name: manifest_sha256, data_type: string, required: true, description: Raw capture manifest digest.}
+      - {field_id: 18, name: source_record_sha256, data_type: string, required: true, description: Digest of all normalized values and source lineage excluding processing time.}
+      - {field_id: 19, name: processed_at, data_type: timestamptz, required: true, description: UTC publication time.}
+    partitioning:
+      - {field_id: 1000, field: trade_date, transform: identity}
+
   - key: securities
     name: securities
     description: Effective-dated security attributes known at a stated availability time.

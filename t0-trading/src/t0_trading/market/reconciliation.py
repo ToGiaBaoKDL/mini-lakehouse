@@ -10,8 +10,7 @@ from decimal import Decimal
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, computed_field, model_validator
-from ssi_sdk.models import IntervalMessage
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 from t0_trading.capture.reader import StreamDayReader, StreamGap, StreamSessionReader
 from t0_trading.configuration import TradingVersion
@@ -21,9 +20,8 @@ from t0_trading.market.events import (
     QuoteSnapshot,
     StreamEnvelope,
     Trade,
-    provider_price,
-    provider_timestamp,
 )
+from t0_trading.market.intervals import ProviderBar, provider_bar
 from t0_trading.market.replay import replay
 from t0_trading.market.session import (
     TRADE_SESSIONS,
@@ -35,7 +33,6 @@ from t0_trading.market.session import (
 )
 from t0_trading.market.state import Bar, bar_start
 
-_INTERVAL_ADAPTER = TypeAdapter(IntervalMessage)
 _BarKey = tuple[str, datetime]
 _BarValues = tuple[Decimal, Decimal, Decimal, Decimal, int]
 MarketDayFailureReason = Literal[
@@ -46,28 +43,6 @@ MarketDayFailureReason = Literal[
     "overlapping_sessions",
     "reconciliation_failed",
 ]
-
-
-@dataclass(frozen=True, slots=True)
-class _ProviderBar:
-    symbol: str
-    start: datetime
-    observed_at: datetime
-    open_price: Decimal
-    high_price: Decimal
-    low_price: Decimal
-    close_price: Decimal
-    volume: int
-
-    @property
-    def values(self) -> _BarValues:
-        return (
-            self.open_price,
-            self.high_price,
-            self.low_price,
-            self.close_price,
-            self.volume,
-        )
 
 
 @dataclass(slots=True)
@@ -263,50 +238,6 @@ class MarketDayCertification(BaseModel):
         return self
 
 
-def _provider_bar(envelope: StreamEnvelope, timezone: ZoneInfo) -> _ProviderBar | None:
-    if envelope.message_type != "IntervalMessage":
-        return None
-    try:
-        message = _INTERVAL_ADAPTER.validate_json(envelope.message_json)
-    except ValueError as error:
-        raise ValueError("invalid SSI IntervalMessage") from error
-    if (
-        envelope.symbol != message.symbol
-        or envelope.source_time_text != message.trading_time
-        or message.type.value != "trade"
-        or message.volume <= 0
-    ):
-        raise ValueError("SSI IntervalMessage lineage is inconsistent")
-    start = provider_timestamp(message.interval_time, timezone).astimezone(timezone)
-    observed_at = provider_timestamp(message.trading_time, timezone).astimezone(timezone)
-    prices = tuple(
-        provider_price(value) for value in (message.open, message.high, message.low, message.close)
-    )
-    if (
-        start.replace(second=0, microsecond=0) != start
-        or not start <= observed_at < start + timedelta(minutes=1)
-        or observed_at > envelope.received_at.astimezone(timezone)
-    ):
-        raise ValueError("SSI IntervalMessage timestamps are inconsistent")
-    open_price, high_price, low_price, close_price = prices
-    if (
-        low_price <= 0
-        or low_price > min(open_price, close_price)
-        or high_price < max(open_price, close_price)
-    ):
-        raise ValueError("SSI IntervalMessage OHLC values are inconsistent")
-    return _ProviderBar(
-        symbol=message.symbol.upper(),
-        start=start,
-        observed_at=observed_at,
-        open_price=open_price,
-        high_price=high_price,
-        low_price=low_price,
-        close_price=close_price,
-        volume=message.volume,
-    )
-
-
 def _bar_values(bar: Bar) -> _BarValues:
     return (
         bar.open_price,
@@ -317,7 +248,7 @@ def _bar_values(bar: Bar) -> _BarValues:
     )
 
 
-def _interval_progression_issue(previous: _ProviderBar, current: _ProviderBar) -> str | None:
+def _interval_progression_issue(previous: ProviderBar, current: ProviderBar) -> str | None:
     if current.observed_at < previous.observed_at:
         return "observed_time_regression"
     if current.volume < previous.volume:
@@ -529,8 +460,8 @@ def reconcile_capture(
         raise ValueError("configuration is not effective for the captured trade date")
     timezone = ZoneInfo(configuration.market.timezone)
     message_counts: Counter[str] = Counter()
-    provider_bars: dict[_BarKey, _ProviderBar] = {}
-    provider_updates: list[_ProviderBar] = []
+    provider_bars: dict[_BarKey, ProviderBar] = {}
+    provider_updates: list[ProviderBar] = []
     all_interval_symbols: set[str] = set()
     breadth_interval_update_count = 0
     trade_prefixes: dict[_BarKey, _TradePrefix] = {}
@@ -576,7 +507,7 @@ def reconcile_capture(
         nonlocal breadth_interval_update_count, provider_interval_progression_issue_count
         for envelope in capture.envelopes():
             message_counts[envelope.message_type] += 1
-            interval = _provider_bar(envelope, timezone)
+            interval = provider_bar(envelope, timezone)
             if interval is not None:
                 all_interval_symbols.add(interval.symbol)
                 if interval.symbol in capture.breadth_symbols and (
