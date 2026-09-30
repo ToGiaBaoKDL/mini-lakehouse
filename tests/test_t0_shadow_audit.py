@@ -2,7 +2,7 @@ import gzip
 import io
 import json
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,6 +18,7 @@ from t0_trading.arbitration import (
     ensure_shadow_journal,
     publish_shadow_journal,
 )
+from t0_trading.arbitration.journal import ShadowArbitrationManifest
 from t0_trading.capture.reader import StreamDayReader, StreamSessionReader
 from t0_trading.capture.spool import CaptureSpool
 from t0_trading.capture.store import S3CaptureStore
@@ -189,6 +190,59 @@ def test_shadow_journal_outbox_publishes_commit_marker_last(tmp_path: Path) -> N
     assert spool.pending_bytes == 0
 
 
+@pytest.mark.parametrize("extra_hour,accepted", [(15, True), (10, False)])
+def test_certified_journal_handles_only_post_close_extra_segments(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra_hour: int, accepted: bool
+) -> None:
+    manifest_uri, configuration, reader, s3 = _artifacts(tmp_path)
+    extra_id = "332a58b3-9fd1-4571-95ab-e1d7a86755d2"
+    extra = replace(
+        reader,
+        uri=reader.uri.replace(SESSION_ID, extra_id),
+        manifest_sha256="b" * 64,
+        manifest=SimpleNamespace(
+            **{
+                **vars(reader.manifest),
+                "stream_session_id": extra_id,
+                "connected_at": _received(extra_hour, 0),
+                "disconnected_at": _received(extra_hour, 30),
+                "published_at": _received(extra_hour, 30),
+            }
+        ),
+    )
+    readers = {item.uri: item for item in (reader, extra)}
+    monkeypatch.setattr(
+        "t0_trading.arbitration.audit.StreamSessionReader.from_uri",
+        lambda client, uri: readers[uri],
+    )
+    manifest = json.loads(s3.objects[f"landing/{_key(manifest_uri)}"][0])
+    manifest.update(
+        stream_session_ids=[SESSION_ID, extra_id],
+        capture_manifest_uris=[reader.uri, extra.uri],
+        completed_at=extra.manifest.published_at.isoformat(),
+    )
+    s3.replace(
+        _key(manifest_uri), ShadowArbitrationManifest.model_validate(manifest).canonical_bytes()
+    )
+    capture = StreamDayReader((cast(StreamSessionReader, reader),))
+    before = dict(s3.objects)
+    if not accepted:
+        with pytest.raises(ShadowArbitrationAuditError, match="certified capture"):
+            ensure_shadow_journal(
+                capture, configuration, S3CaptureStore(s3, "s3://landing/root"), s3, tmp_path
+            )
+    else:
+        result = ensure_shadow_journal(
+            capture, configuration, S3CaptureStore(s3, "s3://landing/root"), s3, tmp_path
+        )
+        assert result.action == "EXISTING"
+        assert result.capture_evidence_sha256 == capture.evidence_sha256
+        report = audit_shadow_journal(manifest_uri, s3, configuration, certified_capture=capture)
+        assert report.stream_session_ids == (SESSION_ID,)
+        assert report.gap_count == 0
+    assert s3.objects == before
+
+
 def test_shadow_journal_recovery_is_replayable_and_idempotent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -229,6 +283,22 @@ def test_shadow_journal_recovery_is_replayable_and_idempotent(
     assert rebuilt.capture_evidence_sha256 == existing.capture_evidence_sha256
     assert s3.objects == published
     assert {object_id: s3.objects[object_id] for object_id in live_objects} == live_objects
+
+
+@pytest.mark.parametrize("change", ["digest", "missing_segment"])
+def test_certified_journal_rejects_different_capture_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    manifest_uri, configuration, reader, s3 = _artifacts(tmp_path)
+    _use_capture(monkeypatch, reader)
+    different = replace(
+        reader,
+        manifest_sha256="b" * 64,
+        uri=reader.uri if change == "digest" else reader.uri.replace(SESSION_ID, "other"),
+    )
+    capture = StreamDayReader((cast(StreamSessionReader, different),))
+    with pytest.raises(ShadowArbitrationAuditError, match="certified capture"):
+        audit_shadow_journal(manifest_uri, s3, configuration, certified_capture=capture)
 
 
 def test_shadow_journal_audit_rejects_s3_checksum_drift(

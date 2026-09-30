@@ -36,20 +36,6 @@ class ShadowJournalEnsureResult(BaseModel):
     arbitration_count: int = Field(ge=1)
 
 
-def _require_exact_capture(
-    report: ShadowArbitrationAuditReport,
-    capture: StreamDayReader,
-) -> None:
-    if (
-        report.trade_date != capture.trade_date
-        or report.stream_session_ids != capture.stream_session_ids
-        or report.capture_evidence_sha256 != capture.evidence_sha256
-        or report.capture_message_count != capture.message_count
-        or report.gap_count != len(capture.gaps)
-    ):
-        raise RuntimeError("shadow journal does not match the certified capture")
-
-
 def _result(
     action: Literal["EXISTING", "REBUILT"],
     manifest_uri: str,
@@ -127,8 +113,9 @@ def ensure_shadow_journal(
     manifest_key = shadow_journal_manifest_key(capture.trade_date)
     manifest_uri = store.uri(manifest_key)
     if store.read_json(manifest_key) is not None:
-        report = audit_shadow_journal(manifest_uri, s3_client, configuration)
-        _require_exact_capture(report, capture)
+        report = audit_shadow_journal(
+            manifest_uri, s3_client, configuration, certified_capture=capture
+        )
         return _result("EXISTING", manifest_uri, report)
 
     journal = _replay_journal(
@@ -139,6 +126,5 @@ def ensure_shadow_journal(
     published_uri, _ = publish_shadow_journal(journal, store)
     if published_uri != manifest_uri:
         raise RuntimeError("shadow journal publication escaped its canonical location")
-    report = audit_shadow_journal(manifest_uri, s3_client, configuration)
-    _require_exact_capture(report, capture)
+    report = audit_shadow_journal(manifest_uri, s3_client, configuration, certified_capture=capture)
     return _result("REBUILT", manifest_uri, report)

@@ -874,7 +874,12 @@ def publish_promotion_evidence_command(
         client = boto3.client("s3", region_name=region)
         store = S3CaptureStore(client, landing_uri)
         manifest_uri = store.uri(shadow_journal_manifest_key(parsed_trade_date))
-        shadow_audit = audit_shadow_journal(manifest_uri, client, configuration)
+        capture, configuration = _certified_stream_day(
+            parsed_trade_date, landing_uri, region, config
+        )
+        shadow_audit = audit_shadow_journal(
+            manifest_uri, client, configuration, certified_capture=capture
+        )
         session, configuration = _evaluate_arbitrated_session_day(
             parsed_trade_date,
             landing_uri,

@@ -7,6 +7,7 @@ import io
 from datetime import date
 from typing import Any, Literal
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -19,6 +20,7 @@ from t0_trading.context import build_decision_contexts
 from t0_trading.evidence_paths import shadow_journal_manifest_key
 from t0_trading.features import decision_times, replay_features
 from t0_trading.identity import sha256
+from t0_trading.market.session import trading_window
 from t0_trading.strategy.baselines import (
     BASELINE_NAMES,
     BASELINE_VERSION,
@@ -101,8 +103,14 @@ def audit_shadow_journal(
     manifest_uri: str,
     s3_client: Any,
     configuration: TradingConfiguration,
+    *,
+    certified_capture: StreamDayReader | None = None,
 ) -> ShadowArbitrationAuditReport:
-    """Prove one committed journal against immutable capture and policy lineage."""
+    """Prove journal bytes against declared or explicitly certified replay evidence.
+
+    With certified evidence, only additional post-close connections are allowed in
+    the manifest; report lineage describes the evidence actually used for replay.
+    """
     manifest, manifest_body, store, root = _load_manifest(manifest_uri, s3_client)
     if not (
         manifest.candidate_file.endswith(".candidates.jsonl.gz")
@@ -183,6 +191,28 @@ def audit_shadow_journal(
     ):
         raise ShadowArbitrationAuditError("shadow journal capture lineage is inconsistent")
 
+    if certified_capture is not None:
+        _, market_close = trading_window(
+            manifest.trade_date,
+            timezone=ZoneInfo(version.market.timezone),
+            schedule=version.market.sessions,
+        )
+        declared = {session.uri: session.manifest_sha256 for session in capture.sessions}
+        certified = {session.uri: session.manifest_sha256 for session in certified_capture.sessions}
+        if (
+            certified_capture.trade_date != capture.trade_date
+            or any(declared.get(uri) != digest for uri, digest in certified.items())
+            or any(
+                session.manifest.connected_at <= market_close
+                for session in capture.sessions
+                if session.uri not in certified
+            )
+        ):
+            raise ShadowArbitrationAuditError("shadow journal does not match the certified capture")
+        # Trailing connections remain in the immutable manifest. Prove the journal's
+        # complete decision output using only certified evidence before promotion.
+        capture = certified_capture
+
     snapshots = replay_features(
         capture.envelopes(), version, trade_date=manifest.trade_date, gaps=capture.gaps
     )
@@ -201,7 +231,7 @@ def audit_shadow_journal(
         baseline_version=manifest.baseline_version,
         arbitration_version=manifest.arbitration_version,
         arbitration_configuration_sha256=manifest.arbitration_configuration_sha256,
-        stream_session_ids=manifest.stream_session_ids,
+        stream_session_ids=capture.stream_session_ids,
         capture_evidence_sha256=capture.evidence_sha256,
         capture_message_count=capture.message_count,
         gap_count=len(capture.gaps),
