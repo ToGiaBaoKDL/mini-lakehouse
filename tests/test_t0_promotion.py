@@ -10,7 +10,9 @@ from typing import Any, cast
 import pytest
 from t0_trading.arbitration import ShadowArbitrationAuditReport
 from t0_trading.configuration import load_configuration
+from t0_trading.execution.readiness import load_paper_readiness
 from t0_trading.identity import canonical_json, sha256
+from t0_trading.operations import operational_status
 from t0_trading.promotion import (
     ArbitratedSessionEvaluation,
     ArbitratedSessionReport,
@@ -138,6 +140,85 @@ def test_daily_evidence_and_as_of_gate_are_immutable_and_reloadable() -> None:
     assert key.endswith("as_of_date=2026-09-28/promotion_gate.json")
     assert digest == report.sha256
     assert report.status == "PENDING"
+
+
+def _stored_evidence(count: int, *, net_bps: str = "5"):
+    store = _Store()
+    evaluation, gate, arbitration = _policies()
+    for index in range(count):
+        day = FIRST_DATE + timedelta(days=index)
+        session = _session(day, net_bps=net_bps)
+        audit = _shadow_audit(day, session)
+        session = session.model_copy(
+            update={"shadow_audit_sha256": sha256(canonical_json(audit.model_dump(mode="json")))}
+        )
+        publish_session_evidence(store, audit, session)
+    latest = FIRST_DATE + timedelta(days=count - 1)
+    report = evaluate_promotion_gate(
+        load_session_evidence(store, gate, as_of_date=latest), evaluation, gate, arbitration
+    )
+    publish_gate_evidence(store, as_of_date=latest, report=report)
+    return store, latest
+
+
+@pytest.mark.parametrize(
+    "count,net,mode", [(25, "5", "OBSERVE_ONLY"), (26, "-5", "OBSERVE_ONLY"), (26, "5", "PAPER")]
+)
+def test_runtime_readiness_recomputes_latest_complete_gate(count: int, net: str, mode: str) -> None:
+    store, previous = _stored_evidence(count, net_bps=net)
+    config = load_configuration(CONFIGURATION)
+    result = load_paper_readiness(
+        store,
+        config,
+        trade_date=previous + timedelta(days=1),
+        previous_session=previous,
+        enabled=True,
+    )
+    assert result.mode == mode
+    assert result.capital_authorized is False
+    disabled = load_paper_readiness(
+        store, config, trade_date=previous + timedelta(days=1), previous_session=previous
+    )
+    assert disabled.mode == "OBSERVE_ONLY"
+
+
+def test_runtime_does_not_fall_back_to_old_pass_or_accept_corrupt_audit() -> None:
+    store, previous = _stored_evidence(26)
+    config = load_configuration(CONFIGURATION)
+    missing = load_paper_readiness(
+        store,
+        config,
+        trade_date=previous + timedelta(days=2),
+        previous_session=previous + timedelta(days=1),
+        enabled=True,
+    )
+    assert missing.mode == "OBSERVE_ONLY"
+    assert missing.reason == "MISSING_PREVIOUS_SESSION_GATE"
+    audit_key = next(key for key in store.values if key.endswith("/shadow_audit.json"))
+    store.values[audit_key] = b"{}"
+    corrupt = load_paper_readiness(
+        store,
+        config,
+        trade_date=previous + timedelta(days=1),
+        previous_session=previous,
+        enabled=True,
+    )
+    assert corrupt.mode == "OBSERVE_ONLY"
+    assert corrupt.reason.startswith("INVALID_OR_UNAVAILABLE_EVIDENCE")
+
+
+def test_operational_status_does_not_treat_absent_live_data_as_healthy() -> None:
+    report = operational_status(
+        _Store(),
+        load_configuration(CONFIGURATION),
+        trade_date=FIRST_DATE + timedelta(days=1),
+        previous_session=FIRST_DATE,
+    )
+    assert report.journal == report.publication == "MISSING"
+    assert report.ledger_reconciled is None
+    assert report.live_freshness == "NOT_OBSERVED"
+    assert report.security_status == "NOT_CERTIFIED"
+    assert report.readiness.mode == "OBSERVE_ONLY"
 
 
 def test_complete_profitable_selected_holdout_passes_for_paper_only() -> None:

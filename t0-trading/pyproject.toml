@@ -17,3 +17,6 @@ dependencies = [
 
 [project.scripts]
 t0-trading = "t0_trading.cli:app"
+
+[project.optional-dependencies]
+paper = ["psycopg[binary]>=3.3.4,<4"]

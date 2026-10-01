@@ -43,7 +43,7 @@ def bar_rows(
             or envelope.stream_session_id != capture.manifest.stream_session_id
         ):
             raise ValueError("constituent bar does not match capture lineage")
-        values = {
+        values: dict[str, object] = {
             "stream_session_id": envelope.stream_session_id,
             "receive_sequence": envelope.receive_sequence,
             "symbol": bar.symbol,

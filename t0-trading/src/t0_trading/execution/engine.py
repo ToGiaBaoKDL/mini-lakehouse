@@ -251,6 +251,8 @@ def reduce_paper_order(
             raise ValueError("paper fill average changed without additional quantity")
         increment = event.cumulative_filled_quantity - filled
         evidence = event.fill_evidence
+        if (increment > 0) != (evidence is not None):
+            raise ValueError("paper quantity changes require fill evidence")
         if evidence is not None:
             fill_position = (
                 evidence.observed_at,
@@ -281,6 +283,10 @@ def reduce_paper_order(
                 or (last_fill_position is not None and fill_position <= last_fill_position)
             ):
                 raise ValueError("paper fill evidence does not reconcile with the order event")
+            if (intent.action == "BUY" and evidence.fill_price > intent.limit_price) or (
+                intent.action == "SELL" and evidence.fill_price < intent.limit_price
+            ):
+                raise ValueError("paper fill violates its limit price")
             fill_positions.add(fill_identity)
             last_fill_position = fill_position
         if event.average_fill_price is not None and (

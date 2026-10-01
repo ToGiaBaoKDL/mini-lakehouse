@@ -390,7 +390,8 @@ uv run --project t0-trading t0-trading evaluate-promotion-gate \
 
 ### Paper execution boundary
 
-`t0_trading.execution` contains broker-neutral paper contracts and no network adapter. The planner
+`t0_trading.execution` contains broker-neutral paper contracts, deterministic paper matching,
+and a PostgreSQL persistence adapter. It contains no broker network adapter. The planner
 accepts one exact selected candidate, its pre-entry selection evidence, a timestamped account
 snapshot, current quote/security band, market phase, explicit risk limits, and the effective public
 DTA cost assumption. It also requires an exact promotion `PASS` produced before the candidate's
@@ -402,7 +403,7 @@ or cycle capacity.
 The intent reserves settled inventory for the later sell leg and settled cash including the buy fee;
 sale receivables and advance are not inferred. `PaperResourceLedger` is an immutable, revisioned
 state whose hash is embedded in every intent. Reservation transitions reject an intent planned from
-an older ledger; the future persistence adapter must commit the next revision with compare-and-swap,
+an older ledger; the PostgreSQL adapter commits the next revision with compare-and-swap,
 so concurrent candidates cannot spend the same cash or settled shares. Terminal entry transitions
 release unused resources and retain only the quantity actually filled for the SELL leg.
 
@@ -412,9 +413,65 @@ available quantity, and source hash. The reducer rejects duplicate evidence, reu
 market positions, inconsistent cumulative averages, overfills, fills beyond evidenced liquidity,
 and limit violations. SELL planning uses only a terminal entry, its open ledger reservation, and a
 fresh bid at or after the arbitration horizon. A rejected or unfilled entry cannot create an exit,
-while partial exits retain an open reservation for the remaining quantity. The contracts are the
-seam for a future paper adapter; they are deliberately not SSI/VNDIRECT request payloads and cannot
+while partial exits retain an open reservation for the remaining quantity. These contracts
+are deliberately not SSI/VNDIRECT request payloads and cannot
 send an order.
+
+### Durable paper runtime and operations
+
+`execution.runtime.PaperRuntime` is the reusable consumer boundary, separate from capture.
+It defaults to disabled. It exposes entry, quote, exit, clock and cancel transitions and reports
+`COMMITTED`, `NO_CHANGE`, `BLOCKED`, `OBSERVE_ONLY` or `ERROR`; planner block reasons survive this
+boundary, while exception messages and account data do not enter its result. The service caller
+must retain these results and handle errors; a rejected write is never acknowledged as a fill.
+
+The matcher consumes subsequent receipt-ordered top-of-book quotes, never the quote used to plan
+the order. It supports partial fills and shares displayed liquidity across orders. An unchanged
+book does not replenish liquidity; at the same price, only a positive quantity delta contributes
+new capacity. Expiry wins over a fill at the exact deadline. A disallowed market status cancels
+pending orders. A separate clock call expires orders even without quotes. This is a conservative
+simulation assumption, **not** a model of exchange queue priority or proof of actual execution.
+
+`PostgresPaperRepository` commits the checkpoint and new operation records in one transaction.
+Loading verifies hashes, replays ledger transitions and compares the checkpoint with the operation
+log. Exact retries are idempotent; stale concurrent writes fail instead of silently replanning.
+There is one immutable account snapshot per trade date for this single-account capability:
+refreshing an account snapshot cannot create a second independent cash/inventory budget.
+The operation log is append-only through the application API; this is not a database-owner
+tamper-proof audit store. PostgreSQL is not introduced into the raw-capture process.
+
+The owning service supplies a psycopg autocommit connection and manages its lifecycle; install
+the optional `t0-trading[paper]` extra for the driver. Bootstrap SQL is maintained at
+`infra/runtime/postgres/bootstrap/t0_trading.sql`; existing databases need this bootstrap reapplied
+through the normal deployment workflow. Tests do not apply it to production.
+
+`execution.readiness.load_paper_readiness` reads the **exact preceding observed trading session**,
+binds session evidence to published audits and recomputes the promotion gate under effective
+configuration. Missing, corrupt, incomplete or non-PASS evidence leaves the consumer observe-only;
+an older PASS is never substituted. The caller owns the observed trading calendar and must supply
+the actual previous session, not simply the most recent successful publication or yesterday's date.
+The 26-session production gate is unchanged, and PASS still does not authorize live capital.
+
+Inspect sealed S3 evidence without claiming that it represents a live heartbeat:
+
+```bash
+t0-trading operational-status \
+  --trade-date YYYY-MM-DD \
+  --previous-session YYYY-MM-DD \
+  --landing-uri s3://LANDING_BUCKET
+```
+
+The status API also accepts a reconciled paper session and a live `DecisionContext` from the owning
+service. Without those inputs it reports `PAPER_REPOSITORY_NOT_OBSERVED` and
+`LIVE_FRESHNESS_NOT_OBSERVED`, not healthy. Journal/publication `COMMITTED` means a valid commit
+artifact exists, not that all payloads have been replay-audited. Individual-security halt coverage
+remains `NOT_CERTIFIED`.
+
+This change supplies the tested runtime and persistence boundary; it does **not** install or enable
+an autonomous paper worker. Connecting live selected candidates and quotes, supplying authoritative
+account/calendar inputs, scheduling clock ticks and routing consumer errors are explicit service
+integration requirements before paper activation. Raw capture and end-of-day Airflow remain
+independent and continue without PostgreSQL access.
 
 ## Shadow candidate arbitration
 

@@ -421,11 +421,13 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "boto3", specifier = ">=1.42,<2" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'paper'", specifier = ">=3.3.4,<4" },
     { name = "pydantic", specifier = ">=2.12,<3" },
     { name = "pyyaml", specifier = ">=6.0.3,<7" },
     { name = "ssi-sdk", specifier = "==3.2.1" },
     { name = "typer", specifier = "==0.25.1" },
 ]
+provides-extras = ["paper"]
 
 [[package]]
 name = "typer"

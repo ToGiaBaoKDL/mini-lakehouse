@@ -67,6 +67,7 @@ from t0_trading.market.reconciliation import (
     reconcile_session,
     select_feature_capture,
 )
+from t0_trading.operations import operational_status
 from t0_trading.outcomes import OutcomeLabel, build_outcome_audit, label_outcomes
 from t0_trading.promotion import (
     ArbitratedSessionReport,
@@ -1188,6 +1189,25 @@ def validate_stream_day_command(
     )
 
 
+def operational_status_command(
+    trade_date: Annotated[str, typer.Option(help="Session to inspect, YYYY-MM-DD.")],
+    previous_session: Annotated[
+        str, typer.Option(help="Exact previous SSI-observed session; no weekday guessing.")
+    ],
+    landing_uri: Annotated[str, typer.Option(help="Landing S3 root URI.")],
+    region: Annotated[str, typer.Option()] = "ap-southeast-1",
+    config: Annotated[Path, typer.Option()] = DEFAULT_TRADING_CONFIG,
+) -> None:
+    """Read sealed S3 operational evidence; does not enable paper or claim live freshness."""
+    day, previous = _parse_trade_date(trade_date), _parse_trade_date(previous_session)
+    if previous >= day:
+        raise typer.BadParameter("previous-session must precede trade-date")
+    configuration = load_configuration(config)
+    store = S3CaptureStore(boto3.client("s3", region_name=region), landing_uri)
+    report = operational_status(store, configuration, trade_date=day, previous_session=previous)
+    _emit_model(report, None)
+
+
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
@@ -1217,3 +1237,4 @@ app.command("audit-shadow-journal")(audit_shadow_journal_command)
 app.command("ensure-shadow-journal")(ensure_shadow_journal_command)
 app.command("validate-stream-day")(validate_stream_day_command)
 app.command("certify-stream-day")(certify_stream_day_command)
+app.command("operational-status")(operational_status_command)

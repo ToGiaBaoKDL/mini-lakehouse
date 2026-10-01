@@ -1,9 +1,11 @@
 """Paper execution is causal, fail-closed, and broker neutral."""
 
+import os
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import cast
+from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
@@ -28,6 +30,17 @@ from t0_trading.execution import (
     reduce_paper_order,
     reserve_paper_entry,
     settle_paper_entry,
+)
+from t0_trading.execution.postgres import PaperConflict, PaperConnection, PostgresPaperRepository
+from t0_trading.execution.readiness import PaperReadiness
+from t0_trading.execution.runtime import (
+    PaperRuntime,
+    PaperSession,
+    advance_clock,
+    cancel_order,
+    process_quote,
+    submit_entry,
+    submit_exit,
 )
 from t0_trading.promotion import PromotionGateReport, PromotionTargetResult
 from t0_trading.strategy.baselines import (
@@ -212,6 +225,301 @@ def test_paper_planner_emits_a_deterministic_paper_only_intent() -> None:
     assert plan.intent.reserved_exit_quantity == 100
     assert plan == plan_paper_order(request, policy, arbitration, context, promotion)
     assert "outcome" not in plan.model_dump_json().lower()
+
+
+def _runtime_case(quantity: int = 100):
+    config = load_configuration(CONFIGURATION)
+    policy = config.resolve_paper_execution(TRADE_DATE)
+    assert policy is not None
+    config = config.model_copy(
+        update={"paper_executions": (policy.model_copy(update={"order_quantity": quantity}),)}
+    )
+    request = _request(cash="50000", settled=400, ask_quantity=quantity)
+    request = request.model_copy(
+        update={"risk": request.risk.model_copy(update={"max_cycle_quantity": quantity})}
+    )
+    session = PaperSession(account=request.account, costs=request.costs, ledger=request.resources)
+    ready = PaperReadiness(
+        trade_date=TRADE_DATE,
+        previous_session=date(2026, 10, 23),
+        mode="PAPER",
+        reason="PROMOTION_PASS",
+        promotion=request.promotion,
+    )
+    return config, request, session, ready
+
+
+def _next_quote(request: PaperExecutionRequest, offset: int = 1, quantity: int = 100):
+    at = request.market.observed_at + timedelta(seconds=offset)
+    return request.market.model_copy(
+        update={
+            "observed_at": at,
+            "quote_received_at": at,
+            "receive_sequence": request.market.receive_sequence + offset,
+            "best_ask_quantity": quantity,
+            "source_sha256": f"{offset:064x}",
+        }
+    )
+
+
+def test_runtime_replays_partial_fills_and_settles_only_once() -> None:
+    config, request, initial, ready = _runtime_case(200)
+    submitted = submit_entry(initial, request, ready, config)
+    assert len(submitted.intents) == 1
+    intent = submitted.intents[0]
+    assert submit_entry(submitted, request, ready, config) == submitted
+    partial = process_quote(submitted, _next_quote(request), config)
+    assert reduce_paper_order(intent, partial.events(intent)).status == "PARTIALLY_FILLED"
+    assert partial.ledger.reservations[0].status == "ENTRY_PENDING"
+    # Rehydrate the exact durable checkpoint: no ephemeral matcher state is required.
+    restarted = PaperSession.model_validate_json(partial.model_dump_json())
+    assert process_quote(restarted, _next_quote(request), config) == restarted
+    filled = process_quote(restarted, _next_quote(request, 2, 200), config)
+    assert reduce_paper_order(intent, filled.events(intent)).status == "FILLED"
+    assert filled.ledger.reservations[0].reserved_exit_quantity == 200
+    assert filled.ledger.available_cash_vnd == Decimal(29980)
+    assert advance_clock(filled, intent.expires_at) == filled
+    assert PaperSession.model_validate(filled.model_dump()) == filled
+
+
+def test_runtime_never_fills_from_planning_quote_or_unchanged_book() -> None:
+    config, request, initial, ready = _runtime_case()
+    submitted = submit_entry(initial, request, ready, config)
+    planning = process_quote(submitted, request.market, config)
+    unchanged = process_quote(planning, _next_quote(request), config)
+    assert (
+        reduce_paper_order(submitted.intents[0], unchanged.events(submitted.intents[0])).status
+        == "ACCEPTED"
+    )
+    expired = advance_clock(unchanged, submitted.intents[0].expires_at)
+    assert expired.ledger.available_cash_vnd == initial.ledger.available_cash_vnd
+    assert expired.ledger.positions == initial.ledger.positions
+    assert not expired.ledger.reservations
+
+
+def test_runtime_partial_expiry_releases_only_unused_resources() -> None:
+    config, request, initial, ready = _runtime_case(200)
+    submitted = submit_entry(initial, request, ready, config)
+    intent = submitted.intents[0]
+    partial = process_quote(submitted, _next_quote(request), config)
+    expired = advance_clock(partial, intent.expires_at)
+    assert expired.ledger.available_cash_vnd == Decimal(39990)
+    assert expired.ledger.reservations[0].reserved_exit_quantity == 100
+    assert expired.ledger.positions[0].available_exit_quantity == 200
+    assert advance_clock(expired, intent.expires_at + timedelta(seconds=1)) == expired
+
+
+def test_runtime_exit_does_not_credit_unsettled_sale_proceeds() -> None:
+    config, request, initial, ready = _runtime_case()
+    submitted = submit_entry(initial, request, ready, config)
+    entry = submitted.intents[0]
+    filled = process_quote(submitted, _next_quote(request), config)
+    market = _next_quote(request, 300).model_copy(
+        update={"best_bid_price": Decimal(110), "best_ask_price": Decimal(111)}
+    )
+    exiting = submit_exit(filled, entry, market, config)
+    assert len(exiting.intents) == 2
+    assert submit_exit(exiting, entry, market, config) == exiting
+    later = market.model_copy(
+        update={
+            "observed_at": market.observed_at + timedelta(seconds=1),
+            "quote_received_at": market.observed_at + timedelta(seconds=1),
+            "receive_sequence": 999,
+        }
+    )
+    closed = process_quote(exiting, later, config)
+    assert not closed.ledger.reservations
+    assert closed.ledger.realized_net_pnl_vnd > 0
+    assert closed.ledger.available_cash_vnd == filled.ledger.available_cash_vnd
+
+
+def test_runtime_status_cancel_and_cursor_conflict_are_fail_closed() -> None:
+    config, request, initial, ready = _runtime_case()
+    submitted = submit_entry(initial, request, ready, config)
+    halted = _next_quote(request).model_copy(update={"market_status": "HALT"})
+    cancelled = process_quote(submitted, halted, config)
+    intent = submitted.intents[0]
+    assert reduce_paper_order(intent, cancelled.events(intent)).status == "CANCELLED"
+    assert cancelled.ledger.available_cash_vnd == initial.ledger.available_cash_vnd
+    assert cancel_order(cancelled, intent, halted.observed_at, reason="STOP") == cancelled
+    with pytest.raises(ValueError, match="cursor"):
+        process_quote(cancelled, halted.model_copy(update={"best_ask_quantity": 200}), config)
+
+
+def test_runtime_quote_at_expiry_expires_instead_of_filling() -> None:
+    config, request, initial, ready = _runtime_case()
+    submitted = submit_entry(initial, request, ready, config)
+    result = process_quote(submitted, _next_quote(request, 5), config)
+    intent = submitted.intents[0]
+    assert reduce_paper_order(intent, result.events(intent)).status == "EXPIRED"
+
+
+def test_paper_checkpoint_rejects_cash_drift_and_removed_history() -> None:
+    config, request, initial, ready = _runtime_case()
+    submitted = submit_entry(initial, request, ready, config)
+    for updates in ({"operations": ()}, {"ledger": initial.ledger}):
+        with pytest.raises(ValueError, match="reconcile"):
+            PaperSession.model_validate({**submitted.model_dump(), **updates})
+
+
+def test_paper_consumer_disabled_and_repository_failure_do_not_escape() -> None:
+    config, request, initial, ready = _runtime_case()
+
+    class Repository:
+        def load(self) -> PaperSession:
+            return initial
+
+        def commit(self, previous: PaperSession, current: PaperSession) -> None:
+            raise RuntimeError("sensitive connection details must not be emitted")
+
+    repository = Repository()
+    assert PaperRuntime(repository, config).entry(request, ready).status == "OBSERVE_ONLY"
+    result = PaperRuntime(repository, config, enabled=True).entry(request, ready)
+    assert result.status == "ERROR"
+    assert result.reason == "RuntimeError"
+    assert result.state_sha256 is None
+
+
+def test_paper_consumer_distinguishes_blocks_retries_and_commits() -> None:
+    config, request, initial, ready = _runtime_case()
+
+    class Repository:
+        state = initial
+        writes = 0
+
+        def load(self) -> PaperSession:
+            return self.state
+
+        def commit(self, previous: PaperSession, current: PaperSession) -> None:
+            assert previous == self.state
+            self.state = current
+            self.writes += 1
+
+    repository = Repository()
+    runtime = PaperRuntime(repository, config, enabled=True)
+    blocked = request.model_copy(
+        update={"market": request.market.model_copy(update={"market_status": "HALT"})}
+    )
+    result = runtime.entry(blocked, ready)
+    assert result.status == "BLOCKED"
+    assert "MARKET_STATUS_INELIGIBLE" in result.block_reasons
+    assert repository.writes == 0
+    assert runtime.entry(request, ready).status == "COMMITTED"
+    assert runtime.entry(request, ready).status == "NO_CHANGE"
+    assert repository.writes == 1
+
+
+def test_paper_quote_rejects_a_different_session_date() -> None:
+    config, request, initial, _ = _runtime_case()
+    quote = _next_quote(request)
+    next_day = quote.model_copy(
+        update={
+            "observed_at": quote.observed_at + timedelta(days=1),
+            "quote_received_at": quote.quote_received_at + timedelta(days=1),
+        }
+    )
+    with pytest.raises(ValueError, match="session date"):
+        process_quote(initial, next_day, config)
+
+
+def test_paper_multiple_orders_cannot_reuse_one_quotes_liquidity() -> None:
+    config, request, initial, ready = _runtime_case()
+    first = submit_entry(initial, request, ready, config)
+    candidate = request.candidate.model_copy(
+        update={"decision_at": DECISION_AT + timedelta(seconds=1)}
+    )
+    arbitration = request.arbitration.model_copy(
+        update={
+            "decision_at": candidate.decision_at,
+            "candidate_sha256": candidate.sha256,
+            "selected_candidate_sha256": candidate.sha256,
+        }
+    )
+    second_request = PaperExecutionRequest.model_validate(
+        {
+            **request.model_dump(),
+            "candidate": candidate,
+            "arbitration": arbitration,
+            "resources": first.ledger,
+            "selection": request.selection.model_copy(
+                update={
+                    "arbitration_sha256": arbitration.sha256,
+                    "selected_at": candidate.decision_at,
+                }
+            ),
+        }
+    )
+    second = submit_entry(first, second_request, ready, config)
+    assert len(second.intents) == 2
+    matched = process_quote(second, _next_quote(request), config)
+    assert (
+        sum(
+            reduce_paper_order(item, matched.events(item)).cumulative_filled_quantity
+            for item in matched.intents
+        )
+        == 100
+    )
+
+
+@pytest.mark.integration
+def test_postgres_paper_atomic_commit_retry_conflict_and_rollback() -> None:
+    """Run only against an explicitly supplied disposable PostgreSQL instance."""
+    dsn = os.environ.get("T0_PAPER_TEST_DSN")
+    if not dsn:
+        pytest.skip("T0_PAPER_TEST_DSN is required for isolated PostgreSQL verification")
+    psycopg = pytest.importorskip("psycopg")
+    config, request, initial, ready = _runtime_case()
+    next_state = submit_entry(initial, request, ready, config)
+    namespace = "paper_test_" + uuid4().hex
+    schema = (
+        Path("infra/runtime/postgres/bootstrap/t0_trading.sql")
+        .read_text()
+        .split("SET ROLE t0_trading;", 1)[1]
+        .split("RESET ROLE;", 1)[0]
+    )
+    with psycopg.connect(dsn, autocommit=True) as connection:
+        connection.execute(f'CREATE SCHEMA "{namespace}"')
+        try:
+            connection.execute(f'SET search_path TO "{namespace}"')
+            connection.execute(schema)
+            repo = PostgresPaperRepository(
+                cast(PaperConnection, connection),
+                trade_date=TRADE_DATE,
+                account_sha256=initial.account.sha256,
+            )
+            repo.initialize(initial)
+            assert repo.load() == initial
+            repo.commit(initial, next_state)
+            repo.commit(initial, next_state)  # Lost acknowledgement, exact retry.
+            assert repo.load() == next_state
+            assert connection.execute("SELECT count(*) FROM paper_operations").fetchone()[0] == 2
+            conflicting = process_quote(initial, _next_quote(request), config)
+            with pytest.raises(PaperConflict):
+                repo.commit(initial, conflicting)
+            expired = advance_clock(next_state, next_state.intents[0].expires_at)
+            connection.execute(
+                "ALTER TABLE paper_operations ADD CONSTRAINT test_fail CHECK(sequence < 3)"
+            )
+            with pytest.raises(psycopg.errors.CheckViolation):
+                repo.commit(next_state, expired)
+            assert repo.load() == next_state  # Checkpoint UPDATE was rolled back with the INSERT.
+            connection.execute("ALTER TABLE paper_operations DROP CONSTRAINT test_fail")
+            repo.commit(next_state, expired)
+            assert repo.load() == expired
+            # A new snapshot cannot silently reset the same account's daily resource budget.
+            with pytest.raises(psycopg.errors.UniqueViolation):
+                connection.execute(
+                    "INSERT INTO paper_sessions SELECT trade_date, %s, revision, state_sha256, "
+                    "state_json FROM paper_sessions",
+                    ("f" * 64,),
+                )
+            connection.execute(
+                "UPDATE paper_operations SET operation_sha256 = %s WHERE sequence = 1", ("e" * 64,)
+            )
+            with pytest.raises(ValueError, match="operation log disagree"):
+                repo.load()
+        finally:
+            connection.execute(f'DROP SCHEMA "{namespace}" CASCADE')
 
 
 def test_paper_planner_records_operational_blocks_without_an_order_intent() -> None:

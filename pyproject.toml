@@ -12,6 +12,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
+markers = ["integration: requires an explicitly supplied isolated external service"]
 addopts = "-ra --strict-markers"
 testpaths = ["tests"]
 pythonpath = [
