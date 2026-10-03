@@ -6,7 +6,9 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from t0_trading.arbitration import ShadowArbitrationJournal
 from t0_trading.configuration import load_configuration
+from t0_trading.context import DecisionContext, LiveDecisionContextEngine, ZoneContext
 from t0_trading.controls import CostPolicy
 from t0_trading.features import FeatureSnapshot, WindowFeatures
 from t0_trading.market.session import MarketSession
@@ -169,6 +171,92 @@ def test_relative_baseline_cannot_use_future_or_missing_peer_clock() -> None:
         item for item in score_buy_first_baselines((vic,)) if item.strategy == "vic_vhm_relative"
     )
     assert missing_peer.block_reasons == ("missing_peer",)
+
+
+def test_incremental_journal_matches_batch_scoring_with_causal_peer_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clocks = (DECISION_AT - timedelta(seconds=30), DECISION_AT)
+    features = tuple(
+        snapshot
+        for at in clocks
+        for snapshot in (_snapshot("VIC", at), _snapshot("VHM", at, long_return="60"))
+    )
+    contexts = tuple(
+        DecisionContext(
+            context_version="decision-context-v3",
+            context_configuration_sha256="b" * 64,
+            feature_configuration_sha256="a" * 64,
+            data_mode="LIVE",
+            trade_date=TRADE_DATE,
+            decision_at=at,
+            zones=tuple(
+                ZoneContext(
+                    symbol=item.symbol,
+                    current_feature_snapshot_sha256=item.sha256,
+                    observation_count=0,
+                    support_distance_bps=None,
+                    resistance_distance_bps=None,
+                )
+                for item in sorted(features, key=lambda item: item.symbol)
+                if item.decision_at == at
+            ),
+            indices=(),
+            market_statuses=(),
+            market_confirmation_strength=Decimal("0.5"),
+            regime="TREND_UP",
+            reasons=(),
+        )
+        for at in clocks
+    )
+    expected = score_buy_first_baselines(features, contexts)
+    relative = next(
+        item
+        for item in expected
+        if item.symbol == "VIC"
+        and item.decision_at == DECISION_AT
+        and item.strategy == "vic_vhm_relative"
+    )
+    assert relative.is_candidate
+    current = tuple(item for item in features if item.decision_at == DECISION_AT)
+    history = tuple(item for item in features if item.decision_at < DECISION_AT)
+    assert score_buy_first_baselines(current, (contexts[-1],), history=history) == tuple(
+        item for item in expected if item.decision_at == DECISION_AT
+    )
+    with pytest.raises(ValueError, match="strictly precede"):
+        score_buy_first_baselines(current, history=current)
+
+    config = load_configuration(Path(CONFIGURATION))
+    policy = config.candidate_arbitrations[0].model_copy(update={"effective_from": TRADE_DATE})
+    journal = ShadowArbitrationJournal(
+        tmp_path / "stream.arbitrations.jsonl",
+        TRADE_DATE,
+        config.resolve(TRADE_DATE),
+        config.resolve_context(TRADE_DATE),
+        policy,
+    )
+
+    def snapshots(_: ShadowArbitrationJournal, at: datetime) -> tuple[FeatureSnapshot, ...]:
+        return tuple(item for item in features if item.decision_at == at)
+
+    def context(
+        _: LiveDecisionContextEngine, current: Sequence[FeatureSnapshot]
+    ) -> DecisionContext:
+        return next(item for item in contexts if item.decision_at == current[0].decision_at)
+
+    monkeypatch.setattr(journal, "_decision_times", clocks)
+    monkeypatch.setattr(ShadowArbitrationJournal, "_snapshots", snapshots)
+    monkeypatch.setattr(LiveDecisionContextEngine, "build", context)
+    try:
+        journal.advance(
+            DECISION_AT + timedelta(seconds=config.resolve(TRADE_DATE).features.cadence_seconds)
+        )
+        assert not journal.failed
+        assert journal.partial_candidate_output.read_bytes() == b"".join(
+            item.canonical_bytes() + b"\n" for item in expected
+        )
+    finally:
+        journal.abort()
 
 
 def test_ineligible_feature_abstains_for_all_baselines() -> None:

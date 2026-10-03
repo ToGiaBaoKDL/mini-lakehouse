@@ -62,6 +62,14 @@ def test_cli_help_and_validation_do_not_initialize_aws(monkeypatch: Any) -> None
     assert invalid_stream.exit_code == 2
     assert "must exceed heartbeat_seconds" in invalid_stream.output
 
+    invalid_realtime = runner.invoke(
+        app,
+        ["capture-stream", "--landing-uri", "s3://landing/root"],
+        env={"T0_REALTIME_SHADOW": "true", "T0_REALTIME_MAX_DELAY_SECONDS": "1"},
+    )
+    assert invalid_realtime.exit_code == 2
+    assert "watermark" in invalid_realtime.output
+
     future = runner.invoke(
         app,
         [

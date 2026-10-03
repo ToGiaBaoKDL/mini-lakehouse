@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 from collections import deque
 from collections.abc import Callable, Sequence
@@ -16,6 +17,7 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from t0_trading.arbitration.engine import CandidateArbitrator
+from t0_trading.arbitration.selection import RealtimeSelection
 from t0_trading.capture.membership import BreadthMembershipSnapshot
 from t0_trading.capture.reader import StreamGap
 from t0_trading.configuration import (
@@ -31,6 +33,7 @@ from t0_trading.market import StreamEnvelope
 from t0_trading.strategy.baselines import (
     BASELINE_NAMES,
     BASELINE_VERSION,
+    RELATIVE_PEER_LAG,
     score_buy_first_baselines,
 )
 
@@ -135,6 +138,8 @@ class ShadowArbitrationJournal:
         breadth_policy: BreadthVersion | None = None,
         breadth_membership: BreadthMembershipSnapshot | None = None,
         on_error: Callable[[Exception], None] | None = None,
+        on_selection: Callable[[RealtimeSelection], None] | None = None,
+        on_disconnect: Callable[[datetime], None] | None = None,
     ) -> None:
         if not output.name.endswith(_ARBITRATION_SUFFIX):
             raise ValueError(f"shadow journal output must end with {_ARBITRATION_SUFFIX}")
@@ -165,6 +170,7 @@ class ShadowArbitrationJournal:
             raise ValueError("shadow journal configuration has no decision clocks")
         self._next_decision = 0
         self._pending: deque[StreamEnvelope] = deque()
+        self._feature_history: deque[FeatureSnapshot] = deque()
         self._last_ingested_at: datetime | None = None
         self._open_gap: datetime | None = None
         self._gaps: list[StreamGap] = []
@@ -172,6 +178,8 @@ class ShadowArbitrationJournal:
         self._first_connected_at: datetime | None = None
         self._watermark_delay = timedelta(seconds=configuration.features.cadence_seconds)
         self._on_error = on_error
+        self._on_selection = on_selection
+        self._on_disconnect = on_disconnect
         self._failed = False
         self._closed = False
         self._candidate_digest = hashlib.sha256()
@@ -289,7 +297,7 @@ class ShadowArbitrationJournal:
             for snapshot in snapshots
         )
 
-    def _advance(self, cutoff: datetime) -> None:
+    def _advance(self, cutoff: datetime, *, realtime: bool = False) -> None:
         while (
             self._next_decision < len(self._decision_times)
             and self._decision_times[self._next_decision] <= cutoff
@@ -297,13 +305,20 @@ class ShadowArbitrationJournal:
             decision_at = self._decision_times[self._next_decision]
             snapshots = self._snapshots(decision_at)
             context = self._context_engine.build(snapshots)
-            candidates = score_buy_first_baselines(snapshots, (context,))
+            while self._feature_history and (
+                self._feature_history[0].decision_at < decision_at - RELATIVE_PEER_LAG
+            ):
+                self._feature_history.popleft()
+            candidates = score_buy_first_baselines(
+                snapshots, (context,), history=tuple(self._feature_history)
+            )
             for candidate in candidates:
                 line = candidate.canonical_bytes() + b"\n"
                 self._candidate_stream.write(line)
                 self._candidate_digest.update(line)
                 self.candidate_count += 1
-            for arbitration in self._arbitrator.decide(candidates):
+            arbitrations = self._arbitrator.decide(candidates)
+            for arbitration in arbitrations:
                 line = arbitration.canonical_bytes() + b"\n"
                 self._arbitration_stream.write(line)
                 self._arbitration_digest.update(line)
@@ -311,15 +326,64 @@ class ShadowArbitrationJournal:
             self._candidate_stream.flush()
             self._arbitration_stream.flush()
             self._next_decision += 1
+            # Only hand off decisions after both journal streams accepted their records.
+            # This is a live shadow hint, not proof of the final S3 publication commit.
+            if realtime and self._on_selection is not None:
+                try:
+                    by_hash = {item.sha256: item for item in candidates}
+                    for arbitration in arbitrations:
+                        if arbitration.status != "SELECTED":
+                            continue
+                        candidate = by_hash[arbitration.candidate_sha256]
+                        required = {
+                            candidate.feature_snapshot_sha256,
+                            candidate.peer_feature_snapshot_sha256,
+                        }
+                        self._on_selection(
+                            RealtimeSelection(
+                                candidate=candidate,
+                                arbitration=arbitration,
+                                context=context,
+                                features=tuple(
+                                    item for item in snapshots if item.sha256 in required
+                                ),
+                                lagged_peer=next(
+                                    (
+                                        item
+                                        for item in self._feature_history
+                                        if item.symbol != candidate.symbol
+                                        and item.decision_at == decision_at - RELATIVE_PEER_LAG
+                                    ),
+                                    None,
+                                )
+                                if candidate.strategy == "vic_vhm_relative"
+                                else None,
+                            )
+                        )
+                except Exception as error:
+                    # A broken consumer must not invalidate the research journal or raw capture.
+                    self._on_selection = None
+                    logging.getLogger(__name__).error(
+                        "Realtime handoff disabled (%s)", type(error).__name__
+                    )
+            self._feature_history.extend(snapshots)
         if self._next_decision == len(self._decision_times):
             self._pending.clear()
         else:
             self._apply_until(cutoff)
 
     def advance(self, observed_at: datetime) -> None:
-        self._safe(lambda: self._advance(_utc(observed_at, "observed_at") - self._watermark_delay))
+        self._safe(
+            lambda: self._advance(
+                _utc(observed_at, "observed_at") - self._watermark_delay, realtime=True
+            )
+        )
 
     def disconnected(self, disconnected_at: datetime, *, unavailable: bool) -> None:
+        if self._on_disconnect is not None:
+            with suppress(Exception):
+                self._on_disconnect(disconnected_at)
+
         def operation() -> None:
             observed_at = _utc(disconnected_at, "disconnected_at")
             if unavailable and self._open_gap is None:

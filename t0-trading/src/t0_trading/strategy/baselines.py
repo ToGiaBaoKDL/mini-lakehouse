@@ -39,6 +39,7 @@ BASELINE_GROUP_NAMES: dict[BaselineName, tuple[str, str, str]] = {
     ),
 }
 BASELINE_VERSION = "buy-first-baselines-v3"
+RELATIVE_PEER_LAG = timedelta(seconds=30)
 
 _ZERO = Decimal(0)
 _ONE = Decimal(1)
@@ -323,24 +324,33 @@ def _relative(
 def score_buy_first_baselines(
     snapshots: Sequence[FeatureSnapshot],
     contexts: Sequence[DecisionContext] = (),
+    *,
+    history: Sequence[FeatureSnapshot] = (),
 ) -> tuple[BaselineCandidate, ...]:
     """Emit all candidates and abstentions without reading future outcomes.
 
     Exactly one disjoint 30-second prior peer window is used for the relative
     baseline's lagged-move proxy. A missing peer clock abstains instead of
     interpolation. Only VIC/VHM are supported by the V1 research contract.
+    Incremental callers may supply strictly earlier history; outputs cover only snapshots,
+    so replay and realtime share scoring without re-emitting previous decisions.
     """
     if not snapshots:
         raise ValueError("baseline scoring requires feature snapshots")
+    if history and max(item.decision_at for item in history) >= min(
+        item.decision_at for item in snapshots
+    ):
+        raise ValueError("baseline history must strictly precede scored clocks")
+    available = (*history, *snapshots)
     if (
-        len({item.trade_date for item in snapshots}) != 1
-        or len({(item.feature_version, item.configuration_sha256) for item in snapshots}) != 1
+        len({item.trade_date for item in available}) != 1
+        or len({(item.feature_version, item.configuration_sha256) for item in available}) != 1
     ):
         raise ValueError("baseline features must share trade date and lineage")
-    if any(item.symbol not in {"VIC", "VHM"} for item in snapshots):
+    if any(item.symbol not in {"VIC", "VHM"} for item in available):
         raise ValueError("V1 baselines support only VIC and VHM")
-    by_key = {(item.symbol, item.decision_at): item for item in snapshots}
-    if len(by_key) != len(snapshots):
+    by_key = {(item.symbol, item.decision_at): item for item in available}
+    if len(by_key) != len(available):
         raise ValueError("baseline feature clocks must be unique")
     context_by_clock = {item.decision_at: item for item in contexts}
     if len(context_by_clock) != len(contexts):
@@ -389,7 +399,7 @@ def score_buy_first_baselines(
                 _relative(
                     snapshot,
                     peer,
-                    by_key.get((peer_symbol, snapshot.decision_at - timedelta(seconds=30))),
+                    by_key.get((peer_symbol, snapshot.decision_at - RELATIVE_PEER_LAG)),
                     context,
                 ),
             )

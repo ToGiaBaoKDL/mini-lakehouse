@@ -24,6 +24,9 @@ services:
       LAKEHOUSE_ENVIRONMENT: ${LAKEHOUSE_ENVIRONMENT}
       AWS_CONFIG_FILE: /run/aws/config
       AWS_EC2_METADATA_DISABLED: "true"
+      T0_REALTIME_SHADOW: ${T0_REALTIME_SHADOW:-false}
+      T0_REALTIME_MAX_DELAY_SECONDS: ${T0_REALTIME_MAX_DELAY_SECONDS:-15}
+      T0_REALTIME_QUEUE_SIZE: ${T0_REALTIME_QUEUE_SIZE:-128}
     volumes:
       - ${AWS_IDENTITY_DIR}/t0-trading:/run/aws:ro
       - ${T0_STREAM_SPOOL_DIR}:/var/lib/t0-trading/spool

@@ -519,7 +519,11 @@ def test_t0_stream_capture_is_scheduled_externally_and_uses_its_workload_identit
         "LAKEHOUSE_ENVIRONMENT",
         "AWS_CONFIG_FILE",
         "AWS_EC2_METADATA_DISABLED",
+        "T0_REALTIME_SHADOW",
+        "T0_REALTIME_MAX_DELAY_SECONDS",
+        "T0_REALTIME_QUEUE_SIZE",
     }
+    assert service["environment"]["T0_REALTIME_SHADOW"] == "${T0_REALTIME_SHADOW:-false}"
 
 
 def test_all_container_images_are_immutable() -> None:

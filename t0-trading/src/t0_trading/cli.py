@@ -6,7 +6,7 @@ import json
 import os
 import signal
 from dataclasses import replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event
@@ -80,6 +80,7 @@ from t0_trading.promotion import (
     publish_session_evidence,
 )
 from t0_trading.provider import authenticated, market_stream
+from t0_trading.realtime import RealtimeWorker
 from t0_trading.simulation import SimulationRequest, simulate_cycles
 from t0_trading.strategy.baseline_audit import (
     BaselineAuditReport,
@@ -488,6 +489,25 @@ def capture_stream_command(
         Path | None,
         typer.Option(help="Optional runtime readiness marker written after the first heartbeat."),
     ] = None,
+    realtime_shadow: Annotated[
+        bool,
+        typer.Option(
+            help="Enable bounded realtime shadow handoff; no paper orders or alerts.",
+            envvar="T0_REALTIME_SHADOW",
+        ),
+    ] = False,
+    realtime_max_delay_seconds: Annotated[
+        float,
+        typer.Option(
+            min=1,
+            max=300,
+            help="Maximum decision age at shadow delivery.",
+            envvar="T0_REALTIME_MAX_DELAY_SECONDS",
+        ),
+    ] = 15,
+    realtime_queue_size: Annotated[
+        int, typer.Option(min=1, max=10_000, envvar="T0_REALTIME_QUEUE_SIZE")
+    ] = 128,
 ) -> None:
     """Capture one bounded market window as reconnect-safe immutable segments."""
     environment = os.environ.get("LAKEHOUSE_ENVIRONMENT", "dev")
@@ -497,6 +517,10 @@ def capture_stream_command(
         configuration = load_configuration(config)
         version = configuration.resolve(trade_date)
         capture_scope = configuration.capture_scope(trade_date)
+        if realtime_shadow and realtime_max_delay_seconds <= version.features.cadence_seconds:
+            raise ValueError("realtime maximum delay must exceed the journal watermark delay")
+        if realtime_shadow and configuration.resolve_candidate_arbitration(trade_date) is None:
+            raise ValueError("realtime shadow requires an effective arbitration policy")
         options = StreamCaptureOptions(
             symbols=capture_scope.symbols,
             markets=capture_scope.markets,
@@ -519,6 +543,7 @@ def capture_stream_command(
         for signum in (signal.SIGINT, signal.SIGTERM)
     }
     journal: ShadowArbitrationJournal | None = None
+    realtime: RealtimeWorker | None = None
     journal_workspace: TemporaryDirectory[str] | None = None
     shadow_manifest_uri: str | None = None
     shadow_manifest_sha256: str | None = None
@@ -538,6 +563,28 @@ def capture_stream_command(
         try:
             arbitration = configuration.resolve_candidate_arbitration(trade_date)
             if arbitration is not None:
+                if realtime_shadow:
+                    realtime = RealtimeWorker(
+                        lambda selection: typer.echo(
+                            json.dumps(
+                                {
+                                    "event": "t0_realtime_shadow_selection",
+                                    "mode": "SHADOW",
+                                    "promotion_checked": False,
+                                    "symbol": selection.candidate.symbol,
+                                    "strategy": selection.candidate.strategy,
+                                    "decision_at": selection.candidate.decision_at.isoformat(),
+                                    "candidate_sha256": selection.candidate.sha256,
+                                    "arbitration_sha256": selection.arbitration.sha256,
+                                    "capital_authorized": False,
+                                },
+                                sort_keys=True,
+                            ),
+                            err=True,
+                        ),
+                        maximum_delay=timedelta(seconds=realtime_max_delay_seconds),
+                        capacity=realtime_queue_size,
+                    )
                 journal_workspace = TemporaryDirectory(prefix="t0-shadow-")
                 journal = ShadowArbitrationJournal(
                     Path(journal_workspace.name) / "shadow.arbitrations.jsonl",
@@ -551,8 +598,10 @@ def capture_stream_command(
                         f"T0 shadow journal disabled ({type(error).__name__})",
                         err=True,
                     ),
+                    on_selection=realtime.offer if realtime is not None else None,
+                    on_disconnect=realtime.disconnected if realtime is not None else None,
                 )
-        except (OSError, ValueError) as error:
+        except Exception as error:  # Observer/worker initialization must not interrupt raw capture.
             typer.echo(
                 f"T0 shadow journal unavailable ({type(error).__name__})",
                 err=True,
@@ -573,6 +622,8 @@ def capture_stream_command(
             spool=spool,
             observer=journal,
         )
+        if realtime is not None:
+            realtime.close()
         if journal is not None:
             journal.close(datetime.now(UTC), manifest_uris)
             if not journal.failed:
@@ -587,6 +638,13 @@ def capture_stream_command(
         typer.echo(f"SSI stream capture failed: {_safe_error(error)}", err=True)
         raise typer.Exit(code=1) from None
     finally:
+        if realtime is not None:
+            typer.echo(
+                json.dumps(
+                    {"event": "t0_realtime_shadow_stopped", **realtime.close().model_dump()}
+                ),
+                err=True,
+            )
         if journal is not None and not capture_completed:
             journal.abort()
         if journal_workspace is not None:

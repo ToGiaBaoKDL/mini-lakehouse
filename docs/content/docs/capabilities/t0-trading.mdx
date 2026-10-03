@@ -475,6 +475,43 @@ independent and continue without PostgreSQL access.
 
 ## Shadow candidate arbitration
 
+### Optional realtime shadow handoff
+
+`capture-stream --realtime-shadow` (or `T0_REALTIME_SHADOW=true` in the capture deployment)
+enables a bounded background consumer of the **same** selected candidates written to the journal.
+It is off by default. SSI SDK still owns transport, subscriptions and callbacks; feature/context
+engines and the arbitrator remain the sole decision owners. There is no second strategy loop,
+SDK connection, database call or external notification on the capture thread.
+
+The handoff verifies candidate/arbitration/context/feature lineage, including the disjoint peer
+snapshot for relative candidates. The journal retains only the relative baseline's required
+30-second feature history and calls the existing scorer with that history. This fixes the previous
+live-journal omission of peer history without changing batch strategy semantics. Historical
+immutable journals are not rewritten; an old journal produced without that history may fail replay
+audit where eligible peer history existed (even if the strategy ultimately abstained).
+Such evidence must not be silently promoted.
+
+The consumer logs `t0_realtime_shadow_selection` with `mode=SHADOW`, `promotion_checked=false`,
+and `capital_authorized=false`. These are **diagnostic shadow selections**, not promoted trade
+alerts, paper orders, or proof of an end-of-day S3 commit. No notifier is enabled by this option.
+
+`T0_REALTIME_MAX_DELAY_SECONDS` defaults to 15 and must exceed the journal's one-cadence
+watermark delay. `T0_REALTIME_QUEUE_SIZE` defaults to 128. The consumer rejects future/expired
+decisions, ignores repeated or regressing per-symbol clocks, and invalidates queued decisions
+from before disconnect. Existing feature warmup and capture-gap handling still govern recovery.
+Overflow disables delivery; sink exceptions or conflicting selections for one clock disable the
+affected symbol. Consumer errors do not
+fail the journal. Shutdown discards queued decisions rather than delivering a backlog. Completion
+logs include queue, delivery, stale, duplicate, disconnect and failure counters/state.
+
+This is thread isolation, not process isolation or a durable outbox. A sink already running cannot
+be cancelled by Python and must bound its own I/O. Process restarts do not restore delivery state;
+the existing journal fails closed if it cannot establish a complete session. Durable idempotency,
+restart recovery, authoritative account/calendar admission and paper quote/clock delivery remain
+requirements before connecting external notifications or automated paper execution.
+
+### Immutable end-of-day publication
+
 The scheduled capture container builds candidate and arbitration journals from the receipt-ordered
 queue outside the SSI SDK callback. Its clock stays one feature cadence behind receipt time to avoid
 racing callback delivery. A reconnect is recorded as `CAPTURE_GAP` through the configured warm-up
