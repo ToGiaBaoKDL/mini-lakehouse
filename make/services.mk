@@ -23,7 +23,7 @@ T0_TRADING_COMPOSE_CONFIG := AWS_IDENTITY_DIR=/tmp/validation LAKEHOUSE_ENVIRONM
 	airflow-secrets-init airflow-up airflow-down airflow-logs airflow-dags \
 	arxiv-lens-up arxiv-lens-down arxiv-lens-logs \
 	lightdash-secrets-init lightdash-ci-secret-sync \
-	t0-trading-ssi-secret-sync t0-trading-certify t0-trading-down t0-trading-logs \
+	t0-trading-ssi-secret-sync t0-trading-telegram-secret-sync t0-trading-certify t0-trading-down t0-trading-logs \
 	t0-trading-secrets-init \
 	lightdash-up lightdash-down lightdash-logs \
 	signoz-secrets-init \
@@ -48,6 +48,9 @@ lightdash-ci-secret-sync: ## Store the local Lightdash CI token payload in Secre
 
 t0-trading-ssi-secret-sync: ## Store the local SSI FastConnect v3 credential in Secrets Manager.
 	t0-trading/deploy/sync-ssi-secret ".secrets/$(LAKEHOUSE_ENVIRONMENT)/t0-trading/ssi.json"
+
+t0-trading-telegram-secret-sync: ## Store the local Telegram bot/chat payload in Secrets Manager.
+	t0-trading/deploy/sync-telegram-secret ".secrets/$(LAKEHOUSE_ENVIRONMENT)/t0-trading/telegram.json"
 
 t0-trading-secrets-init: ## Initialize the T0 trading PostgreSQL credential exactly once.
 	infra/runtime/postgres/initialize-secrets t0_trading

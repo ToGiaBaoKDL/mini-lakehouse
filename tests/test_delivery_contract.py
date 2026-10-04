@@ -77,7 +77,7 @@ def test_component_release_publishes_before_protected_digest_deployment() -> Non
     assert "deployment/release_manifest" not in release + action + script
     assert "latest" not in release + action + script
     assert 'tar -C "$SOURCE_ROOT" -cf -' in action
-    assert "bundle+=(t0-trading/deploy)" in action
+    assert "bundle+=(infra/runtime/postgres t0-trading/deploy)" in action
     assert "source_root:" in action
     assert "revision:" not in action
     assert "git init" not in script
@@ -291,7 +291,10 @@ def test_each_component_owns_its_deployment_operation() -> None:
         "compose down --remove-orphans"
     )
     assert "migrate-production status --json" in lightdash
-    assert "infra/runtime/postgres/deploy" not in t0_trading
+    assert '"$bundle_root/infra/runtime/postgres/deploy" t0_trading' in t0_trading
+    assert 'if [ "$notifications_enabled" = true ]; then' in t0_trading
+    assert "notifications.compose.yaml" in t0_trading
+    assert "--profile notifications" in t0_trading
     assert "docker compose --project-name t0-trading" in t0_trading
     assert "create --force-recreate --remove-orphans" in t0_trading
     assert 'sudo "$script_dir/reconcile-schedule"' in t0_trading
@@ -322,6 +325,7 @@ def test_t0_stream_schedule_is_component_owned_and_fail_safe() -> None:
     window = (deploy / "stream-window").read_text(encoding="utf-8")
     systemd = deploy / "systemd"
     capture = (systemd / "lakehouse-t0-stream-capture.service").read_text(encoding="utf-8")
+    notifier = (systemd / "lakehouse-t0-shadow-notifier.service").read_text(encoding="utf-8")
     start = (systemd / "lakehouse-t0-stream-start.timer").read_text(encoding="utf-8")
     stop = (systemd / "lakehouse-t0-stream-stop.timer").read_text(encoding="utf-8")
     stop_service = (systemd / "lakehouse-t0-stream-stop.service").read_text(encoding="utf-8")
@@ -341,6 +345,14 @@ def test_t0_stream_schedule_is_component_owned_and_fail_safe() -> None:
     assert '"$minute_of_day" -lt 940' in window
     assert "Persistent=true" in start + stop
     assert "Conflicts=lakehouse-t0-stream-capture.service" in stop_service
+    assert "Wants=lakehouse-t0-shadow-notifier.service" in capture
+    assert "Requires=lakehouse-t0-shadow-notifier.service" not in capture
+    assert "PartOf=lakehouse-t0-stream-capture.service" in notifier
+    assert "ExecCondition=/usr/local/sbin/lakehouse-t0-stream-window" in notifier
+    assert "ExecStart=/usr/bin/docker start --attach lakehouse-t0-shadow-notifier" in notifier
+    assert "ExecStop=-/usr/bin/docker stop --time 15 lakehouse-t0-shadow-notifier" in notifier
+    assert "Restart=on-failure" in notifier
+    assert "lakehouse-t0-shadow-notifier.service" in reconcile + stop_service
 
 
 def test_top_level_arxiv_lens_resolves_the_release_bundle_root() -> None:

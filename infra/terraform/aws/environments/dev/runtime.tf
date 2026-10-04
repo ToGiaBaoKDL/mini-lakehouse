@@ -4,16 +4,17 @@ locals {
     domain => "athena/dbt_${domain}_output_uri"
   }
   runtime_parameters = merge({
-    "storage/landing_uri"          = "s3://${module.storage.bucket_names.landing}"
-    "storage/curated_uri"          = "s3://${module.storage.bucket_names.curated}"
-    "storage/analytics_uri"        = "s3://${module.storage.bucket_names.analytics}"
-    "storage/lightdash_uri"        = "s3://${module.storage.bucket_names.lightdash}"
-    "athena/arxiv_lens_output_uri" = "s3://${module.storage.bucket_names["query-results"]}/${local.athena_workload_prefixes.arxiv_lens}"
-    "athena/lightdash_output_uri"  = "s3://${module.storage.bucket_names["query-results"]}/${local.athena_workload_prefixes.lightdash}"
-    "airflow/remote_log_uri"       = "s3://${module.storage.bucket_names.logs}/airflow/task-logs"
-    "backup/metadata_postgres_uri" = "s3://${module.storage.bucket_names.backups}/metadata-postgres"
-    "emr/application_id"           = module.emr_serverless.application_id
-    "emr/execution_role_arn"       = module.identity.emr_runtime_role_arn
+    "t0-trading/notifications_enabled" = tostring(var.t0_notifications_enabled)
+    "storage/landing_uri"              = "s3://${module.storage.bucket_names.landing}"
+    "storage/curated_uri"              = "s3://${module.storage.bucket_names.curated}"
+    "storage/analytics_uri"            = "s3://${module.storage.bucket_names.analytics}"
+    "storage/lightdash_uri"            = "s3://${module.storage.bucket_names.lightdash}"
+    "athena/arxiv_lens_output_uri"     = "s3://${module.storage.bucket_names["query-results"]}/${local.athena_workload_prefixes.arxiv_lens}"
+    "athena/lightdash_output_uri"      = "s3://${module.storage.bucket_names["query-results"]}/${local.athena_workload_prefixes.lightdash}"
+    "airflow/remote_log_uri"           = "s3://${module.storage.bucket_names.logs}/airflow/task-logs"
+    "backup/metadata_postgres_uri"     = "s3://${module.storage.bucket_names.backups}/metadata-postgres"
+    "emr/application_id"               = module.emr_serverless.application_id
+    "emr/execution_role_arn"           = module.identity.emr_runtime_role_arn
     }, {
     for domain, parameter_name in local.dbt_output_parameter_names : parameter_name =>
     "s3://${module.storage.bucket_names["query-results"]}/${local.athena_workload_prefixes["dbt_${domain}"]}"
@@ -47,6 +48,7 @@ locals {
     ]
     t0_trading = [
       "storage/landing_uri",
+      "t0-trading/notifications_enabled",
     ]
     }, {
     for domain, parameter_name in local.dbt_output_parameter_names : "dbt_${domain}" => [

@@ -182,6 +182,7 @@ module "identity" {
   signoz_ci_secret_arn          = aws_secretsmanager_secret.signoz_ci.arn
   services_deployer_secret_arns = toset([
     aws_secretsmanager_secret.cloudflare_tunnel.arn,
+    aws_secretsmanager_secret.t0_trading_telegram.arn,
   ])
   container_repository_arns = toset(values(module.container_registry.repository_arns))
   workload_data_access      = local.workload_data_access

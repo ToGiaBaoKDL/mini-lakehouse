@@ -82,6 +82,7 @@ def test_secret_containers_never_manage_secret_values() -> None:
     assert 'resource "aws_secretsmanager_secret" "signoz_ci"' in environment
     assert 'resource "aws_secretsmanager_secret" "ocr"' in environment
     assert 'resource "aws_secretsmanager_secret" "t0_trading_ssi"' in environment
+    assert 'resource "aws_secretsmanager_secret" "t0_trading_telegram"' in environment
     assert 'for_each = toset(["modal"])' in environment
     assert 'resource "aws_secretsmanager_secret" "cloudflare_tunnel"' in environment
     assert 'resource "aws_secretsmanager_secret" "cloudflare_docs_ci"' in environment
@@ -297,13 +298,14 @@ def test_service_images_are_immutable_bounded_and_published_by_one_role() -> Non
     ).read_text(encoding="utf-8")
 
 
-def test_services_deployer_reads_only_the_connector_secret() -> None:
+def test_services_deployer_reads_only_scoped_deployment_secrets() -> None:
     environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
     services = Path("infra/terraform/aws/modules/identity/services.tf").read_text(encoding="utf-8")
 
     assert "services_deployer_secret_arns" in environment + services
     assert "aws_secretsmanager_secret.cloudflare_tunnel.arn" in environment
-    assert 'sid       = "ReadInfrastructureConnectorSecrets"' in services
+    assert 'sid       = "ReadServiceDeploymentSecrets"' in services
+    assert "aws_secretsmanager_secret.t0_trading_telegram.arn" in environment
     assert 'actions   = ["secretsmanager:GetSecretValue"]' in services
     assert "airflow_secret_arns" not in services
     assert "ocr_secret_arns" not in services
@@ -361,6 +363,23 @@ def test_t0_trading_runtime_is_bound_to_owned_raw_prefixes_and_secrets() -> None
     assert '"s3:DeleteObject"' not in identity
     assert "glue:" not in identity
     assert "var.bucket_arns.curated" not in identity
+
+
+def test_t0_notification_activation_and_secrets_have_explicit_owners() -> None:
+    environment = _terraform_sources(Path("infra/terraform/aws/environments/dev"))
+    variables = Path("infra/terraform/aws/environments/dev/variables.tf").read_text()
+    identity = Path("infra/terraform/aws/modules/identity/t0_trading.tf").read_text()
+    services = Path("infra/terraform/aws/modules/identity/services.tf").read_text()
+    assert 'variable "t0_notifications_enabled"' in variables
+    assert "default     = false" in variables
+    assert (
+        '"t0-trading/notifications_enabled" = tostring(var.t0_notifications_enabled)' in environment
+    )
+    grants = environment.split("services_deployer_secret_arns = toset([", 1)[1].split("])", 1)[0]
+    assert "aws_secretsmanager_secret.t0_trading_telegram.arn" in grants
+    assert "metadata_postgres" not in grants
+    assert "t0_trading_telegram" not in identity
+    assert "resources = var.services_deployer_secret_arns" in services
 
 
 def test_docs_deployer_reads_only_the_cloudflare_docs_secret() -> None:

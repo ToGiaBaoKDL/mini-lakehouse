@@ -20,7 +20,7 @@ data "aws_iam_policy_document" "services_deployer" {
     resources = var.container_repository_arns
   }
   statement {
-    sid       = "ReadInfrastructureConnectorSecrets"
+    sid       = "ReadServiceDeploymentSecrets"
     actions   = ["secretsmanager:GetSecretValue"]
     resources = var.services_deployer_secret_arns
   }

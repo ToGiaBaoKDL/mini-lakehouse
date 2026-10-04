@@ -4,13 +4,14 @@ services:
     environment:
       T0_REALTIME_SHADOW: "true"
       T0_DELIVERY_DSN_FILE: /run/secrets/t0-delivery-dsn
-    volumes:
-      - ${T0_DELIVERY_DSN_HOST_FILE:?Provide a protected PostgreSQL DSN file}:/run/secrets/t0-delivery-dsn:ro
+    secrets:
+      - t0-delivery-dsn
     networks:
       - default
       - metadata
 
   shadow-notifier:
+    container_name: lakehouse-t0-shadow-notifier
     profiles: [notifications]
     image: "${T0_TRADING_IMAGE:-t0-trading:local}"
     user: "${LOCAL_UID}:0"
@@ -21,18 +22,25 @@ services:
       T0_TELEGRAM_SECRET_FILE: /run/secrets/t0-telegram
       T0_NOTIFICATIONS_ENABLED: ${T0_NOTIFICATIONS_ENABLED:-false}
       PTB_TIMEDELTA: "true"
-    volumes:
-      - ${T0_DELIVERY_DSN_HOST_FILE:?Provide a protected PostgreSQL DSN file}:/run/secrets/t0-delivery-dsn:ro
-      - ${T0_TELEGRAM_HOST_FILE:?Provide a protected Telegram credentials file}:/run/secrets/t0-telegram:ro
+    secrets:
+      - t0-delivery-dsn
+      - t0-telegram
     networks:
       - default
       - metadata
     cpus: 0.25
     mem_limit: 256m
     stop_grace_period: 15s
-    restart: "on-failure:3"
+    # systemd owns the same weekday window as capture, with independent failure recovery.
+    restart: "no"
 
 networks:
   metadata:
     external: true
     name: lakehouse-metadata
+
+secrets:
+  t0-delivery-dsn:
+    file: "${T0_DELIVERY_DSN_HOST_FILE:?T0 delivery DSN file is required}"
+  t0-telegram:
+    file: "${T0_TELEGRAM_HOST_FILE:?T0 Telegram file is required}"

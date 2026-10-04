@@ -213,11 +213,11 @@ variable "signoz_ci_secret_arn" {
 
 variable "services_deployer_secret_arns" {
   type        = set(string)
-  description = "Infrastructure connector secrets readable by the services deployer."
+  description = "Exact connector and notification secrets readable by the host services deployer."
 
   validation {
     condition     = length(var.services_deployer_secret_arns) > 0
-    error_message = "The services deployer requires at least one infrastructure connector secret."
+    error_message = "The services deployer requires at least one deployment secret."
   }
 }
 

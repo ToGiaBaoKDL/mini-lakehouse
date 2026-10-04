@@ -527,14 +527,24 @@ def test_t0_stream_capture_is_scheduled_externally_and_uses_its_workload_identit
 
 
 def test_t0_notifications_are_separate_opt_in_and_use_secret_files() -> None:
-    overlay = _compose("t0-trading/deploy/delivery.compose.yaml")
+    overlay = _compose("t0-trading/deploy/notifications.compose.yaml")
     sender = overlay["services"]["shadow-notifier"]
     assert sender["profiles"] == ["notifications"]
     assert sender["command"] == ["notify-shadow"]
     assert sender["environment"]["T0_NOTIFICATIONS_ENABLED"] == "${T0_NOTIFICATIONS_ENABLED:-false}"
-    assert sender["restart"] == "on-failure:3"
+    assert sender["restart"] == "no"
+    assert sender["container_name"] == "lakehouse-t0-shadow-notifier"
     assert "depends_on" not in overlay["services"]["stream-capture"]
-    assert all(item.endswith(":ro") for item in sender["volumes"])
+    assert sender["secrets"] == ["t0-delivery-dsn", "t0-telegram"]
+    assert overlay["services"]["stream-capture"]["secrets"] == ["t0-delivery-dsn"]
+    assert "T0_TELEGRAM_SECRET" not in sender["environment"]
+    assert "T0_DELIVERY_DSN" not in sender["environment"]
+    assert overlay["secrets"] == {
+        "t0-delivery-dsn": {
+            "file": "${T0_DELIVERY_DSN_HOST_FILE:?T0 delivery DSN file is required}"
+        },
+        "t0-telegram": {"file": "${T0_TELEGRAM_HOST_FILE:?T0 Telegram file is required}"},
+    }
     assert "--extra notifications" in Path("t0-trading/Dockerfile").read_text()
 
 

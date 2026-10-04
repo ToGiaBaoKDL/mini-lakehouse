@@ -13,6 +13,7 @@ window_source="$script_dir/stream-window"
 window_target=/usr/local/sbin/lakehouse-t0-stream-window
 units="
 lakehouse-t0-stream-capture.service
+lakehouse-t0-shadow-notifier.service
 lakehouse-t0-stream-start.timer
 lakehouse-t0-stream-stop.service
 lakehouse-t0-stream-stop.timer

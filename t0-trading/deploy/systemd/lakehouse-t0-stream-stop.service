@@ -1,6 +1,6 @@
 [Unit]
 Description=Stop SSI FastConnect capture after the market-data window
-Conflicts=lakehouse-t0-stream-capture.service
+Conflicts=lakehouse-t0-stream-capture.service lakehouse-t0-shadow-notifier.service
 
 [Service]
 Type=oneshot

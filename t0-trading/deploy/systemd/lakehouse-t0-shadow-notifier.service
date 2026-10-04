@@ -1,0 +1,19 @@
+[Unit]
+Description=Deliver durable T0 shadow selections to Telegram
+Requires=docker.service
+After=docker.service network-online.target
+PartOf=lakehouse-t0-stream-capture.service
+StartLimitIntervalSec=5min
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=ubuntu
+ExecCondition=/usr/local/sbin/lakehouse-t0-stream-window
+ExecCondition=/usr/bin/docker container inspect --format={{.State.Status}} lakehouse-t0-shadow-notifier
+ExecStart=/usr/bin/docker start --attach lakehouse-t0-shadow-notifier
+ExecStop=-/usr/bin/docker stop --time 15 lakehouse-t0-shadow-notifier
+Restart=on-failure
+RestartSec=15s
+TimeoutStartSec=2min
+TimeoutStopSec=30s

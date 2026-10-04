@@ -8,29 +8,68 @@ fi
 
 image=${1:-t0-trading:local}
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+bundle_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
 environment=${LAKEHOUSE_ENVIRONMENT:-dev}
 identity_dir=${AWS_IDENTITY_DIR:-"$HOME/.config/lakehouse/$environment/aws"}
 spool_dir=${T0_STREAM_SPOOL_DIR:-"$HOME/.local/state/lakehouse/$environment/t0-trading/spool"}
-host_config="$identity_dir/t0-trading/host-config"
 
-test -r "$host_config" || {
-    printf '%s\n' "The t0-trading host identity config is missing." >&2
-    exit 1
+require_outside_window() {
+    if "$script_dir/stream-window"; then
+        printf '%s\n' \
+            "T0 deployment refused: rerun outside the market-data window to avoid a capture gap." >&2
+        exit 75
+    fi
 }
+# Refuse before AWS/secret access; recheck after preflight before changing runtime services.
+require_outside_window
+
 test -r "$identity_dir/t0-trading/config" || {
     printf '%s\n' "The t0-trading container identity config is missing." >&2
     exit 1
 }
 
 aws_runtime() {
+    workload=$1
+    shift
+    host_config="$identity_dir/$workload/host-config"
+    test -r "$host_config" || {
+        printf '%s\n' "The $workload host identity config is missing." >&2
+        return 1
+    }
     env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
         AWS_SHARED_CREDENTIALS_FILE=/dev/null \
-        AWS_CONFIG_FILE="$host_config" AWS_PROFILE=default aws "$@"
+        AWS_CONFIG_FILE="$host_config" AWS_PROFILE=default AWS_PAGER= aws "$@"
 }
 
-landing_uri=$(aws_runtime ssm get-parameter \
+landing_uri=$(aws_runtime t0-trading ssm get-parameter \
     --name "/lakehouse/$environment/storage/landing_uri" \
     --query Parameter.Value --output text)
+notifications_enabled=$(aws_runtime t0-trading ssm get-parameter \
+    --name "/lakehouse/$environment/t0-trading/notifications_enabled" \
+    --query Parameter.Value --output text)
+case "$notifications_enabled" in
+    true | false) ;;
+    *) printf '%s\n' "T0 notifications_enabled must be true or false." >&2; exit 1 ;;
+esac
+
+if [ "$notifications_enabled" = true ]; then
+    telegram_secret=$(aws_runtime services-deployer secretsmanager get-secret-value \
+        --secret-id "lakehouse/$environment/t0-trading/telegram" \
+        --query SecretString --output text)
+    telegram_payload=$(printf '%s' "$telegram_secret" | jq -ce -f "$script_dir/telegram-secret.jq")
+    database_secret=$(aws_runtime metadata-postgres secretsmanager get-secret-value \
+        --secret-id "lakehouse/$environment/metadata-postgres/t0_trading" \
+        --query SecretString --output text)
+    printf '%s' "$database_secret" | jq -e \
+        '.version == 1 and (.password | type == "string" and length > 0)' >/dev/null
+    delivery_dsn=$(printf '%s' "$database_secret" | python3 -c '
+import json, sys
+from urllib.parse import quote
+password = quote(json.load(sys.stdin)["password"], safe="")
+print(f"postgresql://t0_trading:{password}@metadata-postgres:5432/t0_trading", end="")
+')
+    export T0_NOTIFICATIONS_ENABLED=true
+fi
 
 install -d -m 0700 "$spool_dir"
 
@@ -43,17 +82,47 @@ export T0_STREAM_SPOOL_DIR=$spool_dir
 export T0_STREAM_DURATION_SECONDS=${T0_STREAM_DURATION_SECONDS:-86400}
 
 service=lakehouse-t0-stream-capture.service
-if "$script_dir/stream-window"; then
-    printf '%s\n' \
-        "T0 deployment refused: rerun outside the market-data window to avoid a capture gap." >&2
-    exit 75
+require_outside_window
+if [ "$notifications_enabled" = true ]; then
+    # Persist file sources: the scheduler starts pre-created containers via docker start.
+    # Stage both validated credentials without replacing the current runtime's files.
+    secret_dir="$HOME/.config/lakehouse/$environment/secrets/t0-trading"
+    umask 077
+    install -d -m 0700 "$secret_dir"
+    secret_stage=$(mktemp -d "$secret_dir/.stage.XXXXXX")
+    trap 'rm -f "$secret_stage/delivery-dsn" "$secret_stage/telegram.json"; rmdir "$secret_stage"' 0
+    trap 'exit 1' HUP INT TERM
+    printf '%s' "$delivery_dsn" >"$secret_stage/delivery-dsn"
+    printf '%s' "$telegram_payload" >"$secret_stage/telegram.json"
+    unset delivery_dsn telegram_payload database_secret telegram_secret
+    export T0_DELIVERY_DSN_HOST_FILE="$secret_dir/delivery-dsn"
+    export T0_TELEGRAM_HOST_FILE="$secret_dir/telegram.json"
+    "$bundle_root/infra/runtime/postgres/deploy" t0_trading
 fi
+require_outside_window
 
 if systemctl is-active --quiet "$service"; then
     sudo systemctl stop "$service"
 fi
+if systemctl is-active --quiet lakehouse-t0-shadow-notifier.service; then
+    sudo systemctl stop lakehouse-t0-shadow-notifier.service
+fi
 
-docker compose --project-name t0-trading -f "$script_dir/compose.yaml" \
-    create --force-recreate --remove-orphans
+if [ "$notifications_enabled" = true ]; then
+    # Replace sources only after preflight/bootstrap and stopping the old consumers.
+    mv -f "$secret_stage/delivery-dsn" "$T0_DELIVERY_DSN_HOST_FILE"
+    mv -f "$secret_stage/telegram.json" "$T0_TELEGRAM_HOST_FILE"
+fi
+
+compose() {
+    if [ "$notifications_enabled" = true ]; then
+        docker compose --project-name t0-trading -f "$script_dir/compose.yaml" \
+            -f "$script_dir/notifications.compose.yaml" --profile notifications "$@"
+    else
+        docker compose --project-name t0-trading -f "$script_dir/compose.yaml" "$@"
+    fi
+}
+
+compose create --force-recreate --remove-orphans
 
 sudo "$script_dir/reconcile-schedule"

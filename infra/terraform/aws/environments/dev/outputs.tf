@@ -49,6 +49,11 @@ output "t0_trading_database_secret_id" {
   value       = aws_secretsmanager_secret.metadata_postgres["t0_trading"].name
 }
 
+output "t0_trading_telegram_secret_id" {
+  description = "Secrets Manager identifier populated by the explicit Telegram credential sync."
+  value       = aws_secretsmanager_secret.t0_trading_telegram.name
+}
+
 output "container_repository_urls" {
   description = "Immutable ECR repositories keyed by deployable service."
   value       = module.container_registry.repository_urls

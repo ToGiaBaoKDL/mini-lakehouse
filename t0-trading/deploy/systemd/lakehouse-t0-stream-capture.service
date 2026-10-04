@@ -1,6 +1,7 @@
 [Unit]
 Description=SSI FastConnect live market-data capture
 Requires=docker.service
+Wants=lakehouse-t0-shadow-notifier.service
 After=docker.service network-online.target
 StartLimitIntervalSec=5min
 StartLimitBurst=5

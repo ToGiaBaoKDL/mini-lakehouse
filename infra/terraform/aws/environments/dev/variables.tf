@@ -1,3 +1,9 @@
+variable "t0_notifications_enabled" {
+  type        = bool
+  default     = false
+  description = "Enable the independently scheduled Telegram shadow notifier after its secret is populated."
+}
+
 variable "catalog_admin_principal_arns" {
   type        = set(string)
   description = "Existing IAM principal ARNs allowed to assume the contract catalog administrator role."

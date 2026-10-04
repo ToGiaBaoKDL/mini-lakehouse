@@ -558,21 +558,43 @@ the recovery source, and old decisions must not be pushed as fresh alerts. The n
 resume feature state or repair a mid-session capture restart. The running service never rewrites
 historical journals or changes promotion requirements.
 
-Deployment is explicitly opt-in:
+Deployment is explicitly opt-in and uses the maintained release/reconcile path:
 
-1. Rebuild the T0 image (the `notifications` extra includes PostgreSQL and Telegram drivers).
-2. Apply the maintained PostgreSQL bootstrap using `infra/runtime/postgres/deploy t0_trading`.
-   This adds the outbox tables; no lakehouse catalog change is required.
-3. Supply protected, read-only files outside the repo: one libpq DSN for the `t0_trading` database,
-   and one JSON file with `bot_token` and `chat_id`. Do not put token/password values on the command
-   line, in Git, or in logs. The existing metadata-postgres secret remains the password authority;
-   materializing the protected DSN file is an operator/deployment responsibility.
-4. Combine `t0-trading/deploy/compose.yaml` with `t0-trading/deploy/delivery.compose.yaml`, setting
-   `T0_DELIVERY_DSN_HOST_FILE` and `T0_TELEGRAM_HOST_FILE` to those files. Keep the existing capture
-   scheduler as lifecycle owner; enable the overlay in its normal deployment configuration.
-5. Start only `shadow-notifier` with the `notifications` profile when ready. Sending defaults to
-   disabled; set `T0_NOTIFICATIONS_ENABLED=true` explicitly. The notifier retries process failures
-   at most three times and never restarts the capture service as a dependency.
+1. Apply AWS Terraform to provision the empty Telegram secret and exact deployment IAM grants.
+   Terraform never owns secret values. `t0_notifications_enabled` defaults to `false` and is
+   published to `/lakehouse/dev/t0-trading/notifications_enabled` in SSM.
+2. Fill `bot_token` and `chat_id` in the private, Git-ignored template
+   `.secrets/dev/t0-trading/telegram.json` (`{"bot_token":"","chat_id":""}`), keeping permissions
+   at `0600`. On a fresh checkout, create this private file directly; it is not distributed in Git.
+   The blank template is rejected by sync. Populate Secrets Manager with
+   `AWS_PROFILE=tgbao-dev make t0-trading-telegram-secret-sync`.
+3. Initialize the existing T0 database secret if needed using
+   `AWS_PROFILE=tgbao-dev make t0-trading-secrets-init`. Set `t0_notifications_enabled = true` in
+   the AWS environment's Terraform inputs and apply once credentials are ready.
+4. Release/deploy the T0 image outside the market-data window. Reconcile reads the SSM flag;
+   enabled deployments read and validate the two owned secrets, bootstrap the maintained PostgreSQL schema,
+   and create both containers using `compose.yaml` plus `notifications.compose.yaml` with the
+   `notifications` profile. Disabled deployments remain capture-only without DB/Telegram access.
+   No lakehouse catalog or Airflow change is required.
+5. The existing weekday capture timer starts capture and independently starts
+   `lakehouse-t0-shadow-notifier.service`. Its failure cannot stop capture; capture shutdown and
+   the existing end-of-window timer stop the notifier. Both use systemd restart policy, with no
+   duplicate Docker restart owner. Reconcile creates containers but does not start capture or
+   send a Telegram message during deployment.
+
+The `services-deployer` host identity reads only the owned Telegram secret (in addition to its
+existing connector/image duties); the `metadata-postgres` identity remains the DB password owner.
+The capture AWS identity gains no Telegram or database-secret permission. Reconcile prepares both
+credentials in a private staging directory, then replaces their file sources under
+`~/.config/lakehouse/dev/secrets/t0-trading` only after preflight and stopping old consumers.
+Directories use `0700`, files use `0600`; Compose mounts them read-only under `/run/secrets`.
+Persistent `secrets.file` sources support the scheduler's later `docker start`, without putting
+credentials in container environment variables or requiring a separate materializer. The notifier
+has no AWS identity mount. Sync and reconcile share the `telegram-secret.jq` payload contract.
+Both credentials must validate before bootstrapping or recreating containers; failed preflight
+preserves existing secret files and cleans staged files. Subsequent deploys refresh the file sources
+and recreate consumers. Disabling notifications removes the notifier container but leaves protected
+host files in place; Secrets Manager remains the canonical source.
 
 For a bounded operator run (this sends a real message only when an eligible pending record exists):
 

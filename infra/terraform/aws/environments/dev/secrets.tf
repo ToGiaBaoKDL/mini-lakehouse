@@ -80,6 +80,13 @@ resource "aws_secretsmanager_secret" "t0_trading_ssi" {
   tags                    = local.tags
 }
 
+resource "aws_secretsmanager_secret" "t0_trading_telegram" {
+  name                    = "lakehouse/${local.environment}/t0-trading/telegram"
+  description             = "Telegram bot and destination owned by the T0 shadow notifier."
+  recovery_window_in_days = 7
+  tags                    = local.tags
+}
+
 resource "aws_secretsmanager_secret" "cloudflare_tunnel" {
   name                    = "lakehouse/${local.environment}/cloudflare/tunnel-token"
   description             = "Connector token for the Cloudflare Tunnel running on the services host."
