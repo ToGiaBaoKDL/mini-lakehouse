@@ -526,6 +526,18 @@ def test_t0_stream_capture_is_scheduled_externally_and_uses_its_workload_identit
     assert service["environment"]["T0_REALTIME_SHADOW"] == "${T0_REALTIME_SHADOW:-false}"
 
 
+def test_t0_notifications_are_separate_opt_in_and_use_secret_files() -> None:
+    overlay = _compose("t0-trading/deploy/delivery.compose.yaml")
+    sender = overlay["services"]["shadow-notifier"]
+    assert sender["profiles"] == ["notifications"]
+    assert sender["command"] == ["notify-shadow"]
+    assert sender["environment"]["T0_NOTIFICATIONS_ENABLED"] == "${T0_NOTIFICATIONS_ENABLED:-false}"
+    assert sender["restart"] == "on-failure:3"
+    assert "depends_on" not in overlay["services"]["stream-capture"]
+    assert all(item.endswith(":ro") for item in sender["volumes"])
+    assert "--extra notifications" in Path("t0-trading/Dockerfile").read_text()
+
+
 def test_all_container_images_are_immutable() -> None:
     airflow_dockerfile = (AIRFLOW_RUNTIME / "Dockerfile").read_text(encoding="utf-8")
     dbt_dockerfile = Path("analytics/dbt-project/Dockerfile").read_text(encoding="utf-8")

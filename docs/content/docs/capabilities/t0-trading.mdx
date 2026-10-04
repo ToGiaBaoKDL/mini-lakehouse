@@ -4,9 +4,10 @@ description: An evidence-gated SSI market-data and assisted-decision capability.
 ---
 
 T0 Trading has a catalog foundation, a scheduled bounded REST publication path, weekday live stream
-capture, manifest-scoped replay, and deterministic candidate arbitration. Shadow output remains
-a journal: the capability does not send notifications, initialize an SSI trading client, or place
-broker orders.
+capture, manifest-scoped replay, and deterministic candidate arbitration. Selected shadow candidates
+can optionally be persisted to a PostgreSQL outbox and delivered by a separate Telegram notifier.
+Notifications are disabled by default and remain diagnostic shadow evidence. The capability does
+not initialize an SSI trading client or place broker orders.
 
 ## Provider boundary
 
@@ -438,7 +439,8 @@ log. Exact retries are idempotent; stale concurrent writes fail instead of silen
 There is one immutable account snapshot per trade date for this single-account capability:
 refreshing an account snapshot cannot create a second independent cash/inventory budget.
 The operation log is append-only through the application API; this is not a database-owner
-tamper-proof audit store. PostgreSQL is not introduced into the raw-capture process.
+tamper-proof audit store. Paper persistence is not introduced into raw capture; the optional
+shadow-delivery sink below uses PostgreSQL only from its background consumer thread.
 
 The owning service supplies a psycopg autocommit connection and manages its lifecycle; install
 the optional `t0-trading[paper]` extra for the driver. Bootstrap SQL is maintained at
@@ -471,7 +473,7 @@ This change supplies the tested runtime and persistence boundary; it does **not*
 an autonomous paper worker. Connecting live selected candidates and quotes, supplying authoritative
 account/calendar inputs, scheduling clock ticks and routing consumer errors are explicit service
 integration requirements before paper activation. Raw capture and end-of-day Airflow remain
-independent and continue without PostgreSQL access.
+independent; base capture and end-of-day Airflow continue without PostgreSQL access.
 
 ## Shadow candidate arbitration
 
@@ -499,16 +501,95 @@ alerts, paper orders, or proof of an end-of-day S3 commit. No notifier is enable
 watermark delay. `T0_REALTIME_QUEUE_SIZE` defaults to 128. The consumer rejects future/expired
 decisions, ignores repeated or regressing per-symbol clocks, and invalidates queued decisions
 from before disconnect. Existing feature warmup and capture-gap handling still govern recovery.
-Overflow disables delivery; sink exceptions or conflicting selections for one clock disable the
-affected symbol. Consumer errors do not
+Overflow disables delivery; permanent sink errors or conflicting selections for one clock disable
+the affected symbol. Temporary database errors retry the same immutable selection with a bounded
+attempt budget and backoff, checking the original TTL and disconnect watermark on every attempt.
+An exhausted budget drops that selection without disabling future fresh decisions. Consumer errors do not
 fail the journal. Shutdown discards queued decisions rather than delivering a backlog. Completion
-logs include queue, delivery, stale, duplicate, disconnect and failure counters/state.
+logs include queue, delivery, stale, duplicate, disconnect, transient-error and retry-exhaustion counters/state.
 
-This is thread isolation, not process isolation or a durable outbox. A sink already running cannot
-be cancelled by Python and must bound its own I/O. Process restarts do not restore delivery state;
-the existing journal fails closed if it cannot establish a complete session. Durable idempotency,
-restart recovery, authoritative account/calendar admission and paper quote/clock delivery remain
-requirements before connecting external notifications or automated paper execution.
+The default log sink is thread isolation, not process isolation or a durable outbox. A sink already running cannot
+be cancelled by Python and must bound its own I/O. Process restarts do not restore its in-memory state;
+the existing journal fails closed if it cannot establish a complete session. Durable idempotency and
+restart recovery are provided by the opt-in delivery path below for records already committed to
+PostgreSQL. Authoritative account/calendar admission and paper quote/clock delivery remain
+requirements before automated paper execution.
+
+### Durable shadow delivery and Telegram
+
+The optional `--delivery-dsn-file` / `T0_DELIVERY_DSN_FILE` switches the realtime worker's sink
+from logs to `shadow_deliveries` in PostgreSQL. The writer owns serialization, checksums and an
+immutable deadline measured from the decision clock. A unique `(symbol, decision_at)` and
+arbitration identity make replayed writes idempotent and reject conflicting selections. No database
+I/O is performed in the SSI callback or raw-capture loop. Temporary connectivity, lock/statement
+timeouts and serialization/deadlock failures are classified centrally; authentication, schema and
+integrity failures are not treated as transient. Raw capture continues independently.
+
+Ownership is grouped under `t0_trading.notifications`: `postgres.py` owns durable outbox transitions,
+`runtime.py` owns DSN/connection lifecycle and the writer, `telegram.py` owns the SDK adapter and
+send-result handling, and `cli.py` owns notifier lifecycle and reconnects. Strategy/arbitration
+still owns the selected payload; `realtime.py` owns the bounded handoff and retry budget.
+
+`notify-shadow` is a separate process using the `python-telegram-bot` SDK. PostgreSQL owns
+`FOR UPDATE SKIP LOCKED` claims and lease fencing. The notifier validates the payload and checks
+the database deadline again, subtracting the database round-trip duration before reserving the full
+send timeout. One active sending lease serializes delivery to the configured destination without
+holding a transaction during network I/O.
+Only an explicit SDK `RetryAfter` schedules a bounded retry; permanent rejection becomes `FAILED`.
+Every `RetryAfter`, including the last attempt, also advances a shared PostgreSQL cooldown. Other
+pending messages and restarted notifier processes observe the same cooldown. Temporary DB failures
+reconnect the notifier without replaying an external send; orphan sending leases still become `UNKNOWN`.
+Timeout/network ambiguity or a lost sending lease becomes `UNKNOWN`, never automatically resent.
+See the SDK's [error contracts](https://docs.python-telegram-bot.org/en/stable/telegram.error.html).
+`PENDING` records survive restart, while expired records are never revived. This deliberately favors
+avoiding duplicate alerts over guaranteed delivery; Telegram sends and PostgreSQL commits are not
+one atomic transaction. The target chat is single-destination configuration, not per-message routing.
+
+Disconnect callbacks update an in-memory watermark immediately and the background worker persists
+it with priority, even if no later selection arrives. Pending pre-disconnect records expire, late
+idempotent writes cannot revive them, and claimed records must pass the durable watermark check
+before sending. Invalidation retries during temporary DB failures; new writes wait until the latest
+watermark is committed. The handoff is asynchronous: an already-started Telegram send cannot be
+recalled, and a callback racing the final eligibility check cannot be made atomic with Telegram.
+
+Durability starts at the PostgreSQL commit, **not** at the in-memory handoff. A capture process crash
+before that commit can lose a notification; the immutable raw capture/research evidence remains
+the recovery source, and old decisions must not be pushed as fresh alerts. The notifier does not
+resume feature state or repair a mid-session capture restart. The running service never rewrites
+historical journals or changes promotion requirements.
+
+Deployment is explicitly opt-in:
+
+1. Rebuild the T0 image (the `notifications` extra includes PostgreSQL and Telegram drivers).
+2. Apply the maintained PostgreSQL bootstrap using `infra/runtime/postgres/deploy t0_trading`.
+   This adds the outbox tables; no lakehouse catalog change is required.
+3. Supply protected, read-only files outside the repo: one libpq DSN for the `t0_trading` database,
+   and one JSON file with `bot_token` and `chat_id`. Do not put token/password values on the command
+   line, in Git, or in logs. The existing metadata-postgres secret remains the password authority;
+   materializing the protected DSN file is an operator/deployment responsibility.
+4. Combine `t0-trading/deploy/compose.yaml` with `t0-trading/deploy/delivery.compose.yaml`, setting
+   `T0_DELIVERY_DSN_HOST_FILE` and `T0_TELEGRAM_HOST_FILE` to those files. Keep the existing capture
+   scheduler as lifecycle owner; enable the overlay in its normal deployment configuration.
+5. Start only `shadow-notifier` with the `notifications` profile when ready. Sending defaults to
+   disabled; set `T0_NOTIFICATIONS_ENABLED=true` explicitly. The notifier retries process failures
+   at most three times and never restarts the capture service as a dependency.
+
+For a bounded operator run (this sends a real message only when an eligible pending record exists):
+
+```bash
+uv run --package t0-trading --extra notifications t0-trading notify-shadow \
+  --dsn-file /protected/t0-delivery-dsn \
+  --telegram-file /protected/t0-telegram.json \
+  --enabled --once
+```
+
+Messages explicitly say `SHADOW`, not promoted, and not an order; they carry the original decision
+time, expiry, reference mid price, strategy/group evidence, regime and lineage. No account data is
+sent. Individual-security halt coverage remains uncertified. The SDK owns HTTP encoding and error
+parsing; notifier logs emit status/error categories, never token-bearing URLs or exception bodies.
+Database `SENT` records retain Telegram message IDs; `UNKNOWN` records require operator inspection,
+not a bulk reset to `PENDING`. Message arrival after the network deadline cannot be ruled out by
+client-side timeout alone.
 
 ### Immutable end-of-day publication
 

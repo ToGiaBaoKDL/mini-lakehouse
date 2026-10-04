@@ -16,13 +16,14 @@ from t0_trading.configuration import load_configuration
 from t0_trading.context import DecisionContext, LiveDecisionContextEngine
 from t0_trading.features import FeatureSnapshot
 from t0_trading.market.session import MarketSession
+from t0_trading.persistence import TransientDatabaseError
 from t0_trading.realtime import RealtimeWorker
 from t0_trading.strategy.baselines import BaselineCandidate, GroupEvidence
 
 AT = datetime(2026, 10, 1, 2, 30, tzinfo=UTC)
 
 
-def _selection(symbol: str = "VIC", at: datetime = AT) -> RealtimeSelection:
+def realtime_selection(symbol: str = "VIC", at: datetime = AT) -> RealtimeSelection:
     feature = FeatureSnapshot(
         feature_version="microstructure-v1",
         configuration_version="market-state-v1",
@@ -111,13 +112,13 @@ def test_realtime_delivers_exact_selection_once_and_discards_late_or_future_cloc
     delivered: list[RealtimeSelection] = []
     worker = RealtimeWorker(delivered.append, maximum_delay=timedelta(seconds=15), clock=lambda: AT)
     try:
-        worker.offer(_selection(at=AT - timedelta(seconds=16)))
+        worker.offer(realtime_selection(at=AT - timedelta(seconds=16)))
         _wait_until(lambda: worker.health().stale == 1)
-        selection = _selection()
+        selection = realtime_selection()
         worker.offer(selection)
         worker.offer(selection)
         _wait_until(lambda: worker.health().duplicates == 1)
-        worker.offer(_selection("VHM", AT + timedelta(seconds=1)))
+        worker.offer(realtime_selection("VHM", AT + timedelta(seconds=1)))
         _wait_until(lambda: worker.health().stale == 2)
         assert delivered == [selection]
         assert worker.health().delivered == 1
@@ -135,8 +136,8 @@ def test_sink_error_disables_only_its_symbol_without_exposing_exception_text() -
 
     worker = RealtimeWorker(sink, maximum_delay=timedelta(seconds=15), clock=lambda: AT)
     try:
-        worker.offer(_selection())
-        worker.offer(_selection("VHM"))
+        worker.offer(realtime_selection())
+        worker.offer(realtime_selection("VHM"))
         _wait_until(lambda: worker.health().delivered == 1)
         assert delivered == ["VHM"]
         assert worker.health().failed_symbols == ("VIC",)
@@ -145,10 +146,151 @@ def test_sink_error_disables_only_its_symbol_without_exposing_exception_text() -
         worker.close()
 
 
+def test_transient_write_retries_same_identity_without_disabling_symbol() -> None:
+    calls: list[RealtimeSelection] = []
+
+    def sink(selection: RealtimeSelection) -> None:
+        calls.append(selection)
+        if len(calls) == 1:
+            raise TransientDatabaseError("OperationalError")
+
+    worker = RealtimeWorker(
+        sink, maximum_delay=timedelta(seconds=15), clock=lambda: AT, retry_delay=0.01
+    )
+    try:
+        selection = realtime_selection()
+        worker.offer(selection)
+        _wait_until(lambda: worker.health().delivered == 1)
+        assert calls == [selection, selection]
+        assert worker.health().failed_symbols == ()
+        assert worker.health().transient_errors == 1
+        assert worker.health().failure is None
+    finally:
+        worker.close()
+
+
+def test_exhausted_retry_budget_does_not_disable_later_fresh_decisions() -> None:
+    failed = realtime_selection(at=AT - timedelta(seconds=1))
+    delivered: list[RealtimeSelection] = []
+
+    def sink(selection: RealtimeSelection) -> None:
+        if selection == failed:
+            raise TransientDatabaseError("OperationalError")
+        delivered.append(selection)
+
+    worker = RealtimeWorker(
+        sink,
+        maximum_delay=timedelta(seconds=15),
+        clock=lambda: AT,
+        maximum_attempts=2,
+        retry_delay=0.01,
+    )
+    try:
+        worker.offer(failed)
+        _wait_until(lambda: worker.health().retry_exhausted == 1)
+        fresh = realtime_selection()
+        worker.offer(fresh)
+        _wait_until(lambda: worker.health().delivered == 1)
+        assert delivered == [fresh]
+        assert worker.health().transient_errors == 2
+        assert worker.health().failed_symbols == ()
+    finally:
+        worker.close()
+
+
+def test_retry_never_revives_an_expired_decision() -> None:
+    now = [AT]
+    attempts: list[RealtimeSelection] = []
+
+    def sink(selection: RealtimeSelection) -> None:
+        attempts.append(selection)
+        now[0] += timedelta(seconds=16)
+        raise TransientDatabaseError("OperationalError")
+
+    worker = RealtimeWorker(
+        sink, maximum_delay=timedelta(seconds=15), clock=lambda: now[0], retry_delay=0.01
+    )
+    try:
+        worker.offer(realtime_selection())
+        _wait_until(lambda: worker.health().stale == 1)
+        assert len(attempts) == 1
+        assert worker.health().delivered == 0
+        assert worker.health().failed_symbols == ()
+    finally:
+        worker.close()
+
+
+def test_disconnect_is_persisted_and_retried_without_waiting_for_a_new_selection() -> None:
+    watermarks: list[datetime] = []
+
+    def invalidate(at: datetime) -> None:
+        watermarks.append(at)
+        if len(watermarks) == 1:
+            raise TransientDatabaseError("OperationalError")
+
+    worker = RealtimeWorker(
+        lambda _: None,
+        maximum_delay=timedelta(seconds=15),
+        clock=lambda: AT,
+        invalidate=invalidate,
+        retry_delay=0.01,
+    )
+    try:
+        worker.disconnected(AT)
+        _wait_until(lambda: len(watermarks) == 2)
+        assert watermarks == [AT, AT]
+        assert worker.health().failed_symbols == ()
+        _wait_until(lambda: worker.health().failure is None)
+    finally:
+        worker.close()
+
+
+def test_disconnect_during_inflight_write_is_persisted_before_any_later_write() -> None:
+    entered, release = Event(), Event()
+    operations: list[str] = []
+
+    def sink(_: RealtimeSelection) -> None:
+        entered.set()
+        assert release.wait(2)
+        operations.append("write")
+
+    worker = RealtimeWorker(
+        sink,
+        maximum_delay=timedelta(seconds=15),
+        clock=lambda: AT,
+        invalidate=lambda _: operations.append("invalidate"),
+    )
+    try:
+        worker.offer(realtime_selection())
+        assert entered.wait(2)
+        worker.disconnected(AT)
+        worker.offer(realtime_selection("VHM"))
+        release.set()
+        _wait_until(lambda: worker.health().disconnected == 1)
+        assert operations == ["write", "invalidate"]
+    finally:
+        release.set()
+        worker.close()
+
+
+def test_graceful_close_persists_disconnect_without_draining_selections() -> None:
+    watermarks: list[datetime] = []
+    worker = RealtimeWorker(
+        lambda _: pytest.fail("shutdown must not deliver a selection"),
+        maximum_delay=timedelta(seconds=15),
+        clock=lambda: AT,
+        invalidate=watermarks.append,
+    )
+    worker.disconnected(AT)
+    health = worker.close()
+    assert watermarks == [AT]
+    assert health.failure is None
+
+
 def test_conflicting_selection_for_one_clock_is_not_treated_as_an_exact_retry() -> None:
     delivered: list[RealtimeSelection] = []
     worker = RealtimeWorker(delivered.append, maximum_delay=timedelta(seconds=15), clock=lambda: AT)
-    selection = _selection()
+    selection = realtime_selection()
     try:
         worker.offer(selection)
         _wait_until(lambda: worker.health().delivered == 1)
@@ -175,10 +317,10 @@ def test_overflow_is_fail_closed_and_capture_producer_does_not_wait_for_sink() -
 
     worker = RealtimeWorker(sink, maximum_delay=timedelta(seconds=15), capacity=1, clock=lambda: AT)
     try:
-        worker.offer(_selection())
+        worker.offer(realtime_selection())
         assert entered.wait(2)
-        worker.offer(_selection("VHM"))
-        worker.offer(_selection("VHM"))
+        worker.offer(realtime_selection("VHM"))
+        worker.offer(realtime_selection("VHM"))
         assert worker.health().failure == "QUEUE_OVERFLOW"
         assert not worker.health().enabled
     finally:
@@ -192,11 +334,11 @@ def test_disconnect_invalidates_pending_selections_but_not_future_warmed_decisio
     worker = RealtimeWorker(delivered.append, maximum_delay=timedelta(seconds=15), clock=lambda: AT)
     try:
         worker.disconnected(AT - timedelta(seconds=1))
-        worker.offer(_selection(at=AT - timedelta(seconds=2)))
+        worker.offer(realtime_selection(at=AT - timedelta(seconds=2)))
         _wait_until(lambda: worker.health().disconnected == 1)
-        worker.offer(_selection())
+        worker.offer(realtime_selection())
         _wait_until(lambda: worker.health().delivered == 1)
-        assert delivered == [_selection()]
+        assert delivered == [realtime_selection()]
     finally:
         worker.close()
 
@@ -212,13 +354,13 @@ def test_shutdown_does_not_deliver_queued_decisions_or_wait_indefinitely() -> No
 
     worker = RealtimeWorker(sink, maximum_delay=timedelta(seconds=15), clock=lambda: AT)
     try:
-        worker.offer(_selection())
+        worker.offer(realtime_selection())
         assert entered.wait(2)
-        worker.offer(_selection("VHM"))
+        worker.offer(realtime_selection("VHM"))
         health = worker.close(timeout=0)
         assert health.failure == "SHUTDOWN_TIMEOUT"
         assert health.queued == 0
-        worker.offer(_selection("VHM"))
+        worker.offer(realtime_selection("VHM"))
         assert worker.health().queued == 0
     finally:
         release.set()
@@ -228,7 +370,7 @@ def test_shutdown_does_not_deliver_queued_decisions_or_wait_indefinitely() -> No
 
 @pytest.mark.parametrize("field", ["context", "features", "arbitration"])
 def test_selection_rejects_mixed_lineage(field: str) -> None:
-    first, other = _selection(), _selection(at=AT + timedelta(seconds=5))
+    first, other = realtime_selection(), realtime_selection(at=AT + timedelta(seconds=5))
     with pytest.raises(ValueError):
         RealtimeSelection(**{**first.model_dump(), field: getattr(other, field)})
 
@@ -238,7 +380,7 @@ def test_selection_rejects_mixed_lineage(field: str) -> None:
 def test_journal_handoff_preserves_bytes_and_consumer_failure_cannot_fail_journal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, consumer_fails: bool, live: bool
 ) -> None:
-    selection = _selection()
+    selection = realtime_selection()
     config = load_configuration(Path("t0-trading/config/trading.yaml"))
     policy = config.resolve_candidate_arbitration(AT.date())
     assert policy is not None

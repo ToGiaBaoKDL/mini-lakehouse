@@ -1,21 +1,30 @@
 """Causal, immutable handoff shared by shadow journals and realtime consumers."""
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from t0_trading.arbitration.model import CandidateArbitration, require_selected_candidate
 from t0_trading.context.model import DecisionContext
 from t0_trading.features.model import FeatureSnapshot
+from t0_trading.identity import canonical_json
 from t0_trading.strategy.baselines import RELATIVE_PEER_LAG, BaselineCandidate
 
 
 class RealtimeSelection(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    schema_version: Literal[1] = 1
     candidate: BaselineCandidate
     arbitration: CandidateArbitration
     context: DecisionContext
     features: tuple[FeatureSnapshot, ...]
     lagged_peer: FeatureSnapshot | None = None
+
+    def canonical_bytes(self) -> bytes:
+        # Computed feature fields participate in their own feature hash, but must not become
+        # forbidden input fields when this enclosing payload is rehydrated after a restart.
+        return canonical_json(self.model_dump(mode="json", round_trip=True))
 
     @model_validator(mode="after")
     def validate_lineage(self) -> "RealtimeSelection":

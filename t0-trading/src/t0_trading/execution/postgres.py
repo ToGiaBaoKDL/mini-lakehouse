@@ -6,25 +6,10 @@ are added to the raw-capture process. Compatible with a psycopg connection's tra
 
 from __future__ import annotations
 
-from contextlib import AbstractContextManager
 from datetime import date
-from typing import Protocol
 
 from t0_trading.execution.runtime import PaperSession
-
-
-class _Cursor(Protocol):
-    rowcount: int
-
-    def fetchone(self) -> tuple[object, ...] | None: ...
-    def fetchall(self) -> list[tuple[object, ...]]: ...
-
-
-class PaperConnection(Protocol):
-    autocommit: bool
-
-    def transaction(self) -> AbstractContextManager[object]: ...
-    def execute(self, query: str, params: tuple[object, ...]) -> _Cursor: ...
+from t0_trading.persistence import PostgresConnection
 
 
 class PaperConflict(RuntimeError):
@@ -33,7 +18,7 @@ class PaperConflict(RuntimeError):
 
 class PostgresPaperRepository:
     def __init__(
-        self, connection: PaperConnection, *, trade_date: date, account_sha256: str
+        self, connection: PostgresConnection, *, trade_date: date, account_sha256: str
     ) -> None:
         if not connection.autocommit:
             raise ValueError(

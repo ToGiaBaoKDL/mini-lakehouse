@@ -24,7 +24,7 @@ COPY t0-trading/src ./t0-trading/src
 COPY infra/runtime/identity/install-aws-signing-helper /tmp/install-aws-signing-helper
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --package t0-trading --no-editable \
+    uv sync --frozen --no-dev --package t0-trading --extra notifications --no-editable \
     && /tmp/install-aws-signing-helper "$TARGETARCH" \
     && rm -f /usr/local/bin/uv /usr/local/bin/uvx /tmp/install-aws-signing-helper
 

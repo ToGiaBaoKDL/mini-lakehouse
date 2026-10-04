@@ -67,6 +67,8 @@ from t0_trading.market.reconciliation import (
     reconcile_session,
     select_feature_capture,
 )
+from t0_trading.notifications.cli import notify_shadow
+from t0_trading.notifications.runtime import DurableShadowSink
 from t0_trading.operations import operational_status
 from t0_trading.outcomes import OutcomeLabel, build_outcome_audit, label_outcomes
 from t0_trading.promotion import (
@@ -508,6 +510,10 @@ def capture_stream_command(
     realtime_queue_size: Annotated[
         int, typer.Option(min=1, max=10_000, envvar="T0_REALTIME_QUEUE_SIZE")
     ] = 128,
+    delivery_dsn_file: Annotated[
+        Path | None,
+        typer.Option(envvar="T0_DELIVERY_DSN_FILE", help="Opt-in durable shadow sink DSN file."),
+    ] = None,
 ) -> None:
     """Capture one bounded market window as reconnect-safe immutable segments."""
     environment = os.environ.get("LAKEHOUSE_ENVIRONMENT", "dev")
@@ -517,6 +523,8 @@ def capture_stream_command(
         configuration = load_configuration(config)
         version = configuration.resolve(trade_date)
         capture_scope = configuration.capture_scope(trade_date)
+        if delivery_dsn_file is not None and not realtime_shadow:
+            raise ValueError("durable delivery requires realtime shadow")
         if realtime_shadow and realtime_max_delay_seconds <= version.features.cadence_seconds:
             raise ValueError("realtime maximum delay must exceed the journal watermark delay")
         if realtime_shadow and configuration.resolve_candidate_arbitration(trade_date) is None:
@@ -564,8 +572,18 @@ def capture_stream_command(
             arbitration = configuration.resolve_candidate_arbitration(trade_date)
             if arbitration is not None:
                 if realtime_shadow:
+                    durable_sink = (
+                        DurableShadowSink(
+                            delivery_dsn_file,
+                            lifetime=timedelta(seconds=realtime_max_delay_seconds),
+                        )
+                        if delivery_dsn_file is not None
+                        else None
+                    )
                     realtime = RealtimeWorker(
-                        lambda selection: typer.echo(
+                        durable_sink
+                        if durable_sink is not None
+                        else lambda selection: typer.echo(
                             json.dumps(
                                 {
                                     "event": "t0_realtime_shadow_selection",
@@ -584,6 +602,7 @@ def capture_stream_command(
                         ),
                         maximum_delay=timedelta(seconds=realtime_max_delay_seconds),
                         capacity=realtime_queue_size,
+                        invalidate=durable_sink.invalidate if durable_sink is not None else None,
                     )
                 journal_workspace = TemporaryDirectory(prefix="t0-shadow-")
                 journal = ShadowArbitrationJournal(
@@ -1296,3 +1315,4 @@ app.command("ensure-shadow-journal")(ensure_shadow_journal_command)
 app.command("validate-stream-day")(validate_stream_day_command)
 app.command("certify-stream-day")(certify_stream_day_command)
 app.command("operational-status")(operational_status_command)
+app.command("notify-shadow")(notify_shadow)

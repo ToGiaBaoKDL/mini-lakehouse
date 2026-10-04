@@ -31,7 +31,7 @@ from t0_trading.execution import (
     reserve_paper_entry,
     settle_paper_entry,
 )
-from t0_trading.execution.postgres import PaperConflict, PaperConnection, PostgresPaperRepository
+from t0_trading.execution.postgres import PaperConflict, PostgresPaperRepository
 from t0_trading.execution.readiness import PaperReadiness
 from t0_trading.execution.runtime import (
     PaperRuntime,
@@ -42,6 +42,7 @@ from t0_trading.execution.runtime import (
     submit_entry,
     submit_exit,
 )
+from t0_trading.persistence import PostgresConnection
 from t0_trading.promotion import PromotionGateReport, PromotionTargetResult
 from t0_trading.strategy.baselines import (
     BASELINE_GROUP_NAMES,
@@ -483,7 +484,7 @@ def test_postgres_paper_atomic_commit_retry_conflict_and_rollback() -> None:
             connection.execute(f'SET search_path TO "{namespace}"')
             connection.execute(schema)
             repo = PostgresPaperRepository(
-                cast(PaperConnection, connection),
+                cast(PostgresConnection, connection),
                 trade_date=TRADE_DATE,
                 account_sha256=initial.account.sha256,
             )
