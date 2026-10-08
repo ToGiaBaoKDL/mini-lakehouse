@@ -9,6 +9,7 @@ import pytest
 from t0_trading.arbitration import ShadowArbitrationJournal
 from t0_trading.configuration import load_configuration
 from t0_trading.context import DecisionContext, LiveDecisionContextEngine, ZoneContext
+from t0_trading.context.model import MarketStatusContext
 from t0_trading.controls import CostPolicy
 from t0_trading.features import FeatureSnapshot, WindowFeatures
 from t0_trading.market.session import MarketSession
@@ -202,7 +203,19 @@ def test_incremental_journal_matches_batch_scoring_with_causal_peer_history(
                 if item.decision_at == at
             ),
             indices=(),
-            market_statuses=(),
+            market_statuses=(
+                MarketStatusContext(
+                    market="HOSE",
+                    status="LO",
+                    age_seconds=Decimal(1),
+                    is_tradable=True,
+                    source_kind="ssi_stream_market_status",
+                    source_record_sha256="d" * 64,
+                    stream_session_id="session-1",
+                    receive_sequence=9,
+                    reasons=(),
+                ),
+            ),
             market_confirmation_strength=Decimal("0.5"),
             regime="TREND_UP",
             reasons=(),

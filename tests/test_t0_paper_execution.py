@@ -44,6 +44,7 @@ from t0_trading.execution.runtime import (
 )
 from t0_trading.persistence import PostgresConnection
 from t0_trading.promotion import PromotionGateReport, PromotionTargetResult
+from t0_trading.promotion.evidence import resolve_research_lineage
 from t0_trading.strategy.baselines import (
     BASELINE_GROUP_NAMES,
     BaselineCandidate,
@@ -239,6 +240,31 @@ def _runtime_case(quantity: int = 100):
     request = request.model_copy(
         update={"risk": request.risk.model_copy(update={"max_cycle_quantity": quantity})}
     )
+    lineage = resolve_research_lineage(config, TRADE_DATE, request.costs)
+    candidate = request.candidate.model_copy(
+        update={
+            "context_snapshot_sha256": "b" * 64,
+            "context_configuration_sha256": lineage.context_configuration_sha256,
+            "context_version": config.resolve_context(TRADE_DATE).version,
+            "context_data_mode": "LIVE",
+            "market_regime": "TREND_UP",
+        }
+    )
+    arbitration = request.arbitration.model_copy(
+        update={
+            "candidate_sha256": candidate.sha256,
+            "selected_candidate_sha256": candidate.sha256,
+        }
+    )
+    request = request.model_copy(
+        update={
+            "candidate": candidate,
+            "arbitration": arbitration,
+            "selection": request.selection.model_copy(
+                update={"arbitration_sha256": arbitration.sha256}
+            ),
+        }
+    )
     session = PaperSession(account=request.account, costs=request.costs, ledger=request.resources)
     ready = PaperReadiness(
         trade_date=TRADE_DATE,
@@ -246,6 +272,7 @@ def _runtime_case(quantity: int = 100):
         mode="PAPER",
         reason="PROMOTION_PASS",
         promotion=request.promotion,
+        research_lineage=lineage,
     )
     return config, request, session, ready
 
@@ -261,6 +288,57 @@ def _next_quote(request: PaperExecutionRequest, offset: int = 1, quantity: int =
             "source_sha256": f"{offset:064x}",
         }
     )
+
+
+@pytest.mark.parametrize("changed", ["features", "outcomes", "costs", "candidate_context"])
+def test_paper_admission_rechecks_readiness_against_active_session_assumptions(
+    changed: str,
+) -> None:
+    config, request, session, ready = _runtime_case()
+    if changed == "features":
+        version = config.resolve(TRADE_DATE)
+        config = config.model_copy(
+            update={
+                "versions": (
+                    version.model_copy(
+                        update={
+                            "features": version.features.model_copy(
+                                update={"warmup_seconds": version.features.warmup_seconds + 60}
+                            )
+                        }
+                    ),
+                )
+            }
+        )
+    elif changed == "outcomes":
+        outcome = config.resolve_outcomes(TRADE_DATE)
+        config = config.model_copy(
+            update={
+                "outcomes": (
+                    outcome.model_copy(
+                        update={
+                            "execution_latency_milliseconds": outcome.execution_latency_milliseconds
+                            + 1
+                        }
+                    ),
+                )
+            }
+        )
+    elif changed == "costs":
+        costs = session.costs.model_copy(update={"buy_fee_bps": session.costs.buy_fee_bps + 1})
+        session = session.model_copy(update={"costs": costs})
+        request = request.model_copy(update={"costs": costs})
+    else:
+        request = request.model_copy(
+            update={
+                "candidate": request.candidate.model_copy(
+                    update={"context_configuration_sha256": "a" * 64}
+                )
+            }
+        )
+    with pytest.raises(ValueError, match="admission lineage mismatch"):
+        submit_entry(session, request, ready, config)
+    assert session.revision == 0 and not session.intents
 
 
 def test_runtime_replays_partial_fills_and_settles_only_once() -> None:

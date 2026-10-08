@@ -14,6 +14,7 @@ from t0_trading.arbitration.model import CandidateArbitration
 from t0_trading.arbitration.selection import RealtimeSelection
 from t0_trading.configuration import load_configuration
 from t0_trading.context import DecisionContext, LiveDecisionContextEngine
+from t0_trading.context.model import MarketStatusContext
 from t0_trading.features import FeatureSnapshot
 from t0_trading.market.session import MarketSession
 from t0_trading.persistence import TransientDatabaseError
@@ -57,7 +58,19 @@ def realtime_selection(symbol: str = "VIC", at: datetime = AT) -> RealtimeSelect
         decision_at=at,
         zones=(),
         indices=(),
-        market_statuses=(),
+        market_statuses=(
+            MarketStatusContext(
+                market="HOSE",
+                status="LO",
+                age_seconds=Decimal(1),
+                is_tradable=True,
+                source_kind="ssi_stream_market_status",
+                source_record_sha256="d" * 64,
+                stream_session_id="session-1",
+                receive_sequence=9,
+                reasons=(),
+            ),
+        ),
         market_confirmation_strength=Decimal("0.5"),
         regime="TREND_UP",
         reasons=(),
@@ -106,6 +119,76 @@ def _wait_until(predicate: Callable[[], bool]) -> None:
     while not predicate() and monotonic() < deadline:
         sleep(0.005)
     assert predicate()
+
+
+@pytest.mark.parametrize("status_kind", ["missing", "halt", "calendar"])
+def test_realtime_handoff_rejects_unverified_market_authorization(status_kind: str) -> None:
+    selection = realtime_selection()
+    statuses = ()
+    if status_kind == "halt":
+        statuses = (
+            selection.context.market_statuses[0].model_copy(
+                update={"status": "HALT", "is_tradable": False, "reasons": ("MARKET_NOT_TRADABLE",)}
+            ),
+        )
+    elif status_kind == "calendar":
+        statuses = (
+            selection.context.market_statuses[0].model_copy(
+                update={
+                    "source_kind": "configured_market_calendar",
+                    "stream_session_id": None,
+                    "receive_sequence": None,
+                }
+            ),
+        )
+    context = selection.context.model_copy(update={"market_statuses": statuses})
+    candidate = selection.candidate.model_copy(update={"context_snapshot_sha256": context.sha256})
+    arbitration = selection.arbitration.model_copy(
+        update={
+            "candidate_sha256": candidate.sha256,
+            "selected_candidate_sha256": candidate.sha256,
+        }
+    )
+    with pytest.raises(ValueError, match="verified market status"):
+        RealtimeSelection(
+            candidate=candidate,
+            arbitration=arbitration,
+            context=context,
+            features=selection.features,
+        )
+
+
+def test_historical_scoring_semantics_do_not_weaken_realtime_unknown_regime_gate() -> None:
+    selection = realtime_selection()
+    context = selection.context.model_copy(
+        update={
+            "regime": "UNKNOWN",
+            "reasons": ("VN30_missing",),
+            "market_confirmation_strength": None,
+        }
+    )
+    assert context.market_basis is None and context.is_tradable
+    assert context.selection_block_reason() is None
+    assert context.selection_block_reason(realtime=True) == "regime_ineligible"
+    candidate = selection.candidate.model_copy(
+        update={
+            "context_snapshot_sha256": context.sha256,
+            "market_regime": "UNKNOWN",
+        }
+    )
+    arbitration = selection.arbitration.model_copy(
+        update={
+            "candidate_sha256": candidate.sha256,
+            "selected_candidate_sha256": candidate.sha256,
+        }
+    )
+    with pytest.raises(ValueError, match="healthy regime"):
+        RealtimeSelection(
+            candidate=candidate,
+            arbitration=arbitration,
+            context=context,
+            features=selection.features,
+        )
 
 
 def test_realtime_delivers_exact_selection_once_and_discards_late_or_future_clocks() -> None:

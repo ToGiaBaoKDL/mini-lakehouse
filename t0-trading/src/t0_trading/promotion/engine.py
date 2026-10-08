@@ -80,21 +80,12 @@ def evaluate_arbitrated_walk_forward(
         or not policy.contains(value)
         or not arbitration_policy.contains(value)
         or item.arbitration_version != arbitration_policy.version
+        or item.baseline_version != arbitration_policy.candidate_version
         or item.arbitration_configuration_sha256 != arbitration_policy.sha256
         for value, item in zip(dates, reports, strict=True)
     ):
         raise ValueError("arbitrated sessions do not match prospective policies")
-    lineages = {
-        (
-            item.baseline_version,
-            item.feature_configuration_sha256,
-            item.context_configuration_sha256,
-            item.outcome_configuration_sha256,
-            item.cost_policy_sha256,
-        )
-        for item in reports
-    }
-    if len(lineages) != 1:
+    if any(item.research_lineage != reports[0].research_lineage for item in reports[1:]):
         raise ValueError("arbitrated sessions must share complete research lineage")
     keys = tuple(
         (item.strategy, item.symbol, item.horizon_seconds) for item in reports[0].evaluations

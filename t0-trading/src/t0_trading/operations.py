@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict
 from t0_trading.arbitration.journal import ShadowArbitrationManifest
 from t0_trading.configuration import TradingConfiguration
 from t0_trading.context import DecisionContext
+from t0_trading.context.regime import context_identity
 from t0_trading.evidence_paths import PROMOTION_EVIDENCE_PREFIX, shadow_journal_manifest_key
 from t0_trading.execution.engine import reduce_paper_order
 from t0_trading.execution.readiness import PaperReadiness, load_paper_readiness
@@ -57,6 +58,7 @@ def operational_status(
         trade_date=trade_date,
         previous_session=previous_session,
         enabled=paper_enabled,
+        costs=paper_session.costs if paper_session is not None else None,
     )
     reasons = [readiness.reason, "LIVE_FRESHNESS_NOT_OBSERVED", "SECURITY_STATUS_NOT_CERTIFIED"]
     journal_state: Literal["COMMITTED", "MISSING", "INVALID"] = "MISSING"
@@ -116,10 +118,12 @@ def operational_status(
             raise ValueError("live status requires an aware observation clock")
         age = (observed_at.astimezone(UTC) - context.decision_at).total_seconds()
         policy = configuration.resolve_context(trade_date)
+        regime_policy = configuration.resolve_regime(trade_date)
         if (
             context.trade_date != trade_date
             or age < 0
-            or context.context_configuration_sha256 != policy.sha256
+            or context.context_configuration_sha256
+            != context_identity(policy, regime_policy, configuration.resolve_breadth(trade_date))
         ):
             raise ValueError("live status context lineage mismatch")
         for item in context.indices:
@@ -138,12 +142,25 @@ def operational_status(
             )
         for item in context.market_statuses:
             market_health[item.market] = item.reasons
+        for basket in context.breadth:
+            market_health[f"breadth:{basket.index}"] = basket.reasons
+        if context.market_basis == "CONSTITUENT_BREADTH":
+            analytics_health = market_health.get(
+                f"breadth:{context.market_reference_index}", ("MISSING_REQUIRED_BREADTH",)
+            )
+            context_age_limit = configuration.resolve(trade_date).features.cadence_seconds
+        else:
+            analytics_health = tuple(
+                reason for item in context.indices for reason in market_health[item.index]
+            )
+            context_age_limit = policy.index_stale_after_seconds
         freshness = (
             "CURRENT"
             if not context.reasons
-            and not any(market_health.values())
+            and not analytics_health
+            and context.is_tradable
             and context.data_mode == "LIVE"
-            and age <= policy.index_stale_after_seconds
+            and age <= context_age_limit
             else "STALE_OR_INCOMPLETE"
         )
         reasons.remove("LIVE_FRESHNESS_NOT_OBSERVED")

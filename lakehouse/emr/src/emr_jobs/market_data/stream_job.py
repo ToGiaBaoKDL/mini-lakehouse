@@ -147,6 +147,7 @@ def run(
             arbitration_policy=arbitration_policy,
             capture_evidence_sha256=feature_capture.evidence_sha256,
             breadth_policy=trading.resolve_breadth(trade_date),
+            regime_policy=trading.resolve_regime(trade_date),
             breadth_membership=feature_capture.breadth_membership,
         )
         logger.info(

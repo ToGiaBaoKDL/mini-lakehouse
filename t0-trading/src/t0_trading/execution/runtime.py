@@ -34,6 +34,7 @@ from t0_trading.execution.model import (
 )
 from t0_trading.execution.readiness import PaperReadiness
 from t0_trading.identity import canonical_json, sha256
+from t0_trading.promotion.evidence import resolve_research_lineage
 
 Operation = PaperOrderIntent | PaperOrderEvent
 
@@ -160,12 +161,20 @@ def submit_entry(
 ) -> PaperSession:
     if readiness.mode != "PAPER":
         return session
+    lineage = readiness.research_lineage
+    if lineage is None:
+        raise ValueError("paper admission requires research lineage")
     if (
         readiness.promotion != request.promotion
         or readiness.trade_date != request.candidate.trade_date
         or readiness.previous_session >= readiness.trade_date
         or request.account != session.account
         or request.costs != session.costs
+        or readiness.trade_date != session.ledger.trade_date
+        or lineage
+        != resolve_research_lineage(configuration, session.ledger.trade_date, session.costs)
+        or request.candidate.baseline_version != lineage.baseline_version
+        or request.candidate.context_configuration_sha256 != lineage.context_configuration_sha256
     ):
         raise ValueError("paper admission lineage mismatch")
     if any(

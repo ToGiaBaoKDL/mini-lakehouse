@@ -92,6 +92,16 @@ breadth:
     stale_after_seconds: 90
     minimum_participation: "0.80"
     confirmation_advance_ratio: "0.60"
+# Prospective research basis, not a tuned or capital-authorized strategy.
+# VNREAL remains optional context; never substitute it for the required VN30 breadth.
+regimes:
+  - version: constituent-regime-v1
+    effective_from: 2026-10-09
+    effective_to: null
+    basis: CONSTITUENT_BREADTH
+    reference_index: VN30
+    trend_threshold_bps: "10"
+    high_dispersion_threshold_bps: "150"
 contexts:
   - version: decision-context-v3
     effective_from: 2026-08-27

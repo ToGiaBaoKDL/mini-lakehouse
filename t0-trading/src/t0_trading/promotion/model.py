@@ -28,6 +28,17 @@ class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+class ResearchLineage(_StrictModel):
+    """Outcome-independent assumptions shared by promotion and paper admission."""
+
+    baseline_version: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
+    arbitration_configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    feature_configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    context_configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    outcome_configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    cost_policy_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class PromotionTargetResult(_StrictModel):
     strategy: BaselineName
     symbol: str = Field(pattern=r"^[A-Z][A-Z0-9]*$")
@@ -85,6 +96,9 @@ class ArbitratedSessionReport(_StrictModel):
     context_configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     outcome_configuration_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     cost_policy_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    cost_assumptions_sha256: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$", exclude_if=lambda value: value is None
+    )
     capture_evidence_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     shadow_audit_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     capture_gap_count: int = Field(ge=0)
@@ -101,6 +115,19 @@ class ArbitratedSessionReport(_StrictModel):
 
     def canonical_bytes(self) -> bytes:
         return canonical_json(self.model_dump(mode="json"))
+
+    @property
+    def research_lineage(self) -> ResearchLineage:
+        """Fixed assumptions defining a promotion cohort, independent of outcomes."""
+        # Old sealed evidence retains its exact cost hash, never inferred fee equivalence.
+        return ResearchLineage(
+            baseline_version=self.baseline_version,
+            arbitration_configuration_sha256=self.arbitration_configuration_sha256,
+            feature_configuration_sha256=self.feature_configuration_sha256,
+            context_configuration_sha256=self.context_configuration_sha256,
+            outcome_configuration_sha256=self.outcome_configuration_sha256,
+            cost_policy_sha256=self.cost_assumptions_sha256 or self.cost_policy_sha256,
+        )
 
     @property
     def sha256(self) -> str:

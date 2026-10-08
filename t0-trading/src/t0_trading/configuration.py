@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import date, time, timedelta
 from decimal import Decimal
 from itertools import pairwise
 from pathlib import Path
@@ -44,7 +44,9 @@ class _EffectiveVersion(_StrictModel):
 
     @property
     def sha256(self) -> str:
-        return sha256(self.canonical_bytes())
+        # Closing an interval changes resolution metadata, not the policy's assumptions.
+        # Retain the original open-ended representation to preserve historical identities.
+        return sha256(canonical_json({**self.model_dump(mode="json"), "effective_to": None}))
 
 
 _EffectiveVersionT = TypeVar("_EffectiveVersionT", bound=_EffectiveVersion)
@@ -403,6 +405,30 @@ class TradingVersion(_EffectiveVersion):
     features: FeatureConfiguration
 
 
+class RegimeVersion(_EffectiveVersion):
+    """Declared analytical basis; never a substitute for market-status authorization."""
+
+    basis: Literal["OFFICIAL_INDEX", "CONSTITUENT_BREADTH"]
+    reference_index: str | None = None
+    trend_threshold_bps: Decimal | None = Field(default=None, gt=0)
+    high_dispersion_threshold_bps: Decimal | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_basis(self) -> RegimeVersion:
+        breadth_fields = (
+            self.reference_index,
+            self.trend_threshold_bps,
+            self.high_dispersion_threshold_bps,
+        )
+        if self.basis == "CONSTITUENT_BREADTH":
+            if any(value is None for value in breadth_fields):
+                raise ValueError("breadth regime requires reference and explicit thresholds")
+            _require_identifiers("regime reference", (self.reference_index or "",))
+        elif any(value is not None for value in breadth_fields):
+            raise ValueError("official regime uses the context index thresholds")
+        return self
+
+
 class TradingConfiguration(_StrictModel):
     schema_version: Literal[2] = 2
     capture: CaptureConfiguration
@@ -414,6 +440,7 @@ class TradingConfiguration(_StrictModel):
     paper_executions: tuple[PaperExecutionVersion, ...]
     contexts: tuple[ContextVersion, ...]
     breadth: tuple[BreadthVersion, ...] = Field(default=(), exclude_if=lambda value: not value)
+    regimes: tuple[RegimeVersion, ...] = Field(default=(), exclude_if=lambda value: not value)
 
     @model_validator(mode="after")
     def validate_versions(self) -> TradingConfiguration:
@@ -441,6 +468,28 @@ class TradingConfiguration(_StrictModel):
                 for item in self.breadth
             ):
                 raise ValueError("breadth indices require captured membership")
+        if self.regimes:
+            _validate_effective_versions(self.regimes, "regime")
+            for regime in self.regimes:
+                if regime.basis != "CONSTITUENT_BREADTH":
+                    continue
+                boundaries = {regime.effective_from}
+                boundaries.update(
+                    item.effective_to + timedelta(days=1)
+                    for item in self.breadth
+                    if item.effective_to is not None
+                    and regime.contains(item.effective_to + timedelta(days=1))
+                )
+                for boundary in sorted(boundaries):
+                    breadth = self.resolve_breadth(boundary)
+                    if breadth is None or regime.reference_index not in breadth.indices:
+                        raise ValueError("breadth regime requires an effective captured reference")
+                if any(
+                    regime.reference_index not in item.indices
+                    for item in self.breadth
+                    if _intervals_overlap(regime, item)
+                ):
+                    raise ValueError("regime reference must remain covered by breadth policies")
         for arbitration in self.candidate_arbitrations:
             overlapping_outcomes = tuple(
                 outcome for outcome in self.outcomes if _intervals_overlap(arbitration, outcome)
@@ -526,6 +575,9 @@ class TradingConfiguration(_StrictModel):
 
     def resolve_breadth(self, value: date) -> BreadthVersion | None:
         return self._resolve_optional(self.breadth, value, "breadth") if self.breadth else None
+
+    def resolve_regime(self, value: date) -> RegimeVersion | None:
+        return self._resolve_optional(self.regimes, value, "regime") if self.regimes else None
 
     def resolve_candidate_arbitration(self, value: date) -> CandidateArbitrationVersion | None:
         """Return the prospective policy, or none before arbitration was declared."""

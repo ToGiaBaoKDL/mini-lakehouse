@@ -69,6 +69,13 @@ class CostPolicy(_StrictModel):
     def sha256(self) -> str:
         return sha256(self.canonical_bytes())
 
+    @property
+    def assumptions_sha256(self) -> str:
+        """Comparable fee assumptions across sessions; validity is checked separately."""
+        return sha256(
+            canonical_json(self.model_dump(mode="json", exclude={"effective_from", "effective_to"}))
+        )
+
 
 class AdvancePolicy(_StrictModel):
     """Opt-in sale-proceeds advance; absent means pending sales are not spendable."""

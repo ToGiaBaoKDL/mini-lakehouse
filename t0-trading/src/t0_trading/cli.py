@@ -48,6 +48,7 @@ from t0_trading.configuration import (
     load_configuration,
 )
 from t0_trading.context import build_decision_contexts
+from t0_trading.context.regime import context_identity
 from t0_trading.controls import (
     PUBLIC_VNDIRECT_DTA_CHECKED_AT,
     public_vndirect_dta_costs,
@@ -223,6 +224,7 @@ def _evaluate_arbitrated_session_day(
         version,
         configuration.resolve_context(trade_date),
         breadth_policy=configuration.resolve_breadth(trade_date),
+        regime_policy=configuration.resolve_regime(trade_date),
         breadth_membership=reader.breadth_membership,
     )
     candidates = score_buy_first_baselines(snapshots, contexts)
@@ -305,6 +307,8 @@ def check_config(
         )
         promotion_evaluation = configuration.resolve_baseline_evaluation(selected_date, "PROMOTION")
         context = configuration.resolve_context(selected_date)
+        regime = configuration.resolve_regime(selected_date)
+        breadth = configuration.resolve_breadth(selected_date)
         arbitration = configuration.resolve_candidate_arbitration(selected_date)
         promotion_gate = configuration.resolve_promotion_gate(selected_date)
         paper_execution = configuration.resolve_paper_execution(selected_date)
@@ -326,6 +330,10 @@ def check_config(
                 "exploratory_evaluation_version_sha256": exploratory_evaluation.sha256,
                 "context_version": context.version,
                 "context_version_sha256": context.sha256,
+                "regime_policy_version": regime.version if regime else None,
+                "market_basis": regime.basis if regime else None,
+                "regime_policy_sha256": regime.sha256 if regime else None,
+                "context_configuration_sha256": context_identity(context, regime, breadth),
                 "arbitration_version": arbitration.version if arbitration else None,
                 "arbitration_version_sha256": arbitration.sha256 if arbitration else None,
                 "promotion_gate_version": promotion_gate.version if promotion_gate else None,
@@ -612,6 +620,7 @@ def capture_stream_command(
                     configuration.resolve_context(trade_date),
                     arbitration,
                     breadth_policy=configuration.resolve_breadth(trade_date),
+                    regime_policy=configuration.resolve_regime(trade_date),
                     breadth_membership=breadth_membership,
                     on_error=lambda error: typer.echo(
                         f"T0 shadow journal disabled ({type(error).__name__})",
@@ -823,6 +832,7 @@ def audit_buy_first_baselines_command(
             configuration.resolve(parsed_trade_date),
             configuration.resolve_context(parsed_trade_date),
             breadth_policy=configuration.resolve_breadth(parsed_trade_date),
+            regime_policy=configuration.resolve_regime(parsed_trade_date),
             breadth_membership=reader.breadth_membership,
         )
         candidates = score_buy_first_baselines(snapshots, contexts)
@@ -974,7 +984,9 @@ def publish_promotion_evidence_command(
         shadow_key, shadow_digest, session_key, session_digest = publish_session_evidence(
             store, shadow_audit, session
         )
-        sessions = load_session_evidence(store, gate, as_of_date=parsed_trade_date)
+        sessions = load_session_evidence(
+            store, gate, as_of_date=parsed_trade_date, reference=session
+        )
         if sessions.get(parsed_trade_date) != session:
             raise RuntimeError("published promotion session is not visible to the gate")
         gate_report = evaluate_promotion_gate(

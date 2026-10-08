@@ -139,6 +139,8 @@ def test_daily_evidence_scores_only_selected_arbitrations() -> None:
         *evidence,
         capture_evidence_sha256=evidence[4].capture_evidence_sha256,
     )
+    assert report.cost_policy_sha256 == evidence[3].sha256
+    assert report.cost_assumptions_sha256 == evidence[3].assumptions_sha256
 
     selected = [item for item in report.evaluations if item.selected_count]
     assert {(item.strategy, item.symbol) for item in selected} == {

@@ -14,19 +14,19 @@ from pydantic import TypeAdapter
 from ssi_sdk.models import MarketStatusMessage, TradeMessage
 
 from t0_trading.capture.membership import BreadthMembershipSnapshot
-from t0_trading.configuration import BreadthVersion, ContextVersion, TradingVersion
+from t0_trading.configuration import BreadthVersion, ContextVersion, RegimeVersion, TradingVersion
 from t0_trading.context.breadth import BreadthEngine
 from t0_trading.context.model import (
     ContextDataMode,
     DecisionContext,
     IndexContext,
     IndexSourceKind,
-    MarketRegime,
     MarketStatusContext,
     MarketStatusSourceKind,
     MarketWindowContext,
     ZoneContext,
 )
+from t0_trading.context.regime import context_identity, market_state
 from t0_trading.features import FeatureSnapshot
 from t0_trading.identity import canonical_json, sha256
 from t0_trading.market.events import StreamEnvelope, provider_timestamp
@@ -314,50 +314,6 @@ def _market_status_context(
     )
 
 
-def _market_state(
-    indices: Sequence[IndexContext],
-    statuses: Sequence[MarketStatusContext],
-    policy: ContextVersion,
-) -> tuple[Decimal | None, MarketRegime, tuple[str, ...]]:
-    reasons = tuple(
-        dict.fromkeys(
-            (
-                *(f"{item.index}_{reason}" for item in indices for reason in item.reasons),
-                *(f"{item.market}_{reason}" for item in statuses for reason in item.reasons),
-            )
-        )
-    )
-    if reasons:
-        return None, "UNKNOWN", reasons
-    long_window = policy.market_windows_seconds[-1]
-    long = [
-        next(window for window in item.windows if window.window_seconds == long_window)
-        for item in indices
-    ]
-    confirmation = min(
-        _ONE,
-        max(
-            _ZERO,
-            min(
-                ratio(window.return_bps, policy.trend_threshold_bps, quantum=RATIO_QUANTUM)
-                for window in long
-            ),
-        ),
-    )
-    market_return = sum((window.return_bps for window in long), _ZERO) / len(long)
-    market_volatility = sum((window.realized_volatility_bps for window in long), _ZERO) / len(long)
-    regime: MarketRegime
-    if market_volatility >= policy.high_volatility_threshold_bps:
-        regime = "HIGH_VOLATILITY"
-    elif market_return >= policy.trend_threshold_bps:
-        regime = "TREND_UP"
-    elif market_return <= -policy.trend_threshold_bps:
-        regime = "TREND_DOWN"
-    else:
-        regime = "RANGE"
-    return confirmation, regime, ()
-
-
 def build_decision_contexts_from_observations(
     snapshots: Sequence[FeatureSnapshot],
     observations: Iterable[IndexObservation],
@@ -467,7 +423,7 @@ def build_decision_contexts_from_observations(
                 for market in sorted(configuration.market.status_markets)
             )
         )
-        confirmation, regime, reasons = _market_state(indices, statuses, policy)
+        confirmation, regime, reasons = market_state(indices, statuses, policy)
         contexts.append(
             DecisionContext(
                 context_version=policy.version,
@@ -501,6 +457,7 @@ def build_decision_contexts(
     *,
     breadth_policy: BreadthVersion | None = None,
     breadth_membership: BreadthMembershipSnapshot | None = None,
+    regime_policy: RegimeVersion | None = None,
 ) -> tuple[DecisionContext, ...]:
     """Replay the live engine; only receipts available at each decision may advance state."""
     if not snapshots:
@@ -512,6 +469,7 @@ def build_decision_contexts(
         policy,
         breadth_policy=breadth_policy,
         breadth_membership=breadth_membership,
+        regime_policy=regime_policy,
     )
     clocks: dict[datetime, list[FeatureSnapshot]] = defaultdict(list)
     for snapshot in snapshots:
@@ -545,9 +503,13 @@ class LiveDecisionContextEngine:
         *,
         breadth_policy: BreadthVersion | None = None,
         breadth_membership: BreadthMembershipSnapshot | None = None,
+        regime_policy: RegimeVersion | None = None,
     ) -> None:
         self._configuration = configuration
         self._policy = policy
+        self._regime_policy = regime_policy
+        self._breadth_policy = breadth_policy
+        self.configuration_sha256 = context_identity(policy, regime_policy, breadth_policy)
         self._timezone = ZoneInfo(configuration.market.timezone)
         self._index_ticks: dict[str, list[IndexObservation]] = {
             index: [] for index in configuration.market.indices
@@ -559,6 +521,7 @@ class LiveDecisionContextEngine:
             symbol: deque() for symbol in configuration.market.symbols
         }
         self._last_received_at: datetime | None = None
+        self._stream_session_id: str | None = None
         self._last_decision_at: datetime | None = None
         self._breadth = (
             BreadthEngine(configuration, breadth_policy, breadth_membership)
@@ -570,6 +533,14 @@ class LiveDecisionContextEngine:
         if self._last_received_at is not None and envelope.received_at < self._last_received_at:
             raise ValueError("context envelopes must be receipt ordered")
         self._last_received_at = envelope.received_at
+        if self._regime_policy is not None and (
+            self._stream_session_id is not None
+            and self._stream_session_id != envelope.stream_session_id
+        ):
+            # A reconnect may have missed a phase transition. Authorization must be reacquired.
+            for ticks in self._status_ticks.values():
+                ticks.clear()
+        self._stream_session_id = envelope.stream_session_id
         if self._breadth is not None:
             self._breadth.apply(envelope)
         index = _index_tick(envelope, set(self._index_ticks), self._timezone)
@@ -598,6 +569,12 @@ class LiveDecisionContextEngine:
             raise ValueError("live context requires the complete feature matrix")
         if not self._policy.contains(ordered[0].trade_date):
             raise ValueError("live context policy must cover the feature trade date")
+        if self._regime_policy is not None and not self._regime_policy.contains(
+            ordered[0].trade_date
+        ):
+            raise ValueError("regime policy must cover the feature trade date")
+        if self._last_received_at is not None and self._last_received_at > decision_at:
+            raise ValueError("live context cannot build before applied receipts")
         zones = tuple(
             _zone(item, tuple(self._history[item.symbol]), self._policy) for item in ordered
         )
@@ -620,10 +597,18 @@ class LiveDecisionContextEngine:
             )
             for market in sorted(self._status_ticks)
         )
-        confirmation, regime, reasons = _market_state(indices, statuses, self._policy)
+        breadth = self._breadth.build(decision_at) if self._breadth is not None else ()
+        confirmation, regime, reasons = market_state(
+            indices,
+            statuses,
+            self._policy,
+            regime_policy=self._regime_policy,
+            breadth=breadth,
+            breadth_policy=self._breadth_policy,
+        )
         context = DecisionContext(
             context_version=self._policy.version,
-            context_configuration_sha256=self._policy.sha256,
+            context_configuration_sha256=self.configuration_sha256,
             feature_configuration_sha256=ordered[0].configuration_sha256,
             data_mode="LIVE",
             trade_date=ordered[0].trade_date,
@@ -631,7 +616,13 @@ class LiveDecisionContextEngine:
             zones=zones,
             indices=indices,
             market_statuses=statuses,
-            breadth=self._breadth.build(decision_at) if self._breadth is not None else (),
+            breadth=breadth,
+            market_basis=self._regime_policy.basis if self._regime_policy else None,
+            market_reference_index=self._regime_policy.reference_index
+            if self._regime_policy
+            else None,
+            regime_policy_version=self._regime_policy.version if self._regime_policy else None,
+            regime_policy_sha256=self._regime_policy.sha256 if self._regime_policy else None,
             market_confirmation_strength=confirmation,
             regime=regime,
             reasons=reasons,

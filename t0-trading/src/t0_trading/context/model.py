@@ -11,7 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from t0_trading.context.breadth import BreadthContext
 from t0_trading.identity import canonical_json, sha256
 
-MarketRegime = Literal["TREND_UP", "TREND_DOWN", "RANGE", "HIGH_VOLATILITY", "UNKNOWN"]
+MarketRegime = Literal[
+    "TREND_UP", "TREND_DOWN", "RANGE", "HIGH_VOLATILITY", "HIGH_DISPERSION", "UNKNOWN"
+]
 ContextDataMode = Literal["LIVE", "HISTORICAL_PROXY"]
 IndexSourceKind = Literal["ssi_stream_trade", "ssi_rest_index_1m_historical"]
 MarketStatusSourceKind = Literal["ssi_stream_market_status", "configured_market_calendar"]
@@ -147,6 +149,16 @@ class DecisionContext(_StrictModel):
     indices: tuple[IndexContext, ...]
     market_statuses: tuple[MarketStatusContext, ...]
     breadth: tuple[BreadthContext, ...] = Field(default=(), exclude_if=lambda value: not value)
+    market_basis: Literal["OFFICIAL_INDEX", "CONSTITUENT_BREADTH"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    regime_policy_version: str | None = Field(
+        default=None, pattern=r"^[a-z0-9][a-z0-9-]*$", exclude_if=lambda value: value is None
+    )
+    regime_policy_sha256: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$", exclude_if=lambda value: value is None
+    )
+    market_reference_index: str | None = Field(default=None, exclude_if=lambda value: value is None)
     market_confirmation_strength: Decimal | None = Field(default=None, ge=0, le=1)
     regime: MarketRegime
     reasons: tuple[str, ...]
@@ -160,6 +172,23 @@ class DecisionContext(_StrictModel):
 
     @model_validator(mode="after")
     def validate_context(self) -> DecisionContext:
+        policy = (self.market_basis, self.regime_policy_version, self.regime_policy_sha256)
+        if any(value is None for value in policy) != all(value is None for value in policy):
+            raise ValueError("regime basis and policy lineage must be wholly present or absent")
+        if (self.market_reference_index is not None) != (
+            self.market_basis == "CONSTITUENT_BREADTH"
+        ):
+            raise ValueError("only constituent regime requires a reference index")
+        if self.market_basis is not None and self.data_mode != "LIVE":
+            raise ValueError("declared realtime regime cannot use historical proxy context")
+        if self.market_basis == "CONSTITUENT_BREADTH" and self.regime != "UNKNOWN":
+            reference = next(
+                (item for item in self.breadth if item.index == self.market_reference_index), None
+            )
+            if reference is None or reference.reasons:
+                raise ValueError(
+                    "classified constituent regime requires eligible reference evidence"
+                )
         if tuple(item.index for item in self.breadth) != tuple(
             sorted({item.index for item in self.breadth})
         ):
@@ -185,6 +214,25 @@ class DecisionContext(_StrictModel):
         if (self.market_confirmation_strength is None) != bool(self.reasons):
             raise ValueError("market confirmation availability must match context health")
         return self
+
+    @property
+    def is_tradable(self) -> bool:
+        """Market authorization is independent of analytical regime availability."""
+        expected_source = (
+            "ssi_stream_market_status" if self.data_mode == "LIVE" else "configured_market_calendar"
+        )
+        return bool(self.market_statuses) and all(
+            item.is_tradable and item.source_kind == expected_source
+            for item in self.market_statuses
+        )
+
+    def selection_block_reason(self, *, realtime: bool = False) -> str | None:
+        """Prospective scoring and realtime require regime; old research keeps its semantics."""
+        if not self.is_tradable:
+            return "market_status_ineligible"
+        if (realtime or self.market_basis is not None) and self.regime == "UNKNOWN":
+            return "regime_ineligible"
+        return None
 
     def zone(self, symbol: str) -> ZoneContext:
         matches = tuple(zone for zone in self.zones if zone.symbol == symbol)

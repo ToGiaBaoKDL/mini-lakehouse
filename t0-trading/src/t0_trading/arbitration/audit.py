@@ -17,6 +17,7 @@ from t0_trading.capture.reader import StreamDayReader, StreamSessionReader
 from t0_trading.capture.store import CaptureStoreUnavailable, S3CaptureStore
 from t0_trading.configuration import TradingConfiguration
 from t0_trading.context import build_decision_contexts
+from t0_trading.context.regime import context_identity
 from t0_trading.evidence_paths import shadow_journal_manifest_key
 from t0_trading.features import decision_times, replay_features
 from t0_trading.identity import sha256
@@ -147,7 +148,11 @@ def audit_shadow_journal(
         version.sha256,
         version.features.version,
         context_policy.version,
-        context_policy.sha256,
+        context_identity(
+            context_policy,
+            configuration.resolve_regime(manifest.trade_date),
+            configuration.resolve_breadth(manifest.trade_date),
+        ),
         BASELINE_VERSION,
         arbitration_policy.version,
         arbitration_policy.sha256,
@@ -222,6 +227,7 @@ def audit_shadow_journal(
         version,
         context_policy,
         breadth_policy=configuration.resolve_breadth(manifest.trade_date),
+        regime_policy=configuration.resolve_regime(manifest.trade_date),
         breadth_membership=capture.breadth_membership,
     )
     candidates = score_buy_first_baselines(snapshots, contexts)

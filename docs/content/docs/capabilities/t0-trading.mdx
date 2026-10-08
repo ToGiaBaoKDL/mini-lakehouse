@@ -284,7 +284,7 @@ joins a separately versioned, immutable `DecisionContext` at the exact feature c
   not a fitted rolling leader model. Positive VN30 and VNINDEX returns confirm the candidate only
   when both index series are fresh and have complete point-in-time lookback windows.
 
-The same context classifies `TREND_UP`, `TREND_DOWN`, `RANGE`, or `HIGH_VOLATILITY` from VNINDEX and
+Before the prospective constituent policy below, context classifies `TREND_UP`, `TREND_DOWN`, `RANGE`, or `HIGH_VOLATILITY` from VNINDEX and
 VN30. Research replay uses completed-day one-minute REST bars and records `HISTORICAL_PROXY` plus the
 original REST record hash on every context; it never presents those bars as contemporaneously
 received stream evidence. Live shadow context remains fail-closed until a separately certified
@@ -298,7 +298,7 @@ is reported as a segment, not used as a threshold tuned on the evaluated session
 Live context also requires the latest received HOSE market phase to be one of the versioned
 tradable statuses. Market status is a transition state and remains effective until another
 transition; it is not incorrectly expired by a telemetry TTL. Missing status, `BREAK`, `HALT`, or
-another disallowed phase makes the context `UNKNOWN` and blocks all three baselines before candidate
+another disallowed phase makes the original index context `UNKNOWN` and blocks all three baselines before candidate
 selection. Historical proxy analysis records a separate configured-calendar source and never claims
 that it observed a live status transition.
 
@@ -452,6 +452,13 @@ binds session evidence to published audits and recomputes the promotion gate und
 configuration. Missing, corrupt, incomplete or non-PASS evidence leaves the consumer observe-only;
 an older PASS is never substituted. The caller owns the observed trading calendar and must supply
 the actual previous session, not simply the most recent successful publication or yesterday's date.
+Readiness binds baseline, arbitration, feature, context, outcome, and cost assumptions to the
+current session. Paper entry rechecks that binding against its configuration, session costs, and
+candidate context. Changing any assumption requires matching evidence, not reuse of an older PASS.
+Daily reports retain the full cost-policy checksum and additionally record an assumption checksum
+excluding validity dates; fee rates, slippage, account plan, source, and verification timestamp
+remain bound. This prevents identical daily fee assumptions from fragmenting promotion cohorts.
+Earlier sealed reports remain unchanged and are never assigned an inferred assumption checksum.
 The 26-session production gate is unchanged, and PASS still does not authorize live capital.
 
 Inspect sealed S3 evidence without claiming that it represents a live heartbeat:
@@ -922,12 +929,59 @@ defaults, not tuned profitability claims. Earlier contexts omit breadth and reta
 canonical hashes. Deploy the same configuration with both capture and EMR before activating it;
 do not edit an effective policy after it has produced journals.
 
-Breadth is supplemental context, not an official index, a security-halt signal, or a new strategy
-gate. Existing baseline scores, official-index regime, security safety boundaries, and 26-session
-promotion requirements are unchanged. Strategy use requires a separate prospective evaluation.
+Through 2026-10-08, breadth is supplemental context and does not replace official-index regime.
+It is never an official index or a security-halt signal.
 
-Deployment requires `make catalog-apply` before the new EMR release: two new tables and an optional
-`breadth_json` column are additive. Publish the EMR artifacts and deploy the capture image/config
+### Prospective realtime regime basis
+
+The independent `regimes` policy declares `CONSTITUENT_BREADTH` from **2026-10-09**. `VN30` is the
+required basket; `VNREAL` remains optional sector context. The source is deliberately selected in
+configuration, not inferred from whichever feed happens to be available. A missing/stale/partial
+required basket yields `UNKNOWN`; neither a healthy VNREAL basket nor completed-day REST bars may
+replace it. `OFFICIAL_INDEX` is supported as an explicit alternative when an authoritative
+point-in-time feed is actually available. It never synthesizes official index points from breadth.
+
+`context/regime.py` owns the pure analytical classifier; `context/engine.py` owns received state
+and as-of clocks. Live capture, S3 replay, journal recovery/audit, and EMR use the same engine and
+effective policies. Analytical regime is independent of HOSE tradability: healthy breadth can
+produce a known regime while a missing or disallowed phase still blocks **every candidate**.
+The declared regime policy also blocks `UNKNOWN` before arbitration, without consuming selection
+capacity or cooldown. Scoring and handoff share context admission rules. Historical policies keep
+their existing research semantics, while realtime always requires a known regime and live-source
+market authorization. Ineligible context does not disable the callback, so later eligible clocks
+can recover. A
+calendar status or historical proxy cannot authorize notifications. On a new stream session,
+market authorization must be reacquired because a transition could have been missed. Security
+halt coverage remains uncertified; no security-status source or real-capital permission is invented.
+
+The breadth classifier uses equal-weight mean return, the existing upward breadth confirmation,
+and cross-sectional dispersion. Dispersion above the explicit research threshold yields
+`HIGH_DISPERSION`, not `HIGH_VOLATILITY`: dispersion is not time-series index volatility. Other
+states are `TREND_UP`, `TREND_DOWN`, `RANGE`, and `UNKNOWN`. Downward direction requires a negative
+mean and a non-advancing fraction meeting the same configured breadth threshold; non-advancing
+includes unchanged constituents and is not advertised as a strict decline ratio.
+Upward confirmation strength is a bounded
+positive mean-return strength times advance ratio. Initial 10-bps trend and 150-bps dispersion
+thresholds are provisional **research assumptions**, not trained or profitability-validated rules.
+
+Contexts materialize `market_basis`, `market_reference_index`, `regime_policy_version`, and
+`regime_policy_sha256`. Their effective configuration fingerprint combines the context, declared
+regime, and required breadth policies. Earlier contexts omit these new fields and retain their
+original bytes/hashes; historical journals are not rewritten. Promotion includes only the current
+session's exact assumption cohort, including context and costs—not sessions chosen by performance.
+Older sessions remain useful for research but do not count toward a changed context's **unchanged
+26-session production gate**. Readiness recomputes this cohort and cannot reuse an older-context
+PASS after the policy changes. No Telegram delivery, paper worker, or live execution is enabled by
+declaring a research basis.
+
+Effective-policy fingerprints bind the version, start date, and all assumptions, but normalize
+the closing date to its original open-ended representation. Closing an interval to introduce a
+successor changes configuration resolution metadata, not an earlier policy's identity. Full
+configuration serialization still includes the closing date. Existing open-ended fingerprints
+and sealed journals remain unchanged; changing parameters or version still changes identity.
+
+Deployment requires `make catalog-apply` before the new EMR release. The constituent tables,
+`breadth_json`, and four optional regime-lineage columns are additive. Publish the EMR artifacts and deploy the capture image/config
 through the existing release flow. Airflow needs no new DAG or schedule; the existing stream job
 owns the writes. A successful local test does not substitute for checking the first deployed run.
 

@@ -79,8 +79,11 @@ def load_session_evidence(
     gate: PromotionGateVersion,
     *,
     as_of_date: date,
+    reference: ArbitratedSessionReport | None = None,
 ) -> dict[date, ArbitratedSessionReport]:
-    """Load committed session reports in the active prospective gate window."""
+    """Load a fixed-assumption cohort, without pooling changed context/cost policies."""
+    if reference is not None and reference.trade_date != as_of_date:
+        raise ValueError("promotion cohort reference must be the as-of session")
     sessions: dict[date, ArbitratedSessionReport] = {}
     prefix = f"{PROMOTION_EVIDENCE_PREFIX}/sessions"
     for key in store.list_keys(prefix):
@@ -96,6 +99,8 @@ def load_session_evidence(
         report = ArbitratedSessionReport.model_validate(value)
         if report.trade_date != key_date:
             raise RuntimeError(f"promotion session key lineage is inconsistent: {key}")
+        if reference is not None and report.research_lineage != reference.research_lineage:
+            continue
         if key_date in sessions:
             raise RuntimeError(f"duplicate promotion session exists for {key_date.isoformat()}")
         sessions[key_date] = report

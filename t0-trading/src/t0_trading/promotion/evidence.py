@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Sequence
+from datetime import date
 from decimal import Decimal
 from typing import cast
 
@@ -12,7 +13,8 @@ from t0_trading.arbitration import (
     ShadowArbitrationAuditReport,
     require_selected_candidate,
 )
-from t0_trading.configuration import PromotionGateVersion
+from t0_trading.configuration import PromotionGateVersion, TradingConfiguration
+from t0_trading.context.regime import context_identity
 from t0_trading.controls import CostPolicy, conditional_net_return_bps
 from t0_trading.identity import canonical_json, sha256
 from t0_trading.numeric import ratio
@@ -20,8 +22,30 @@ from t0_trading.outcomes import OutcomeLabel
 from t0_trading.promotion.model import (
     ArbitratedSessionEvaluation,
     ArbitratedSessionReport,
+    ResearchLineage,
 )
-from t0_trading.strategy.baselines import BaselineCandidate, BaselineName
+from t0_trading.strategy.baselines import BASELINE_VERSION, BaselineCandidate, BaselineName
+
+
+def resolve_research_lineage(
+    configuration: TradingConfiguration, trade_date: date, costs: CostPolicy
+) -> ResearchLineage:
+    """Resolve current assumptions without reading performance or a previous PASS."""
+    arbitration = configuration.resolve_candidate_arbitration(trade_date)
+    if arbitration is None or not costs.contains(trade_date):
+        raise ValueError("research lineage requires effective arbitration and costs")
+    return ResearchLineage(
+        baseline_version=BASELINE_VERSION,
+        arbitration_configuration_sha256=arbitration.sha256,
+        feature_configuration_sha256=configuration.resolve(trade_date).sha256,
+        context_configuration_sha256=context_identity(
+            configuration.resolve_context(trade_date),
+            configuration.resolve_regime(trade_date),
+            configuration.resolve_breadth(trade_date),
+        ),
+        outcome_configuration_sha256=configuration.resolve_outcomes(trade_date).sha256,
+        cost_policy_sha256=costs.assumptions_sha256,
+    )
 
 
 def _journal_sha256(records: Sequence[BaselineCandidate | CandidateArbitration]) -> str:
@@ -145,6 +169,7 @@ def evaluate_arbitrated_session(
         context_configuration_sha256=next(iter(context_lineages)),
         outcome_configuration_sha256=outcome_sha,
         cost_policy_sha256=costs.sha256,
+        cost_assumptions_sha256=costs.assumptions_sha256,
         capture_evidence_sha256=capture_evidence_sha256,
         shadow_audit_sha256=sha256(canonical_json(shadow_audit.model_dump(mode="json"))),
         capture_gap_count=shadow_audit.gap_count,

@@ -42,6 +42,10 @@ class RealtimeSelection(BaseModel):
             or context.data_mode != "LIVE"
         ):
             raise ValueError("realtime selection requires matching live context")
+        if context.selection_block_reason(realtime=True) is not None:
+            raise ValueError(
+                "realtime selection requires healthy regime and verified market status"
+            )
         by_symbol = {item.symbol: item for item in self.features}
         feature = by_symbol.get(candidate.symbol)
         if (

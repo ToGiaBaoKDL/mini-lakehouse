@@ -374,9 +374,8 @@ def score_buy_first_baselines(
             else "not_continuous_session"
             if snapshot.market_session
             not in (MarketSession.CONTINUOUS_AM, MarketSession.CONTINUOUS_PM)
-            else "market_status_ineligible"
+            else context.selection_block_reason()
             if context is not None
-            and any(not status.is_tradable for status in context.market_statuses)
             else None
         )
         if block is not None:

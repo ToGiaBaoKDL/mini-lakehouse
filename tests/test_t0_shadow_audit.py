@@ -3,7 +3,7 @@ import io
 import json
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -100,14 +100,22 @@ class _SessionReader:
 
 
 def _artifacts(
-    tmp_path: Path, *, enable_breadth: bool = False
+    tmp_path: Path, *, enable_breadth: bool = False, enable_regime: bool = False
 ) -> tuple[str, TradingConfiguration, _SessionReader, _S3]:
     configuration = _configuration()
-    if enable_breadth:
+    if enable_breadth or enable_regime:
         configuration = configuration.model_copy(
             update={
                 "breadth": (
                     configuration.breadth[0].model_copy(update={"effective_from": TRADE_DATE}),
+                )
+            }
+        )
+    if enable_regime:
+        configuration = configuration.model_copy(
+            update={
+                "regimes": (
+                    configuration.regimes[0].model_copy(update={"effective_from": TRADE_DATE}),
                 )
             }
         )
@@ -123,6 +131,7 @@ def _artifacts(
         configuration.resolve_context(TRADE_DATE),
         arbitration_policy,
         breadth_policy=configuration.resolve_breadth(TRADE_DATE),
+        regime_policy=configuration.resolve_regime(TRADE_DATE),
     )
     journal.connected(SESSION_ID, connected_at)
     journal.close(disconnected_at, (CAPTURE_MANIFEST_URI,))
@@ -159,13 +168,18 @@ def _key(uri: str) -> str:
     return urlparse(uri).path.lstrip("/")
 
 
-@pytest.mark.parametrize("enable_breadth", [False, True])
+@pytest.mark.parametrize(
+    "enable_breadth,enable_regime", [(False, False), (True, False), (True, True)]
+)
 def test_shadow_journal_is_published_and_audited_from_s3(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     enable_breadth: bool,
+    enable_regime: bool,
 ) -> None:
-    manifest_uri, configuration, reader, s3 = _artifacts(tmp_path, enable_breadth=enable_breadth)
+    manifest_uri, configuration, reader, s3 = _artifacts(
+        tmp_path, enable_breadth=enable_breadth, enable_regime=enable_regime
+    )
     _use_capture(monkeypatch, reader)
 
     report = audit_shadow_journal(manifest_uri, s3, configuration)
@@ -178,6 +192,33 @@ def test_shadow_journal_is_published_and_audited_from_s3(
     assert report.gap_count == 0
     assert report.arbitration_count == report.candidate_count
     assert manifest_uri.endswith(f"trade_date={TRADE_DATE.isoformat()}/manifest.json")
+
+
+def test_sealed_journal_still_audits_after_policy_interval_closure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    uri, configuration, reader, s3 = _artifacts(tmp_path, enable_regime=True)
+    _use_capture(monkeypatch, reader)
+    original = audit_shadow_journal(uri, s3, configuration)
+    regime = configuration.regimes[0]
+    assert regime.trend_threshold_bps is not None
+    last_day = TRADE_DATE + timedelta(days=30)
+    updated = configuration.model_copy(
+        update={
+            "regimes": (
+                regime.model_copy(update={"effective_to": last_day}),
+                regime.model_copy(
+                    update={
+                        "version": "constituent-regime-v2",
+                        "effective_from": last_day + timedelta(days=1),
+                        "trend_threshold_bps": regime.trend_threshold_bps + 1,
+                    }
+                ),
+            )
+        }
+    )
+    assert updated.sha256 != configuration.sha256
+    assert audit_shadow_journal(uri, s3, updated) == original
 
 
 def test_shadow_journal_outbox_publishes_commit_marker_last(tmp_path: Path) -> None:

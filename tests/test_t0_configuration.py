@@ -1,5 +1,5 @@
 import json
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -9,8 +9,42 @@ from t0_trading.configuration import (
     load_configuration,
     parse_configuration,
 )
+from t0_trading.identity import sha256
 
 CONFIGURATION = Path("t0-trading/config/trading.yaml")
+
+
+@pytest.mark.parametrize(
+    "collection",
+    [
+        "versions",
+        "contexts",
+        "outcomes",
+        "breadth",
+        "regimes",
+        "candidate_arbitrations",
+        "promotion_gates",
+        "paper_executions",
+        "baseline_evaluations",
+    ],
+)
+def test_policy_closure_changes_resolution_metadata_not_historical_identity(
+    collection: str,
+) -> None:
+    configuration = load_configuration(CONFIGURATION)
+    policy = getattr(configuration, collection)[0]
+    closed = policy.model_copy(update={"effective_to": policy.effective_from + timedelta(days=30)})
+    assert closed.contains(policy.effective_from)
+    assert not closed.contains(policy.effective_from + timedelta(days=31))
+    assert closed.canonical_bytes() != policy.canonical_bytes()
+    assert closed.sha256 == policy.sha256 == sha256(policy.canonical_bytes())
+    assert closed.model_copy(update={"version": "changed-v2"}).sha256 != policy.sha256
+    assert (
+        closed.model_copy(
+            update={"effective_from": policy.effective_from + timedelta(days=1)}
+        ).sha256
+        != policy.sha256
+    )
 
 
 def test_trading_configuration_is_strict_effective_dated_and_stable() -> None:
@@ -198,9 +232,9 @@ def test_capture_scope_must_cover_effective_decision_requirements() -> None:
         1,
     )
     configuration = parse_configuration(
-        content.replace(
-            "membership_indices: [VN30, VNREAL]", "membership_indices: [VNREAL]"
-        ).replace("    indices: [VN30, VNREAL]", "    indices: [VNREAL]")
+        content.replace("membership_indices: [VN30, VNREAL]", "membership_indices: [VNREAL]")
+        .replace("    indices: [VN30, VNREAL]", "    indices: [VNREAL]")
+        .replace("reference_index: VN30", "reference_index: VNREAL")
     )
 
     with pytest.raises(TradingConfigurationError, match="does not cover"):

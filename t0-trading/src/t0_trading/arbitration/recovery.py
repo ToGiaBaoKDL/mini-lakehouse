@@ -71,6 +71,7 @@ def _replay_journal(
         configuration.resolve_context(trade_date),
         arbitration,
         breadth_policy=configuration.resolve_breadth(trade_date),
+        regime_policy=configuration.resolve_regime(trade_date),
         breadth_membership=capture.breadth_membership,
         on_error=errors.append,
     )

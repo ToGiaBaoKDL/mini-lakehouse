@@ -24,6 +24,7 @@ from t0_trading.configuration import (
     BreadthVersion,
     CandidateArbitrationVersion,
     ContextVersion,
+    RegimeVersion,
     TradingVersion,
 )
 from t0_trading.context import LiveDecisionContextEngine
@@ -137,6 +138,7 @@ class ShadowArbitrationJournal:
         *,
         breadth_policy: BreadthVersion | None = None,
         breadth_membership: BreadthMembershipSnapshot | None = None,
+        regime_policy: RegimeVersion | None = None,
         on_error: Callable[[Exception], None] | None = None,
         on_selection: Callable[[RealtimeSelection], None] | None = None,
         on_disconnect: Callable[[datetime], None] | None = None,
@@ -163,6 +165,7 @@ class ShadowArbitrationJournal:
             context_policy,
             breadth_policy=breadth_policy,
             breadth_membership=breadth_membership,
+            regime_policy=regime_policy,
         )
         self._arbitrator = CandidateArbitrator(arbitration_policy)
         self._decision_times = tuple(decision_times(configuration, trade_date))
@@ -328,7 +331,11 @@ class ShadowArbitrationJournal:
             self._next_decision += 1
             # Only hand off decisions after both journal streams accepted their records.
             # This is a live shadow hint, not proof of the final S3 publication commit.
-            if realtime and self._on_selection is not None:
+            if (
+                realtime
+                and self._on_selection is not None
+                and context.selection_block_reason(realtime=True) is None
+            ):
                 try:
                     by_hash = {item.sha256: item for item in candidates}
                     for arbitration in arbitrations:
@@ -419,7 +426,7 @@ class ShadowArbitrationJournal:
                 configuration_sha256=self._configuration.sha256,
                 feature_version=self._configuration.features.version,
                 context_version=self._context_policy.version,
-                context_configuration_sha256=self._context_policy.sha256,
+                context_configuration_sha256=self._context_engine.configuration_sha256,
                 baseline_version=BASELINE_VERSION,
                 arbitration_version=self._arbitration_policy.version,
                 arbitration_configuration_sha256=self._arbitration_policy.sha256,

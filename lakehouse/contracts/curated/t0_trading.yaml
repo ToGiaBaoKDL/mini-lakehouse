@@ -133,12 +133,12 @@ tables:
     columns:
       - {field_id: 1, name: schema_version, data_type: long, required: true, description: Decision-context contract version.}
       - {field_id: 2, name: context_version, data_type: string, required: true, description: Version of the deterministic context policy.}
-      - {field_id: 3, name: context_configuration_sha256, data_type: string, required: true, description: SHA-256 of the exact context policy.}
+      - {field_id: 3, name: context_configuration_sha256, data_type: string, required: true, description: SHA-256 of the effective context assumptions including any declared regime and required breadth policy.}
       - {field_id: 4, name: feature_configuration_sha256, data_type: string, required: true, description: SHA-256 of the parent feature configuration.}
       - {field_id: 5, name: trade_date, data_type: date, required: true, description: Exchange-local trading date.}
       - {field_id: 6, name: decision_at, data_type: timestamptz, required: true, description: UTC point-in-time evaluation boundary.}
       - {field_id: 7, name: data_mode, data_type: string, required: true, description: LIVE or explicit HISTORICAL_PROXY context mode.}
-      - {field_id: 8, name: market_confirmation_strength, data_type: decimal, precision: 10, scale: 8, required: false, description: Conservative cross-index upward confirmation strength.}
+      - {field_id: 8, name: market_confirmation_strength, data_type: decimal, precision: 10, scale: 8, required: false, description: Upward confirmation from the explicitly declared analytical basis; never trading authorization.}
       - {field_id: 9, name: regime, data_type: string, required: true, description: Deterministic broad-market regime or UNKNOWN.}
       - {field_id: 10, name: reasons_json, data_type: string, required: true, description: Canonical JSON context failure reasons.}
       - {field_id: 11, name: zones_json, data_type: string, required: true, description: Canonical JSON symbol-zone facts and feature lineage.}
@@ -146,7 +146,11 @@ tables:
       - {field_id: 13, name: processed_at, data_type: timestamptz, required: true, description: UTC materialization time.}
       - {field_id: 14, name: context_sha256, data_type: string, required: true, description: SHA-256 of the canonical complete DecisionContext.}
       - {field_id: 15, name: market_statuses_json, data_type: string, required: true, description: "Canonical JSON point-in-time market status, tradability gate, and source lineage."}
-      - {field_id: 16, name: breadth_json, data_type: string, required: false, description: "Optional equal-weight constituent context with membership and observation lineage; never official index regime."}
+      - {field_id: 16, name: breadth_json, data_type: string, required: false, description: "Equal-weight constituent context with membership and observation lineage; not official index points."}
+      - {field_id: 17, name: market_basis, data_type: string, required: false, description: Prospectively declared OFFICIAL_INDEX or CONSTITUENT_BREADTH analytical basis.}
+      - {field_id: 18, name: market_reference_index, data_type: string, required: false, description: Required constituent basket for breadth regime; other baskets remain optional.}
+      - {field_id: 19, name: regime_policy_version, data_type: string, required: false, description: Prospective source-aware regime policy version.}
+      - {field_id: 20, name: regime_policy_sha256, data_type: string, required: false, description: Exact analytical regime policy fingerprint; included in context configuration identity.}
     partitioning:
       - {field_id: 1000, field: trade_date, transform: identity}
 

@@ -23,12 +23,19 @@ def shadow_message(selection: RealtimeSelection, claim: DeliveryClaim) -> str:
     candidate = selection.candidate
     local = candidate.decision_at.astimezone(ZoneInfo("Asia/Ho_Chi_Minh"))
     feature = next(item for item in selection.features if item.symbol == candidate.symbol)
+    basis = (
+        f"Context: {selection.context.market_basis}"
+        f" | Reference: {selection.context.market_reference_index or 'official indices'}\n"
+        if selection.context.market_basis is not None
+        else ""
+    )
     return (
         "SHADOW — CHƯA QUA PROMOTION — KHÔNG PHẢI LỆNH GIAO DỊCH\n"
         f"{candidate.symbol} | {candidate.strategy}\n"
         f"Quan sát: {local.isoformat()}\n"
         f"Giá mid tham chiếu tại quan sát: {feature.mid_price} VND (không phải giá khớp)\n"
         f"Strength: {candidate.strength} | Regime: {candidate.market_regime}\n"
+        f"{basis}"
         f"Nhóm: {', '.join(group.name + '=' + group.status for group in candidate.groups)}\n"
         "Chưa xác nhận halt từng mã; không cấp quyền dùng vốn thật.\n"
         f"Hết hạn: {claim.expires_at.astimezone(ZoneInfo('Asia/Ho_Chi_Minh')).isoformat()}\n"

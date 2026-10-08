@@ -4,14 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
-from pyspark.sql import SparkSession
 from t0_trading.arbitration import CandidateArbitration, arbitrate_candidates
 from t0_trading.capture.membership import BreadthMembershipSnapshot
 from t0_trading.configuration import (
     BreadthVersion,
     CandidateArbitrationVersion,
     ContextVersion,
+    RegimeVersion,
     TradingVersion,
 )
 from t0_trading.context import (
@@ -31,10 +32,10 @@ from t0_trading.simulation.presets import (
 from t0_trading.strategy.baseline_audit import BaselineAuditReport, evaluate_buy_first_baselines
 from t0_trading.strategy.baselines import BaselineCandidate, score_buy_first_baselines
 
-from emr_jobs.common.contracts import spark_schema
-from emr_jobs.common.iceberg import qualified_name
-from emr_jobs.t0_trading.iceberg import insert_missing, require_compatible
 from lakehouse.contracts.curated import CuratedProductContract
+
+if TYPE_CHECKING:
+    from pyspark.sql import SparkSession
 
 
 def _json(value: object) -> str:
@@ -49,6 +50,8 @@ def _historical_index_observations(
     configuration: TradingVersion,
     context_policy: ContextVersion,
 ) -> tuple[IndexObservation, ...]:
+    from emr_jobs.common.iceberg import qualified_name
+
     trade_date = snapshots[0].trade_date
     target = qualified_name(market_product.table_identifier("index_bars_1m"))
     codes = spark.createDataFrame(
@@ -98,6 +101,7 @@ def _contexts(
     context_policy: ContextVersion,
     breadth_policy: BreadthVersion | None = None,
     breadth_membership: BreadthMembershipSnapshot | None = None,
+    regime_policy: RegimeVersion | None = None,
 ) -> tuple[DecisionContext, ...]:
     live = build_decision_contexts(
         snapshots,
@@ -106,8 +110,11 @@ def _contexts(
         context_policy,
         breadth_policy=breadth_policy,
         breadth_membership=breadth_membership,
+        regime_policy=regime_policy,
     )
-    if any(item.value is not None for context in live for item in context.indices):
+    if regime_policy is not None or any(
+        item.value is not None for context in live for item in context.indices
+    ):
         return live
     historical = _historical_index_observations(
         spark,
@@ -145,6 +152,10 @@ def _context_rows(
             "data_mode": context.data_mode,
             "market_confirmation_strength": context.market_confirmation_strength,
             "regime": context.regime,
+            "market_basis": context.market_basis,
+            "market_reference_index": context.market_reference_index,
+            "regime_policy_version": context.regime_policy_version,
+            "regime_policy_sha256": context.regime_policy_sha256,
             "reasons_json": _json(context.reasons),
             "zones_json": _json([item.model_dump(mode="json") for item in context.zones]),
             "indices_json": _json([item.model_dump(mode="json") for item in context.indices]),
@@ -262,6 +273,10 @@ def _prepare(
     view: str,
     fingerprint: str,
 ) -> tuple[str, tuple[str, ...]]:
+    from emr_jobs.common.contracts import spark_schema
+    from emr_jobs.common.iceberg import qualified_name
+    from emr_jobs.t0_trading.iceberg import require_compatible
+
     contract = product.table(table)
     spark.createDataFrame(rows, spark_schema(contract)).createOrReplaceTempView(view)
     target = qualified_name(product.table_identifier(table))
@@ -289,6 +304,7 @@ def publish(
     capture_evidence_sha256: str,
     breadth_policy: BreadthVersion | None = None,
     breadth_membership: BreadthMembershipSnapshot | None = None,
+    regime_policy: RegimeVersion | None = None,
 ) -> tuple[
     tuple[DecisionContext, ...],
     tuple[BaselineCandidate, ...],
@@ -296,6 +312,8 @@ def publish(
     BaselineAuditReport,
 ]:
     """Build and idempotently publish one certified context-aware research matrix."""
+    from emr_jobs.t0_trading.iceberg import insert_missing
+
     contexts = _contexts(
         spark,
         market_product=market_product,
@@ -305,6 +323,7 @@ def publish(
         context_policy=context_policy,
         breadth_policy=breadth_policy,
         breadth_membership=breadth_membership,
+        regime_policy=regime_policy,
     )
     candidates = score_buy_first_baselines(snapshots, contexts)
     if any(
